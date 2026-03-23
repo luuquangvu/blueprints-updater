@@ -5,8 +5,8 @@
   "config_flow": true,
   "dependencies": ["blueprint"],
   "after_dependencies": ["automation", "script", "template"],
-  "documentation": "https://github.com/luuquangvu/blueprints_updater",
-  "issue_tracker": "https://github.com/luuquangvu/blueprints_updater/issues",
+  "documentation": "https://github.com/luuquangvu/blueprints-updater",
+  "issue_tracker": "https://github.com/luuquangvu/blueprints-updater/issues",
   "iot_class": "cloud_polling",
   "version": "0.0.0"
 }

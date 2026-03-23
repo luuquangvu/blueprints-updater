@@ -28,12 +28,12 @@
 
 ### Tùy chọn 1: Sử dụng HACS (Khuyến nghị)
 
-[![Add Blueprints Updater to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=luuquangvu&repository=blueprints_updater&category=integration)
+[![Add Blueprints Updater to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=luuquangvu&repository=blueprints-updater&category=integration)
 
 1.  Mở **HACS** trong Home Assistant.
 2.  Tìm kiếm **Blueprints Updater**.
 3.  Nếu không tìm thấy, nhấp vào biểu tượng ba chấm ở góc trên cùng bên phải và chọn **Kho lưu trữ tùy chỉnh (Custom repositories)**.
-4.  Thêm `https://github.com/luuquangvu/blueprints_updater` với danh mục **Bộ tích hợp (Integration)**.
+4.  Thêm `https://github.com/luuquangvu/blueprints-updater` với danh mục **Bộ tích hợp (Integration)**.
 5.  Tìm kiếm **Blueprints Updater** và nhấp vào **Tải xuống (Download)**.
 6.  Khởi động lại Home Assistant.
 

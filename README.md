@@ -28,12 +28,12 @@
 
 ### Option 1: Using HACS (Recommended)
 
-[![Add Blueprints Updater to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=luuquangvu&repository=blueprints_updater&category=integration)
+[![Add Blueprints Updater to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=luuquangvu&repository=blueprints-updater&category=integration)
 
 1.  Open **HACS** in Home Assistant.
 2.  Search for **Blueprints Updater**.
 3.  If not found, click the three dots in the top right corner and select **Custom repositories**.
-4.  Add `https://github.com/luuquangvu/blueprints_updater` with category **Integration**.
+4.  Add `https://github.com/luuquangvu/blueprints-updater` with category **Integration**.
 5.  Search for **Blueprints Updater** and click **Download**.
 6.  Restart Home Assistant.
 
