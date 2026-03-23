@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Thiết lập Blueprints Updater",
+        "description": "Bạn có muốn thiết lập Blueprints Updater? Nó sẽ quét các blueprint cục bộ của bạn và tìm bản cập nhật.",
+        "data": {
+          "auto_update": "Tự động cập nhật",
+          "update_interval": "Khoảng thời gian cập nhật (giờ)",
+          "filter_mode": "Chế độ lọc",
+          "selected_blueprints": "Blueprints (không bắt buộc)"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Chỉ cho phép một thực thể Blueprints Updater duy nhất."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Cài đặt",
+        "description": "Cấu hình tự động cập nhật, khoảng thời gian quét và bộ lọc cho các blueprint của bạn.",
+        "data": {
+          "auto_update": "Tự động cập nhật",
+          "update_interval": "Khoảng thời gian cập nhật (giờ)",
+          "filter_mode": "Chế độ lọc",
+          "selected_blueprints": "Blueprints đã chọn"
+        }
+      }
+    }
+  },
+  "selector": {
+    "filter_mode": {
+      "options": {
+        "all": "Cập nhật tất cả",
+        "whitelist": "Whitelist (Chỉ cập nhật các blueprint trong danh sách)",
+        "blacklist": "Blacklist (Không cập nhật các blueprint trong danh sách)"
+      }
+    }
+  },
+  "entity": {
+    "update": {
+      "blueprint": {
+        "name": "{name}"
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Tải lại blueprints",
+      "description": "Quét tất cả các blueprint cục bộ và kiểm tra bản cập nhật ngay lập tức."
+    }
+  }
+}

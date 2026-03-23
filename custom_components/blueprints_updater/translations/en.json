@@ -1,0 +1,55 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Setup Blueprints Updater",
+        "description": "Do you want to setup Blueprints Updater? It will scan your local blueprints and look for updates.",
+        "data": {
+          "auto_update": "Enable Auto-Update",
+          "update_interval": "Update Interval (hours)",
+          "filter_mode": "Filter Mode",
+          "selected_blueprints": "Blueprints (optional)"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only a single instance of Blueprints Updater is allowed."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Settings",
+        "description": "Configure auto-update, scanning interval, and filters for your blueprints.",
+        "data": {
+          "auto_update": "Enable Auto-Update",
+          "update_interval": "Update Interval (hours)",
+          "filter_mode": "Filter Mode",
+          "selected_blueprints": "Selected Blueprints"
+        }
+      }
+    }
+  },
+  "selector": {
+    "filter_mode": {
+      "options": {
+        "all": "Update All",
+        "whitelist": "Whitelist (Only update selected blueprints)",
+        "blacklist": "Blacklist (Do not update selected blueprints)"
+      }
+    }
+  },
+  "entity": {
+    "update": {
+      "blueprint": {
+        "name": "{name}"
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Reload blueprints",
+      "description": "Scans all local blueprints for new files and checks for updates immediately."
+    }
+  }
+}

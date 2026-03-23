@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+import logging
+import os
+from typing import Any, cast
+
+import voluptuous as vol
+from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
+
+from .const import (
+    CONF_AUTO_UPDATE,
+    CONF_FILTER_MODE,
+    CONF_SELECTED_BLUEPRINTS,
+    CONF_UPDATE_INTERVAL,
+    DEFAULT_UPDATE_INTERVAL_HOURS,
+    DOMAIN,
+    FILTER_MODE_ALL,
+    FILTER_MODE_BLACKLIST,
+    FILTER_MODE_WHITELIST,
+)
+from .coordinator import BlueprintUpdateCoordinator
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, Any]]:
+    """Scan blueprints and return options for the selector."""
+    blueprints = await hass.async_add_executor_job(
+        BlueprintUpdateCoordinator._scan_blueprints, hass, FILTER_MODE_ALL, []
+    )
+    options = [
+        {
+            "value": (
+                rel_path := os.path.relpath(path, hass.config.path("blueprints")).replace("\\", "/")
+            ),
+            "label": f"{info['name']} ({rel_path})",
+        }
+        for path, info in blueprints.items()
+    ]
+    options.sort(key=lambda x: x["label"])
+    return options
+
+
+def _get_config_schema(
+    defaults: dict[str, Any],
+    blueprint_options: list[dict[str, Any]],
+) -> vol.Schema:
+    """Return the config schema."""
+    return vol.Schema(
+        {
+            vol.Optional(
+                CONF_AUTO_UPDATE,
+                default=defaults.get(CONF_AUTO_UPDATE, False),
+            ): cv.boolean,
+            vol.Required(
+                CONF_UPDATE_INTERVAL,
+                default=defaults.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_HOURS),
+            ): vol.All(cv.positive_int, vol.Range(min=1)),
+            vol.Required(
+                CONF_FILTER_MODE,
+                default=defaults.get(CONF_FILTER_MODE, FILTER_MODE_ALL),
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=cast(
+                        Any,
+                        [
+                            {"value": FILTER_MODE_ALL, "label": "Update All"},
+                            {"value": FILTER_MODE_WHITELIST, "label": "Whitelist"},
+                            {"value": FILTER_MODE_BLACKLIST, "label": "Blacklist"},
+                        ],
+                    ),
+                    mode=SelectSelectorMode.DROPDOWN,
+                    translation_key="filter_mode",
+                )
+            ),
+            vol.Optional(
+                CONF_SELECTED_BLUEPRINTS,
+                default=defaults.get(CONF_SELECTED_BLUEPRINTS, []),
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=cast(Any, blueprint_options),
+                    mode=SelectSelectorMode.DROPDOWN,
+                    multiple=True,
+                )
+            ),
+        }
+    )
+
+
+class BlueprintsUpdaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for Blueprints Updater."""
+
+    VERSION = 1
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle the initial step."""
+        _LOGGER.debug("User step in config flow: %s", user_input)
+        if self._async_current_entries():
+            return self.async_abort(reason="single_instance_allowed")
+
+        if user_input is not None:
+            return self.async_create_entry(title="Blueprints Updater", data=user_input)
+
+        options = await _async_get_blueprint_options(self.hass)
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=_get_config_schema({}, options),
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> BlueprintsUpdaterOptionsFlowHandler:
+        """Get the options flow for this handler."""
+        return BlueprintsUpdaterOptionsFlowHandler()
+
+
+class BlueprintsUpdaterOptionsFlowHandler(OptionsFlow):
+    """Handle options flow for Blueprints Updater."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Manage the options."""
+        _LOGGER.debug("Options flow step init: %s", user_input)
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = await _async_get_blueprint_options(self.hass)
+
+        defaults = {**self.config_entry.data, **self.config_entry.options}
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=_get_config_schema(defaults, options),
+        )

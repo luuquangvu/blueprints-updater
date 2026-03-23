@@ -1,0 +1,33 @@
+[project]
+name = "blueprints-updater"
+version = "0.0.0"
+description = "Blueprints Updater for Home Assistant"
+requires-python = ">=3.14.2"
+dependencies = [
+    "homeassistant",
+    "PyYAML",
+    "aiohttp",
+    "voluptuous",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific rules
+    "TID",  # flake8-tidy-imports
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
