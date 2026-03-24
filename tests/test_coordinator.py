@@ -143,6 +143,8 @@ def test_scan_blueprints(hass, coordinator):
         results = coordinator._scan_blueprints(hass, FILTER_MODE_ALL, [])
         assert len(results) == 1, f"Expected 1, got {len(results)}: {results.keys()}"
         assert any("valid.yaml" in k for k in results)
+        full_path = next(iter(results.keys()))
+        assert results[full_path]["rel_path"] == "valid.yaml"
 
         # WHITELIST mode - including valid.yaml
         results = coordinator._scan_blueprints(hass, FILTER_MODE_WHITELIST, ["valid.yaml"])
@@ -163,6 +165,7 @@ async def test_async_update_blueprint(coordinator):
     path = "/config/blueprints/test.yaml"
     info = {
         "name": "Test",
+        "rel_path": "test.yaml",
         "source_url": "https://github.com/user/repo/blob/main/test.yaml",
         "hash": "old_hash",
     }

@@ -181,6 +181,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                     results[path] = {
                         "name": info["name"],
+                        "rel_path": info["rel_path"],
                         "source_url": source_url,
                         "local_hash": local_hash,
                         "remote_hash": remote_hash,
@@ -316,6 +317,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         if source_url:
                             found_blueprints[full_path] = {
                                 "name": bp_info.get("name", file),
+                                "rel_path": rel_path,
                                 "source_url": source_url,
                                 "hash": hashlib.sha256(content.encode()).hexdigest(),
                             }

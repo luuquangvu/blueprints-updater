@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any
 
@@ -65,7 +66,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         super().__init__(coordinator)
         self._path = path
         self._attr_name = info["name"]
-        self._attr_unique_id = f"blueprint_{info['local_hash']}"
+        self._attr_unique_id = f"blueprint_{hashlib.sha256(info['rel_path'].encode()).hexdigest()}"
         self._attr_title = info["name"]
 
     @property
