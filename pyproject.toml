@@ -10,6 +10,13 @@ dependencies = [
     "voluptuous",
 ]
 
+[dependency-groups]
+dev = [
+    "ruff",
+    "ty",
+    "pytest",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py313"
