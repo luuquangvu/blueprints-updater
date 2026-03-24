@@ -18,5 +18,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/luuquangvu/blueprints-updater/issues",
   "single_config_entry": true,
-  "version": "1.0.0"
+  "version": "1.0.1"
 }
