@@ -29,24 +29,38 @@ async def async_setup_entry(
     """Set up the Blueprints Updater update entities."""
     coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    current_paths: set[str] = set()
+    current_entities: dict[str, BlueprintUpdateEntity] = {}
 
     @callback
-    def async_add_blueprint_entities() -> None:
-        """Add new blueprint entities when discovered."""
+    def async_update_entities() -> None:
+        """Add new blueprint entities or remove deleted ones."""
         new_entities = []
+
+        # Add new entities
         for path, info in coordinator.data.items():
-            if path not in current_paths:
-                new_entities.append(BlueprintUpdateEntity(coordinator, path, info))
-                current_paths.add(path)
+            if path not in current_entities:
+                entity = BlueprintUpdateEntity(coordinator, path, info)
+                current_entities[path] = entity
+                new_entities.append(entity)
 
         if new_entities:
             _LOGGER.debug("Adding %d new blueprint update entities", len(new_entities))
             async_add_entities(new_entities)
 
-    async_add_blueprint_entities()
+        # Remove deleted entities
+        removed_paths = []
+        for path in current_entities:
+            if path not in coordinator.data:
+                removed_paths.append(path)
 
-    entry.async_on_unload(coordinator.async_add_listener(async_add_blueprint_entities))
+        for path in removed_paths:
+            _LOGGER.debug("Removing blueprint update entity for deleted file: %s", path)
+            entity = current_entities.pop(path)
+            hass.async_create_task(entity.async_remove())
+
+    async_update_entities()
+
+    entry.async_on_unload(coordinator.async_add_listener(async_update_entities))
 
 
 class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], UpdateEntity):
