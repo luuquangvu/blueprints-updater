@@ -1,12 +1,14 @@
 {
   "domain": "blueprints_updater",
   "name": "Blueprints Updater",
+  "after_dependencies": ["automation", "script", "template"],
   "codeowners": ["@luuquangvu"],
   "config_flow": true,
   "dependencies": ["blueprint"],
-  "after_dependencies": ["automation", "script", "template"],
   "documentation": "https://github.com/luuquangvu/blueprints-updater",
-  "issue_tracker": "https://github.com/luuquangvu/blueprints-updater/issues",
+  "integration_type": "service",
   "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/luuquangvu/blueprints-updater/issues",
+  "single_config_entry": true,
   "version": "0.0.0"
 }
