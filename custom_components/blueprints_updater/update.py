@@ -36,7 +36,6 @@ async def async_setup_entry(
         """Add new blueprint entities or remove deleted ones."""
         new_entities = []
 
-        # Add new entities
         for path, info in coordinator.data.items():
             if path not in current_entities:
                 entity = BlueprintUpdateEntity(coordinator, path, info)
@@ -47,7 +46,6 @@ async def async_setup_entry(
             _LOGGER.debug("Adding %d new blueprint update entities", len(new_entities))
             async_add_entities(new_entities)
 
-        # Remove deleted entities
         removed_paths = []
         for path in current_entities:
             if path not in coordinator.data:
@@ -76,7 +74,13 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         path: str,
         info: dict[str, Any],
     ) -> None:
-        """Initialize the update entity."""
+        """Initialize the update entity.
+
+        Args:
+            coordinator: Update coordinator.
+            path: Path to the blueprint.
+            info: Blueprint metadata dict.
+        """
         super().__init__(coordinator)
         self._path = path
         self._attr_name = info["name"]
@@ -121,12 +125,21 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         if self._path in self.coordinator.data:
             info = self.coordinator.data[self._path]
             if info["updatable"]:
-                return f"Update available from {info['source_url']}"
+                return (
+                    f"Update available from {info['source_url']}\n\n"
+                    "**Warning**: Auto-update may carry backward incompatibility risks "
+                    "if the author introduces breaking changes."
+                )
             return "Up to date"
         return None
 
     async def async_install(self, version: str | None, backup: bool, **kwargs: Any) -> None:
-        """Install the update."""
+        """Install the update.
+
+        Args:
+            version: The desired version to install (unused).
+            backup: Whether a backup should be created (unused).
+        """
         if self._path not in self.coordinator.data:
             _LOGGER.error("Blueprint path %s not found in coordinator data", self._path)
             return

@@ -32,31 +32,26 @@ def coordinator(hass):
 
 def test_normalize_url(coordinator):
     """Test URL normalization."""
-    # GitHub blob to raw
     assert (
         coordinator._normalize_url("https://github.com/user/repo/blob/main/blueprints/test.yaml")
         == "https://raw.githubusercontent.com/user/repo/main/blueprints/test.yaml"
     )
 
-    # Gist to raw
     assert (
         coordinator._normalize_url("https://gist.github.com/user/gist_id")
         == "https://gist.github.com/user/gist_id/raw"
     )
 
-    # Gist already raw
     assert (
         coordinator._normalize_url("https://gist.github.com/user/gist_id/raw")
         == "https://gist.github.com/user/gist_id/raw"
     )
 
-    # HA Forum topic to JSON API
     assert (
         coordinator._normalize_url("https://community.home-assistant.io/t/topic-slug/12345")
         == "https://community.home-assistant.io/t/12345.json"
     )
 
-    # Other URL unchanged
     assert (
         coordinator._normalize_url("https://example.com/blueprint.yaml")
         == "https://example.com/blueprint.yaml"
@@ -65,7 +60,6 @@ def test_normalize_url(coordinator):
 
 def test_parse_forum_content(coordinator):
     """Test parsing forum content."""
-    # Valid forum JSON
     json_data = {
         "post_stream": {
             "posts": [
@@ -82,11 +76,9 @@ def test_parse_forum_content(coordinator):
     assert "blueprint:" in content
     assert "name: Test" in content
 
-    # No blueprint in code block
     json_data_no_bp = {"post_stream": {"posts": [{"cooked": "<code>not a blueprint</code>"}]}}
     assert coordinator._parse_forum_content(json_data_no_bp) is None
 
-    # Empty/Missing posts
     assert coordinator._parse_forum_content({}) is None
     assert coordinator._parse_forum_content({"post_stream": {"posts": []}}) is None
 
@@ -95,16 +87,13 @@ def test_ensure_source_url(coordinator):
     """Test ensuring source_url is present."""
     source_url = "https://github.com/user/repo/blob/main/test.yaml"
 
-    # Missing source_url
     content = "blueprint:\n  name: Test"
     new_content = coordinator._ensure_source_url(content, source_url)
     assert f"source_url: {source_url}" in new_content
 
-    # Already present
     content_with_url = f"blueprint:\n  name: Test\n  source_url: {source_url}"
     assert coordinator._ensure_source_url(content_with_url, source_url) == content_with_url
 
-    # Present with quotes
     content_with_quotes = f"blueprint:\n  name: Test\n  source_url: '{source_url}'"
     assert coordinator._ensure_source_url(content_with_quotes, source_url) == content_with_quotes
 
@@ -139,22 +128,18 @@ def test_scan_blueprints(hass, coordinator):
         patch("os.walk", return_value=mock_files),
         patch("builtins.open", side_effect=open_side_effect),
     ):
-        # ALL mode
         results = coordinator._scan_blueprints(hass, FILTER_MODE_ALL, [])
         assert len(results) == 1, f"Expected 1, got {len(results)}: {results.keys()}"
         assert any("valid.yaml" in k for k in results)
         full_path = next(iter(results.keys()))
         assert results[full_path]["rel_path"] == "valid.yaml"
 
-        # WHITELIST mode - including valid.yaml
         results = coordinator._scan_blueprints(hass, FILTER_MODE_WHITELIST, ["valid.yaml"])
         assert len(results) == 1
 
-        # WHITELIST mode - excluding valid.yaml
         results = coordinator._scan_blueprints(hass, FILTER_MODE_WHITELIST, ["other.yaml"])
         assert len(results) == 0
 
-        # BLACKLIST mode - excluding valid.yaml
         results = coordinator._scan_blueprints(hass, FILTER_MODE_BLACKLIST, ["valid.yaml"])
         assert len(results) == 0
 
@@ -171,10 +156,10 @@ async def test_async_update_blueprint(coordinator):
     }
     results = {path: {"last_error": None, "hash": "old_hash"}}
 
-    mock_response = MagicMock()
+    mock_response = AsyncMock()
     mock_response.status = 200
     mock_response.raise_for_status = MagicMock()
-    mock_response.text = AsyncMock(return_value="blueprint:\n  name: Test")
+    mock_response.text.return_value = "blueprint:\n  name: Test"
 
     mock_session = MagicMock()
     mock_session.get.return_value.__aenter__.return_value = mock_response
@@ -182,7 +167,6 @@ async def test_async_update_blueprint(coordinator):
     semaphore = asyncio.Semaphore(1)
 
     with patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash:
-        # Mock hash to be different
         mock_hash.return_value.hexdigest.return_value = "new_hash"
 
         await coordinator._async_update_blueprint(mock_session, semaphore, path, info, results)
@@ -199,7 +183,6 @@ async def test_async_install_blueprint(hass, coordinator):
     path = "/config/blueprints/test.yaml"
     remote_content = "blueprint:\n  name: Test"
 
-    # Mock services: automation and script exist, template does not
     hass.services.has_service = MagicMock(
         side_effect=lambda domain, service: (
             domain in ["automation", "script"] if service == "reload" else False
@@ -209,16 +192,15 @@ async def test_async_install_blueprint(hass, coordinator):
 
     with (
         patch("builtins.open", MagicMock()),
+        patch("custom_components.blueprints_updater.coordinator.os.replace"),
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
     ):
         await coordinator.async_install_blueprint(path, remote_content)
 
-    # Verify automation and script were called, template was not
     assert hass.services.async_call.call_count == 2
     hass.services.async_call.assert_any_call("automation", "reload")
     hass.services.async_call.assert_any_call("script", "reload")
 
-    # Verify template was NOT called
     with pytest.raises(AssertionError):
         hass.services.async_call.assert_any_call("template", "reload")
 
@@ -226,7 +208,6 @@ async def test_async_install_blueprint(hass, coordinator):
 @pytest.mark.asyncio
 async def test_async_update_data_partial_failure(coordinator):
     """Test that one failed blueprint does not stop others."""
-    # Setup 2 blueprints
     blueprints = {
         "/config/blueprints/good.yaml": {
             "name": "Good",
@@ -242,16 +223,14 @@ async def test_async_update_data_partial_failure(coordinator):
         },
     }
 
-    # Mock _scan_blueprints
     coordinator._scan_blueprints = MagicMock(return_value=blueprints)
 
-    # Mock responses: good = 200, bad = 404
-    mock_good_resp = MagicMock()
+    mock_good_resp = AsyncMock()
     mock_good_resp.status = 200
     mock_good_resp.raise_for_status = MagicMock()
-    mock_good_resp.text = AsyncMock(return_value="blueprint:\n  name: Good")
+    mock_good_resp.text.return_value = "blueprint:\n  name: Good"
 
-    mock_bad_resp = MagicMock()
+    mock_bad_resp = AsyncMock()
     mock_bad_resp.status = 404
     mock_bad_resp.raise_for_status = MagicMock(side_effect=Exception("404 Not Found"))
 
@@ -276,14 +255,110 @@ async def test_async_update_data_partial_failure(coordinator):
 
     results = await run_test()
 
-    # Verify both are in results
     assert "/config/blueprints/good.yaml" in results
     assert "/config/blueprints/bad.yaml" in results
 
-    # Good one should be updatable
     assert results["/config/blueprints/good.yaml"]["updatable"] is True
     assert results["/config/blueprints/good.yaml"]["last_error"] is None
 
-    # Bad one should have error
     assert results["/config/blueprints/bad.yaml"]["last_error"] is not None
     assert "404" in results["/config/blueprints/bad.yaml"]["last_error"]
+
+
+@pytest.mark.asyncio
+async def test_async_update_blueprint_errors(coordinator):
+    """Test various error conditions in _async_update_blueprint."""
+    path = "/config/blueprints/test.yaml"
+    info = {"name": "Test", "source_url": "https://url", "hash": "hash"}
+    results = {path: {"last_error": None, "hash": "hash"}}
+
+    mock_resp_empty = AsyncMock()
+    mock_resp_empty.status = 200
+    mock_resp_empty.raise_for_status = MagicMock()
+    mock_resp_empty.text.return_value = ""
+
+    mock_session = MagicMock()
+    mock_session.get.return_value.__aenter__.return_value = mock_resp_empty
+    sem = asyncio.Semaphore(1)
+
+    await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
+    assert results[path]["last_error"] == "Empty content received"
+
+    mock_resp_invalid = AsyncMock()
+    mock_resp_invalid.status = 200
+    mock_resp_invalid.raise_for_status = MagicMock()
+    mock_resp_invalid.text.return_value = "}invalid yaml: {\n"
+    mock_session.get.return_value.__aenter__.return_value = mock_resp_invalid
+
+    await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
+    assert "YAML Syntax Error" in str(results[path]["last_error"])
+
+    mock_resp_missing_bp = AsyncMock()
+    mock_resp_missing_bp.status = 200
+    mock_resp_missing_bp.raise_for_status = MagicMock()
+    mock_resp_missing_bp.text.return_value = "other_key: value\nsource_url: https://url"
+    mock_session.get.return_value.__aenter__.return_value = mock_resp_missing_bp
+
+    await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
+    assert "Missing 'blueprint' root key" in str(results[path]["last_error"])
+
+    mock_session.get.side_effect = Exception("Connection Failed")
+    await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
+    assert "Fetch Error: Connection Failed" in str(results[path]["last_error"])
+
+
+@pytest.mark.asyncio
+async def test_async_install_blueprint_error(coordinator):
+    """Test exception during blueprint installation."""
+    with (
+        patch("builtins.open", side_effect=Exception("Write failed")),
+        pytest.raises(Exception, match="Write failed"),
+    ):
+        await coordinator.async_install_blueprint("/fake/path.yaml", "content")
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_auto_update(coordinator):
+    """Test _async_update_data with auto_update enabled."""
+    coordinator.config_entry.options = {"auto_update": True}
+    coordinator._scan_blueprints = MagicMock(
+        return_value={
+            "/test.yaml": {
+                "name": "Test",
+                "rel_path": "test.yaml",
+                "source_url": "https://url",
+                "hash": "old",
+            }
+        }
+    )
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.text.return_value = "blueprint:\n  name: Test\n  source_url: https://url"
+
+    mock_session = MagicMock()
+    mock_session.get.return_value.__aenter__.return_value = mock_resp
+
+    with (
+        patch("aiohttp.ClientSession", return_value=mock_session),
+        patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
+        patch.object(coordinator, "async_install_blueprint") as mock_install,
+        patch.object(coordinator, "_async_reload_services") as mock_reload,
+    ):
+        mock_session.__aenter__.return_value = mock_session
+        mock_hash.return_value.hexdigest.return_value = "new"
+
+        results = await coordinator._async_update_data()
+
+        mock_install.assert_called_once_with(
+            "/test.yaml",
+            "blueprint:\n  name: Test\n  source_url: https://url",
+            reload_services=False,
+        )
+        mock_reload.assert_called_once()
+        assert "/test.yaml" in results
+        assert results["/test.yaml"]["updatable"] is False
+        assert results["/test.yaml"]["remote_content"] is None
+        assert results["/test.yaml"]["local_hash"] == "new"
+        assert "_auto_updated" not in results["/test.yaml"]

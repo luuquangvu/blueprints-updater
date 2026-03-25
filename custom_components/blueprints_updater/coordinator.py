@@ -48,7 +48,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         filter_mode: str = FILTER_MODE_ALL,
         selected_blueprints: list[str] | None = None,
     ) -> None:
-        """Initialize the coordinator."""
+        """Initialize the coordinator.
+
+        Args:
+            hass: HomeAssistant instance.
+            entry: Integration configuration entry.
+            update_interval: Scan interval.
+            filter_mode: Blueprint filtering mode.
+            selected_blueprints: List of selected blueprints.
+        """
         self.hass = hass
         self.config_entry = entry
         self.filter_mode = filter_mode
@@ -97,57 +105,35 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ]
             await asyncio.gather(*tasks)
 
-        if self.config_entry and self.config_entry.options.get(CONF_AUTO_UPDATE, False):
-            auto_update_tasks = [
-                self.async_install_blueprint(path, info["remote_content"])
-                for path, info in results.items()
-                if info["updatable"] and info["remote_content"] and not info.get("last_error")
-            ]
-            if auto_update_tasks:
-                _LOGGER.info("Auto-updating %d blueprints", len(auto_update_tasks))
-                await asyncio.gather(*auto_update_tasks)
-
-                new_blueprints = await self.hass.async_add_executor_job(
-                    self._scan_blueprints,
-                    self.hass,
-                    self.filter_mode,
-                    self.selected_blueprints,
-                )
-                for path, info in new_blueprints.items():
-                    if path in results:
-                        results[path].update(
-                            {
-                                "local_hash": info["hash"],
-                                "updatable": False,
-                            }
-                        )
-                    else:
-                        results[path] = {
-                            "name": info["name"],
-                            "rel_path": info["rel_path"],
-                            "source_url": info["source_url"],
-                            "local_hash": info["hash"],
-                            "updatable": False,
-                            "remote_hash": None,
-                            "remote_content": None,
-                            "last_error": None,
-                        }
+        auto_updated_count = sum(1 for info in results.values() if info.pop("_auto_updated", False))
+        if auto_updated_count > 0:
+            _LOGGER.info("Auto-updated %d blueprints", auto_updated_count)
+            await self._async_reload_services()
 
         return results
 
-    async def async_install_blueprint(self, path: str, remote_content: str) -> None:
-        """Install a blueprint by overwriting the local file."""
+    async def _async_reload_services(self) -> None:
+        """Reload automation, script, and template services."""
+        for domain in ("automation", "script", "template"):
+            if self.hass.services.has_service(domain, "reload"):
+                await self.hass.services.async_call(domain, "reload")
+
+    async def async_install_blueprint(
+        self, path: str, remote_content: str, reload_services: bool = True
+    ) -> None:
+        """Install a blueprint by overwriting the local file atomically."""
         try:
 
             def _save_file(file_path: str, content: str) -> None:
-                with open(file_path, "w", encoding="utf-8") as f:
+                tmp_path = f"{file_path}.tmp"
+                with open(tmp_path, "w", encoding="utf-8") as f:
                     f.write(content)
+                os.replace(tmp_path, file_path)
 
             await self.hass.async_add_executor_job(_save_file, path, remote_content)
 
-            for domain in ("automation", "script", "template"):
-                if self.hass.services.has_service(domain, "reload"):
-                    await self.hass.services.async_call(domain, "reload")
+            if reload_services:
+                await self._async_reload_services()
 
             _LOGGER.info("Blueprint at %s updated successfully", path)
         except Exception as err:
@@ -214,10 +200,33 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
                         last_error = f"YAML Syntax Error: {err}"
 
+                    if (
+                        updatable
+                        and not last_error
+                        and self.config_entry
+                        and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
+                    ):
+                        await self.async_install_blueprint(
+                            path, remote_content, reload_services=False
+                        )
+                        results[path].update(
+                            {
+                                "remote_hash": remote_hash,
+                                "remote_content": None,
+                                "updatable": False,
+                                "local_hash": remote_hash,
+                                "last_error": None,
+                                "_auto_updated": True,
+                            }
+                        )
+                        return
+
                     results[path].update(
                         {
                             "remote_hash": remote_hash,
-                            "remote_content": remote_content,
+                            "remote_content": remote_content
+                            if updatable and not last_error
+                            else None,
                             "updatable": updatable,
                             "last_error": last_error,
                         }
@@ -315,7 +324,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         filter_mode: str,
         selected_blueprints: list[str],
     ) -> dict[str, Any]:
-        """Scan the blueprints directory for YAML files with source_url."""
+        """Scan the blueprints directory for YAML files with source_url.
+
+        Args:
+            hass: HomeAssistant instance.
+            filter_mode: Blueprint filter mode.
+            selected_blueprints: List of selected blueprints.
+
+        Returns:
+            Dictionary mapping paths to blueprint properties.
+        """
         blueprint_path = hass.config.path("blueprints")
         found_blueprints = {}
 

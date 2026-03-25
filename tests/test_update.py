@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.blueprints_updater.const import DOMAIN
-from custom_components.blueprints_updater.update import async_setup_entry
+from custom_components.blueprints_updater.update import BlueprintUpdateEntity, async_setup_entry
 
 
 @pytest.mark.asyncio
@@ -16,7 +16,6 @@ async def test_update_entities_lifecycle(hass):
     entry.async_on_unload = MagicMock()
 
     coordinator = MagicMock()
-    # Initial data with one blueprint
     coordinator.data = {
         "/config/blueprints/test1.yaml": {
             "name": "Test 1",
@@ -32,7 +31,6 @@ async def test_update_entities_lifecycle(hass):
 
     async_add_entities = MagicMock()
 
-    # 1. Setup entry - should add initial entity
     await async_setup_entry(hass, entry, async_add_entities)
 
     assert async_add_entities.called
@@ -41,10 +39,8 @@ async def test_update_entities_lifecycle(hass):
     entity = added_entities[0]
     assert entity._path == "/config/blueprints/test1.yaml"
 
-    # Get the listener callback
     update_callback = coordinator.async_add_listener.call_args[0][0]
 
-    # 2. Add another blueprint
     coordinator.data["/config/blueprints/test2.yaml"] = {
         "name": "Test 2",
         "rel_path": "test2.yaml",
@@ -61,23 +57,95 @@ async def test_update_entities_lifecycle(hass):
     entity2 = added_entities[0]
     assert entity2._path == "/config/blueprints/test2.yaml"
 
-    # 3. Remove the first blueprint
     del coordinator.data["/config/blueprints/test1.yaml"]
 
-    # Mock entity.async_remove
     entity.async_remove = AsyncMock()
 
     update_callback()
 
-    # Verify entity removal was initiated via hass.async_create_task
     assert hass.async_create_task.called
     assert entity.async_remove.called
 
-    # Get the coroutine that was passed to async_create_task and await it
-    # to avoid RuntimeWarning and verify it's the right one.
     remove_coro = hass.async_create_task.call_args[0][0]
     await remove_coro
-    # Alternative check: just verify pop and call happened implicitly if we can
-    # Given the implementation: hass.async_create_task(entity.async_remove())
-    # We can check if async_remove was called (which returns the coro passed to async_create_task)
     assert entity.async_remove.called
+
+
+@pytest.fixture
+def coordinator():
+    """Fixture for BlueprintUpdateCoordinator in update tests."""
+    comp = MagicMock()
+    comp.data = {
+        "/config/blueprints/test.yaml": {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "source_url": "https://url.com",
+            "local_hash": "hash1xxxxxxxxxxx",
+            "remote_hash": "hash2xxxxxxxxxxx",
+            "updatable": True,
+            "last_error": None,
+            "remote_content": "blueprint:\n  name: Test",
+        }
+    }
+    comp.config_entry = MagicMock()
+    comp.config_entry.options = {"auto_update": True}
+    comp.async_install_blueprint = AsyncMock()
+    comp.async_refresh = AsyncMock()
+    return comp
+
+
+def test_entity_properties(coordinator):
+    """Test properties of BlueprintUpdateEntity."""
+    entity = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/test.yaml",
+        coordinator.data["/config/blueprints/test.yaml"],
+    )
+
+    assert entity.name == "Test"
+    assert entity._path == "/config/blueprints/test.yaml"
+    assert entity.auto_update is True
+    assert entity.installed_version == "hash1xxx"
+    assert entity.latest_version == "hash2xxx"
+    assert entity.release_summary == (
+        "Update available from https://url.com\n\n"
+        "**Warning**: Auto-update may carry backward incompatibility risks "
+        "if the author introduces breaking changes."
+    )
+    assert entity.extra_state_attributes == {}
+
+    entity_missing = BlueprintUpdateEntity(
+        coordinator, "/missing.yaml", {"name": "Missing", "rel_path": "missing"}
+    )
+    assert entity_missing.installed_version is None
+    assert entity_missing.latest_version is None
+    assert entity_missing.release_summary is None
+
+    coordinator.data["/config/blueprints/test.yaml"]["last_error"] = "Fetch Error"
+    assert entity.extra_state_attributes == {"last_error": "Fetch Error"}
+
+
+@pytest.mark.asyncio
+async def test_entity_async_install(coordinator):
+    """Test async_install method of BlueprintUpdateEntity."""
+    entity = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/test.yaml",
+        coordinator.data["/config/blueprints/test.yaml"],
+    )
+
+    await entity.async_install(version=None, backup=False)
+    coordinator.async_install_blueprint.assert_called_once_with(
+        "/config/blueprints/test.yaml", "blueprint:\n  name: Test"
+    )
+    coordinator.async_refresh.assert_called_once()
+
+    coordinator.data.pop("/config/blueprints/test.yaml")
+    await entity.async_install(version=None, backup=False)
+
+    coordinator.data["/config/blueprints/test.yaml"] = {"last_error": "Syntax Error"}
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    with pytest.raises(HomeAssistantError, match="Cannot install blueprint: Syntax Error"):
+        await entity.async_install(version=None, backup=False)
