@@ -12,6 +12,7 @@ from homeassistant.components.update import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -51,10 +52,15 @@ async def async_setup_entry(
             if path not in coordinator.data:
                 removed_paths.append(path)
 
-        for path in removed_paths:
-            _LOGGER.debug("Removing blueprint update entity for deleted file: %s", path)
-            entity = current_entities.pop(path)
-            hass.async_create_task(entity.async_remove())
+        if removed_paths:
+            entity_registry = er.async_get(hass)
+            for path in removed_paths:
+                _LOGGER.debug("Removing blueprint update entity for deleted file: %s", path)
+                entity = current_entities.pop(path)
+                if entity.entity_id and entity_registry.async_get(entity.entity_id):
+                    entity_registry.async_remove(entity.entity_id)
+                else:
+                    hass.async_create_task(entity.async_remove())
 
     async_update_entities()
 
