@@ -41,7 +41,7 @@ async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, An
             "value": (
                 rel_path := os.path.relpath(path, hass.config.path("blueprints")).replace("\\", "/")
             ),
-            "label": f"**{info['name']}** [{rel_path}]",
+            "label": f"{info['name']} [{rel_path}]",
         }
         for path, info in blueprints.items()
     ]
