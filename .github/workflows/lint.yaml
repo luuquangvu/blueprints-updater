@@ -2,12 +2,16 @@ name: Lint and Type Check
 
 on:
   push:
+    branches:
+      - main
     paths:
       - "**.py"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/lint.yaml"
   pull_request:
+    branches:
+      - main
     paths:
       - "**.py"
       - "pyproject.toml"
