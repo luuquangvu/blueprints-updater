@@ -57,14 +57,15 @@
     - **Danh sách đen (Blacklist)**: Theo dõi tất cả các blueprint _ngoại trừ_ những cái bạn chọn.
 6.  Sau khi thêm, tích hợp sẽ quét các blueprint của bạn. Nếu tìm thấy bản cập nhật, chúng sẽ xuất hiện dưới dạng thực thể `update` trong bảng điều khiển của bạn.
 
-### Làm mới thủ công (Hot Reload)
+### Áp dụng thay đổi (Thêm/Xóa Blueprints)
 
-Nếu bạn vừa thêm một tệp blueprint mới hoặc muốn kiểm tra bản cập nhật ngay lập tức mà không muốn chờ đợi:
+Vì Home Assistant không liên tục giám sát tệp hệ thống để tiết kiệm tài nguyên, nên **việc thêm hoặc xóa blueprint sẽ không được cập nhật ngay lập tức**.
 
-1.  Vào **Công cụ nhà phát triển (Developer Tools)** > thẻ **Hành động (Actions)**.
-2.  Tìm kiếm hành động **`blueprints_updater.reload`**.
-3.  Nhấp vào **Thực hiện hành động (Perform Action)**.
-    Tích hợp sẽ ngay lập tức quét thư mục blueprints và tạo thêm các thực thể mới hoặc cập nhật trạng thái nếu có.
+Để áp dụng các thay đổi này tức thì mà không cần chờ đến lần quét tự động tiếp theo, bạn phải làm **một** trong các cách sau:
+
+1. **Chạy hành động Reload (Khuyên dùng)**: Vào **Công cụ nhà phát triển (Developer Tools)** > **Hành động (Actions)**, tìm kiếm hành động **`blueprints_updater.reload`** và nhấn **Thực hiện hành động (Perform Action)**. Tích hợp sẽ ngay lập tức quét thư mục blueprints và sinh ra/xóa bỏ thực thể tương ứng.
+2. **Reload Tích hợp**: Vào **Cài đặt (Settings)** > **Thiết bị & Dịch vụ (Devices & Services)** > **Blueprints Updater**, nhấn vào ba chấm và chọn **Tải lại (Reload)**.
+3. **Khởi động lại Home Assistant**.
 
 ### Yêu cầu
 

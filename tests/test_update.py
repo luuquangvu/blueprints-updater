@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -28,47 +28,49 @@ async def test_update_entities_lifecycle(hass):
 
     hass.data = {DOMAIN: {"test_entry": coordinator}}
     hass.async_create_task = MagicMock()
+    hass.states = MagicMock()
 
     async_add_entities = MagicMock()
 
-    await async_setup_entry(hass, entry, async_add_entities)
+    mock_entity_registry = MagicMock()
 
-    assert async_add_entities.called
-    added_entities = async_add_entities.call_args[0][0]
-    assert len(added_entities) == 1
-    entity = added_entities[0]
-    assert entity._path == "/config/blueprints/test1.yaml"
+    with patch(
+        "custom_components.blueprints_updater.update.er.async_get",
+        return_value=mock_entity_registry,
+    ):
+        await async_setup_entry(hass, entry, async_add_entities)
 
-    update_callback = coordinator.async_add_listener.call_args[0][0]
+        assert async_add_entities.called
+        added_entities = async_add_entities.call_args[0][0]
+        assert len(added_entities) == 1
+        entity = added_entities[0]
+        assert entity._path == "/config/blueprints/test1.yaml"
 
-    coordinator.data["/config/blueprints/test2.yaml"] = {
-        "name": "Test 2",
-        "rel_path": "test2.yaml",
-        "source_url": "https://url2.com",
-        "local_hash": "hash2",
-    }
+        update_callback = coordinator.async_add_listener.call_args[0][0]
 
-    async_add_entities.reset_mock()
-    update_callback()
+        coordinator.data["/config/blueprints/test2.yaml"] = {
+            "name": "Test 2",
+            "rel_path": "test2.yaml",
+            "source_url": "https://url2.com",
+            "local_hash": "hash2",
+        }
 
-    assert async_add_entities.called
-    added_entities = async_add_entities.call_args[0][0]
-    assert len(added_entities) == 1
-    entity2 = added_entities[0]
-    assert entity2._path == "/config/blueprints/test2.yaml"
+        async_add_entities.reset_mock()
+        update_callback()
 
-    del coordinator.data["/config/blueprints/test1.yaml"]
+        assert async_add_entities.called
+        added_entities = async_add_entities.call_args[0][0]
+        assert len(added_entities) == 1
+        entity2 = added_entities[0]
+        assert entity2._path == "/config/blueprints/test2.yaml"
 
-    entity.async_remove = AsyncMock()
+        del coordinator.data["/config/blueprints/test1.yaml"]
+        entity.entity_id = "update.test1"
+        mock_entity_registry.async_get.return_value = MagicMock()
 
-    update_callback()
+        update_callback()
 
-    assert hass.async_create_task.called
-    assert entity.async_remove.called
-
-    remove_coro = hass.async_create_task.call_args[0][0]
-    await remove_coro
-    assert entity.async_remove.called
+        mock_entity_registry.async_remove.assert_called_once_with("update.test1")
 
 
 @pytest.fixture

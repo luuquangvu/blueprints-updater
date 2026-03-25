@@ -57,14 +57,15 @@
     - **Blacklist**: Tracks all blueprints _except_ the ones you select.
 6.  Once added, the integration will scan your blueprints. If updates are found, they will appear as `update` entities in your dashboard.
 
-### Manual Refresh (Hot Reload)
+### Applying Changes (Adding/Deleting Blueprints)
 
-If you add a new blueprint file or want to check for updates immediately without waiting for the scheduled scan:
+Since Home Assistant does not constantly monitor the file system to save resources, **newly added or deleted blueprints will not be reflected immediately**.
 
-1.  Go to **Developer Tools** > **Actions**.
-2.  Search for the **`blueprints_updater.reload`** action.
-3.  Click **Perform Action**.
-    The integration will instantly scan your blueprints directory and create any new entities or update statuses.
+To apply changes instantly without waiting for the next scheduled background scan, you must do **one** of the following:
+
+1. **Run the Reload Action (Recommended)**: Go to **Developer Tools** > **Actions**, search for **`blueprints_updater.reload`**, and click **Perform Action**. The integration will instantly scan your blueprints directory and create any new entities or update statuses.
+2. **Reload the Integration**: Go to **Settings** > **Devices & Services** > **Blueprints Updater**, click the three dots, and select **Reload**.
+3. **Restart Home Assistant**.
 
 ### Requirements
 
