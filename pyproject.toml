@@ -40,6 +40,7 @@ select = [
 quote-style = "double"
 indent-style = "space"
 
-[tool.pytest.ini_options]
+[tool.pytest]
 asyncio_mode = "auto"
 pythonpath = ["."]
+filterwarnings = ["ignore::DeprecationWarning"]
