@@ -18,6 +18,8 @@ from homeassistant.util import yaml as yaml_util
 from .const import (
     CONCURRENT_REQUESTS_LIMIT,
     CONF_AUTO_UPDATE,
+    CONF_FILTER_MODE,
+    CONF_SELECTED_BLUEPRINTS,
     DOMAIN,
     DOMAIN_GIST,
     DOMAIN_GITHUB,
@@ -45,8 +47,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         hass: HomeAssistant,
         entry: ConfigEntry,
         update_interval: timedelta,
-        filter_mode: str = FILTER_MODE_ALL,
-        selected_blueprints: list[str] | None = None,
     ) -> None:
         """Initialize the coordinator.
 
@@ -54,13 +54,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             hass: HomeAssistant instance.
             entry: Integration configuration entry.
             update_interval: Scan interval.
-            filter_mode: Blueprint filtering mode.
-            selected_blueprints: List of selected blueprints.
         """
         self.hass = hass
         self.config_entry = entry
-        self.filter_mode = filter_mode
-        self.selected_blueprints = selected_blueprints or []
         super().__init__(
             hass,
             _LOGGER,
@@ -70,16 +66,25 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch blueprint update data."""
+        filter_mode = (
+            self.config_entry.options.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
+            if self.config_entry
+            else FILTER_MODE_ALL
+        )
+        selected_blueprints = (
+            self.config_entry.options.get(CONF_SELECTED_BLUEPRINTS, []) if self.config_entry else []
+        )
+
         _LOGGER.debug(
             "Starting blueprint update check (filter_mode=%s, selected_blueprints=%s)",
-            self.filter_mode,
-            self.selected_blueprints,
+            filter_mode,
+            selected_blueprints,
         )
         blueprints = await self.hass.async_add_executor_job(
-            self._scan_blueprints,
+            self.scan_blueprints,
             self.hass,
-            self.filter_mode,
-            self.selected_blueprints,
+            filter_mode,
+            selected_blueprints,
         )
 
         results: dict[str, Any] = {
@@ -319,7 +324,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     @staticmethod
-    def _scan_blueprints(
+    def scan_blueprints(
         hass: HomeAssistant,
         filter_mode: str,
         selected_blueprints: list[str],

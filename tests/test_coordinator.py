@@ -26,7 +26,6 @@ def coordinator(hass):
             hass,
             entry,
             timedelta(hours=24),
-            filter_mode=FILTER_MODE_ALL,
         )
 
 
@@ -107,7 +106,7 @@ def test_scan_blueprints(hass, coordinator):
     invalid_content = "not: a blueprint"
     no_url_content = "blueprint:\n  name: No URL"
 
-    def open_side_effect(path, encoding=None):
+    def open_side_effect(path, *_args, **_kwargs):
         path_str = str(path)
         basename = os.path.basename(path_str)
         content = ""
@@ -128,19 +127,19 @@ def test_scan_blueprints(hass, coordinator):
         patch("os.walk", return_value=mock_files),
         patch("builtins.open", side_effect=open_side_effect),
     ):
-        results = coordinator._scan_blueprints(hass, FILTER_MODE_ALL, [])
+        results = coordinator.scan_blueprints(hass, FILTER_MODE_ALL, [])
         assert len(results) == 1, f"Expected 1, got {len(results)}: {results.keys()}"
         assert any("valid.yaml" in k for k in results)
         full_path = next(iter(results.keys()))
         assert results[full_path]["rel_path"] == "valid.yaml"
 
-        results = coordinator._scan_blueprints(hass, FILTER_MODE_WHITELIST, ["valid.yaml"])
+        results = coordinator.scan_blueprints(hass, FILTER_MODE_WHITELIST, ["valid.yaml"])
         assert len(results) == 1
 
-        results = coordinator._scan_blueprints(hass, FILTER_MODE_WHITELIST, ["other.yaml"])
+        results = coordinator.scan_blueprints(hass, FILTER_MODE_WHITELIST, ["other.yaml"])
         assert len(results) == 0
 
-        results = coordinator._scan_blueprints(hass, FILTER_MODE_BLACKLIST, ["valid.yaml"])
+        results = coordinator.scan_blueprints(hass, FILTER_MODE_BLACKLIST, ["valid.yaml"])
         assert len(results) == 0
 
 
@@ -223,7 +222,7 @@ async def test_async_update_data_partial_failure(coordinator):
         },
     }
 
-    coordinator._scan_blueprints = MagicMock(return_value=blueprints)
+    coordinator.scan_blueprints = MagicMock(return_value=blueprints)
 
     mock_good_resp = AsyncMock()
     mock_good_resp.status = 200
@@ -239,7 +238,7 @@ async def test_async_update_data_partial_failure(coordinator):
         mock_session = mock_session_class.return_value
         mock_session.__aenter__.return_value = mock_session
 
-        def get_side_effect(url, **kwargs):
+        def get_side_effect(url, **_kwargs):
             m = MagicMock()
             if "good.yaml" in url:
                 m.__aenter__.return_value = mock_good_resp
@@ -321,7 +320,7 @@ async def test_async_install_blueprint_error(coordinator):
 async def test_async_update_data_auto_update(coordinator):
     """Test _async_update_data with auto_update enabled."""
     coordinator.config_entry.options = {"auto_update": True}
-    coordinator._scan_blueprints = MagicMock(
+    coordinator.scan_blueprints = MagicMock(
         return_value={
             "/test.yaml": {
                 "name": "Test",
