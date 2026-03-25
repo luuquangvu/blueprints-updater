@@ -12,6 +12,7 @@ from homeassistant.components.update import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -51,10 +52,32 @@ async def async_setup_entry(
             if path not in coordinator.data:
                 removed_paths.append(path)
 
-        for path in removed_paths:
-            _LOGGER.debug("Removing blueprint update entity for deleted file: %s", path)
-            entity = current_entities.pop(path)
-            hass.async_create_task(entity.async_remove(force_remove=True))
+        entity_registry = er.async_get(hass)
+
+        if removed_paths:
+            for path in removed_paths:
+                _LOGGER.debug("Removing blueprint update entity for deleted file: %s", path)
+                entity = current_entities.pop(path)
+                if entity.entity_id:
+                    if entity_registry.async_get(entity.entity_id):
+                        entity_registry.async_remove(entity.entity_id)
+                    hass.states.async_remove(entity.entity_id)
+                else:
+                    hass.async_create_task(entity.async_remove(force_remove=True))
+
+        valid_unique_ids = {
+            f"blueprint_{hashlib.sha256(info['rel_path'].encode()).hexdigest()}"
+            for info in coordinator.data.values()
+        }
+
+        entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+        for entity_entry in entries:
+            if entity_entry.domain == "update" and entity_entry.unique_id not in valid_unique_ids:
+                _LOGGER.debug(
+                    "Removing orphaned registry entry for entity: %s", entity_entry.entity_id
+                )
+                entity_registry.async_remove(entity_entry.entity_id)
+                hass.states.async_remove(entity_entry.entity_id)
 
     async_update_entities()
 
