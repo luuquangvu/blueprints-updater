@@ -34,14 +34,14 @@ _LOGGER = logging.getLogger(__name__)
 async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, Any]]:
     """Scan blueprints and return options for the selector."""
     blueprints = await hass.async_add_executor_job(
-        BlueprintUpdateCoordinator._scan_blueprints, hass, FILTER_MODE_ALL, []
+        BlueprintUpdateCoordinator.scan_blueprints, hass, FILTER_MODE_ALL, []
     )
     options = [
         {
             "value": (
                 rel_path := os.path.relpath(path, hass.config.path("blueprints")).replace("\\", "/")
             ),
-            "label": f"{info['name']} ({rel_path})",
+            "label": f"**{info['name']}** [{rel_path}]",
         }
         for path, info in blueprints.items()
     ]
@@ -140,7 +140,7 @@ class BlueprintsUpdaterOptionsFlowHandler(OptionsFlow):
 
         options = await _async_get_blueprint_options(self.hass)
 
-        defaults = {**self.config_entry.data, **self.config_entry.options}
+        defaults = dict(self.config_entry.options)
 
         return self.async_show_form(
             step_id="init",

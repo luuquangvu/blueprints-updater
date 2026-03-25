@@ -6,12 +6,9 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 
 from .const import (
-    CONF_FILTER_MODE,
-    CONF_SELECTED_BLUEPRINTS,
     CONF_UPDATE_INTERVAL,
     DEFAULT_UPDATE_INTERVAL_HOURS,
     DOMAIN,
-    FILTER_MODE_ALL,
 )
 from .coordinator import BlueprintUpdateCoordinator
 
@@ -31,15 +28,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     interval_hours = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_HOURS)
-    filter_mode = entry.options.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
-    selected_blueprints = entry.options.get(CONF_SELECTED_BLUEPRINTS, [])
 
     blueprint_coordinator = BlueprintUpdateCoordinator(
         hass,
         entry,
         timedelta(hours=interval_hours),
-        filter_mode=filter_mode,
-        selected_blueprints=selected_blueprints,
     )
     await blueprint_coordinator.async_config_entry_first_refresh()
 
@@ -64,8 +57,6 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     blueprint_coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     interval_hours = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_HOURS)
     blueprint_coordinator.update_interval = timedelta(hours=interval_hours)
-    blueprint_coordinator.filter_mode = entry.options.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
-    blueprint_coordinator.selected_blueprints = entry.options.get(CONF_SELECTED_BLUEPRINTS, [])
 
     await blueprint_coordinator.async_request_refresh()
 
