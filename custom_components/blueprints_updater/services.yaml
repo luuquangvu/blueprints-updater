@@ -13,3 +13,14 @@ restore_blueprint:
         entity:
           integration: blueprints_updater
           domain: update
+update_all:
+  name: Update All Blueprints
+  description: Automatically downloads and installs all available blueprint updates.
+  fields:
+    backup:
+      name: Create Backup
+      description: Create a .bak file for all updated blueprints before overwriting.
+      required: false
+      default: true
+      selector:
+        boolean:

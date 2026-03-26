@@ -2,9 +2,11 @@ import hashlib
 import logging
 from datetime import timedelta
 
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
 
@@ -89,6 +91,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "restore_blueprint",
         async_restore_blueprint_handler,
         supports_response=SupportsResponse.ONLY,
+    )
+
+    async def async_update_all_handler(call: ServiceCall) -> None:
+        """Handle updating all available blueprints."""
+        backup = call.data.get("backup", True)
+
+        updatable_paths = [
+            path
+            for path, info in blueprint_coordinator.data.items()
+            if info.get("updatable") and info.get("remote_content") and not info.get("last_error")
+        ]
+
+        if not updatable_paths:
+            _LOGGER.info("No blueprints available for update")
+            return
+
+        _LOGGER.info("Starting bulk update for %d blueprints", len(updatable_paths))
+
+        for path in updatable_paths:
+            info = blueprint_coordinator.data[path]
+            remote_content = info["remote_content"]
+            await blueprint_coordinator.async_install_blueprint(
+                path, remote_content, reload_services=False, backup=backup
+            )
+
+        await blueprint_coordinator.async_reload_services()
+        await blueprint_coordinator.async_request_refresh()
+
+    hass.services.async_register(
+        DOMAIN,
+        "update_all",
+        async_update_all_handler,
+        schema=vol.Schema(
+            {
+                vol.Optional("backup", default=True): cv.boolean,
+            }
+        ),
     )
 
     entry.async_on_unload(entry.add_update_listener(async_update_options))

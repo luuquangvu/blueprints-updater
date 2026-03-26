@@ -60,6 +60,16 @@
           "description": "The update entity of the blueprint you want to restore."
         }
       }
+    },
+    "update_all": {
+      "name": "Update All Blueprints",
+      "description": "Automatically downloads and installs all available blueprint updates simultaneously.",
+      "fields": {
+        "backup": {
+          "name": "Create Backup",
+          "description": "Create a .bak file for all updated blueprints before overwriting."
+        }
+      }
     }
   },
   "exceptions": {

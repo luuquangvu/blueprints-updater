@@ -199,7 +199,6 @@ async def test_entity_release_summary_with_usage(coordinator):
         assert summary is not None
         assert "affect 2 running automation(s)" in summary
 
-    # Test script usage
     info_script = {
         "name": "Test Script",
         "rel_path": "script/test2.yaml",
@@ -217,3 +216,41 @@ async def test_entity_release_summary_with_usage(coordinator):
         summary = entity_script.release_summary
         assert summary is not None
         assert "affect 1 running script(s)" in summary
+
+
+@pytest.mark.asyncio
+async def test_entity_skip_version(coordinator):
+    """Test that skipping a version works natively."""
+    entity = BlueprintUpdateEntity(
+        coordinator,
+        "blueprint_with_update.yaml",
+        {
+            "name": "Update Blueprint",
+            "rel_path": "blueprint_with_update.yaml",
+        },
+    )
+
+    coordinator.data = {
+        "blueprint_with_update.yaml": {
+            "local_hash": "hash1xxxxxxxxxxxx",
+            "remote_hash": "hash2xxxxxxxxxxxx",
+            "updatable": True,
+            "source_url": "https://url.com",
+        }
+    }
+
+    entity.hass = coordinator.hass
+
+    with patch.object(entity, "async_write_ha_state"):
+        assert entity.state == "on"
+
+        await entity.async_skip()
+
+        assert entity.state == "off"
+
+        attrs = entity.state_attributes
+        assert attrs is not None
+        assert attrs["skipped_version"] == "hash2xxx"
+
+        await entity.async_clear_skipped()
+        assert entity.state == "on"
