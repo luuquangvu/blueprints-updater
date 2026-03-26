@@ -50,6 +50,24 @@
     "reload": {
       "name": "Tải lại blueprints",
       "description": "Quét tất cả các blueprint cục bộ và kiểm tra bản cập nhật ngay lập tức."
+    },
+    "restore_blueprint": {
+      "name": "Khôi phục Blueprint",
+      "description": "Khôi phục lại tệp cấu hình blueprint từ bản sao lưu (.bak) nếu có.",
+      "fields": {
+        "entity_id": {
+          "name": "Thực thể Blueprint",
+          "description": "Thực thể cập nhật của blueprint bạn muốn khôi phục."
+        }
+      },
+      "responses": {
+        "missing_entity_id": "Thiếu tham số entity_id.",
+        "invalid_entity": "Thực thể cập nhật blueprint không hợp lệ.",
+        "not_found": "Không tìm thấy thư mục/file cấu hình gốc.",
+        "success": "Khôi phục thành công bản sao lưu.",
+        "missing_backup": "Không tìm thấy bản sao lưu cho Blueprint này! Vui lòng đảm bảo bạn đã tích chọn tạo backup ở lần cài đặt trước.",
+        "system_error": "Đã xảy ra lỗi hệ thống: {error}"
+      }
     }
   }
 }

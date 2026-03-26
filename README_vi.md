@@ -19,6 +19,7 @@
 - **Tự động Cập nhật**: Tùy chọn tự động tải xuống và áp dụng các bản cập nhật ngay khi được phát hiện.
 - **Cải tiến Logic Reload**: Tự động tải lại các miền `automation`, `script`, và `template` sau khi cập nhật để đảm bảo thay đổi có hiệu lực ngay lập tức.
 - **An toàn là trên hết**: Kiểm tra tính hợp lệ của mã YAML trước khi cập nhật. Nếu tệp nguồn bị lỗi cú pháp, hệ thống sẽ chặn cập nhật để bảo vệ cấu hình của bạn và cung cấp thông báo lỗi chi tiết.
+- **Sao lưu & Phục hồi (Backup & Restore)**: Tự động tạo bản sao lưu trước khi cập nhật blueprint. Nếu bản cập nhật làm hỏng tự động hóa, bạn có thể dễ dàng khôi phục lại cấu hình gốc. (Chế độ tự động cập nhật mặc định tạo bản sao lưu).
 - **Làm mới thủ công (Manual Refresh)**: Kích hoạt quét ngay lập tức thông qua dịch vụ **`blueprints_updater.reload`** trong Developer Tools.
 - **Tự động nhận diện (Dynamic Discovery)**: Tự động phát hiện và thêm các blueprint mới dưới dạng thực thể cập nhật mà không cần khởi động lại.
 
@@ -56,6 +57,27 @@
     - **Danh sách trắng (Whitelist)**: Chỉ theo dõi các blueprint bạn chọn cụ thể từ danh sách.
     - **Danh sách đen (Blacklist)**: Theo dõi tất cả các blueprint _ngoại trừ_ những cái bạn chọn.
 6.  Sau khi thêm, tích hợp sẽ quét các blueprint của bạn. Nếu tìm thấy bản cập nhật, chúng sẽ xuất hiện dưới dạng thực thể `update` trong bảng điều khiển của bạn.
+
+### Sao lưu & Phục hồi (Backup & Restore)
+
+Blueprints Updater cung cấp một mạng lưới an toàn tích hợp sẵn, cho phép bạn sao lưu các blueprint trước khi chúng được cập nhật và khôi phục chúng nếu cần thiết.
+
+#### Kích hoạt Sao lưu
+
+Khi cài đặt bản cập nhật từ bảng điều khiển Home Assistant, bạn sẽ có tùy chọn tích chọn **Backup (Sao lưu)**. Nếu được bật, tiện ích sẽ tự động lưu blueprint hiện tại của bạn thành một tệp `.bak` trước khi ghi đè bằng phiên bản mới.
+
+> **Lưu ý:** Nếu bạn đang bật tùy chọn **Tự động Cập nhật (Auto-Update)**, tiện ích sẽ **luôn luôn** tự động sao lưu cấu hình trước khi ghi đè bản mới nhất, tạo ra một mạng lưới an toàn 100% giúp bạn hoàn toàn yên tâm.
+
+#### Khôi phục bản Sao lưu
+
+Nếu bạn phát hiện ra rằng bản blueprint mới cập nhật làm hỏng các automations hoặc có thay đổi không tương thích, bạn có thể dễ dàng quay về phiên bản trước đó:
+
+1. Đi tới **Công cụ nhà phát triển (Developer Tools)** > **Hành động (Actions)**.
+2. Tìm kiếm hành động **`blueprints_updater.restore_blueprint`**.
+3. Chọn thực thể `update` tương ứng với blueprint mà bạn muốn khôi phục.
+4. Nhấn **Thực hiện hành động (Perform Action)**.
+
+Tiện ích sẽ tự động tìm tệp `.bak`, khôi phục lại nội dung YAML gốc, và tự động tải lại (reload) các automations và scripts để áp dụng các thay đổi ngay lập tức.
 
 ### Áp dụng thay đổi (Thêm/Xóa Blueprints)
 

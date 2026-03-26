@@ -5,6 +5,7 @@ import hashlib
 import html
 import logging
 import os
+import shutil
 from datetime import timedelta
 from typing import Any
 from urllib.parse import urlparse, urlunparse
@@ -34,6 +35,7 @@ from .const import (
     RE_GIST_RAW,
     RE_GITHUB_BLOB,
     RE_SOURCE_URL_LINE,
+    REQUEST_TIMEOUT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -124,15 +126,31 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.hass.services.async_call(domain, "reload")
 
     async def async_install_blueprint(
-        self, path: str, remote_content: str, reload_services: bool = True
+        self,
+        path: str,
+        remote_content: str,
+        reload_services: bool = True,
+        backup: bool = False,
     ) -> None:
-        """Install a blueprint by overwriting the local file atomically."""
+        """Install a blueprint by overwriting the local file atomically.
+
+        Args:
+            path: Local path of the blueprint file.
+            remote_content: The new YAML content to write.
+            reload_services: Whether to reload HA services after writing.
+            backup: If True, creates a .bak backup before overwriting.
+        """
         try:
 
             def _save_file(file_path: str, content: str) -> None:
                 tmp_path = f"{file_path}.tmp"
+
                 with open(tmp_path, "w", encoding="utf-8") as f:
                     f.write(content)
+
+                if backup and os.path.exists(file_path):
+                    shutil.copy2(file_path, f"{file_path}.bak")
+
                 os.replace(tmp_path, file_path)
 
             await self.hass.async_add_executor_job(_save_file, path, remote_content)
@@ -140,10 +158,49 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if reload_services:
                 await self._async_reload_services()
 
+            if getattr(self, "data", None) and path in self.data:
+                self.data[path]["updatable"] = False
+
             _LOGGER.info("Blueprint at %s updated successfully", path)
         except Exception as err:
             _LOGGER.error("Failed to update blueprint at %s: %s", path, err)
             raise
+
+    async def async_restore_blueprint(self, path: str) -> dict[str, Any]:
+        """Restore a blueprint from its .bak backup file.
+
+        Args:
+            path: Local path of the blueprint file to restore.
+
+        Returns:
+            A dictionary with 'success' (bool) and 'translation_key' (str).
+        """
+        try:
+
+            def _restore_file(file_path: str) -> tuple[bool, str]:
+                bak_path = f"{file_path}.bak"
+                if not os.path.exists(bak_path):
+                    return False, "missing_backup"
+                os.replace(bak_path, file_path)
+                return True, "success"
+
+            success, message = await self.hass.async_add_executor_job(_restore_file, path)
+
+            if success:
+                await self._async_reload_services()
+                await self.async_request_refresh()
+
+            return {
+                "success": success,
+                "translation_key": message,
+            }
+        except Exception as err:
+            _LOGGER.error("Failed to restore blueprint at %s: %s", path, err)
+            return {
+                "success": False,
+                "translation_key": "system_error",
+                "translation_kwargs": {"error": str(err)},
+            }
 
     async def _async_update_blueprint(
         self,
@@ -164,7 +221,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("Normalized URL for %s: %s", source_url, normalized_url)
         async with semaphore:
             try:
-                async with session.get(normalized_url, timeout=30) as response:
+                async with session.get(normalized_url, timeout=REQUEST_TIMEOUT) as response:
                     response.raise_for_status()
                     if DOMAIN_HA_FORUM in normalized_url:
                         json_data = await response.json()
@@ -212,7 +269,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
                     ):
                         await self.async_install_blueprint(
-                            path, remote_content, reload_services=False
+                            path, remote_content, reload_services=False, backup=True
                         )
                         results[path].update(
                             {

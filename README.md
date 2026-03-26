@@ -19,6 +19,7 @@
 - **Auto-Update Support**: Optional feature to automatically download and apply updates as soon as they are detected.
 - **Improved Reload Logic**: Automatically reloads `automation`, `script`, and `template` domains after an update to ensure immediate effect.
 - **Safety First**: Validates remote YAML content before updates. If the remote file has syntax errors, the update is blocked to protect your local configuration, and informative error messages are provided.
+- **Backup & Restore**: Automatically create backups before updating blueprints. If an update breaks your automations, easily restore the previous version with a single service call. (Auto-updates are always backed up).
 - **Manual Refresh**: Trigger an immediate scan via the **`blueprints_updater.reload`** action in Developer Tools.
 - **Dynamic Discovery**: Automatically detects and adds new blueprints as `update` entities without requiring a restart.
 
@@ -56,6 +57,27 @@
     - **Whitelist**: Only tracks blueprints you explicitly select from the list.
     - **Blacklist**: Tracks all blueprints _except_ the ones you select.
 6.  Once added, the integration will scan your blueprints. If updates are found, they will appear as `update` entities in your dashboard.
+
+### Backup & Restore
+
+Blueprints Updater provides a built-in safety net by allowing you to back up blueprints before they are updated and restore them if needed.
+
+#### Enabling Backups
+
+When installing an update from the Home Assistant dashboard, you will have the option to check the **Backup** toggle. If enabled, the integration will automatically save your current blueprint to a `.bak` file before replacing it with the new version.
+
+> **Note:** If you have **Auto-Update** enabled in the integration settings, it will **always** create a backup automatically before applying an update, providing a guaranteed safety net with zero effort required.
+
+#### Restoring a Backup
+
+If you find that a newly updated blueprint breaks your automations or has an incompatible change, you can easily revert to the previous version:
+
+1. Go to **Developer Tools** > **Actions** (or **Services**).
+2. Search for the **`blueprints_updater.restore_blueprint`** action.
+3. Select the `update` entity associated with the blueprint you want to restore.
+4. Click **Perform Action**.
+
+The integration will look for the `.bak` file, restore the original YAML content, and automatically reload your automations and scripts to apply the change immediately.
 
 ### Applying Changes (Adding/Deleting Blueprints)
 

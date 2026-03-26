@@ -50,6 +50,24 @@
     "reload": {
       "name": "Reload blueprints",
       "description": "Scans all local blueprints for new files and checks for updates immediately."
+    },
+    "restore_blueprint": {
+      "name": "Restore Blueprint",
+      "description": "Restores a blueprint from its backup (.bak) file if available.",
+      "fields": {
+        "entity_id": {
+          "name": "Blueprint Entity",
+          "description": "The update entity of the blueprint you want to restore."
+        }
+      },
+      "responses": {
+        "missing_entity_id": "Missing entity_id parameter.",
+        "invalid_entity": "Invalid blueprint update entity.",
+        "not_found": "Original blueprint file not found.",
+        "success": "Backup restored successfully.",
+        "missing_backup": "Missing backup file. A backup may not have been created during the previous update.",
+        "system_error": "System error during restore: {error}"
+      }
     }
   }
 }

@@ -27,3 +27,4 @@ RE_BLUEPRINT_KEY = re.compile(r"^(blueprint:.*)$", re.MULTILINE)
 RE_SOURCE_URL_LINE = re.compile(r"^\s*source_url:\s*['\"]?(.*?)['\"]?\s*$", re.MULTILINE)
 
 CONCURRENT_REQUESTS_LIMIT = 5
+REQUEST_TIMEOUT = 60

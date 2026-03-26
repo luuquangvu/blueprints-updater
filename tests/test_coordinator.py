@@ -354,6 +354,7 @@ async def test_async_update_data_auto_update(coordinator):
             "/test.yaml",
             "blueprint:\n  name: Test\n  source_url: https://url",
             reload_services=False,
+            backup=True,
         )
         mock_reload.assert_called_once()
         assert "/test.yaml" in results
@@ -361,3 +362,81 @@ async def test_async_update_data_auto_update(coordinator):
         assert results["/test.yaml"]["remote_content"] is None
         assert results["/test.yaml"]["local_hash"] == "new"
         assert "_auto_updated" not in results["/test.yaml"]
+
+
+@pytest.mark.asyncio
+async def test_async_install_blueprint_backup(hass, coordinator):
+    """Test installing a blueprint with backup enabled."""
+    path = "/config/blueprints/test.yaml"
+    remote_content = "blueprint:\n  name: Test"
+
+    hass.services.has_service = MagicMock(return_value=True)
+    hass.services.async_call = AsyncMock()
+
+    with (
+        patch("builtins.open", MagicMock()),
+        patch("custom_components.blueprints_updater.coordinator.os.replace") as mock_replace,
+        patch("custom_components.blueprints_updater.coordinator.os.path.exists", return_value=True),
+        patch("custom_components.blueprints_updater.coordinator.shutil.copy2") as mock_copy,
+    ):
+        await coordinator.async_install_blueprint(path, remote_content, backup=True)
+
+    mock_copy.assert_called_once_with(path, f"{path}.bak")
+    mock_replace.assert_called_once_with(f"{path}.tmp", path)
+
+
+@pytest.mark.asyncio
+async def test_async_restore_blueprint_success(hass, coordinator):
+    """Test successful restoration of a blueprint backup."""
+    path = "/config/blueprints/test.yaml"
+    coordinator.data = {path: {"updatable": False}}
+
+    hass.services.has_service = MagicMock(return_value=True)
+    hass.services.async_call = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    with (
+        patch("custom_components.blueprints_updater.coordinator.os.path.exists", return_value=True),
+        patch("custom_components.blueprints_updater.coordinator.os.replace") as mock_replace,
+    ):
+        result = await coordinator.async_restore_blueprint(path)
+
+    mock_replace.assert_called_once_with(f"{path}.bak", path)
+    assert result["success"] is True
+    assert result["translation_key"] == "success"
+    hass.services.async_call.assert_any_call("automation", "reload")
+
+
+@pytest.mark.asyncio
+async def test_async_restore_blueprint_missing(hass, coordinator):
+    """Test restoration when backup is missing."""
+    path = "/config/blueprints/test.yaml"
+    coordinator.data = {path: {"updatable": False}}
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.os.path.exists", return_value=False
+    ):
+        result = await coordinator.async_restore_blueprint(path)
+
+    assert result["success"] is False
+    assert result["translation_key"] == "missing_backup"
+
+
+@pytest.mark.asyncio
+async def test_async_restore_blueprint_error(hass, coordinator):
+    """Test error handling during blueprint restoration."""
+    path = "/config/blueprints/test.yaml"
+    coordinator.data = {path: {"updatable": False}}
+
+    with (
+        patch("custom_components.blueprints_updater.coordinator.os.path.exists", return_value=True),
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.replace",
+            side_effect=Exception("Disk error"),
+        ),
+    ):
+        result = await coordinator.async_restore_blueprint(path)
+
+    assert result["success"] is False
+    assert result["translation_key"] == "system_error"
+    assert "Disk error" in result["translation_kwargs"]["error"]

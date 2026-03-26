@@ -138,7 +138,10 @@ async def test_entity_async_install(coordinator):
 
     await entity.async_install(version=None, backup=False)
     coordinator.async_install_blueprint.assert_called_once_with(
-        "/config/blueprints/test.yaml", "blueprint:\n  name: Test"
+        "/config/blueprints/test.yaml",
+        "blueprint:\n  name: Test",
+        reload_services=True,
+        backup=False,
     )
     coordinator.async_refresh.assert_called_once()
 
@@ -151,3 +154,22 @@ async def test_entity_async_install(coordinator):
 
     with pytest.raises(HomeAssistantError, match="Cannot install blueprint: Syntax Error"):
         await entity.async_install(version=None, backup=False)
+
+
+@pytest.mark.asyncio
+async def test_entity_async_install_backup(coordinator):
+    """Test async_install method with backup enabled."""
+    entity = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/test.yaml",
+        coordinator.data["/config/blueprints/test.yaml"],
+    )
+
+    await entity.async_install(version=None, backup=True)
+    coordinator.async_install_blueprint.assert_called_once_with(
+        "/config/blueprints/test.yaml",
+        "blueprint:\n  name: Test",
+        reload_services=True,
+        backup=True,
+    )
+    coordinator.async_refresh.assert_called_once()

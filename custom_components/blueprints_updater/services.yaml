@@ -1,3 +1,15 @@
 reload:
   name: Reload blueprints
   description: Scans all local blueprints for new files and checks for updates immediately.
+restore_blueprint:
+  name: Restore Blueprint
+  description: Restores a blueprint from its backup (.bak) file if available.
+  fields:
+    entity_id:
+      name: Blueprint Entity
+      description: The update entity of the blueprint you want to restore.
+      required: true
+      selector:
+        entity:
+          integration: blueprints_updater
+          domain: update

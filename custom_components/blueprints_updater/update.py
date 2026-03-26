@@ -89,7 +89,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
     _attr_has_entity_name = True
     _attr_device_class = UpdateDeviceClass.FIRMWARE
-    _attr_supported_features = UpdateEntityFeature.INSTALL
+    _attr_supported_features = UpdateEntityFeature.INSTALL | UpdateEntityFeature.BACKUP
 
     def __init__(
         self,
@@ -161,7 +161,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         Args:
             version: The desired version to install (unused).
-            backup: Whether a backup should be created (unused).
+            backup: Whether a backup should be created (passed to coordinator).
         """
         if self._path not in self.coordinator.data:
             _LOGGER.error("Blueprint path %s not found in coordinator data", self._path)
@@ -177,5 +177,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         _LOGGER.info("Starting manual update for %s from %s", self._attr_name, info["source_url"])
         remote_content = info["remote_content"]
 
-        await self.coordinator.async_install_blueprint(self._path, remote_content)
+        await self.coordinator.async_install_blueprint(
+            self._path, remote_content, reload_services=True, backup=backup
+        )
         await self.coordinator.async_refresh()

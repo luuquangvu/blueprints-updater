@@ -1,9 +1,12 @@
+import hashlib
 import logging
 from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import translation
 
 from .const import (
     CONF_UPDATE_INTERVAL,
@@ -45,6 +48,48 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await blueprint_coordinator.async_request_refresh()
 
     hass.services.async_register(DOMAIN, "reload", async_reload_action_handler)
+
+    async def _translate(key: str, **kwargs: str) -> str:
+        lang = hass.config.language
+        translations = await translation.async_get_translations(hass, lang, "services", [DOMAIN])
+        msg = translations.get(
+            f"component.{DOMAIN}.services.restore_blueprint.responses.{key}", key
+        )
+        return msg.format(**kwargs) if kwargs else msg
+
+    async def async_restore_blueprint_handler(call: ServiceCall) -> dict:
+        """Handle the restore blueprint action."""
+        entity_id = call.data.get("entity_id")
+        if not entity_id:
+            return {"success": False, "message": await _translate("missing_entity_id")}
+
+        entity_registry = er.async_get(hass)
+        entity_entry = entity_registry.async_get(entity_id)
+        if not entity_entry or entity_entry.domain != "update":
+            return {"success": False, "message": await _translate("invalid_entity")}
+
+        target_path = None
+        for path, info in blueprint_coordinator.data.items():
+            expected_id = f"blueprint_{hashlib.sha256(info['rel_path'].encode()).hexdigest()}"
+            if expected_id == entity_entry.unique_id:
+                target_path = path
+                break
+
+        if not target_path:
+            return {"success": False, "message": await _translate("not_found")}
+
+        result = await blueprint_coordinator.async_restore_blueprint(target_path)
+        key = result.pop("translation_key", result.pop("message", "system_error"))
+        kwargs = result.pop("translation_kwargs", {})
+        result["message"] = await _translate(key, **kwargs)
+        return result
+
+    hass.services.async_register(
+        DOMAIN,
+        "restore_blueprint",
+        async_restore_blueprint_handler,
+        supports_response=SupportsResponse.ONLY,
+    )
 
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
