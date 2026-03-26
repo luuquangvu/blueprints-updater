@@ -15,6 +15,7 @@ from homeassistant.components.blueprint.models import Blueprint
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import yaml as yaml_util
 
@@ -119,10 +120,44 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ]
             await asyncio.gather(*tasks)
 
-        auto_updated_count = sum(1 for info in results.values() if info.pop("_auto_updated", False))
-        if auto_updated_count > 0:
-            _LOGGER.info("Auto-updated %d blueprints", auto_updated_count)
+        auto_updated_names = sorted(
+            [info["name"] for info in results.values() if info.get("_auto_updated")]
+        )
+        for info in results.values():
+            info.pop("_auto_updated", None)
+
+        if auto_updated_names:
+            _LOGGER.info(
+                "Auto-updated %d blueprints: %s", len(auto_updated_names), auto_updated_names
+            )
             await self.async_reload_services()
+
+            try:
+                language = self.hass.config.language
+                translations = await async_get_translations(self.hass, language, "notify", [DOMAIN])
+                title_key = f"component.{DOMAIN}.notify.auto_update_title"
+                message_key = f"component.{DOMAIN}.notify.auto_update_message"
+
+                title = translations.get(title_key, "Blueprints Updater: Auto-Updated")
+                message_template = translations.get(
+                    message_key,
+                    "The following blueprints have been automatically updated:\n\n{blueprints}",
+                )
+
+                blueprints_list = "\n".join(f"- {name}" for name in auto_updated_names)
+                message = message_template.format(blueprints=blueprints_list)
+
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "create",
+                    {
+                        "title": title,
+                        "message": message,
+                        "notification_id": f"{DOMAIN}_auto_update",
+                    },
+                )
+            except Exception as err:
+                _LOGGER.warning("Failed to send auto-update notification: %s", err)
 
         return results
 

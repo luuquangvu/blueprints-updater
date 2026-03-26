@@ -100,5 +100,9 @@
     "system_error": {
       "message": "System error during restore: {error}"
     }
+  },
+  "notify": {
+    "auto_update_title": "Blueprints Updater: Auto-Updated",
+    "auto_update_message": "The following blueprints have been automatically updated:\n\n{blueprints}"
   }
 }

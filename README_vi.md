@@ -16,7 +16,7 @@
   - **HA Community Forum**: Phân tích trực tiếp các chủ đề trên diễn đàn để trích xuất mã blueprint YAML mới nhất.
 - **Duy trì nguồn**: Tự động đảm bảo thẻ `source_url` được giữ lại trong các tệp đã cập nhật để các bản cập nhật trong tương lai luôn hoạt động.
 - **Lọc nâng cao (Advanced Filtering)**: Chọn cập nhật tất cả blueprint, hoặc chỉ những blueprint cụ thể (**Whitelist**), hoặc loại trừ các blueprint cụ thể (**Blacklist**).
-- **Tự động Cập nhật**: Tùy chọn tự động tải xuống và áp dụng các bản cập nhật ngay khi được phát hiện.
+- **Tự động Cập nhật**: Tùy chọn tự động tải xuống và áp dụng các bản cập nhật ngay khi được phát hiện. Tiện ích cũng sẽ **gửi một thông báo hệ thống** liệt kê danh sách các blueprint đã được cập nhật để bạn dễ dàng theo dõi.
 - **Cải tiến Logic Reload**: Tự động tải lại các miền `automation`, `script`, và `template` sau khi cập nhật để đảm bảo thay đổi có hiệu lực ngay lập tức.
 - **An toàn là trên hết**: Kiểm tra kỹ lưỡng blueprint trước khi cập nhật - bao gồm cú pháp YAML, cấu trúc blueprint, và tính tương thích phiên bản Home Assistant. Nếu phát hiện bất kỳ vấn đề nào (lỗi cú pháp, thiếu trường bắt buộc, hoặc phiên bản HA quá cũ), bản cập nhật sẽ bị chặn với thông báo lỗi rõ ràng để bảo vệ hệ thống của bạn.
 - **Cảnh báo Tác động (Usage Insight)**: Trước khi cập nhật, tiện ích sẽ tính toán và hiển thị chính xác số lượng Automation và Script đang phụ thuộc vào blueprint này, giúp bạn lường trước mức độ ảnh hưởng của bản cập nhật.
@@ -52,7 +52,7 @@
 
 1.  Đi tới **Cài đặt (Settings)** > **Thiết bị & Dịch vụ (Devices & Services)**.
 2.  Nhấp vào **Thêm bộ tích hợp (Add Integration)** và tìm kiếm **Blueprints Updater**.
-3.  **Bật Tự động Cập nhật**: (Tùy chọn) Nếu được bật, các blueprint phù hợp với tiêu chí của bạn sẽ được cập nhật tự động mà không cần can thiệp thủ công.
+3.  **Bật Tự động Cập nhật**: (Tùy chọn) Nếu được bật, các blueprint phù hợp với tiêu chí của bạn sẽ được cập nhật tự động mà không cần can thiệp thủ công. **Một thông báo hệ thống sẽ xuất hiện** sau mỗi lần tự động cập nhật thành công để bạn biết những gì đã thay đổi.
 4.  Chọn **Khoảng thời gian cập nhật (Update Interval)** (mặc định là 24 giờ).
 5.  Chọn **Chế độ lọc (Filter Mode)**:
     - **Cập nhật tất cả (Update All)**: Theo dõi tất cả blueprint tìm thấy trong thư mục của bạn.
@@ -66,7 +66,7 @@ Blueprints Updater cung cấp một mạng lưới an toàn tích hợp sẵn, c
 
 #### Kích hoạt Sao lưu
 
-Khi cài đặt bản cập nhật từ bảng điều khiển Home Assistant, bạn sẽ có tùy chọn tích chọn **Backup (Sao lưu)**. Nếu được bật, tiện ích sẽ tự động lưu blueprint hiện tại của bạn thành một tệp `.bak` trước khi ghi đè bằng phiên bản mới.
+Khi cài đặt bản cập nhật từ bảng điều khiển Home Assistant, bạn sẽ có tùy chọn tích chọn **Backup (Sao lưu)**. Nếu được bật, tiện ích sẽ tự động lưu blueprint hiện tại của bạn thành một tệp sao lưu có đánh số (`.bak.1`, `.bak.2`, v.v.) trước khi ghi đè bằng phiên bản mới.
 
 > **Lưu ý:** Nếu bạn đang bật tùy chọn **Tự động Cập nhật (Auto-Update)**, tiện ích sẽ **luôn luôn** tự động sao lưu cấu hình trước khi ghi đè bản mới nhất, tạo ra một mạng lưới an toàn 100% giúp bạn hoàn toàn yên tâm.
 
@@ -77,9 +77,10 @@ Nếu bạn phát hiện ra rằng bản blueprint mới cập nhật làm hỏn
 1. Đi tới **Công cụ nhà phát triển (Developer Tools)** > **Hành động (Actions)**.
 2. Tìm kiếm hành động **`blueprints_updater.restore_blueprint`**.
 3. Chọn thực thể `update` tương ứng với blueprint mà bạn muốn khôi phục.
-4. Nhấn **Thực hiện hành động (Perform Action)**.
+4. (Tùy chọn) Nhập **Backup Version** mà bạn muốn khôi phục (mặc định là **1** cho bản sao lưu gần nhất).
+5. Nhấn **Thực hiện hành động (Perform Action)**.
 
-Tiện ích sẽ tự động tìm tệp `.bak`, khôi phục lại nội dung YAML gốc, và tự động tải lại (reload) các automations và scripts để áp dụng các thay đổi ngay lập tức.
+Tiện ích sẽ tự động tìm tệp sao lưu tương ứng, khôi phục lại nội dung YAML gốc, và tự động tải lại (reload) các automations và scripts để áp dụng các thay đổi ngay lập tức.
 
 ### Áp dụng thay đổi (Thêm/Xóa Blueprints)
 
