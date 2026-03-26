@@ -4,6 +4,8 @@ import hashlib
 import logging
 from typing import Any
 
+from homeassistant.components.automation import automations_with_blueprint
+from homeassistant.components.script import scripts_with_blueprint
 from homeassistant.components.update import (
     UpdateDeviceClass,
     UpdateEntity,
@@ -148,11 +150,36 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         if self._path in self.coordinator.data:
             info = self.coordinator.data[self._path]
             if info["updatable"]:
-                return (
+                summary_text = (
                     f"Update available from {info['source_url']}\n\n"
-                    "**Warning**: Auto-update may carry backward incompatibility risks "
+                    "Warning: Auto-update may carry backward incompatibility risks "
                     "if the author introduces breaking changes."
                 )
+
+                rel_path = info.get("rel_path", "")
+                parts = rel_path.split("/", 1)
+                domain = parts[0]
+                bp_id = parts[-1] if len(parts) > 1 else rel_path
+                total_usage = 0
+
+                try:
+                    if domain == "automation":
+                        total_usage = len(automations_with_blueprint(self.coordinator.hass, bp_id))
+                    elif domain == "script":
+                        total_usage = len(scripts_with_blueprint(self.coordinator.hass, bp_id))
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Error calculating %s usage for blueprint %s: %s",
+                        domain,
+                        bp_id,
+                        err,
+                    )
+
+                if total_usage > 0:
+                    summary_text += (
+                        f"\n\nWarning: This update will affect {total_usage} running {domain}(s)."
+                    )
+                return summary_text
             return "Up to date"
         return None
 
