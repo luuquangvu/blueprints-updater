@@ -165,7 +165,10 @@ async def test_async_update_blueprint(coordinator):
 
     semaphore = asyncio.Semaphore(1)
 
-    with patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash:
+    with (
+        patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
+        patch.object(coordinator, "_validate_blueprint", return_value=None),
+    ):
         mock_hash.return_value.hexdigest.return_value = "new_hash"
 
         await coordinator._async_update_blueprint(mock_session, semaphore, path, info, results)
@@ -248,7 +251,10 @@ async def test_async_update_data_partial_failure(coordinator):
 
         mock_session.get.side_effect = get_side_effect
 
-        with patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash:
+        with (
+            patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
+            patch.object(coordinator, "_validate_blueprint", return_value=None),
+        ):
             mock_hash.return_value.hexdigest.return_value = "new_hash"
             return await coordinator._async_update_data()
 
@@ -344,6 +350,7 @@ async def test_async_update_data_auto_update(coordinator):
         patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
         patch.object(coordinator, "async_install_blueprint") as mock_install,
         patch.object(coordinator, "async_reload_services") as mock_reload,
+        patch.object(coordinator, "_validate_blueprint", return_value=None),
     ):
         mock_session.__aenter__.return_value = mock_session
         mock_hash.return_value.hexdigest.return_value = "new"
@@ -440,3 +447,55 @@ async def test_async_restore_blueprint_error(hass, coordinator):
     assert result["success"] is False
     assert result["translation_key"] == "system_error"
     assert "Disk error" in result["translation_kwargs"]["error"]
+
+
+def test_validate_blueprint_valid(coordinator):
+    """Test _validate_blueprint with valid data returns None."""
+    data = {
+        "blueprint": {
+            "name": "Test",
+            "domain": "automation",
+            "input": {},
+        },
+        "trigger": [],
+        "action": [],
+    }
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(data, "https://example.com/bp.yaml")
+    assert result is None
+
+
+def test_validate_blueprint_incompatible_version(coordinator):
+    """Test _validate_blueprint blocks when min_version is too high."""
+    data = {
+        "blueprint": {
+            "name": "Test",
+            "domain": "automation",
+            "input": {},
+            "homeassistant": {"min_version": "2099.1.0"},
+        },
+        "trigger": [],
+        "action": [],
+    }
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(data, "https://example.com/bp.yaml")
+    assert result is not None
+    assert "Incompatible" in result
+    assert "2099.1.0" in result
+
+
+def test_validate_blueprint_schema_error(coordinator):
+    """Test _validate_blueprint catches schema validation errors."""
+    data = {"blueprint": {"name": "Test"}}  # Missing required 'domain'
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(data, "https://example.com/bp.yaml")
+    assert result is not None
+    assert "Validation Error" in result
+
+
+def test_validate_blueprint_missing_key(coordinator):
+    """Test _validate_blueprint with data missing the 'blueprint' key."""
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint({"not_blueprint": {}}, "https://example.com/bp.yaml")
+    assert result is not None
+    assert "Missing 'blueprint' root key" in result
