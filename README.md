@@ -24,6 +24,7 @@
 - **Update All (Bulk Update)**: Instantly update all eligible blueprints simultaneously via the `blueprints_updater.update_all` service, without freezing Home Assistant.
 - **Manual Refresh**: Trigger an immediate scan via the **`blueprints_updater.reload`** action in Developer Tools.
 - **Dynamic Discovery**: Automatically detects and adds new blueprints as `update` entities without requiring a restart.
+- **Multilingual Support**: Fully localized in several languages. The integration automatically adapts to your Home Assistant language settings.
 
 ---
 

@@ -24,6 +24,7 @@
 - **Cập nhật hàng loạt (Update All)**: Cập nhật đồng loạt tất cả các blueprint đang có bản mới thông qua dịch vụ `blueprints_updater.update_all` cực kỳ nhanh chóng mà không làm treo Home Assistant.
 - **Làm mới thủ công (Manual Refresh)**: Kích hoạt quét ngay lập tức thông qua dịch vụ **`blueprints_updater.reload`** trong Developer Tools.
 - **Tự động nhận diện (Dynamic Discovery)**: Tự động phát hiện và thêm các blueprint mới dưới dạng thực thể cập nhật mà không cần khởi động lại.
+- **Hỗ trợ đa ngôn ngữ (Multilingual)**: Được địa phương hóa hoàn toàn cho nhiều ngôn ngữ khác nhau. Tích hợp tự động thích ứng với cài đặt ngôn ngữ trong Home Assistant của bạn.
 
 ---
 
