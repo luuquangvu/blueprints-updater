@@ -76,6 +76,16 @@
           "description": "Tạo bản sao lưu đánh số cho tất cả các blueprint được cập nhật trước khi ghi đè."
         }
       }
+    },
+    "update_all": {
+      "name": "Cập nhật hàng loạt (Update All)",
+      "description": "Tự động tải về và cài đặt tất cả các bản cập nhật blueprint hiện có cùng một lúc.",
+      "fields": {
+        "backup": {
+          "name": "Tạo bản sao lưu",
+          "description": "Tạo tệp .bak cho tất cả các blueprint được cập nhật trước khi ghi đè."
+        }
+      }
     }
   },
   "exceptions": {
