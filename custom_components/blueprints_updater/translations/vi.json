@@ -57,17 +57,29 @@
       "fields": {
         "entity_id": {
           "name": "Thực thể Blueprint",
-          "description": "Thực thể cập nhật của blueprint bạn muốn khôi phục."
+          "description": "Thực thể cập nhật đại diện cho blueprint mà bạn muốn khôi phục."
         }
-      },
-      "responses": {
-        "missing_entity_id": "Thiếu tham số entity_id.",
-        "invalid_entity": "Thực thể cập nhật blueprint không hợp lệ.",
-        "not_found": "Không tìm thấy thư mục/file cấu hình gốc.",
-        "success": "Khôi phục thành công bản sao lưu.",
-        "missing_backup": "Không tìm thấy bản sao lưu cho Blueprint này! Vui lòng đảm bảo bạn đã tích chọn tạo backup ở lần cài đặt trước.",
-        "system_error": "Đã xảy ra lỗi hệ thống: {error}"
       }
+    }
+  },
+  "exceptions": {
+    "missing_entity_id": {
+      "message": "Thiếu tham số entity_id."
+    },
+    "invalid_entity": {
+      "message": "Thực thể cập nhật blueprint không hợp lệ."
+    },
+    "not_found": {
+      "message": "Không tìm thấy tệp blueprint gốc."
+    },
+    "success": {
+      "message": "Đã khôi phục thành công bản sao lưu."
+    },
+    "missing_backup": {
+      "message": "Không tìm thấy tệp sao lưu. Có thể bản sao lưu đã không được tạo trong lần cập nhật trước."
+    },
+    "system_error": {
+      "message": "Lỗi hệ thống khi khôi phục: {error}"
     }
   }
 }
