@@ -101,8 +101,19 @@
       "message": "System error during restore: {error}"
     }
   },
-  "notify": {
+  "common": {
     "auto_update_title": "Blueprints Updater: Auto-Updated",
-    "auto_update_message": "The following blueprints have been automatically updated:\n\n{blueprints}"
+    "auto_update_message": "The following blueprints have been automatically updated:\n\n{blueprints}",
+    "update_available": "Update available from {source_url}",
+    "auto_update_warning": "Warning: Auto-update may carry backward incompatibility risks if the author introduces breaking changes.",
+    "usage_warning": "Warning: This update will affect {count} running {domain}(s).",
+    "up_to_date": "Up to date",
+    "install_error": "Cannot install blueprint: {error}. The remote file has errors and cannot be safely applied.",
+    "invalid_blueprint": "Invalid blueprint: Missing 'blueprint' root key",
+    "incompatible": "Incompatible: {errors}",
+    "validation_error": "Validation Error: {error}",
+    "empty_content": "Empty content received",
+    "yaml_syntax_error": "YAML Syntax Error: {error}",
+    "fetch_error": "Fetch Error: {error}"
   }
 }

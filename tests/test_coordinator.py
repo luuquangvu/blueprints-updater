@@ -287,7 +287,7 @@ async def test_async_update_blueprint_errors(coordinator):
     sem = asyncio.Semaphore(1)
 
     await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert results[path]["last_error"] == "Empty content received"
+    assert results[path]["last_error"] == "empty_content"
 
     mock_resp_invalid = AsyncMock()
     mock_resp_invalid.status = 200
@@ -296,7 +296,7 @@ async def test_async_update_blueprint_errors(coordinator):
     mock_session.get.return_value.__aenter__.return_value = mock_resp_invalid
 
     await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert "YAML Syntax Error" in str(results[path]["last_error"])
+    assert "yaml_syntax_error" in str(results[path]["last_error"])
 
     mock_resp_missing_bp = AsyncMock()
     mock_resp_missing_bp.status = 200
@@ -305,11 +305,12 @@ async def test_async_update_blueprint_errors(coordinator):
     mock_session.get.return_value.__aenter__.return_value = mock_resp_missing_bp
 
     await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert "Missing 'blueprint' root key" in str(results[path]["last_error"])
+    assert "invalid_blueprint" in str(results[path]["last_error"])
 
     mock_session.get.side_effect = Exception("Connection Failed")
     await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert "Fetch Error: Connection Failed" in str(results[path]["last_error"])
+    assert "fetch_error" in str(results[path]["last_error"])
+    assert "Connection Failed" in str(results[path]["last_error"])
 
 
 @pytest.mark.asyncio
@@ -354,8 +355,8 @@ async def test_async_update_data_auto_update(coordinator):
         patch(
             "custom_components.blueprints_updater.coordinator.async_get_translations",
             return_value={
-                "component.blueprints_updater.notify.auto_update_title": "Title",
-                "component.blueprints_updater.notify.auto_update_message": "Msg {blueprints}",
+                "component.blueprints_updater.common.auto_update_title": "Title",
+                "component.blueprints_updater.common.auto_update_message": "Msg {blueprints}",
             },
         ),
     ):
@@ -439,8 +440,8 @@ async def test_async_update_data_auto_update_multiple_sorted(coordinator):
         patch(
             "custom_components.blueprints_updater.coordinator.async_get_translations",
             return_value={
-                "component.blueprints_updater.notify.auto_update_title": "Title",
-                "component.blueprints_updater.notify.auto_update_message": "Msg\n{blueprints}",
+                "component.blueprints_updater.common.auto_update_title": "Title",
+                "component.blueprints_updater.common.auto_update_message": "Msg\n{blueprints}",
             },
         ),
     ):
@@ -572,7 +573,7 @@ def test_validate_blueprint_incompatible_version(coordinator):
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(data, "https://example.com/bp.yaml")
     assert result is not None
-    assert "Incompatible" in result
+    assert "incompatible" in result
     assert "2099.1.0" in result
 
 
@@ -582,7 +583,7 @@ def test_validate_blueprint_schema_error(coordinator):
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(data, "https://example.com/bp.yaml")
     assert result is not None
-    assert "Validation Error" in result
+    assert "validation_error" in result
 
 
 def test_validate_blueprint_missing_key(coordinator):
@@ -590,7 +591,7 @@ def test_validate_blueprint_missing_key(coordinator):
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint({"not_blueprint": {}}, "https://example.com/bp.yaml")
     assert result is not None
-    assert "Missing 'blueprint' root key" in result
+    assert "invalid_blueprint" in result
 
 
 @pytest.mark.asyncio

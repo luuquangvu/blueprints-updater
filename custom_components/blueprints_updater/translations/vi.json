@@ -101,8 +101,19 @@
       "message": "Lỗi hệ thống khi khôi phục: {error}"
     }
   },
-  "notify": {
+  "common": {
     "auto_update_title": "Blueprints Updater: Đã tự động cập nhật",
-    "auto_update_message": "Các blueprint sau đã được tự động cập nhật:\n\n{blueprints}"
+    "auto_update_message": "Các blueprint sau đã được tự động cập nhật:\n\n{blueprints}",
+    "update_available": "Có bản cập nhật mới từ {source_url}",
+    "auto_update_warning": "Cảnh báo: Tự động cập nhật có thể mang lại rủi ro không tương thích ngược nếu tác giả có những thay đổi lớn.",
+    "usage_warning": "Cảnh báo: Bản cập nhật này sẽ ảnh hưởng đến {count} {domain} đang chạy.",
+    "up_to_date": "Đã cập nhật",
+    "install_error": "Không thể cài đặt blueprint: {error}. Tệp từ xa có lỗi và không thể áp dụng an toàn.",
+    "invalid_blueprint": "Blueprint không hợp lệ: Thiếu khóa 'blueprint' gốc",
+    "incompatible": "Không tương thích: {errors}",
+    "validation_error": "Lỗi xác thực: {error}",
+    "empty_content": "Nội dung nhận được bị trống",
+    "yaml_syntax_error": "Lỗi cú pháp YAML: {error}",
+    "fetch_error": "Lỗi tải xuống: {error}"
   }
 }

@@ -111,6 +111,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         self._attr_name = info["name"]
         self._attr_unique_id = f"blueprint_{hashlib.sha256(info['rel_path'].encode()).hexdigest()}"
         self._attr_title = info["name"]
+        self._attr_release_summary = None
 
     @property
     def auto_update(self) -> bool:
@@ -140,48 +141,69 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         attrs = {}
-        if error := self.coordinator.data.get(self._path, {}).get("last_error"):
-            attrs["last_error"] = error
-        return attrs
-
-    @property
-    def release_summary(self) -> str | None:
-        """Summary of the release."""
         if self._path in self.coordinator.data:
             info = self.coordinator.data[self._path]
-            if info["updatable"]:
-                summary_text = (
-                    f"Update available from {info['source_url']}\n\n"
-                    "Warning: Auto-update may carry backward incompatibility risks "
-                    "if the author introduces breaking changes."
+            if error := info.get("last_error"):
+                if "|" in error:
+                    key, val = error.split("|", 1)
+                    attrs["last_error"] = f"{key}: {val}"
+                else:
+                    attrs["last_error"] = error
+        return attrs
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self.hass.async_create_task(self._async_localize_strings())
+        super()._handle_coordinator_update()
+
+    async def _async_localize_strings(self) -> None:
+        """Fetch translations and update localized strings."""
+        if self._path not in self.coordinator.data:
+            return
+
+        info = self.coordinator.data[self._path]
+        if not info["updatable"]:
+            self._attr_release_summary = await self.coordinator.async_translate("up_to_date")
+        else:
+            summary = await self.coordinator.async_translate(
+                "update_available", source_url=info["source_url"]
+            )
+            summary += "\n\n" + await self.coordinator.async_translate("auto_update_warning")
+
+            rel_path = info.get("rel_path", "")
+            parts = rel_path.split("/", 1)
+            domain = parts[0]
+            bp_id = parts[-1] if len(parts) > 1 else rel_path
+
+            total_usage = 0
+            try:
+                if domain == "automation":
+                    total_usage = len(automations_with_blueprint(self.coordinator.hass, bp_id))
+                elif domain == "script":
+                    total_usage = len(scripts_with_blueprint(self.coordinator.hass, bp_id))
+            except Exception as err:
+                _LOGGER.warning(
+                    "Error calculating %s usage for blueprint %s: %s",
+                    domain,
+                    bp_id,
+                    err,
                 )
 
-                rel_path = info.get("rel_path", "")
-                parts = rel_path.split("/", 1)
-                domain = parts[0]
-                bp_id = parts[-1] if len(parts) > 1 else rel_path
-                total_usage = 0
+            if total_usage > 0:
+                summary += "\n\n" + await self.coordinator.async_translate(
+                    "usage_warning", count=total_usage, domain=domain
+                )
 
-                try:
-                    if domain == "automation":
-                        total_usage = len(automations_with_blueprint(self.coordinator.hass, bp_id))
-                    elif domain == "script":
-                        total_usage = len(scripts_with_blueprint(self.coordinator.hass, bp_id))
-                except Exception as err:
-                    _LOGGER.warning(
-                        "Error calculating %s usage for blueprint %s: %s",
-                        domain,
-                        bp_id,
-                        err,
-                    )
+            self._attr_release_summary = summary
 
-                if total_usage > 0:
-                    summary_text += (
-                        f"\n\nWarning: This update will affect {total_usage} running {domain}(s)."
-                    )
-                return summary_text
-            return "Up to date"
-        return None
+        if self.hass and self.entity_id:
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        """When entity is added to hass."""
+        await super().async_added_to_hass()
+        await self._async_localize_strings()
 
     async def async_install(self, version: str | None, backup: bool, **kwargs: Any) -> None:
         """Install the update.
@@ -196,9 +218,14 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         info = self.coordinator.data[self._path]
         if error := info.get("last_error"):
+            if "|" in error:
+                key, val = error.split("|", 1)
+                msg = await self.coordinator.async_translate(key, errors=val, error=val)
+            else:
+                msg = await self.coordinator.async_translate(error)
+
             raise HomeAssistantError(
-                f"Cannot install blueprint: {error}. "
-                "The remote file has errors and cannot be safely applied."
+                await self.coordinator.async_translate("install_error", error=msg)
             )
 
         _LOGGER.info("Starting manual update for %s from %s", self._attr_name, info["source_url"])
