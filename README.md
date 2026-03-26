@@ -18,7 +18,7 @@
 - **Advanced Filtering**: Choose to update all blueprints, only specific ones (**Whitelist**), or exclude specific ones (**Blacklist**).
 - **Auto-Update Support**: Optional feature to automatically download and apply updates as soon as they are detected.
 - **Improved Reload Logic**: Automatically reloads `automation`, `script`, and `template` domains after an update to ensure immediate effect.
-- **Safety First**: Validates remote YAML content before updates. If the remote file has syntax errors, the update is blocked to protect your local configuration, and informative error messages are provided.
+- **Safety First**: Thoroughly validates remote blueprints before applying updates - checking YAML syntax, blueprint structure, and Home Assistant version compatibility. If anything is wrong (syntax errors, missing fields, or your HA version is too old for the new blueprint), the update is blocked with a clear error message to protect your system.
 - **Usage Insight**: Before updating, the integration calculates and displays the exact number of Automations and Scripts that currently rely on the blueprint, helping you understand the impact of the update.
 - **Backup & Restore**: Automatically create backups before updating blueprints. If an update breaks your automations, easily restore the previous version with a single service call. (Auto-updates are always backed up).
 - **Update All (Bulk Update)**: Instantly update all eligible blueprints simultaneously via the `blueprints_updater.update_all` service, without freezing Home Assistant.

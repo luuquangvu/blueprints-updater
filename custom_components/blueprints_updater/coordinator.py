@@ -11,6 +11,8 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import aiohttp
+from homeassistant.components.blueprint.models import Blueprint
+from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -118,6 +120,41 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.async_reload_services()
 
         return results
+
+    @staticmethod
+    def _validate_blueprint(data: Any, source_url: str) -> str | None:
+        """Validate blueprint data using HA Core's Blueprint class.
+
+        Performs basic structure check, structural validation,
+        and min_version compatibility check.
+        Returns an error string if validation fails, or None if valid.
+        """
+        if not isinstance(data, dict) or "blueprint" not in data:
+            _LOGGER.warning(
+                "Remote content from %s is not a valid blueprint (missing 'blueprint' key)",
+                source_url,
+            )
+            return "Invalid blueprint: Missing 'blueprint' root key"
+
+        try:
+            bp = Blueprint(data, schema=BLUEPRINT_SCHEMA)
+            errors = bp.validate()
+            if errors:
+                error_msg = "; ".join(errors)
+                _LOGGER.warning(
+                    "Blueprint from %s is incompatible: %s",
+                    source_url,
+                    error_msg,
+                )
+                return f"Incompatible: {error_msg}"
+        except Exception as err:
+            _LOGGER.warning(
+                "Blueprint validation failed for %s: %s",
+                source_url,
+                err,
+            )
+            return f"Validation Error: {err}"
+        return None
 
     async def async_reload_services(self) -> None:
         """Reload automation, script, and template services."""
@@ -243,17 +280,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
                     local_hash = info["hash"]
                     updatable = remote_hash != local_hash
-                    last_error = None
 
                     try:
                         data = yaml_util.parse_yaml(remote_content)
-                        if not isinstance(data, dict) or "blueprint" not in data:
-                            _LOGGER.warning(
-                                "Remote content from %s is not a valid blueprint "
-                                "(missing 'blueprint' key)",
-                                source_url,
-                            )
-                            last_error = "Invalid blueprint: Missing 'blueprint' root key"
+                        last_error = self._validate_blueprint(data, source_url)
                     except Exception as err:
                         _LOGGER.warning(
                             "Could not parse remote blueprint from %s: %s",
