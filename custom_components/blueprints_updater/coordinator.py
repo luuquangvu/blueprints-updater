@@ -33,6 +33,7 @@ from .const import (
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
+    MAX_RETRIES,
     RE_BLUEPRINT_KEY,
     RE_FORUM_CODE_BLOCK,
     RE_FORUM_TOPIC_ID,
@@ -40,7 +41,9 @@ from .const import (
     RE_GITHUB_BLOB,
     RE_SOURCE_URL_LINE,
     REQUEST_TIMEOUT,
+    RETRY_BACKOFF,
 )
+from .utils import retry_async
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -280,76 +283,79 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("Checking for updates: %s (source: %s)", info["name"], source_url)
         normalized_url = self._normalize_url(source_url)
         _LOGGER.debug("Normalized URL for %s: %s", source_url, normalized_url)
+
         async with semaphore:
             try:
-                async with session.get(normalized_url, timeout=REQUEST_TIMEOUT) as response:
-                    response.raise_for_status()
-                    if DOMAIN_HA_FORUM in normalized_url:
-                        json_data = await response.json()
-                        remote_content = self._parse_forum_content(json_data)
-                    else:
-                        remote_content = await response.text()
+                remote_content = await self._async_fetch_content(session, normalized_url)
 
-                    _LOGGER.debug(
-                        "Fetched %d bytes from %s", len(remote_content or ""), normalized_url
+                _LOGGER.debug("Fetched %d bytes from %s", len(remote_content or ""), normalized_url)
+
+                if not remote_content:
+                    _LOGGER.warning("Empty content received from %s", normalized_url)
+                    results[path]["last_error"] = "Empty content received"
+                    return
+
+                remote_content = self._ensure_source_url(remote_content, source_url)
+
+                remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
+                local_hash = info["hash"]
+                updatable = remote_hash != local_hash
+
+                try:
+                    data = yaml_util.parse_yaml(remote_content)
+                    last_error = self._validate_blueprint(data, source_url)
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Could not parse remote blueprint from %s: %s",
+                        source_url,
+                        err,
                     )
+                    last_error = f"YAML Syntax Error: {err}"
 
-                    if not remote_content:
-                        _LOGGER.warning("Empty content received from %s", normalized_url)
-                        results[path]["last_error"] = "Empty content received"
-                        return
-
-                    remote_content = self._ensure_source_url(remote_content, source_url)
-
-                    remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
-                    local_hash = info["hash"]
-                    updatable = remote_hash != local_hash
-
-                    try:
-                        data = yaml_util.parse_yaml(remote_content)
-                        last_error = self._validate_blueprint(data, source_url)
-                    except Exception as err:
-                        _LOGGER.warning(
-                            "Could not parse remote blueprint from %s: %s",
-                            source_url,
-                            err,
-                        )
-                        last_error = f"YAML Syntax Error: {err}"
-
-                    if (
-                        updatable
-                        and not last_error
-                        and self.config_entry
-                        and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
-                    ):
-                        await self.async_install_blueprint(
-                            path, remote_content, reload_services=False, backup=True
-                        )
-                        results[path].update(
-                            {
-                                "remote_hash": remote_hash,
-                                "remote_content": None,
-                                "updatable": False,
-                                "local_hash": remote_hash,
-                                "last_error": None,
-                                "_auto_updated": True,
-                            }
-                        )
-                        return
-
+                if (
+                    updatable
+                    and not last_error
+                    and self.config_entry
+                    and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
+                ):
+                    await self.async_install_blueprint(
+                        path, remote_content, reload_services=False, backup=True
+                    )
                     results[path].update(
                         {
                             "remote_hash": remote_hash,
-                            "remote_content": remote_content
-                            if updatable and not last_error
-                            else None,
-                            "updatable": updatable,
-                            "last_error": last_error,
+                            "remote_content": None,
+                            "updatable": False,
+                            "local_hash": remote_hash,
+                            "last_error": None,
+                            "_auto_updated": True,
                         }
                     )
+                    return
+
+                results[path].update(
+                    {
+                        "remote_hash": remote_hash,
+                        "remote_content": remote_content if updatable and not last_error else None,
+                        "updatable": updatable,
+                        "last_error": last_error,
+                    }
+                )
             except Exception as err:
-                _LOGGER.error("Error fetching blueprint from %s: %s", source_url, err)
+                _LOGGER.error("Error fetching blueprint after retries from %s: %s", source_url, err)
                 results[path]["last_error"] = f"Fetch Error: {err}"
+
+    @retry_async(max_retries=MAX_RETRIES, base_delay=RETRY_BACKOFF)
+    async def _async_fetch_content(self, session: aiohttp.ClientSession, url: str) -> str:
+        """Fetch content from a URL with retries."""
+        async with session.get(url, timeout=REQUEST_TIMEOUT) as response:
+            response.raise_for_status()
+
+            if DOMAIN_HA_FORUM in url:
+                json_data = await response.json()
+                return self._parse_forum_content(json_data) or ""
+
+            return await response.text()
 
     @staticmethod
     def _normalize_url(url: str) -> str:
