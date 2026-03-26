@@ -111,7 +111,7 @@ def test_entity_properties(coordinator):
     assert entity.latest_version == "hash2xxx"
     assert entity.release_summary == (
         "Update available from https://url.com\n\n"
-        "**Warning**: Auto-update may carry backward incompatibility risks "
+        "Warning: Auto-update may carry backward incompatibility risks "
         "if the author introduces breaking changes."
     )
     assert entity.extra_state_attributes == {}
@@ -173,3 +173,47 @@ async def test_entity_async_install_backup(coordinator):
         backup=True,
     )
     coordinator.async_refresh.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_entity_release_summary_with_usage(coordinator):
+    """Test release summary includes usage warning."""
+    import custom_components.blueprints_updater.update as update_module
+
+    # Test automation usage
+    info_auto = {
+        "name": "Test Auto",
+        "rel_path": "automation/test.yaml",
+        "source_url": "https://url.com",
+        "updatable": True,
+    }
+    entity_auto = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/automation/test.yaml",
+        info_auto,
+    )
+    coordinator.data["/config/blueprints/automation/test.yaml"] = info_auto
+
+    with patch.object(update_module, "automations_with_blueprint", return_value=["auto1", "auto2"]):
+        summary = entity_auto.release_summary
+        assert summary is not None
+        assert "affect 2 running automation(s)" in summary
+
+    # Test script usage
+    info_script = {
+        "name": "Test Script",
+        "rel_path": "script/test2.yaml",
+        "source_url": "https://url.com",
+        "updatable": True,
+    }
+    entity_script = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/script/test2.yaml",
+        info_script,
+    )
+    coordinator.data["/config/blueprints/script/test2.yaml"] = info_script
+
+    with patch.object(update_module, "scripts_with_blueprint", return_value=["script1"]):
+        summary = entity_script.release_summary
+        assert summary is not None
+        assert "affect 1 running script(s)" in summary
