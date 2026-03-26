@@ -95,16 +95,40 @@ def coordinator():
     comp.config_entry.options = {"auto_update": True}
     comp.async_install_blueprint = AsyncMock()
     comp.async_refresh = AsyncMock()
+    comp.async_translate = AsyncMock(
+        side_effect=lambda key, **kwargs: {
+            "up_to_date": "Up to date",
+            "update_available": f"Update available from {kwargs.get('source_url')}",
+            "auto_update_warning": (
+                "Warning: Auto-update may carry backward incompatibility risks "
+                "if the author introduces breaking changes."
+            ),
+            "usage_warning": (
+                f"Warning: This update will affect {kwargs.get('count')} "
+                f"running {kwargs.get('domain')}(s)."
+            ),
+            "install_error": (
+                f"Cannot install blueprint: {kwargs.get('error')}. "
+                "The remote file has errors and cannot be safely applied."
+            ),
+        }.get(key, key)
+    )
+    comp.hass = MagicMock()
     return comp
 
 
-def test_entity_properties(coordinator):
+@pytest.mark.asyncio
+async def test_entity_properties(coordinator):
     """Test properties of BlueprintUpdateEntity."""
     entity = BlueprintUpdateEntity(
         coordinator,
         "/config/blueprints/test.yaml",
         coordinator.data["/config/blueprints/test.yaml"],
     )
+    entity.hass = coordinator.hass
+    entity.entity_id = "update.test"
+    with patch.object(entity, "async_write_ha_state"):
+        await entity._async_localize_strings()
 
     assert entity.name == "Test"
     assert entity._path == "/config/blueprints/test.yaml"
@@ -121,6 +145,10 @@ def test_entity_properties(coordinator):
     entity_missing = BlueprintUpdateEntity(
         coordinator, "/missing.yaml", {"name": "Missing", "rel_path": "missing"}
     )
+    entity_missing.hass = coordinator.hass
+    entity_missing.entity_id = "update.missing"
+    with patch.object(entity_missing, "async_write_ha_state"):
+        await entity_missing._async_localize_strings()
     assert entity_missing.installed_version is None
     assert entity_missing.latest_version is None
     assert entity_missing.release_summary is None
@@ -151,6 +179,7 @@ async def test_entity_async_install(coordinator):
     await entity.async_install(version=None, backup=False)
 
     coordinator.data["/config/blueprints/test.yaml"] = {"last_error": "Syntax Error"}
+    entity.hass = coordinator.hass
 
     with pytest.raises(HomeAssistantError, match="Cannot install blueprint: Syntax Error"):
         await entity.async_install(version=None, backup=False)
@@ -190,9 +219,15 @@ async def test_entity_release_summary_with_usage(coordinator):
         "/config/blueprints/automation/test.yaml",
         info_auto,
     )
+    entity_auto.entity_id = "update.auto"
     coordinator.data["/config/blueprints/automation/test.yaml"] = info_auto
+    entity_auto.hass = coordinator.hass
 
-    with patch.object(update_module, "automations_with_blueprint", return_value=["auto1", "auto2"]):
+    with (
+        patch.object(update_module, "automations_with_blueprint", return_value=["auto1", "auto2"]),
+        patch.object(entity_auto, "async_write_ha_state"),
+    ):
+        await entity_auto._async_localize_strings()
         summary = entity_auto.release_summary
         assert summary is not None
         assert "affect 2 running automation(s)" in summary
@@ -208,9 +243,15 @@ async def test_entity_release_summary_with_usage(coordinator):
         "/config/blueprints/script/test2.yaml",
         info_script,
     )
+    entity_script.entity_id = "update.script"
     coordinator.data["/config/blueprints/script/test2.yaml"] = info_script
+    entity_script.hass = coordinator.hass
 
-    with patch.object(update_module, "scripts_with_blueprint", return_value=["script1"]):
+    with (
+        patch.object(update_module, "scripts_with_blueprint", return_value=["script1"]),
+        patch.object(entity_script, "async_write_ha_state"),
+    ):
+        await entity_script._async_localize_strings()
         summary = entity_script.release_summary
         assert summary is not None
         assert "affect 1 running script(s)" in summary

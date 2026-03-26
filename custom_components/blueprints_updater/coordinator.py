@@ -15,6 +15,7 @@ from homeassistant.components.blueprint.models import Blueprint
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import yaml as yaml_util
 
@@ -72,6 +73,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             name=DOMAIN,
             update_interval=update_interval,
         )
+        self._translations: dict[str, str] = {}
+
+    async def async_translate(self, key: str, **kwargs: Any) -> str:
+        """Translate a key using the current language."""
+        language = self.hass.config.language
+        translations = await async_get_translations(self.hass, language, "common", [DOMAIN])
+        template = translations.get(f"component.{DOMAIN}.common.{key}", key)
+        try:
+            return template.format(**kwargs) if kwargs else template
+        except KeyError:
+            return template
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch blueprint update data."""
@@ -119,10 +131,44 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ]
             await asyncio.gather(*tasks)
 
-        auto_updated_count = sum(1 for info in results.values() if info.pop("_auto_updated", False))
-        if auto_updated_count > 0:
-            _LOGGER.info("Auto-updated %d blueprints", auto_updated_count)
+        auto_updated_names = sorted(
+            [info["name"] for info in results.values() if info.get("_auto_updated")]
+        )
+        for info in results.values():
+            info.pop("_auto_updated", None)
+
+        if auto_updated_names:
+            _LOGGER.info(
+                "Auto-updated %d blueprints: %s", len(auto_updated_names), auto_updated_names
+            )
             await self.async_reload_services()
+
+            try:
+                language = self.hass.config.language
+                translations = await async_get_translations(self.hass, language, "common", [DOMAIN])
+                title_key = f"component.{DOMAIN}.common.auto_update_title"
+                message_key = f"component.{DOMAIN}.common.auto_update_message"
+
+                title = translations.get(title_key, "Blueprints Updater: Auto-Updated")
+                message_template = translations.get(
+                    message_key,
+                    "The following blueprints have been automatically updated:\n\n{blueprints}",
+                )
+
+                blueprints_list = "\n".join(f"- {name}" for name in auto_updated_names)
+                message = message_template.format(blueprints=blueprints_list)
+
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "create",
+                    {
+                        "title": title,
+                        "message": message,
+                        "notification_id": f"{DOMAIN}_auto_update",
+                    },
+                )
+            except Exception as err:
+                _LOGGER.warning("Failed to send auto-update notification: %s", err)
 
         return results
 
@@ -139,7 +185,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Remote content from %s is not a valid blueprint (missing 'blueprint' key)",
                 source_url,
             )
-            return "Invalid blueprint: Missing 'blueprint' root key"
+            return "invalid_blueprint"
 
         try:
             bp = Blueprint(data, schema=BLUEPRINT_SCHEMA)
@@ -151,14 +197,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     source_url,
                     error_msg,
                 )
-                return f"Incompatible: {error_msg}"
+                return f"incompatible|{error_msg}"
         except Exception as err:
             _LOGGER.warning(
                 "Blueprint validation failed for %s: %s",
                 source_url,
                 err,
             )
-            return f"Validation Error: {err}"
+            return f"validation_error|{err}"
         return None
 
     async def async_reload_services(self) -> None:
@@ -292,7 +338,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 if not remote_content:
                     _LOGGER.warning("Empty content received from %s", normalized_url)
-                    results[path]["last_error"] = "Empty content received"
+                    results[path]["last_error"] = "empty_content"
                     return
 
                 remote_content = self._ensure_source_url(remote_content, source_url)
@@ -310,7 +356,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         source_url,
                         err,
                     )
-                    last_error = f"YAML Syntax Error: {err}"
+                    last_error = f"yaml_syntax_error|{err}"
 
                 if (
                     updatable
@@ -343,7 +389,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             except Exception as err:
                 _LOGGER.error("Error fetching blueprint after retries from %s: %s", source_url, err)
-                results[path]["last_error"] = f"Fetch Error: {err}"
+                results[path]["last_error"] = f"fetch_error|{err}"
 
     @retry_async(max_retries=MAX_RETRIES, base_delay=RETRY_BACKOFF)
     async def _async_fetch_content(self, session: aiohttp.ClientSession, url: str) -> str:

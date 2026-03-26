@@ -287,7 +287,7 @@ async def test_async_update_blueprint_errors(coordinator):
     sem = asyncio.Semaphore(1)
 
     await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert results[path]["last_error"] == "Empty content received"
+    assert results[path]["last_error"] == "empty_content"
 
     mock_resp_invalid = AsyncMock()
     mock_resp_invalid.status = 200
@@ -296,7 +296,7 @@ async def test_async_update_blueprint_errors(coordinator):
     mock_session.get.return_value.__aenter__.return_value = mock_resp_invalid
 
     await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert "YAML Syntax Error" in str(results[path]["last_error"])
+    assert "yaml_syntax_error" in str(results[path]["last_error"])
 
     mock_resp_missing_bp = AsyncMock()
     mock_resp_missing_bp.status = 200
@@ -305,11 +305,12 @@ async def test_async_update_blueprint_errors(coordinator):
     mock_session.get.return_value.__aenter__.return_value = mock_resp_missing_bp
 
     await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert "Missing 'blueprint' root key" in str(results[path]["last_error"])
+    assert "invalid_blueprint" in str(results[path]["last_error"])
 
     mock_session.get.side_effect = Exception("Connection Failed")
     await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert "Fetch Error: Connection Failed" in str(results[path]["last_error"])
+    assert "fetch_error" in str(results[path]["last_error"])
+    assert "Connection Failed" in str(results[path]["last_error"])
 
 
 @pytest.mark.asyncio
@@ -351,6 +352,13 @@ async def test_async_update_data_auto_update(coordinator):
         patch.object(coordinator, "async_install_blueprint") as mock_install,
         patch.object(coordinator, "async_reload_services") as mock_reload,
         patch.object(coordinator, "_validate_blueprint", return_value=None),
+        patch(
+            "custom_components.blueprints_updater.coordinator.async_get_translations",
+            return_value={
+                "component.blueprints_updater.common.auto_update_title": "Title",
+                "component.blueprints_updater.common.auto_update_message": "Msg {blueprints}",
+            },
+        ),
     ):
         mock_session.__aenter__.return_value = mock_session
         mock_hash.return_value.hexdigest.return_value = "new"
@@ -364,11 +372,93 @@ async def test_async_update_data_auto_update(coordinator):
             backup=True,
         )
         mock_reload.assert_called_once()
+
+        coordinator.hass.services.async_call.assert_any_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "Title",
+                "message": "Msg - Test",
+                "notification_id": "blueprints_updater_auto_update",
+            },
+        )
+
         assert "/test.yaml" in results
         assert results["/test.yaml"]["updatable"] is False
         assert results["/test.yaml"]["remote_content"] is None
         assert results["/test.yaml"]["local_hash"] == "new"
         assert "_auto_updated" not in results["/test.yaml"]
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_auto_update_multiple_sorted(coordinator):
+    """Test _async_update_data sorts multiple auto-updated blueprints."""
+    coordinator.config_entry.options = {"auto_update": True}
+    coordinator.scan_blueprints = MagicMock(
+        return_value={
+            "/b.yaml": {
+                "name": "Beta",
+                "rel_path": "b.yaml",
+                "source_url": "https://url/b",
+                "hash": "old",
+            },
+            "/a.yaml": {
+                "name": "Alpha",
+                "rel_path": "a.yaml",
+                "source_url": "https://url/a",
+                "hash": "old",
+            },
+        }
+    )
+
+    mock_resp_a = AsyncMock()
+    mock_resp_a.status = 200
+    mock_resp_a.raise_for_status = MagicMock()
+    mock_resp_a.text.return_value = "blueprint:\n  name: Alpha\n  source_url: https://url/a"
+
+    mock_resp_b = AsyncMock()
+    mock_resp_b.status = 200
+    mock_resp_b.raise_for_status = MagicMock()
+    mock_resp_b.text.return_value = "blueprint:\n  name: Beta\n  source_url: https://url/b"
+
+    mock_session = MagicMock()
+    mock_session.__aenter__.return_value = mock_session
+
+    def get_side_effect(url, **_kwargs):
+        m = MagicMock()
+        m.__aenter__.return_value = mock_resp_a if "/a" in url else mock_resp_b
+        return m
+
+    mock_session.get.side_effect = get_side_effect
+
+    with (
+        patch("aiohttp.ClientSession", return_value=mock_session),
+        patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
+        patch.object(coordinator, "async_install_blueprint"),
+        patch.object(coordinator, "async_reload_services"),
+        patch.object(coordinator, "_validate_blueprint", return_value=None),
+        patch(
+            "custom_components.blueprints_updater.coordinator.async_get_translations",
+            return_value={
+                "component.blueprints_updater.common.auto_update_title": "Title",
+                "component.blueprints_updater.common.auto_update_message": "Msg\n{blueprints}",
+            },
+        ),
+    ):
+        mock_hash.return_value.hexdigest.return_value = "new"
+
+        await coordinator._async_update_data()
+
+        args = coordinator.hass.services.async_call.call_args_list
+        notification_call = next(
+            c for c in args if c.args[0] == "persistent_notification" and c.args[1] == "create"
+        )
+        message = notification_call.args[2]["message"]
+
+        assert "Alpha" in message
+        assert "Beta" in message
+        assert message.index("Alpha") < message.index("Beta")
+        assert message == "Msg\n- Alpha\n- Beta"
 
 
 @pytest.mark.asyncio
@@ -483,7 +573,7 @@ def test_validate_blueprint_incompatible_version(coordinator):
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(data, "https://example.com/bp.yaml")
     assert result is not None
-    assert "Incompatible" in result
+    assert "incompatible" in result
     assert "2099.1.0" in result
 
 
@@ -493,7 +583,7 @@ def test_validate_blueprint_schema_error(coordinator):
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(data, "https://example.com/bp.yaml")
     assert result is not None
-    assert "Validation Error" in result
+    assert "validation_error" in result
 
 
 def test_validate_blueprint_missing_key(coordinator):
@@ -501,7 +591,7 @@ def test_validate_blueprint_missing_key(coordinator):
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint({"not_blueprint": {}}, "https://example.com/bp.yaml")
     assert result is not None
-    assert "Missing 'blueprint' root key" in result
+    assert "invalid_blueprint" in result
 
 
 @pytest.mark.asyncio
