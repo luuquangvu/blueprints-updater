@@ -1,6 +1,5 @@
 """Tests for Blueprints Updater utilities."""
 
-import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,8 +10,12 @@ from custom_components.blueprints_updater.utils import retry_async
 @pytest.mark.asyncio
 async def test_retry_async_success():
     """Test retry_async decorator when it succeeds immediately."""
-    mock_func = MagicMock(return_value=asyncio.Future())
-    mock_func.return_value.set_result("success")
+    mock = MagicMock()
+
+    async def mock_func() -> str:
+        """Real async function to satisfy IDE, calling mock to track execution."""
+        mock()
+        return "success"
 
     @retry_async(max_retries=3)
     async def decorated_func():
@@ -20,7 +23,7 @@ async def test_retry_async_success():
 
     result = await decorated_func()
     assert result == "success"
-    assert mock_func.call_count == 1
+    assert mock.call_count == 1
 
 
 @pytest.mark.asyncio

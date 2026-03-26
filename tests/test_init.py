@@ -61,9 +61,8 @@ async def test_service_registration(hass: HomeAssistant):
             "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
             return_value=coordinator_mock,
         ),
-        patch.object(hass.services, "async_register") as mock_register_raw,
+        patch.object(hass.services, "async_register") as mock_register,
     ):
-        mock_register = cast(MagicMock, mock_register_raw)
         await async_setup_entry(hass, entry)
 
         calls = [
@@ -91,7 +90,7 @@ async def test_service_registration(hass: HomeAssistant):
 
 
 async def test_service_handlers(hass: HomeAssistant):
-    """Test service handlers logic."""
+    """Test service handlers' logic."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
     entry.options = {"max_backups": 3}
@@ -259,9 +258,8 @@ async def test_unload_entry(hass: HomeAssistant):
             "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
             return_value=coordinator_mock,
         ),
-        patch.object(hass.services, "async_remove") as mock_remove_raw,
+        patch.object(hass.services, "async_remove") as mock_remove,
     ):
-        mock_remove = cast(MagicMock, mock_remove_raw)
         await async_setup_entry(hass, entry)
         await async_unload_entry(hass, entry)
 
