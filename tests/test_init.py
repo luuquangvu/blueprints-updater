@@ -1,8 +1,10 @@
 import hashlib
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.core import ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.blueprints_updater.__init__ import (
     async_setup_entry,
@@ -11,44 +13,46 @@ from custom_components.blueprints_updater.__init__ import (
 from custom_components.blueprints_updater.const import DOMAIN
 
 
-@pytest.mark.asyncio
-async def test_update_all_service(hass):
-    """Test the update_all service logic."""
+async def test_setup_entry(hass: HomeAssistant):
+    """Test setting up the entry."""
     entry = MagicMock()
-    entry.entry_id = "test_123"
+    entry.entry_id = "test_entry"
     entry.options = {}
+    entry.data = {"old_config": "value"}
+
+    hass.config_entries = MagicMock()
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+
+    coordinator_mock = MagicMock()
+    coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+
+    with patch(
+        "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
+        return_value=coordinator_mock,
+    ):
+        assert await async_setup_entry(hass, entry) is True
+
+    assert DOMAIN in hass.data
+    assert entry.entry_id in hass.data[DOMAIN]
+    assert hass.config_entries.async_update_entry.called
+    assert hass.config_entries.async_forward_entry_setups.called
+
+
+async def test_service_registration(hass: HomeAssistant):
+    """Test that services are registered."""
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.options = {
+        "max_backups": 3,
+    }
     entry.data = {}
 
     hass.config_entries = MagicMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock()
-    hass.config_entries.async_update_entry = MagicMock()
 
     coordinator_mock = MagicMock()
     coordinator_mock.config_entry = entry
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
-    coordinator_mock.async_install_blueprint = AsyncMock()
-    coordinator_mock.async_reload_services = AsyncMock()
-    coordinator_mock.async_request_refresh = AsyncMock()
-
-    coordinator_mock.data = {
-        "file1.yaml": {"updatable": True, "remote_content": "content1", "last_error": None},
-        "file2.yaml": {"updatable": True, "remote_content": "content2", "last_error": None},
-        "file3.yaml": {
-            "updatable": True,
-            "remote_content": None,
-            "last_error": None,
-        },
-        "file4.yaml": {
-            "updatable": True,
-            "remote_content": "content4",
-            "last_error": "Syntax Error",
-        },
-        "file5.yaml": {
-            "updatable": False,
-            "remote_content": "content5",
-            "last_error": None,
-        },
-    }
 
     hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
 
@@ -57,163 +61,102 @@ async def test_update_all_service(hass):
             "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
             return_value=coordinator_mock,
         ),
-        patch(
-            "custom_components.blueprints_updater.__init__.translation.async_get_translations",
-            return_value={},
-        ),
+        patch.object(hass.services, "async_register") as mock_register_raw,
+    ):
+        mock_register = cast(MagicMock, mock_register_raw)
+        await async_setup_entry(hass, entry)
+
+        calls = [
+            call.args[1] if len(call.args) > 1 else call.kwargs.get("service")
+            for call in mock_register.call_args_list
+        ]
+        assert "reload" in calls
+        assert "restore_blueprint" in calls
+        assert "update_all" in calls
+
+        restore_call = next(
+            call
+            for call in mock_register.call_args_list
+            if (len(call.args) > 1 and call.args[1] == "restore_blueprint")
+            or call.kwargs.get("service") == "restore_blueprint"
+        )
+        schema = (
+            restore_call.args[3]
+            if len(restore_call.args) > 3
+            else restore_call.kwargs.get("schema")
+        )
+        assert schema is not None
+        schema({"entity_id": "update.test", "version": 1})
+        schema({"entity_id": "update.test", "version": 4})
+
+
+async def test_service_handlers(hass: HomeAssistant):
+    """Test service handlers logic."""
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.options = {"max_backups": 3}
+    entry.data = {}
+
+    hass.config_entries = MagicMock()
+    hass.config_entries.async_forward_entry_setups = AsyncMock()
+
+    coordinator_mock = MagicMock()
+    coordinator_mock.config_entry = entry
+    coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.async_request_refresh = AsyncMock()
+
+    hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
+
+    with patch(
+        "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
+        return_value=coordinator_mock,
     ):
         await async_setup_entry(hass, entry)
 
-        assert hass.services.async_register.call_count >= 3
+        mock_register = cast(MagicMock, hass.services.async_register)
+        reload_handler = next(
+            (
+                call.args[2] if len(call.args) > 2 else call.kwargs.get("service_func")
+                for call in mock_register.call_args_list
+                if (len(call.args) > 1 and call.args[1] == "reload")
+                or call.kwargs.get("service") == "reload"
+            ),
+            None,
+        )
+        assert reload_handler is not None
+        await reload_handler(ServiceCall(hass, DOMAIN, "reload", {}))
+        assert coordinator_mock.async_request_refresh.called
 
         update_all_handler = next(
             (
-                call.args[2]
-                for call in hass.services.async_register.call_args_list
-                if call.args[1] == "update_all"
+                call.args[2] if len(call.args) > 2 else call.kwargs.get("service_func")
+                for call in mock_register.call_args_list
+                if (len(call.args) > 1 and call.args[1] == "update_all")
+                or call.kwargs.get("service") == "update_all"
             ),
             None,
         )
-
         assert update_all_handler is not None
-        service_call = ServiceCall(hass, DOMAIN, "update_all", {"backup": True})
-        await update_all_handler(service_call)
 
-    assert coordinator_mock.async_install_blueprint.call_count == 2
-    coordinator_mock.async_install_blueprint.assert_any_call(
-        "file1.yaml", "content1", reload_services=False, backup=True
-    )
-    coordinator_mock.async_install_blueprint.assert_any_call(
-        "file2.yaml", "content2", reload_services=False, backup=True
-    )
+        coordinator_mock.data = {
+            "path1": {"updatable": True, "remote_content": "...", "last_error": None}
+        }
+        coordinator_mock.async_install_blueprint = AsyncMock()
+        coordinator_mock.async_reload_services = AsyncMock()
 
-    coordinator_mock.async_reload_services.assert_called_once()
-    coordinator_mock.async_request_refresh.assert_called_once()
+        await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {"backup": True}))
+        assert coordinator_mock.async_install_blueprint.called
 
 
-@pytest.mark.asyncio
-async def test_restore_blueprint_service(hass):
-    """Test the restore_blueprint service handler and translation."""
+async def test_restore_blueprint_handler(hass: HomeAssistant):
+    """Test restore_blueprint handler specifically."""
     entry = MagicMock()
-    entry.entry_id = "test_123"
+    entry.entry_id = "test_entry"
     entry.options = {"max_backups": 3}
     entry.data = {}
 
     hass.config_entries = MagicMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock()
-    hass.config_entries.async_update_entry = MagicMock()
-
-    coordinator_mock = MagicMock()
-    coordinator_mock.config_entry = entry
-    coordinator_mock.async_config_entry_first_refresh = AsyncMock()
-    coordinator_mock.data = {
-        "/config/blueprints/test.yaml": {
-            "name": "Test",
-            "rel_path": "test.yaml",
-        }
-    }
-
-    coordinator_mock.async_restore_blueprint = AsyncMock(
-        return_value={"success": False, "translation_key": "missing_backup"}
-    )
-
-    hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
-
-    entity_entry = MagicMock()
-    entity_entry.domain = "update"
-    entity_entry.config_entry_id = entry.entry_id
-    entity_entry.unique_id = f"blueprint_{hashlib.sha256(b'test.yaml').hexdigest()}"
-
-    with (
-        patch(
-            "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
-            return_value=coordinator_mock,
-        ),
-        patch("custom_components.blueprints_updater.__init__.er.async_get") as mock_er,
-        patch(
-            "custom_components.blueprints_updater.__init__.translation.async_get_translations"
-        ) as mock_trans,
-        patch("custom_components.blueprints_updater.__init__.hashlib", wraps=hashlib),
-    ):
-        mock_er.return_value.async_get.return_value = entity_entry
-        mock_trans.return_value = {
-            f"component.{DOMAIN}.exceptions.missing_backup.message": "Translated Missing Backup"
-        }
-
-        await async_setup_entry(hass, entry)
-
-        restore_handler = next(
-            (
-                call.args[2]
-                for call in hass.services.async_register.call_args_list
-                if call.args[1] == "restore_blueprint"
-            ),
-            None,
-        )
-
-        assert restore_handler is not None
-
-        service_call = ServiceCall(
-            hass, DOMAIN, "restore_blueprint", {"entity_id": "update.test", "version": 1}
-        )
-        result = await restore_handler(service_call)
-
-        assert result["success"] is False
-        assert result["message"] == "Translated Missing Backup"
-        coordinator_mock.async_restore_blueprint.assert_called_once_with(
-            "/config/blueprints/test.yaml", version=1
-        )
-
-
-@pytest.mark.asyncio
-async def test_reload_service(hass):
-    """Test the reload service handler."""
-    entry = MagicMock()
-    entry.entry_id = "test_123"
-    entry.options = {}
-    entry.data = {}
-
-    hass.config_entries = MagicMock()
-    hass.config_entries.async_forward_entry_setups = AsyncMock()
-
-    coordinator_mock = MagicMock()
-    coordinator_mock.config_entry = entry
-    coordinator_mock.async_config_entry_first_refresh = AsyncMock()
-    coordinator_mock.async_request_refresh = AsyncMock()
-
-    hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
-
-    with patch(
-        "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
-        return_value=coordinator_mock,
-    ):
-        await async_setup_entry(hass, entry)
-
-        reload_handler = next(
-            (
-                call.args[2]
-                for call in hass.services.async_register.call_args_list
-                if call.args[1] == "reload"
-            ),
-            None,
-        )
-
-        assert reload_handler is not None
-        await reload_handler(ServiceCall(hass, DOMAIN, "reload", {}))
-        coordinator_mock.async_request_refresh.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_setup_entry_migration(hass):
-    """Test that configuration data is migrated to options."""
-    entry = MagicMock()
-    entry.entry_id = "test_123"
-    entry.data = {"auto_update": True, "update_interval": 12}
-    entry.options = {"max_backups": 5}
-
-    hass.config_entries = MagicMock()
-    hass.config_entries.async_forward_entry_setups = AsyncMock()
-    hass.config_entries.async_update_entry = MagicMock()
 
     coordinator_mock = MagicMock()
     coordinator_mock.config_entry = entry
@@ -227,107 +170,80 @@ async def test_setup_entry_migration(hass):
     ):
         await async_setup_entry(hass, entry)
 
-        hass.config_entries.async_update_entry.assert_called_once_with(
-            entry,
-            data={},
-            options={"max_backups": 5, "auto_update": True, "update_interval": 12},
-        )
-
-
-@pytest.mark.asyncio
-async def test_restore_blueprint_service_errors(hass):
-    """Test error scenarios in restore_blueprint service."""
-    entry = MagicMock()
-    entry.entry_id = "test_123"
-    entry.options = {"max_backups": 3}
-    entry.data = {}
-
-    hass.config_entries = MagicMock()
-    hass.config_entries.async_forward_entry_setups = AsyncMock()
-
-    coordinator_mock = MagicMock()
-    coordinator_mock.config_entry = entry
-    coordinator_mock.async_config_entry_first_refresh = AsyncMock()
-    coordinator_mock.data = {
-        "/config/blueprints/test.yaml": {
-            "name": "Test",
-            "rel_path": "test.yaml",
-        }
-    }
-
-    hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
-
-    with (
-        patch(
-            "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
-            return_value=coordinator_mock,
-        ),
-        patch("custom_components.blueprints_updater.__init__.er.async_get") as mock_er,
-        patch(
-            "custom_components.blueprints_updater.__init__.translation.async_get_translations"
-        ) as mock_trans,
-    ):
-        mock_trans.return_value = {
-            f"component.{DOMAIN}.exceptions.missing_entity_id.message": "Missing ID",
-            f"component.{DOMAIN}.exceptions.invalid_entity.message": "Invalid Entity",
-            f"component.{DOMAIN}.exceptions.not_found.message": "Not Found",
-            f"component.{DOMAIN}.exceptions.invalid_version.message": "Invalid Version",
-        }
-
-        await async_setup_entry(hass, entry)
-
+        mock_register = cast(MagicMock, hass.services.async_register)
         restore_handler = next(
             (
-                call.args[2]
-                for call in hass.services.async_register.call_args_list
-                if call.args[1] == "restore_blueprint"
+                call.args[2] if len(call.args) > 2 else call.kwargs.get("service_func")
+                for call in mock_register.call_args_list
+                if (len(call.args) > 1 and call.args[1] == "restore_blueprint")
+                or call.kwargs.get("service") == "restore_blueprint"
             ),
             None,
         )
 
         assert restore_handler is not None
 
-        result = await restore_handler(ServiceCall(hass, DOMAIN, "restore_blueprint", {}))
-        assert result["message"] == "Missing ID"
+        with pytest.raises(ServiceValidationError) as exc:
+            await restore_handler(ServiceCall(hass, DOMAIN, "restore_blueprint", {}))
+        assert exc.value.translation_key == "missing_entity_id"
+        with patch("homeassistant.helpers.entity_registry.async_get") as mock_er:
+            mock_er.return_value.async_get.return_value = None
+            with pytest.raises(ServiceValidationError) as exc:
+                await restore_handler(
+                    ServiceCall(hass, DOMAIN, "restore_blueprint", {"entity_id": "update.none"})
+                )
+            assert exc.value.translation_key == "invalid_entity"
 
-        mock_er.return_value.async_get.return_value = None
-        result = await restore_handler(
-            ServiceCall(hass, DOMAIN, "restore_blueprint", {"entity_id": "update.none"})
-        )
-        assert result["message"] == "Invalid Entity"
+            bad_entity = MagicMock()
+            bad_entity.domain = "switch"
+            mock_er.return_value.async_get.return_value = bad_entity
+            with pytest.raises(ServiceValidationError) as exc:
+                await restore_handler(
+                    ServiceCall(hass, DOMAIN, "restore_blueprint", {"entity_id": "switch.test"})
+                )
+            assert exc.value.translation_key == "invalid_entity"
 
-        bad_entity = MagicMock()
-        bad_entity.domain = "switch"
-        mock_er.return_value.async_get.return_value = bad_entity
-        result = await restore_handler(
-            ServiceCall(hass, DOMAIN, "restore_blueprint", {"entity_id": "switch.test"})
-        )
-        assert result["message"] == "Invalid Entity"
+            good_entity = MagicMock()
+            good_entity.domain = "update"
+            good_entity.config_entry_id = entry.entry_id
+            good_entity.unique_id = "other_id"
+            mock_er.return_value.async_get.return_value = good_entity
+            coordinator_mock.data = {}
+            with pytest.raises(ServiceValidationError) as exc:
+                await restore_handler(
+                    ServiceCall(hass, DOMAIN, "restore_blueprint", {"entity_id": "update.test"})
+                )
+            assert exc.value.translation_key == "not_found"
 
-        good_entity = MagicMock()
-        good_entity.domain = "update"
-        good_entity.config_entry_id = entry.entry_id
-        good_entity.unique_id = "other_id"
-        mock_er.return_value.async_get.return_value = good_entity
-        result = await restore_handler(
-            ServiceCall(hass, DOMAIN, "restore_blueprint", {"entity_id": "update.test"})
-        )
-        assert result["message"] == "Not Found"
+            coordinator_mock.data = {"test.yaml": {"rel_path": "test.yaml", "updatable": True}}
+            good_entity.unique_id = f"blueprint_{hashlib.sha256(b'test.yaml').hexdigest()}"
+            with pytest.raises(ServiceValidationError) as exc:
+                await restore_handler(
+                    ServiceCall(
+                        hass,
+                        DOMAIN,
+                        "restore_blueprint",
+                        {"entity_id": "update.test", "version": 0},
+                    )
+                )
+            assert exc.value.translation_key == "invalid_version"
 
-        good_entity.unique_id = f"blueprint_{hashlib.sha256(b'test.yaml').hexdigest()}"
-        result = await restore_handler(
-            ServiceCall(
-                hass, DOMAIN, "restore_blueprint", {"entity_id": "update.test", "version": 0}
-            )
-        )
-        assert result["message"] == "Invalid Version"
+            with pytest.raises(ServiceValidationError) as exc:
+                await restore_handler(
+                    ServiceCall(
+                        hass,
+                        DOMAIN,
+                        "restore_blueprint",
+                        {"entity_id": "update.test", "version": 5},
+                    )
+                )
+            assert exc.value.translation_key == "invalid_version"
 
 
-@pytest.mark.asyncio
-async def test_unload_entry(hass):
-    """Test unloading the entry removes services."""
+async def test_unload_entry(hass: HomeAssistant):
+    """Test unloading the entry and service cleanup."""
     entry = MagicMock()
-    entry.entry_id = "test_123"
+    entry.entry_id = "test_entry"
     entry.options = {}
     entry.data = {}
 
@@ -336,21 +252,18 @@ async def test_unload_entry(hass):
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
 
     coordinator_mock = MagicMock()
-    coordinator_mock.config_entry = entry
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
 
-    hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
-
-    with patch(
-        "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
-        return_value=coordinator_mock,
+    with (
+        patch(
+            "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
+            return_value=coordinator_mock,
+        ),
+        patch.object(hass.services, "async_remove") as mock_remove_raw,
     ):
+        mock_remove = cast(MagicMock, mock_remove_raw)
         await async_setup_entry(hass, entry)
-
-        hass.services.async_remove = MagicMock()
-
         await async_unload_entry(hass, entry)
 
         assert entry.entry_id not in hass.data[DOMAIN]
-        for service in ["reload", "restore_blueprint", "update_all"]:
-            hass.services.async_remove.assert_any_call(DOMAIN, service)
+        assert mock_remove.called

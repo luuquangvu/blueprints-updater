@@ -31,3 +31,5 @@ RE_SOURCE_URL_LINE = re.compile(r"^\s*source_url:\s*['\"]?(.*?)['\"]?\s*$", re.M
 
 CONCURRENT_REQUESTS_LIMIT = 5
 REQUEST_TIMEOUT = 60
+MAX_RETRIES = 3
+RETRY_BACKOFF = 2

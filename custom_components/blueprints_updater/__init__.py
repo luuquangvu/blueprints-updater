@@ -6,6 +6,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
@@ -84,12 +85,18 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         """Handle the restore blueprint action."""
         entity_id = call.data.get("entity_id")
         if not entity_id:
-            return {"success": False, "message": await _translate("missing_entity_id")}
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="missing_entity_id",
+            )
 
         entity_registry = er.async_get(hass)
         entity_entry = entity_registry.async_get(entity_id)
         if not entity_entry or entity_entry.domain != "update":
-            return {"success": False, "message": await _translate("invalid_entity")}
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_entity",
+            )
 
         target_path = None
         for path, info in active_coordinator.data.items():
@@ -99,17 +106,20 @@ async def _async_register_services(hass: HomeAssistant) -> None:
                 break
 
         if not target_path:
-            return {"success": False, "message": await _translate("not_found")}
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="not_found",
+            )
 
         version = int(call.data.get("version", 1))
         max_backups = active_coordinator.config_entry.options.get(
             CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS
         )
         if version < 1 or version > max_backups:
-            return {
-                "success": False,
-                "message": await _translate("invalid_version"),
-            }
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_version",
+            )
 
         result = await active_coordinator.async_restore_blueprint(target_path, version=version)
         key = result.pop("translation_key", result.pop("message", "system_error"))
@@ -117,17 +127,16 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         result["message"] = await _translate(key, **kwargs)
         return result
 
-    max_bak = active_coordinator.config_entry.options.get(CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS)
-
     restore_schema = vol.Schema(
         {
             vol.Required("entity_id"): cv.entity_id,
-            vol.Optional("version", default=1): NumberSelector(
-                NumberSelectorConfig(
-                    min=1,
-                    max=max_bak,
-                    mode=NumberSelectorMode.BOX,
-                )
+            vol.Optional("version", default=1): vol.All(
+                vol.Coerce(int),
+                NumberSelector(
+                    NumberSelectorConfig(
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
             ),
         }
     )
