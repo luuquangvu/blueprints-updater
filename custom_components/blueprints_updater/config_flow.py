@@ -7,9 +7,13 @@ from typing import Any, cast
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
+from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -58,18 +62,30 @@ def _get_config_schema(
     """Return the config schema."""
     return vol.Schema(
         {
-            vol.Optional(
+            vol.Required(
                 CONF_AUTO_UPDATE,
                 default=defaults.get(CONF_AUTO_UPDATE, False),
             ): cv.boolean,
             vol.Required(
                 CONF_UPDATE_INTERVAL,
                 default=defaults.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_HOURS),
-            ): vol.All(cv.positive_int, vol.Range(min=1)),
-            vol.Optional(
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=1,
+                    mode=NumberSelectorMode.BOX,
+                    unit_of_measurement=UnitOfTime.HOURS,
+                )
+            ),
+            vol.Required(
                 CONF_MAX_BACKUPS,
                 default=defaults.get(CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS),
-            ): vol.All(cv.positive_int, vol.Range(min=1, max=10)),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=1,
+                    max=10,
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
             vol.Required(
                 CONF_FILTER_MODE,
                 default=defaults.get(CONF_FILTER_MODE, FILTER_MODE_ALL),
@@ -87,7 +103,7 @@ def _get_config_schema(
                     translation_key="filter_mode",
                 )
             ),
-            vol.Optional(
+            vol.Required(
                 CONF_SELECTED_BLUEPRINTS,
                 default=defaults.get(CONF_SELECTED_BLUEPRINTS, []),
             ): SelectSelector(
