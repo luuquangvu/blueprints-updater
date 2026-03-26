@@ -20,9 +20,6 @@ restore_blueprint:
       default: 1
       selector:
         number:
-          min: 1
-          max: 10
-          mode: box
 update_all:
   name: Update All Blueprints
   description: Automatically downloads and installs all available blueprint updates.
