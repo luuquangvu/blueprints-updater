@@ -1,0 +1,119 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Blueprints Updater instellen",
+        "description": "Wilt u Blueprints Updater instellen? Het scant uw lokale blueprints en zoekt naar updates.",
+        "data": {
+          "auto_update": "Automatische update inschakelen",
+          "update_interval": "Update-interval (uren)",
+          "filter_mode": "Filtermodus",
+          "selected_blueprints": "Blueprints (optioneel)",
+          "max_backups": "Maximaal aantal back-upversies"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Slechts één instantie van Blueprints Updater is toegestaan."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Instellingen",
+        "description": "Configureer automatische updates, scan-interval en filters voor uw blueprints.",
+        "data": {
+          "auto_update": "Automatische update inschakelen",
+          "update_interval": "Update-interval (uren)",
+          "filter_mode": "Filtermodus",
+          "selected_blueprints": "Geselecteerde blueprints",
+          "max_backups": "Maximaal aantal back-upversies"
+        }
+      }
+    }
+  },
+  "selector": {
+    "filter_mode": {
+      "options": {
+        "all": "Alles bijwerken",
+        "whitelist": "Whitelist (Alleen geselecteerde blueprints bijwerken)",
+        "blacklist": "Blacklist (Geselecteerde blueprints niet bijwerken)"
+      }
+    }
+  },
+  "entity": {
+    "update": {
+      "blueprint": {
+        "name": "{name}"
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Blueprints herladen",
+      "description": "Scant alle lokale blueprints op nieuwe bestanden en controleert onmiddellijk op updates."
+    },
+    "restore_blueprint": {
+      "name": "Blueprint herstellen",
+      "description": "Herstelt een blueprint van een genummerd back-upbestand (.bak.1, .bak.2, etc.) indien beschikbaar.",
+      "fields": {
+        "entity_id": {
+          "name": "Blueprint-entiteit",
+          "description": "De update-entiteit van de blueprint die u wilt herstellen."
+        },
+        "version": {
+          "name": "Back-upversie",
+          "description": "Welke back-upversie moet worden hersteld (1 = nieuwste, 2 = ouder, enz.)"
+        }
+      }
+    },
+    "update_all": {
+      "name": "Alle blueprints bijwerken",
+      "description": "Downloadt en installeert automatisch alle beschikbare blueprint-updates tegelijkertijd.",
+      "fields": {
+        "backup": {
+          "name": "Back-up maken",
+          "description": "Maak genummerde back-upbestanden voor alle bijgewerkte blueprints voordat u deze overschrijft."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "missing_entity_id": {
+      "message": "Parameter entity_id ontbreekt."
+    },
+    "invalid_entity": {
+      "message": "Ongeldige blueprint-update-entiteit."
+    },
+    "not_found": {
+      "message": "Oorspronkelijk blueprint-bestand niet gevonden."
+    },
+    "success": {
+      "message": "Back-up succesvol hersteld."
+    },
+    "missing_backup": {
+      "message": "Back-upbestand ontbreekt. Er is mogelijk geen back-up gemaakt tijdens de vorige update."
+    },
+    "invalid_version": {
+      "message": "Ongeldige back-upversie. Moet tussen 1 en het geconfigureerde maximum aantal back-ups liggen."
+    },
+    "system_error": {
+      "message": "Systeemfout tijdens herstel: {error}"
+    }
+  },
+  "common": {
+    "auto_update_title": "Blueprints Updater: Automatisch bijgewerkt",
+    "auto_update_message": "De volgende blueprints zijn automatisch bijgewerkt:\n\n{blueprints}",
+    "update_available": "Update beschikbaar van {source_url}",
+    "auto_update_warning": "Waarschuwing: Automatische updates kunnen risico's voor achterwaartse incompatibiliteit met zich meebrengen als de auteur baanbrekende wijzigingen introduceert.",
+    "usage_warning": "Waarschuwing: Deze update heeft invloed op {count} actieve {domain}(s).",
+    "up_to_date": "Bijgewerkt",
+    "install_error": "Kan blueprint niet installeren: {error}. Het externe bestand bevat fouten en kan không veilig worden toegepast. (Fixing typo: niet veilig worden toegepast)",
+    "invalid_blueprint": "Ongeldige blueprint: Root-sleutel 'blueprint' ontbreekt",
+    "incompatible": "Incompatibel: {errors}",
+    "validation_error": "Validatiefout: {error}",
+    "empty_content": "Lege inhoud ontvangen",
+    "yaml_syntax_error": "YAML-syntaxfout: {error}",
+    "fetch_error": "Ophaalfout: {error}"
+  }
+}

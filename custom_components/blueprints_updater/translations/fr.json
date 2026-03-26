@@ -1,0 +1,119 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurer Blueprints Updater",
+        "description": "Voulez-vous configurer Blueprints Updater ? Il scannera vos blueprints locaux et cherchera des mises à jour.",
+        "data": {
+          "auto_update": "Activer la mise à jour automatique",
+          "update_interval": "Intervalle de mise à jour (heures)",
+          "filter_mode": "Mode de filtrage",
+          "selected_blueprints": "Blueprints (facultatif)",
+          "max_backups": "Nombre maximal de versions de sauvegarde"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Une seule instance de Blueprints Updater est autorisée."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Paramètres",
+        "description": "Configurez la mise à jour automatique, l'intervalle d'analyse et les filtres pour vos blueprints.",
+        "data": {
+          "auto_update": "Activer la mise à jour automatique",
+          "update_interval": "Intervalle de mise à jour (heures)",
+          "filter_mode": "Mode de filtrage",
+          "selected_blueprints": "Blueprints sélectionnés",
+          "max_backups": "Nombre maximal de versions de sauvegarde"
+        }
+      }
+    }
+  },
+  "selector": {
+    "filter_mode": {
+      "options": {
+        "all": "Tout mettre à jour",
+        "whitelist": "Liste blanche (Mettre à jour uniquement les blueprints sélectionnés)",
+        "blacklist": "Liste noire (Ne pas mettre à jour les blueprints sélectionnés)"
+      }
+    }
+  },
+  "entity": {
+    "update": {
+      "blueprint": {
+        "name": "{name}"
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Recharger les blueprints",
+      "description": "Scanne tous les blueprints locaux pour de nouveaux fichiers et vérifie les mises à jour immédiatement."
+    },
+    "restore_blueprint": {
+      "name": "Restaurer un Blueprint",
+      "description": "Restaure un blueprint à partir d'un fichier de sauvegarde numéroté (.bak.1, .bak.2, etc.) si disponible.",
+      "fields": {
+        "entity_id": {
+          "name": "Entité du Blueprint",
+          "description": "L'entité de mise à jour du blueprint que vous souhaitez restaurer."
+        },
+        "version": {
+          "name": "Version de sauvegarde",
+          "description": "Quelle version de sauvegarde restaurer (1 = la plus récente, 2 = plus ancienne, etc.)"
+        }
+      }
+    },
+    "update_all": {
+      "name": "Mettre à jour tous les Blueprints",
+      "description": "Télécharge et installe automatiquement toutes les mises à jour de blueprints disponibles simultanément.",
+      "fields": {
+        "backup": {
+          "name": "Créer une sauvegarde",
+          "description": "Créez des fichiers de sauvegarde numérotés pour tous les blueprints mis à jour avant de les écraser."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "missing_entity_id": {
+      "message": "Paramètre entity_id manquant."
+    },
+    "invalid_entity": {
+      "message": "Entité de mise à jour de blueprint non valide."
+    },
+    "not_found": {
+      "message": "Fichier blueprint original non trouvé."
+    },
+    "success": {
+      "message": "Sauvegarde restaurée avec succès."
+    },
+    "missing_backup": {
+      "message": "Fichier de sauvegarde manquant. Une sauvegarde n'a peut-être pas été créée lors de la mise à jour précédente."
+    },
+    "invalid_version": {
+      "message": "Version de sauvegarde non valide. Doit être comprise entre 1 et le nombre maximal de sauvegardes configuré."
+    },
+    "system_error": {
+      "message": "Erreur système lors de la restauration : {error}"
+    }
+  },
+  "common": {
+    "auto_update_title": "Blueprints Updater : Mise à jour automatique effectuée",
+    "auto_update_message": "Les blueprints suivants ont été mis à jour automatiquement :\n\n{blueprints}",
+    "update_available": "Mise à jour disponible depuis {source_url}",
+    "auto_update_warning": "Attention : La mise à jour automatique peut comporter des risques d'incompatibilité descendante si l'auteur introduit des changements majeurs.",
+    "usage_warning": "Attention : Cette mise à jour affectera {count} {domain}(s) en cours d'exécution.",
+    "up_to_date": "À jour",
+    "install_error": "Impossible d'installer le blueprint : {error}. Le fichier distant contient des erreurs et ne peut pas être appliqué en toute sécurité.",
+    "invalid_blueprint": "Blueprint non valide : Clé racine 'blueprint' manquante",
+    "incompatible": "Incompatible : {errors}",
+    "validation_error": "Erreur de validation : {error}",
+    "empty_content": "Contenu vide reçu",
+    "yaml_syntax_error": "Erreur de syntaxe YAML : {error}",
+    "fetch_error": "Erreur de récupération : {error}"
+  }
+}
