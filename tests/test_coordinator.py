@@ -377,6 +377,8 @@ async def test_async_install_blueprint_backup(hass, coordinator):
     path = "/config/blueprints/test.yaml"
     remote_content = "blueprint:\n  name: Test"
 
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.options = {"max_backups": 3}
     hass.services.has_service = MagicMock(return_value=True)
     hass.services.async_call = AsyncMock()
 
@@ -385,11 +387,12 @@ async def test_async_install_blueprint_backup(hass, coordinator):
         patch("custom_components.blueprints_updater.coordinator.os.replace") as mock_replace,
         patch("custom_components.blueprints_updater.coordinator.os.path.exists", return_value=True),
         patch("custom_components.blueprints_updater.coordinator.shutil.copy2") as mock_copy,
+        patch("custom_components.blueprints_updater.coordinator.os.remove"),
     ):
         await coordinator.async_install_blueprint(path, remote_content, backup=True)
 
-    mock_copy.assert_called_once_with(path, f"{path}.bak")
-    mock_replace.assert_called_once_with(f"{path}.tmp", path)
+    mock_copy.assert_called_once_with(path, f"{path}.bak.1")
+    mock_replace.assert_any_call(f"{path}.tmp", path)
 
 
 @pytest.mark.asyncio
@@ -408,7 +411,7 @@ async def test_async_restore_blueprint_success(hass, coordinator):
     ):
         result = await coordinator.async_restore_blueprint(path)
 
-    mock_replace.assert_called_once_with(f"{path}.bak", path)
+    mock_replace.assert_called_once_with(f"{path}.bak.1", path)
     assert result["success"] is True
     assert result["translation_key"] == "success"
     hass.services.async_call.assert_any_call("automation", "reload")
@@ -486,7 +489,7 @@ def test_validate_blueprint_incompatible_version(coordinator):
 
 def test_validate_blueprint_schema_error(coordinator):
     """Test _validate_blueprint catches schema validation errors."""
-    data = {"blueprint": {"name": "Test"}}  # Missing required 'domain'
+    data = {"blueprint": {"name": "Test"}}
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(data, "https://example.com/bp.yaml")
     assert result is not None
@@ -499,3 +502,84 @@ def test_validate_blueprint_missing_key(coordinator):
     result = coordinator._validate_blueprint({"not_blueprint": {}}, "https://example.com/bp.yaml")
     assert result is not None
     assert "Missing 'blueprint' root key" in result
+
+
+@pytest.mark.asyncio
+async def test_backup_rotation(coordinator, tmp_path):
+    """Test that backups rotate correctly: .bak.1 is newest, .bak.3 is oldest."""
+    bp_file = tmp_path / "test.yaml"
+    bp_file.write_text("version_0")
+
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.options = {"max_backups": 3}
+    coordinator.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
+
+    for i in range(1, 4):
+        await coordinator.async_install_blueprint(
+            str(bp_file), f"version_{i}", reload_services=False, backup=True
+        )
+
+    assert bp_file.read_text() == "version_3"
+    assert (tmp_path / "test.yaml.bak.1").read_text() == "version_2"
+    assert (tmp_path / "test.yaml.bak.2").read_text() == "version_1"
+    assert (tmp_path / "test.yaml.bak.3").read_text() == "version_0"
+
+
+@pytest.mark.asyncio
+async def test_backup_max_limit(coordinator, tmp_path):
+    """Test that backups exceeding max_backups are cleaned up."""
+    bp_file = tmp_path / "test.yaml"
+    bp_file.write_text("v0")
+
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.options = {"max_backups": 2}
+    coordinator.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
+
+    for i in range(1, 5):
+        await coordinator.async_install_blueprint(
+            str(bp_file), f"v{i}", reload_services=False, backup=True
+        )
+
+    assert bp_file.read_text() == "v4"
+    assert (tmp_path / "test.yaml.bak.1").read_text() == "v3"
+    assert (tmp_path / "test.yaml.bak.2").read_text() == "v2"
+    assert not (tmp_path / "test.yaml.bak.3").exists()
+
+
+@pytest.mark.asyncio
+async def test_restore_versioned(coordinator, tmp_path):
+    """Test restoring from a specific backup version."""
+    bp_file = tmp_path / "test.yaml"
+    bp_file.write_text("current")
+    (tmp_path / "test.yaml.bak.1").write_text("backup_v1")
+    (tmp_path / "test.yaml.bak.2").write_text("backup_v2")
+
+    coordinator.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
+    coordinator.async_reload_services = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    result = await coordinator.async_restore_blueprint(str(bp_file), version=2)
+    assert result["success"] is True
+    assert bp_file.read_text() == "backup_v2"
+    assert not (tmp_path / "test.yaml.bak.2").exists()
+
+
+@pytest.mark.asyncio
+async def test_backup_migration_old_bak(coordinator, tmp_path):
+    """Test migration of old .bak format to .bak.1 on next backup."""
+    bp_file = tmp_path / "test.yaml"
+    bp_file.write_text("current")
+    (tmp_path / "test.yaml.bak").write_text("old_backup")
+
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.options = {"max_backups": 3}
+    coordinator.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
+
+    await coordinator.async_install_blueprint(
+        str(bp_file), "new_version", reload_services=False, backup=True
+    )
+
+    assert bp_file.read_text() == "new_version"
+    assert (tmp_path / "test.yaml.bak.1").read_text() == "current"
+    assert (tmp_path / "test.yaml.bak.2").read_text() == "old_backup"
+    assert not (tmp_path / "test.yaml.bak").exists()

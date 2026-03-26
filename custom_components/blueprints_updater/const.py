@@ -7,6 +7,9 @@ CONF_UPDATE_INTERVAL = "update_interval"
 CONF_FILTER_MODE = "filter_mode"
 CONF_SELECTED_BLUEPRINTS = "selected_blueprints"
 CONF_AUTO_UPDATE = "auto_update"
+CONF_MAX_BACKUPS = "max_backups"
+
+DEFAULT_MAX_BACKUPS = 3
 
 FILTER_MODE_ALL = "all"
 FILTER_MODE_WHITELIST = "whitelist"

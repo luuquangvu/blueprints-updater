@@ -7,6 +7,7 @@
         "data": {
           "auto_update": "Tự động cập nhật",
           "update_interval": "Khoảng thời gian cập nhật (giờ)",
+          "max_backups": "Số phiên bản sao lưu tối đa",
           "filter_mode": "Chế độ lọc",
           "selected_blueprints": "Blueprints (không bắt buộc)"
         }
@@ -24,6 +25,7 @@
         "data": {
           "auto_update": "Tự động cập nhật",
           "update_interval": "Khoảng thời gian cập nhật (giờ)",
+          "max_backups": "Số phiên bản sao lưu tối đa",
           "filter_mode": "Chế độ lọc",
           "selected_blueprints": "Blueprints đã chọn"
         }
@@ -53,11 +55,15 @@
     },
     "restore_blueprint": {
       "name": "Khôi phục Blueprint",
-      "description": "Khôi phục lại tệp cấu hình blueprint từ bản sao lưu (.bak) nếu có.",
+      "description": "Khôi phục lại tệp cấu hình blueprint từ bản sao lưu được đánh số (.bak.1, .bak.2,...) nếu có.",
       "fields": {
         "entity_id": {
           "name": "Thực thể Blueprint",
           "description": "Thực thể cập nhật đại diện cho blueprint mà bạn muốn khôi phục."
+        },
+        "version": {
+          "name": "Phiên bản sao lưu",
+          "description": "Chọn phiên bản sao lưu muốn khôi phục (1 = mới nhất, 2 = cũ hơn,...)"
         }
       }
     },
@@ -67,7 +73,7 @@
       "fields": {
         "backup": {
           "name": "Tạo bản sao lưu",
-          "description": "Tạo tệp .bak cho tất cả các blueprint được cập nhật trước khi ghi đè."
+          "description": "Tạo bản sao lưu đánh số cho tất cả các blueprint được cập nhật trước khi ghi đè."
         }
       }
     }
@@ -87,6 +93,9 @@
     },
     "missing_backup": {
       "message": "Không tìm thấy tệp sao lưu. Có thể bản sao lưu đã không được tạo trong lần cập nhật trước."
+    },
+    "invalid_version": {
+      "message": "Phiên bản sao lưu không hợp lệ. Phải nằm trong khoảng từ 1 đến số bản sao lưu tối đa đã cấu hình."
     },
     "system_error": {
       "message": "Lỗi hệ thống khi khôi phục: {error}"

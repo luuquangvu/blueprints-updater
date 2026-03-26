@@ -7,6 +7,7 @@
         "data": {
           "auto_update": "Enable Auto-Update",
           "update_interval": "Update Interval (hours)",
+          "max_backups": "Max Backup Versions",
           "filter_mode": "Filter Mode",
           "selected_blueprints": "Blueprints (optional)"
         }
@@ -24,6 +25,7 @@
         "data": {
           "auto_update": "Enable Auto-Update",
           "update_interval": "Update Interval (hours)",
+          "max_backups": "Max Backup Versions",
           "filter_mode": "Filter Mode",
           "selected_blueprints": "Selected Blueprints"
         }
@@ -53,11 +55,15 @@
     },
     "restore_blueprint": {
       "name": "Restore Blueprint",
-      "description": "Restores a blueprint from its backup (.bak) file if available.",
+      "description": "Restores a blueprint from a numbered backup file (.bak.1, .bak.2, etc.) if available.",
       "fields": {
         "entity_id": {
           "name": "Blueprint Entity",
           "description": "The update entity of the blueprint you want to restore."
+        },
+        "version": {
+          "name": "Backup Version",
+          "description": "Which backup version to restore (1 = newest, 2 = older, etc.)"
         }
       }
     },
@@ -67,7 +73,7 @@
       "fields": {
         "backup": {
           "name": "Create Backup",
-          "description": "Create a .bak file for all updated blueprints before overwriting."
+          "description": "Create numbered backup files for all updated blueprints before overwriting."
         }
       }
     }
@@ -87,6 +93,9 @@
     },
     "missing_backup": {
       "message": "Missing backup file. A backup may not have been created during the previous update."
+    },
+    "invalid_version": {
+      "message": "Invalid backup version. Must be between 1 and the configured max backups."
     },
     "system_error": {
       "message": "System error during restore: {error}"

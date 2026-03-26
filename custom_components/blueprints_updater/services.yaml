@@ -3,7 +3,7 @@ reload:
   description: Scans all local blueprints for new files and checks for updates immediately.
 restore_blueprint:
   name: Restore Blueprint
-  description: Restores a blueprint from its backup (.bak) file if available.
+  description: Restores a blueprint from a numbered backup file (.bak.1, .bak.2, etc.) if available.
   fields:
     entity_id:
       name: Blueprint Entity
@@ -13,13 +13,23 @@ restore_blueprint:
         entity:
           integration: blueprints_updater
           domain: update
+    version:
+      name: Backup Version
+      description: Which backup version to restore (1 = newest, 2 = older, etc.)
+      required: false
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 10
+          mode: box
 update_all:
   name: Update All Blueprints
   description: Automatically downloads and installs all available blueprint updates.
   fields:
     backup:
       name: Create Backup
-      description: Create a .bak file for all updated blueprints before overwriting.
+      description: Create numbered backup files for all updated blueprints before overwriting.
       required: false
       default: true
       selector:

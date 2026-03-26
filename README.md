@@ -20,7 +20,7 @@
 - **Improved Reload Logic**: Automatically reloads `automation`, `script`, and `template` domains after an update to ensure immediate effect.
 - **Safety First**: Thoroughly validates remote blueprints before applying updates - checking YAML syntax, blueprint structure, and Home Assistant version compatibility. If anything is wrong (syntax errors, missing fields, or your HA version is too old for the new blueprint), the update is blocked with a clear error message to protect your system.
 - **Usage Insight**: Before updating, the integration calculates and displays the exact number of Automations and Scripts that currently rely on the blueprint, helping you understand the impact of the update.
-- **Backup & Restore**: Automatically create backups before updating blueprints. If an update breaks your automations, easily restore the previous version with a single service call. (Auto-updates are always backed up).
+- **Backup & Restore**: Automatically creates rotating, numbered backups (`.bak.1`, `.bak.2`, `.bak.3`) before updating blueprints, keeping up to N previous versions (configurable, default 3). If an update breaks your automations, easily restore any previous version with a single service call.
 - **Update All (Bulk Update)**: Instantly update all eligible blueprints simultaneously via the `blueprints_updater.update_all` service, without freezing Home Assistant.
 - **Manual Refresh**: Trigger an immediate scan via the **`blueprints_updater.reload`** action in Developer Tools.
 - **Dynamic Discovery**: Automatically detects and adds new blueprints as `update` entities without requiring a restart.

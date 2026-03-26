@@ -1,7 +1,9 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
+import custom_components.blueprints_updater.update as update_module
 from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.update import BlueprintUpdateEntity, async_setup_entry
 
@@ -150,8 +152,6 @@ async def test_entity_async_install(coordinator):
 
     coordinator.data["/config/blueprints/test.yaml"] = {"last_error": "Syntax Error"}
 
-    from homeassistant.exceptions import HomeAssistantError
-
     with pytest.raises(HomeAssistantError, match="Cannot install blueprint: Syntax Error"):
         await entity.async_install(version=None, backup=False)
 
@@ -178,7 +178,6 @@ async def test_entity_async_install_backup(coordinator):
 @pytest.mark.asyncio
 async def test_entity_release_summary_with_usage(coordinator):
     """Test release summary includes usage warning."""
-    import custom_components.blueprints_updater.update as update_module
 
     # Test automation usage
     info_auto = {

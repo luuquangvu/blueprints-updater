@@ -18,8 +18,10 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_AUTO_UPDATE,
     CONF_FILTER_MODE,
+    CONF_MAX_BACKUPS,
     CONF_SELECTED_BLUEPRINTS,
     CONF_UPDATE_INTERVAL,
+    DEFAULT_MAX_BACKUPS,
     DEFAULT_UPDATE_INTERVAL_HOURS,
     DOMAIN,
     FILTER_MODE_ALL,
@@ -64,6 +66,10 @@ def _get_config_schema(
                 CONF_UPDATE_INTERVAL,
                 default=defaults.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_HOURS),
             ): vol.All(cv.positive_int, vol.Range(min=1)),
+            vol.Optional(
+                CONF_MAX_BACKUPS,
+                default=defaults.get(CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS),
+            ): vol.All(cv.positive_int, vol.Range(min=1, max=10)),
             vol.Required(
                 CONF_FILTER_MODE,
                 default=defaults.get(CONF_FILTER_MODE, FILTER_MODE_ALL),

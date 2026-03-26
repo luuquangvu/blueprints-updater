@@ -11,7 +11,9 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
 
 from .const import (
+    CONF_MAX_BACKUPS,
     CONF_UPDATE_INTERVAL,
+    DEFAULT_MAX_BACKUPS,
     DEFAULT_UPDATE_INTERVAL_HOURS,
     DOMAIN,
 )
@@ -80,16 +82,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not target_path:
             return {"success": False, "message": await _translate("not_found")}
 
-        result = await blueprint_coordinator.async_restore_blueprint(target_path)
+        version = int(call.data.get("version", 1))
+        max_backups = entry.options.get(CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS)
+        if version < 1 or version > max_backups:
+            return {
+                "success": False,
+                "message": await _translate("invalid_version"),
+            }
+        result = await blueprint_coordinator.async_restore_blueprint(target_path, version=version)
         key = result.pop("translation_key", result.pop("message", "system_error"))
         kwargs = result.pop("translation_kwargs", {})
         result["message"] = await _translate(key, **kwargs)
         return result
 
+    restore_schema = vol.Schema(
+        {
+            vol.Required("entity_id"): cv.entity_id,
+            vol.Optional("version", default=1): vol.All(vol.Coerce(int), vol.Range(min=1)),
+        }
+    )
+
     hass.services.async_register(
         DOMAIN,
         "restore_blueprint",
         async_restore_blueprint_handler,
+        schema=restore_schema,
         supports_response=SupportsResponse.ONLY,
     )
 

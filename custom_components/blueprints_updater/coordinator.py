@@ -22,7 +22,9 @@ from .const import (
     CONCURRENT_REQUESTS_LIMIT,
     CONF_AUTO_UPDATE,
     CONF_FILTER_MODE,
+    CONF_MAX_BACKUPS,
     CONF_SELECTED_BLUEPRINTS,
+    DEFAULT_MAX_BACKUPS,
     DOMAIN,
     DOMAIN_GIST,
     DOMAIN_GITHUB,
@@ -175,22 +177,39 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             path: Local path of the blueprint file.
             remote_content: The new YAML content to write.
             reload_services: Whether to reload HA services after writing.
-            backup: If True, creates a .bak backup before overwriting.
+            backup: If True, creates rotating numbered backups before overwriting.
         """
+        max_backups = DEFAULT_MAX_BACKUPS
+        if self.config_entry:
+            max_backups = self.config_entry.options.get(CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS)
+
         try:
 
-            def _save_file(file_path: str, content: str) -> None:
+            def _save_file(file_path: str, content: str, max_bak: int) -> None:
                 tmp_path = f"{file_path}.tmp"
 
                 with open(tmp_path, "w", encoding="utf-8") as f:
                     f.write(content)
 
                 if backup and os.path.exists(file_path):
-                    shutil.copy2(file_path, f"{file_path}.bak")
+                    old_bak = f"{file_path}.bak"
+                    if os.path.exists(old_bak):
+                        os.replace(old_bak, f"{file_path}.bak.1")
+                    for i in range(max_bak, 1, -1):
+                        src = f"{file_path}.bak.{i - 1}"
+                        dst = f"{file_path}.bak.{i}"
+                        if os.path.exists(src):
+                            os.replace(src, dst)
+
+                    shutil.copy2(file_path, f"{file_path}.bak.1")
+
+                    old = f"{file_path}.bak.{max_bak + 1}"
+                    if os.path.exists(old):
+                        os.remove(old)
 
                 os.replace(tmp_path, file_path)
 
-            await self.hass.async_add_executor_job(_save_file, path, remote_content)
+            await self.hass.async_add_executor_job(_save_file, path, remote_content, max_backups)
 
             if reload_services:
                 await self.async_reload_services()
@@ -203,25 +222,30 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Failed to update blueprint at %s: %s", path, err)
             raise
 
-    async def async_restore_blueprint(self, path: str) -> dict[str, Any]:
-        """Restore a blueprint from its .bak backup file.
+    async def async_restore_blueprint(self, path: str, version: int = 1) -> dict[str, Any]:
+        """Restore a blueprint from a numbered backup file.
 
         Args:
             path: Local path of the blueprint file to restore.
+            version: Which backup version to restore (1 = newest).
 
         Returns:
             A dictionary with 'success' (bool) and 'translation_key' (str).
         """
         try:
 
-            def _restore_file(file_path: str) -> tuple[bool, str]:
-                bak_path = f"{file_path}.bak"
+            def _restore_file(file_path: str, ver: int) -> tuple[bool, str]:
+                bak_path = f"{file_path}.bak.{ver}"
+                if ver == 1 and not os.path.exists(bak_path):
+                    old_bak = f"{file_path}.bak"
+                    if os.path.exists(old_bak):
+                        bak_path = old_bak
                 if not os.path.exists(bak_path):
                     return False, "missing_backup"
                 os.replace(bak_path, file_path)
                 return True, "success"
 
-            success, message = await self.hass.async_add_executor_job(_restore_file, path)
+            success, message = await self.hass.async_add_executor_job(_restore_file, path, version)
 
             if success:
                 await self.async_reload_services()
