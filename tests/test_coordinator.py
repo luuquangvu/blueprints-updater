@@ -343,7 +343,7 @@ async def test_async_update_data_auto_update(coordinator):
         patch("aiohttp.ClientSession", return_value=mock_session),
         patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
         patch.object(coordinator, "async_install_blueprint") as mock_install,
-        patch.object(coordinator, "_async_reload_services") as mock_reload,
+        patch.object(coordinator, "async_reload_services") as mock_reload,
     ):
         mock_session.__aenter__.return_value = mock_session
         mock_hash.return_value.hexdigest.return_value = "new"

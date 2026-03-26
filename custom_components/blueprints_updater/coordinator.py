@@ -115,11 +115,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         auto_updated_count = sum(1 for info in results.values() if info.pop("_auto_updated", False))
         if auto_updated_count > 0:
             _LOGGER.info("Auto-updated %d blueprints", auto_updated_count)
-            await self._async_reload_services()
+            await self.async_reload_services()
 
         return results
 
-    async def _async_reload_services(self) -> None:
+    async def async_reload_services(self) -> None:
         """Reload automation, script, and template services."""
         for domain in ("automation", "script", "template"):
             if self.hass.services.has_service(domain, "reload"):
@@ -156,7 +156,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.hass.async_add_executor_job(_save_file, path, remote_content)
 
             if reload_services:
-                await self._async_reload_services()
+                await self.async_reload_services()
 
             if getattr(self, "data", None) and path in self.data:
                 self.data[path]["updatable"] = False
@@ -187,7 +187,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             success, message = await self.hass.async_add_executor_job(_restore_file, path)
 
             if success:
-                await self._async_reload_services()
+                await self.async_reload_services()
                 await self.async_request_refresh()
 
             return {
@@ -396,7 +396,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Returns:
             Dictionary mapping paths to blueprint properties.
         """
-        blueprint_path = hass.config.path("blueprints")
+        blueprint_path: str = hass.config.path("blueprints")
         found_blueprints = {}
 
         if not os.path.isdir(blueprint_path):

@@ -19,7 +19,9 @@
 - **Tự động Cập nhật**: Tùy chọn tự động tải xuống và áp dụng các bản cập nhật ngay khi được phát hiện.
 - **Cải tiến Logic Reload**: Tự động tải lại các miền `automation`, `script`, và `template` sau khi cập nhật để đảm bảo thay đổi có hiệu lực ngay lập tức.
 - **An toàn là trên hết**: Kiểm tra tính hợp lệ của mã YAML trước khi cập nhật. Nếu tệp nguồn bị lỗi cú pháp, hệ thống sẽ chặn cập nhật để bảo vệ cấu hình của bạn và cung cấp thông báo lỗi chi tiết.
+- **Cảnh báo Tác động (Usage Insight)**: Trước khi cập nhật, tiện ích sẽ tính toán và hiển thị chính xác số lượng Automation và Script đang phụ thuộc vào blueprint này, giúp bạn lường trước mức độ ảnh hưởng của bản cập nhật.
 - **Sao lưu & Phục hồi (Backup & Restore)**: Tự động tạo bản sao lưu trước khi cập nhật blueprint. Nếu bản cập nhật làm hỏng tự động hóa, bạn có thể dễ dàng khôi phục lại cấu hình gốc. (Chế độ tự động cập nhật mặc định tạo bản sao lưu).
+- **Cập nhật hàng loạt (Update All)**: Cập nhật đồng loạt tất cả các blueprint đang có bản mới thông qua dịch vụ `blueprints_updater.update_all` cực kỳ nhanh chóng mà không làm treo Home Assistant.
 - **Làm mới thủ công (Manual Refresh)**: Kích hoạt quét ngay lập tức thông qua dịch vụ **`blueprints_updater.reload`** trong Developer Tools.
 - **Tự động nhận diện (Dynamic Discovery)**: Tự động phát hiện và thêm các blueprint mới dưới dạng thực thể cập nhật mà không cần khởi động lại.
 
