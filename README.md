@@ -93,7 +93,24 @@ To apply changes instantly without waiting for the next scheduled background sca
 2. **Reload the Integration**: Go to **Settings** > **Devices & Services** > **Blueprints Updater**, click the three dots, and select **Reload**.
 3. **Restart Home Assistant**.
 
-### Requirements
+### Testing the Integration
+
+If you want to see how the update process works immediately, you can use our **Test Blueprint**. This blueprint is updated automatically every day via GitHub Actions to simulate a new release.
+
+**Quick Import:**
+[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fluuquangvu%2Fdemo-blueprints%2Fblob%2Fmain%2Fblueprints%2Ftest_blueprint.yaml)
+
+**Manual Import:**
+
+1.  Copy this URL: `https://github.com/luuquangvu/demo-blueprints/blob/main/blueprints/test_blueprint.yaml`
+2.  In Home Assistant, go to **Settings** > **Automations & Scenes** > **Blueprints**.
+3.  Click **Import Blueprint** and paste the URL.
+
+Once imported, **Blueprints Updater** will detect it on the next scheduled scan. To see it immediately, you can [trigger a manual refresh](#applying-changes-addingdeleting-blueprints). When the GitHub Action updates the blueprint, you will receive a notification and can perform the update.
+
+---
+
+## Requirements
 
 For a blueprint to be trackable, it **must** contain a valid `source_url` within its metadata:
 
