@@ -55,7 +55,7 @@
     },
     "restore_blueprint": {
       "name": "Ripristina Blueprint",
-      "description": "Ripristina un blueprint da un file di backup numerato (.bak.1, .bak.2, ecc.) se disponibile.",
+      "description": "Ripristina un blueprint da un file di backup numerato (.bak.1, .bak.2, ecc.) si disponibile.",
       "fields": {
         "entity_id": {
           "name": "Entità Blueprint",

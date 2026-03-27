@@ -1,0 +1,119 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "设置 Blueprints Updater",
+        "description": "您想设置 Blueprints Updater 吗？它将扫描您的本地蓝图并检查更新。",
+        "data": {
+          "auto_update": "启用自动更新",
+          "update_interval": "更新间隔（小时）",
+          "filter_mode": "过滤模式",
+          "selected_blueprints": "蓝图（可选）",
+          "max_backups": "最大备份版本数"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "只允许运行一个 Blueprints Updater 实例。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "设置",
+        "description": "配置 Blueprints Updater 的行为和设置。",
+        "data": {
+          "auto_update": "启用自动更新",
+          "update_interval": "更新间隔（小时）",
+          "filter_mode": "过滤模式",
+          "selected_blueprints": "已选蓝图",
+          "max_backups": "最大备份版本数"
+        }
+      }
+    }
+  },
+  "selector": {
+    "filter_mode": {
+      "options": {
+        "all": "更新全部",
+        "whitelist": "白名单（仅更新所选蓝图）",
+        "blacklist": "黑名单（不更新所选蓝图）"
+      }
+    }
+  },
+  "entity": {
+    "update": {
+      "blueprint": {
+        "name": "{name}"
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "重新加载蓝图",
+      "description": "扫描所有本地蓝图以查找新文件并立即检查更新。"
+    },
+    "restore_blueprint": {
+      "name": "还原蓝图",
+      "description": "如果可用，从编号的备份文件（.bak.1、.bak.2 等）中还原蓝图。",
+      "fields": {
+        "entity_id": {
+          "name": "蓝图实体",
+          "description": "您要还原的蓝图的更新实体。"
+        },
+        "version": {
+          "name": "备份版本",
+          "description": "要还原哪个备份版本（1 = 最新，2 = 较旧等）"
+        }
+      }
+    },
+    "update_all": {
+      "name": "更新所有蓝图",
+      "description": "自动同时下载并安装所有可用的蓝图更新。",
+      "fields": {
+        "backup": {
+          "name": "创建备份",
+          "description": "在覆盖之前为所有更新的蓝图创建编号的备份文件。"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "missing_entity_id": {
+      "message": "缺少 entity_id 参数。"
+    },
+    "invalid_entity": {
+      "message": "无效的蓝图更新实体。"
+    },
+    "not_found": {
+      "message": "未找到原始蓝图文件。"
+    },
+    "success": {
+      "message": "备份还原成功。"
+    },
+    "missing_backup": {
+      "message": "缺少备份文件。之前的更新期间可能未创建备份。"
+    },
+    "invalid_version": {
+      "message": "无效的备份版本。必须在 1 到配置的最大备份数之间。"
+    },
+    "system_error": {
+      "message": "还原期间发生系统错误：{error}"
+    }
+  },
+  "common": {
+    "auto_update_title": "Blueprints Updater：已自动更新",
+    "auto_update_message": "以下蓝图已自动更新：\n\n{blueprints}",
+    "update_available": "可从 {source_url} 获取更新",
+    "auto_update_warning": "警告：如果作者引入重大更改，自动更新可能会带来向后不兼容的风险。",
+    "usage_warning": "警告：此更新将影响 {count} 个正在运行的 {domain}。",
+    "up_to_date": "已是最新",
+    "install_error": "无法安装蓝图：{error}。远程文件有错误，无法安全应用。",
+    "invalid_blueprint": "无效蓝图：缺少 'blueprint' 根键",
+    "incompatible": "不兼容：{errors}",
+    "validation_error": "验证错误：{error}",
+    "empty_content": "收到的内容为空",
+    "yaml_syntax_error": "YAML 语法错误：{error}",
+    "fetch_error": "获取错误：{error}"
+  }
+}

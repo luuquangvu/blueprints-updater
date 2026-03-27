@@ -1,0 +1,119 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Skonfiguruj Blueprints Updater",
+        "description": "Czy chcesz skonfigurować Blueprints Updater? Przeskanuje on Twoje lokalne blueprints i poszuka aktualizacji.",
+        "data": {
+          "auto_update": "Włącz automatyczną aktualizację",
+          "update_interval": "Interwał aktualizacji (godziny)",
+          "filter_mode": "Tryb filtrowania",
+          "selected_blueprints": "Blueprints (opcjonalnie)",
+          "max_backups": "Maksymalna liczba wersji kopii zapasowych"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Dozwolona jest tylko jedna instancja Blueprints Updater."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Ustawienia",
+        "description": "Skonfiguruj zachowanie i ustawienia Blueprints Updater.",
+        "data": {
+          "auto_update": "Włącz automatyczną aktualizację",
+          "update_interval": "Interwał aktualizacji (godziny)",
+          "filter_mode": "Tryb filtrowania",
+          "selected_blueprints": "Wybrane Blueprints",
+          "max_backups": "Maksymalna liczba wersji kopii zapasowych"
+        }
+      }
+    }
+  },
+  "selector": {
+    "filter_mode": {
+      "options": {
+        "all": "Aktualizuj wszystko",
+        "whitelist": "Biała lista (aktualizuj tylko wybrane Blueprints)",
+        "blacklist": "Czarna lista (nie aktualizuj wybranych Blueprints)"
+      }
+    }
+  },
+  "entity": {
+    "update": {
+      "blueprint": {
+        "name": "{name}"
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Przeładuj Blueprints",
+      "description": "Skanuje wszystkie lokalne Blueprints w poszukiwaniu nowych plików i natychmiast sprawdza aktualizacje."
+    },
+    "restore_blueprint": {
+      "name": "Przywróć Blueprint",
+      "description": "Przywraca Blueprint z ponumerowanego pliku kopii zapasowej (.bak.1, .bak.2 itp.), jeśli jest dostępny.",
+      "fields": {
+        "entity_id": {
+          "name": "Encja Blueprint",
+          "description": "Encja aktualizacji Blueprints, którą chcesz przywrócić."
+        },
+        "version": {
+          "name": "Wersja kopii zapasowej",
+          "description": "Którą wersję kopii zapasowej przywrócić (1 = najnowsza, 2 = starsza itp.)"
+        }
+      }
+    },
+    "update_all": {
+      "name": "Aktualizuj wszystkie Blueprints",
+      "description": "Automatycznie pobiera i instaluje wszystkie dostępne aktualizacje Blueprints jednocześnie.",
+      "fields": {
+        "backup": {
+          "name": "Utwórz kopię zapasową",
+          "description": "Utwórz ponumerowane pliki kopii zapasowych dla wszystkich zaktualizowanych Blueprints przed nadpisaniem."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "missing_entity_id": {
+      "message": "Brak parametru entity_id."
+    },
+    "invalid_entity": {
+      "message": "Nieprawidłowa encja aktualizacji Blueprints."
+    },
+    "not_found": {
+      "message": "Nie znaleziono oryginalnego pliku Blueprint."
+    },
+    "success": {
+      "message": "Kopia zapasowa przywrócona pomyślnie."
+    },
+    "missing_backup": {
+      "message": "Brak pliku kopii zapasowej. Kopia zapasowa mogła nie zostać utworzona podczas poprzedniej aktualizacji."
+    },
+    "invalid_version": {
+      "message": "Nieprawidłowa wersja kopii zapasowej. Musi mieścić się w przedziale od 1 do skonfigurowanego maksimum."
+    },
+    "system_error": {
+      "message": "Błąd systemu podczas przywracania: {error}"
+    }
+  },
+  "common": {
+    "auto_update_title": "Blueprints Updater: Automatycznie zaktualizowano",
+    "auto_update_message": "Następujące Blueprints zostały automatycznie zaktualizowane:\n\n{blueprints}",
+    "update_available": "Aktualizacja dostępna pod adresem {source_url}",
+    "auto_update_warning": "Ostrzeżenie: Automatyczna aktualizacja może wiązać się z ryzykiem braku kompatybilności wstecznej, jeśli autor wprowadzi przełomowe zmiany.",
+    "usage_warning": "Ostrzeżenie: Ta aktualizacja wpłynie na {count} uruchomionych {domain}(ów).",
+    "up_to_date": "Aktualne",
+    "install_error": "Nie można zainstalować Blueprint: {error}. Plik zdalny zawiera błędy i nie można go bezpiecznie zastosować.",
+    "invalid_blueprint": "Nieprawidłowy Blueprint: Brak klucza głównego 'blueprint'",
+    "incompatible": "Niekompatybilne: {errors}",
+    "validation_error": "Błąd walidacji: {error}",
+    "empty_content": "Otrzymano pustą zawartość",
+    "yaml_syntax_error": "Błąd składni YAML: {error}",
+    "fetch_error": "Błąd pobierania: {error}"
+  }
+}
