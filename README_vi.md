@@ -98,11 +98,11 @@ Vì Home Assistant không liên tục giám sát tệp hệ thống để tiết
 Nếu bạn muốn thấy quy trình cập nhật hoạt động như thế nào ngay lập tức, bạn có thể sử dụng **Test Blueprint** của chúng tôi. Blueprint này được cập nhật tự động hàng ngày thông qua GitHub Actions để mô phỏng một bản phát hành mới.
 
 **Cài đặt nhanh:**
-[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fluuquangvu%2Fdemo-blueprints%2Fblob%2Fmain%2Fblueprints%2Ftest_blueprint.yaml)
+[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fluuquangvu%2Fdemo-blueprints%2Fblob%2Fmain%2Fblueprints%2Fmotion_light_blueprint.yaml)
 
 **Cài đặt thủ công:**
 
-1.  Sao chép URL này: `https://github.com/luuquangvu/demo-blueprints/blob/main/blueprints/test_blueprint.yaml`
+1.  Sao chép URL này: `https://github.com/luuquangvu/demo-blueprints/blob/main/blueprints/motion_light_blueprint.yaml`
 2.  Trong Home Assistant, đi tới **Cài đặt** > **Tự động hóa & Cảnh** > **Bản thiết kế**.
 3.  Nhấp vào **Nhập bản thiết kế** và dán URL vào.
 
