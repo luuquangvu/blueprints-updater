@@ -21,7 +21,7 @@
     "step": {
       "init": {
         "title": "Settings",
-        "description": "Configure auto-update, scanning interval, and filters for your blueprints.",
+        "description": "Configure the behavior and settings for Blueprints Updater.",
         "data": {
           "auto_update": "Enable Auto-Update",
           "update_interval": "Update Interval (hours)",

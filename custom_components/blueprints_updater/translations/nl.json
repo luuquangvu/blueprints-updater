@@ -21,7 +21,7 @@
     "step": {
       "init": {
         "title": "Instellingen",
-        "description": "Configureer automatische updates, scan-interval en filters voor uw blueprints.",
+        "description": "Configureer de opties en instellingen voor Blueprints Updater.",
         "data": {
           "auto_update": "Automatische update inschakelen",
           "update_interval": "Update-interval (uren)",

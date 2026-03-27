@@ -21,7 +21,7 @@
     "step": {
       "init": {
         "title": "Paramètres",
-        "description": "Configurez la mise à jour automatique, l'intervalle d'analyse et les filtres pour vos blueprints.",
+        "description": "Configurez les options et les paramètres de Blueprints Updater.",
         "data": {
           "auto_update": "Activer la mise à jour automatique",
           "update_interval": "Intervalle de mise à jour (heures)",

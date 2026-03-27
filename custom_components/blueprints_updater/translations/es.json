@@ -21,7 +21,7 @@
     "step": {
       "init": {
         "title": "Configuración",
-        "description": "Configura la actualización automática, el intervalo de escaneo y los filtros para tus blueprints.",
+        "description": "Configura las opciones y ajustes de Blueprints Updater.",
         "data": {
           "auto_update": "Habilitar actualización automática",
           "update_interval": "Intervalo de actualización (horas)",

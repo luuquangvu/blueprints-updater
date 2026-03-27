@@ -21,7 +21,7 @@
     "step": {
       "init": {
         "title": "Cài đặt",
-        "description": "Cấu hình tự động cập nhật, khoảng thời gian quét và bộ lọc cho các blueprint của bạn.",
+        "description": "Cấu hình các tùy chọn và cài đặt cho Blueprints Updater.",
         "data": {
           "auto_update": "Tự động cập nhật",
           "update_interval": "Khoảng thời gian cập nhật (giờ)",
