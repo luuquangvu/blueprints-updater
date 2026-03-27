@@ -76,13 +76,25 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._translations: dict[str, str] = {}
 
     async def async_translate(self, key: str, **kwargs: Any) -> str:
-        """Translate a key using the current language."""
+        """Translate a key using the current language.
+
+        This method is a wrapper around async_get_translations that provides
+        a more convenient API and better error handling for startup race conditions.
+        """
         language = self.hass.config.language
-        translations = await async_get_translations(self.hass, language, "common", [DOMAIN])
+        translations: dict[str, str] = {}
+
+        try:
+            if DOMAIN in self.hass.config.components:
+                translations = await async_get_translations(self.hass, language, "common", [DOMAIN])
+        except Exception as err:
+            _LOGGER.debug("Could not load translations for %s during setup: %s", DOMAIN, err)
+
         template = translations.get(f"component.{DOMAIN}.common.{key}", key)
         try:
             return template.format(**kwargs) if kwargs else template
-        except KeyError:
+        except (KeyError, ValueError, IndexError) as err:
+            _LOGGER.debug("Error formatting translation for %s: %s", key, err)
             return template
 
     async def _async_update_data(self) -> dict[str, Any]:

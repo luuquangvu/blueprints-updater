@@ -70,9 +70,24 @@ async def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _translate(key: str, **kwargs: str) -> str:
         lang = hass.config.language
-        translations = await translation.async_get_translations(hass, lang, "exceptions", [DOMAIN])
+        translations: dict[str, str] = {}
+
+        try:
+            if DOMAIN in hass.config.components:
+                translations = await translation.async_get_translations(
+                    hass, lang, "exceptions", [DOMAIN]
+                )
+        except Exception as err:
+            _LOGGER.debug(
+                "Could not load translations for %s exceptions during setup: %s", DOMAIN, err
+            )
+
         msg = translations.get(f"component.{DOMAIN}.exceptions.{key}.message", key)
-        return msg.format(**kwargs) if kwargs else msg
+        try:
+            return msg.format(**kwargs) if kwargs else msg
+        except (KeyError, ValueError, IndexError) as err:
+            _LOGGER.debug("Error formatting translation for %s: %s", key, err)
+            return msg
 
     async def async_reload_action_handler(_: ServiceCall) -> None:
         """Handle the reload action call."""

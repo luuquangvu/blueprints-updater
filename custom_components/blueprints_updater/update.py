@@ -92,6 +92,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
     _attr_has_entity_name = True
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_supported_features = UpdateEntityFeature.INSTALL | UpdateEntityFeature.BACKUP
+    _attr_translation_key = "blueprint"
 
     def __init__(
         self,
@@ -154,7 +155,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        self.hass.async_create_task(self._async_localize_strings())
+        if self.hass:
+            self.hass.async_create_task(self._async_localize_strings())
         super()._handle_coordinator_update()
 
     async def _async_localize_strings(self) -> None:

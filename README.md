@@ -95,7 +95,7 @@ To apply changes instantly without waiting for the next scheduled background sca
 
 ### Testing the Integration
 
-If you want to see how the update process works immediately, you can use our **Test Blueprint**. This blueprint is updated automatically every day via GitHub Actions to simulate a new release.
+If you want to see how the update process works immediately, you can use the **Motion-Activated Light/Switch (Daily Update)** blueprint. This blueprint is updated automatically every day via GitHub Actions to simulate a new release.
 
 **Quick Import:**
 [![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fluuquangvu%2Fdemo-blueprints%2Fblob%2Fmain%2Fblueprints%2Fmotion_light_blueprint.yaml)
