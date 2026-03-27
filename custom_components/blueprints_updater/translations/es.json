@@ -21,7 +21,7 @@
     "step": {
       "init": {
         "title": "Configuración",
-        "description": "Configura la actualización automática, el intervalo de escaneo y los filtros para tus blueprints.",
+        "description": "Configura las opciones y ajustes de Blueprints Updater.",
         "data": {
           "auto_update": "Habilitar actualización automática",
           "update_interval": "Intervalo de actualización (horas)",
@@ -105,11 +105,11 @@
     "auto_update_title": "Blueprints Updater: Actualizado automáticamente",
     "auto_update_message": "Los siguientes blueprints se han actualizado automáticamente:\n\n{blueprints}",
     "update_available": "Actualización disponible desde {source_url}",
-    "auto_update_warning": "Advertencia: la actualización automática puede comportar riesgos de incompatibilidad si el autor introduce cambios importantes.",
-    "usage_warning": "Advertencia: esta actualización afectará a {count} {domain}(s) en ejecución.",
+    "auto_update_warning": "Advertencia: la actualización automática puede conllevar riesgos de incompatibilidad si el autor introduce cambios importantes.",
+    "usage_warning": "Advertencia: esta actualización afectará a {count} {domain} en ejecución.",
     "up_to_date": "Actualizado",
     "install_error": "No se puede instalar el blueprint: {error}. El archivo remoto tiene errores y no se puede aplicar de forma segura.",
-    "invalid_blueprint": "Blueprint no válido: Falta la clave raíz 'blueprint' illumination",
+    "invalid_blueprint": "Blueprint no válido: Falta la clave raíz 'blueprint'",
     "incompatible": "Incompatible: {errors}",
     "validation_error": "Error de validación: {error}",
     "empty_content": "Se ha recibido contenido vacío",

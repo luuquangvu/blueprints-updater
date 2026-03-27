@@ -21,7 +21,7 @@
     "step": {
       "init": {
         "title": "Instellingen",
-        "description": "Configureer automatische updates, scan-interval en filters voor uw blueprints.",
+        "description": "Configureer de opties en instellingen voor Blueprints Updater.",
         "data": {
           "auto_update": "Automatische update inschakelen",
           "update_interval": "Update-interval (uren)",
@@ -106,9 +106,9 @@
     "auto_update_message": "De volgende blueprints zijn automatisch bijgewerkt:\n\n{blueprints}",
     "update_available": "Update beschikbaar van {source_url}",
     "auto_update_warning": "Waarschuwing: Automatische updates kunnen risico's voor achterwaartse incompatibiliteit met zich meebrengen als de auteur baanbrekende wijzigingen introduceert.",
-    "usage_warning": "Waarschuwing: Deze update heeft invloed op {count} actieve {domain}(s).",
+    "usage_warning": "Waarschuwing: Deze update heeft invloed op {count} actieve {domain}.",
     "up_to_date": "Bijgewerkt",
-    "install_error": "Kan blueprint niet installeren: {error}. Het externe bestand bevat fouten en kan không veilig worden toegepast. (Fixing typo: niet veilig worden toegepast)",
+    "install_error": "Kan blueprint niet installeren: {error}. Het externe bestand bevat fouten en kan niet veilig worden toegepast.",
     "invalid_blueprint": "Ongeldige blueprint: Root-sleutel 'blueprint' ontbreekt",
     "incompatible": "Incompatibel: {errors}",
     "validation_error": "Validatiefout: {error}",

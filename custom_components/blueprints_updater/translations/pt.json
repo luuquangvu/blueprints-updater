@@ -1,0 +1,119 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurar Blueprints Updater",
+        "description": "Deseja configurar o Blueprints Updater? Ele irá verificar seus blueprints locais e procurar por atualizações.",
+        "data": {
+          "auto_update": "Ativar atualização automática",
+          "update_interval": "Intervalo de atualização (horas)",
+          "filter_mode": "Modo de filtro",
+          "selected_blueprints": "Blueprints (opcional)",
+          "max_backups": "Máximo de versões de backup"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Apenas uma única instância do Blueprints Updater é permitida."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configurações",
+        "description": "Configure o comportamento e as definições do Blueprints Updater.",
+        "data": {
+          "auto_update": "Ativar atualização automática",
+          "update_interval": "Intervalo de atualização (horas)",
+          "filter_mode": "Modo de filtro",
+          "selected_blueprints": "Blueprints selecionados",
+          "max_backups": "Máximo de versões de backup"
+        }
+      }
+    }
+  },
+  "selector": {
+    "filter_mode": {
+      "options": {
+        "all": "Atualizar tudo",
+        "whitelist": "Lista branca (apenas atualizar blueprints selecionados)",
+        "blacklist": "Lista negra (não atualizar blueprints selecionados)"
+      }
+    }
+  },
+  "entity": {
+    "update": {
+      "blueprint": {
+        "name": "{name}"
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Recarregar blueprints",
+      "description": "Verifica todos os blueprints locais à procura de novos ficheiros e verifica atualizações imediatamente."
+    },
+    "restore_blueprint": {
+      "name": "Restaurar Blueprint",
+      "description": "Restaura um blueprint a partir de um ficheiro de cópia de segurança numerado (.bak.1, .bak.2, etc.) se estiver disponível.",
+      "fields": {
+        "entity_id": {
+          "name": "Entidade do Blueprint",
+          "description": "A entidade de atualização do blueprint que deseja restaurar."
+        },
+        "version": {
+          "name": "Versão da Cópia de Segurança",
+          "description": "Qual a versão da cópia de segurança a restaurar (1 = mais recente, 2 = mais antiga, etc.)"
+        }
+      }
+    },
+    "update_all": {
+      "name": "Atualizar todos os Blueprints",
+      "description": "Descarrega e instala automaticamente todas as atualizações de blueprints disponíveis em simultâneo.",
+      "fields": {
+        "backup": {
+          "name": "Criar cópia de segurança",
+          "description": "Crie ficheiros de cópia de segurança numerados para todos os blueprints atualizados antes de os substituir."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "missing_entity_id": {
+      "message": "Falta o parâmetro entity_id."
+    },
+    "invalid_entity": {
+      "message": "Entidade de atualização de blueprint inválida."
+    },
+    "not_found": {
+      "message": "Ficheiro original do blueprint não encontrado."
+    },
+    "success": {
+      "message": "Cópia de segurança restaurada com sucesso."
+    },
+    "missing_backup": {
+      "message": "Ficheiro de cópia de segurança em falta. Pode não ter sido criada uma cópia de segurança durante a atualização anterior."
+    },
+    "invalid_version": {
+      "message": "Versão da cópia de segurança inválida. Deve estar entre 1 e o máximo configurado."
+    },
+    "system_error": {
+      "message": "Erro de sistema durante o restauro: {error}"
+    }
+  },
+  "common": {
+    "auto_update_title": "Blueprints Updater: Atualizado automaticamente",
+    "auto_update_message": "Os seguintes blueprints foram atualizados automaticamente:\n\n{blueprints}",
+    "update_available": "Atualização disponível em {source_url}",
+    "auto_update_warning": "Aviso: A atualização automática pode acarretar riscos de incompatibilidade se o autor introduzir alterações profundas.",
+    "usage_warning": "Aviso: Esta atualização afetará {count} {domain} em execução.",
+    "up_to_date": "Atualizado",
+    "install_error": "Não foi possível instalar o blueprint: {error}. O ficheiro remoto contém erros e não pode ser aplicado em segurança.",
+    "invalid_blueprint": "Blueprint inválido: Falta a chave raiz 'blueprint'",
+    "incompatible": "Incompatível: {errors}",
+    "validation_error": "Erro de validação: {error}",
+    "empty_content": "Conteúdo recebido vazio",
+    "yaml_syntax_error": "Erro de sintaxe YAML: {error}",
+    "fetch_error": "Erro ao procurar: {error}"
+  }
+}

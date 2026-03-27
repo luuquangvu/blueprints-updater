@@ -21,7 +21,7 @@
     "step": {
       "init": {
         "title": "Paramètres",
-        "description": "Configurez la mise à jour automatique, l'intervalle d'analyse et les filtres pour vos blueprints.",
+        "description": "Configurez les options et les paramètres de Blueprints Updater.",
         "data": {
           "auto_update": "Activer la mise à jour automatique",
           "update_interval": "Intervalle de mise à jour (heures)",
@@ -106,7 +106,7 @@
     "auto_update_message": "Les blueprints suivants ont été mis à jour automatiquement :\n\n{blueprints}",
     "update_available": "Mise à jour disponible depuis {source_url}",
     "auto_update_warning": "Attention : La mise à jour automatique peut comporter des risques d'incompatibilité descendante si l'auteur introduit des changements majeurs.",
-    "usage_warning": "Attention : Cette mise à jour affectera {count} {domain}(s) en cours d'exécution.",
+    "usage_warning": "Attention : Cette mise à jour affectera {count} {domain} en cours d'exécution.",
     "up_to_date": "À jour",
     "install_error": "Impossible d'installer le blueprint : {error}. Le fichier distant contient des erreurs et ne peut pas être appliqué en toute sécurité.",
     "invalid_blueprint": "Blueprint non valide : Clé racine 'blueprint' manquante",

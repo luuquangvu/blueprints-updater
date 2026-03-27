@@ -8,7 +8,7 @@
           "auto_update": "Automatisches Update aktivieren",
           "update_interval": "Update-Intervall (Stunden)",
           "filter_mode": "Filter-Modus",
-          "selected_blueprints": "Blueprints (optional)",
+          "selected_blueprints": "Blueprints (wahlweise)",
           "max_backups": "Maximale Backup-Versionen"
         }
       }
@@ -21,7 +21,7 @@
     "step": {
       "init": {
         "title": "Einstellungen",
-        "description": "Konfigurieren Sie die automatische Aktualisierung, das Scan-Intervall und die Filter für Ihre Blueprints.",
+        "description": "Konfigurieren Sie die Einstellungen und das Verhalten von Blueprints Updater.",
         "data": {
           "auto_update": "Automatisches Update aktivieren",
           "update_interval": "Update-Intervall (Stunden)",
@@ -106,7 +106,7 @@
     "auto_update_message": "Die folgenden Blueprints wurden automatisch aktualisiert:\n\n{blueprints}",
     "update_available": "Update verfügbar von {source_url}",
     "auto_update_warning": "Warnung: Die automatische Aktualisierung kann Risiken in Bezug auf die Abwärtskompatibilität bergen, wenn der Autor bahnbrechende Änderungen einführt.",
-    "usage_warning": "Warnung: Dieses Update betrifft {count} laufende {domain}(s).",
+    "usage_warning": "Warnung: Dieses Update betrifft {count} laufende {domain}.",
     "up_to_date": "Auf dem neuesten Stand",
     "install_error": "Blueprint kann nicht installiert werden: {error}. Die Remote-Datei weist Fehler auf und kann nicht sicher angewendet werden.",
     "invalid_blueprint": "Ungültiger Blueprint: Root-Schlüssel 'blueprint' fehlt",

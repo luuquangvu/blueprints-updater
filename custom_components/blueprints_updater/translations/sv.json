@@ -1,0 +1,119 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Konfigurera Blueprints Updater",
+        "description": "Vill du konfigurera Blueprints Updater? Den kommer att skanna dina lokala blueprints och leta efter uppdateringar.",
+        "data": {
+          "auto_update": "Aktivera automatisk uppdatering",
+          "update_interval": "Uppdateringsintervall (timmar)",
+          "filter_mode": "Filterläge",
+          "selected_blueprints": "Blueprints (valfritt)",
+          "max_backups": "Max antal backupversioner"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Endast en instans av Blueprints Updater är tillåten."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Inställningar",
+        "description": "Konfigurera beteende och inställningar för Blueprints Updater.",
+        "data": {
+          "auto_update": "Aktivera automatisk uppdatering",
+          "update_interval": "Uppdateringsintervall (timmar)",
+          "filter_mode": "Filterläge",
+          "selected_blueprints": "Valda Blueprints",
+          "max_backups": "Max antal backupversioner"
+        }
+      }
+    }
+  },
+  "selector": {
+    "filter_mode": {
+      "options": {
+        "all": "Uppdatera alla",
+        "whitelist": "Vitlista (Uppdatera endast valda blueprints)",
+        "blacklist": "Svartlista (Uppdatera inte valda blueprints)"
+      }
+    }
+  },
+  "entity": {
+    "update": {
+      "blueprint": {
+        "name": "{name}"
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Ladda om blueprints",
+      "description": "Skannar alla lokala blueprints efter nya filer och letar efter uppdateringar omedelbart."
+    },
+    "restore_blueprint": {
+      "name": "Återställ Blueprint",
+      "description": "Återställer en blueprint från en numrerad backupfil (.bak.1, .bak.2, etc.) om tillgänglig.",
+      "fields": {
+        "entity_id": {
+          "name": "Blueprint-entitet",
+          "description": "Update-entiteten för den blueprint du vill återställa."
+        },
+        "version": {
+          "name": "Backupversion",
+          "description": "Vilken backupversion som ska återställas (1 = nyaste, 2 = äldre, etc.)"
+        }
+      }
+    },
+    "update_all": {
+      "name": "Uppdatera alla Blueprints",
+      "description": "Laddar automatiskt ner och installerar alla tillgängliga blueprint-uppdateringar samtidigt.",
+      "fields": {
+        "backup": {
+          "name": "Skapa backup",
+          "description": "Skapa numrerade backupfiler för alla uppdaterade blueprints innan de skrivs över."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "missing_entity_id": {
+      "message": "Parametern entity_id saknas."
+    },
+    "invalid_entity": {
+      "message": "Ogiltig blueprint-update-entitet."
+    },
+    "not_found": {
+      "message": "Ursprunglig blueprint-fil hittades inte."
+    },
+    "success": {
+      "message": "Backup återställdes framgångsfullt."
+    },
+    "missing_backup": {
+      "message": "Backupfil saknas. En backup kanske inte skapades under föregående uppdatering."
+    },
+    "invalid_version": {
+      "message": "Ogiltig backupversion. Måste vara mellan 1 och konfigurerat max-antal."
+    },
+    "system_error": {
+      "message": "Systemfel under återställning: {error}"
+    }
+  },
+  "common": {
+    "auto_update_title": "Blueprints Updater: Automatiskt uppdaterad",
+    "auto_update_message": "Följande blueprints har uppdaterats automatiskt:\n\n{blueprints}",
+    "update_available": "Uppdatering tillgänglig från {source_url}",
+    "auto_update_warning": "Varning: Automatisk uppdatering kan medföra risker för bakåtkompatibilitet om författaren introducerar banbrytande ändringar.",
+    "usage_warning": "Varning: Denna uppdatering kommer att påverka {count} körande {domain}.",
+    "up_to_date": "Uppdaterad",
+    "install_error": "Kan inte installera blueprint: {error}. Fjärrfilen har fel och kan inte appliceras säkert.",
+    "invalid_blueprint": "Ogiltig blueprint: Root-nyckeln 'blueprint' saknas",
+    "incompatible": "Inkompatibel: {errors}",
+    "validation_error": "Valideringsfel: {error}",
+    "empty_content": "Tomt innehåll mottogs",
+    "yaml_syntax_error": "YAML-syntaxfel: {error}",
+    "fetch_error": "Hämtningsfel: {error}"
+  }
+}
