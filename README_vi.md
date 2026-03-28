@@ -22,7 +22,7 @@
 - **Cảnh báo Tác động (Usage Insight)**: Trước khi cập nhật, tiện ích sẽ tính toán và hiển thị chính xác số lượng Automation và Script đang phụ thuộc vào blueprint này, giúp bạn lường trước mức độ ảnh hưởng của bản cập nhật.
 - **Sao lưu & Phục hồi (Backup & Restore)**: Tự động tạo bản sao lưu đánh số (`.bak.1`, `.bak.2`, `.bak.3`) trước khi cập nhật blueprint, giữ lại tối đa N phiên bản cũ (có thể cấu hình, mặc định 3). Nếu bản cập nhật làm hỏng tự động hóa, bạn có thể dễ dàng khôi phục bất kỳ phiên bản cũ nào.
 - **Cập nhật hàng loạt (Update All)**: Cập nhật đồng loạt tất cả các blueprint đang có bản mới thông qua dịch vụ `blueprints_updater.update_all` cực kỳ nhanh chóng mà không làm treo Home Assistant.
-- **Làm mới thủ công (Manual Refresh)**: Kích hoạt quét ngay lập tức thông qua dịch vụ **`blueprints_updater.reload`** trong Developer Tools.
+- **Làm mới thủ công (Manual Refresh)**: Kích hoạt quét ngay lập tức thông qua dịch vụ **`blueprints_updater.reload`** trong Developer Tools hoặc menu **YAML configuration reloading**.
 - **Tự động nhận diện (Dynamic Discovery)**: Tự động phát hiện và thêm các blueprint mới dưới dạng thực thể cập nhật mà không cần khởi động lại.
 - **Hỗ trợ đa ngôn ngữ (Multilingual)**: Được địa phương hóa hoàn toàn cho nhiều ngôn ngữ khác nhau. Tích hợp tự động thích ứng với cài đặt ngôn ngữ trong Home Assistant của bạn.
 
@@ -75,7 +75,7 @@ Khi cài đặt bản cập nhật từ bảng điều khiển Home Assistant, b
 
 Nếu bạn phát hiện ra rằng bản blueprint mới cập nhật làm hỏng các automations hoặc có thay đổi không tương thích, bạn có thể dễ dàng quay về phiên bản trước đó:
 
-1. Đi tới **Công cụ nhà phát triển (Developer Tools)** > **Hành động (Actions)**.
+1. Đi tới **Công cụ nhà phát triển (Developer Tools)** > **Hành động (Actions)**. _Lưu ý: Yêu cầu quyền quản trị._
 2. Tìm kiếm hành động **`blueprints_updater.restore_blueprint`**.
 3. Chọn thực thể `update` tương ứng với blueprint mà bạn muốn khôi phục.
 4. (Tùy chọn) Nhập **Backup Version** mà bạn muốn khôi phục (mặc định là **1** cho bản sao lưu gần nhất).
@@ -89,7 +89,7 @@ Vì Home Assistant không liên tục giám sát tệp hệ thống để tiết
 
 Để áp dụng các thay đổi này tức thì mà không cần chờ đến lần quét tự động tiếp theo, bạn phải làm **một** trong các cách sau:
 
-1. **Chạy hành động Reload (Khuyên dùng)**: Vào **Công cụ nhà phát triển (Developer Tools)** > **Hành động (Actions)**, tìm kiếm hành động **`blueprints_updater.reload`** và nhấn **Thực hiện hành động (Perform Action)**. Tích hợp sẽ ngay lập tức quét thư mục blueprints và sinh ra/xóa bỏ thực thể tương ứng.
+1. **Chạy hành động Reload (Khuyên dùng)**: Vào **Công cụ nhà phát triển (Developer Tools)** > **YAML**, tìm **Blueprints Updater** trong danh sách **YAML configuration reloading** và nhấn **Reload**. Hoặc sử dụng hành động **`blueprints_updater.reload`** trong phần **Hành động (Actions)** (Chỉ dành cho quản trị viên).
 2. **Reload Tích hợp**: Vào **Cài đặt (Settings)** > **Thiết bị & Dịch vụ (Devices & Services)** > **Blueprints Updater**, nhấn vào ba chấm và chọn **Tải lại (Reload)**.
 3. **Khởi động lại Home Assistant**.
 

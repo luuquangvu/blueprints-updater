@@ -1,5 +1,4 @@
 import hashlib
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -7,6 +6,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.blueprints_updater.__init__ import (
+    async_setup,
     async_setup_entry,
     async_unload_entry,
 )
@@ -61,12 +61,15 @@ async def test_service_registration(hass: HomeAssistant):
             "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
             return_value=coordinator_mock,
         ),
-        patch.object(hass.services, "async_register") as mock_register,
+        patch(
+            "custom_components.blueprints_updater.__init__.async_register_admin_service"
+        ) as mock_register,
     ):
+        await async_setup(hass, {})
         await async_setup_entry(hass, entry)
 
         calls = [
-            call.args[1] if len(call.args) > 1 else call.kwargs.get("service")
+            call.args[2] if len(call.args) > 2 else call.kwargs.get("service")
             for call in mock_register.call_args_list
         ]
         assert "reload" in calls
@@ -76,12 +79,12 @@ async def test_service_registration(hass: HomeAssistant):
         restore_call = next(
             call
             for call in mock_register.call_args_list
-            if (len(call.args) > 1 and call.args[1] == "restore_blueprint")
+            if (len(call.args) > 2 and call.args[2] == "restore_blueprint")
             or call.kwargs.get("service") == "restore_blueprint"
         )
         schema = (
-            restore_call.args[3]
-            if len(restore_call.args) > 3
+            restore_call.args[4]
+            if len(restore_call.args) > 4
             else restore_call.kwargs.get("schema")
         )
         assert schema is not None
@@ -106,18 +109,23 @@ async def test_service_handlers(hass: HomeAssistant):
 
     hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
 
-    with patch(
-        "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
-        return_value=coordinator_mock,
+    with (
+        patch(
+            "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
+            return_value=coordinator_mock,
+        ),
+        patch(
+            "custom_components.blueprints_updater.__init__.async_register_admin_service"
+        ) as mock_register,
     ):
+        await async_setup(hass, {})
         await async_setup_entry(hass, entry)
 
-        mock_register = cast(MagicMock, hass.services.async_register)
         reload_handler = next(
             (
-                call.args[2] if len(call.args) > 2 else call.kwargs.get("service_func")
+                call.args[3] if len(call.args) > 3 else call.kwargs.get("service_func")
                 for call in mock_register.call_args_list
-                if (len(call.args) > 1 and call.args[1] == "reload")
+                if (len(call.args) > 2 and call.args[2] == "reload")
                 or call.kwargs.get("service") == "reload"
             ),
             None,
@@ -128,9 +136,9 @@ async def test_service_handlers(hass: HomeAssistant):
 
         update_all_handler = next(
             (
-                call.args[2] if len(call.args) > 2 else call.kwargs.get("service_func")
+                call.args[3] if len(call.args) > 3 else call.kwargs.get("service_func")
                 for call in mock_register.call_args_list
-                if (len(call.args) > 1 and call.args[1] == "update_all")
+                if (len(call.args) > 2 and call.args[2] == "update_all")
                 or call.kwargs.get("service") == "update_all"
             ),
             None,
@@ -163,18 +171,23 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
 
     hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
 
-    with patch(
-        "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
-        return_value=coordinator_mock,
+    with (
+        patch(
+            "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
+            return_value=coordinator_mock,
+        ),
+        patch(
+            "custom_components.blueprints_updater.__init__.async_register_admin_service"
+        ) as mock_register,
     ):
+        await async_setup(hass, {})
         await async_setup_entry(hass, entry)
 
-        mock_register = cast(MagicMock, hass.services.async_register)
         restore_handler = next(
             (
-                call.args[2] if len(call.args) > 2 else call.kwargs.get("service_func")
+                call.args[3] if len(call.args) > 3 else call.kwargs.get("service_func")
                 for call in mock_register.call_args_list
-                if (len(call.args) > 1 and call.args[1] == "restore_blueprint")
+                if (len(call.args) > 2 and call.args[2] == "restore_blueprint")
                 or call.kwargs.get("service") == "restore_blueprint"
             ),
             None,
