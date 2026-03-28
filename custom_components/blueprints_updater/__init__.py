@@ -15,6 +15,8 @@ from homeassistant.helpers.selector import (
     NumberSelectorConfig,
     NumberSelectorMode,
 )
+from homeassistant.helpers.service import async_register_admin_service
+from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     CONF_MAX_BACKUPS,
@@ -28,6 +30,12 @@ from .coordinator import BlueprintUpdateCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.UPDATE]
+
+
+async def async_setup(hass: HomeAssistant, _: ConfigType) -> bool:
+    """Set up the Blueprints Updater component."""
+    _async_register_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -53,20 +61,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    await _async_register_services(hass)
-
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     return True
 
 
-async def _async_register_services(hass: HomeAssistant) -> None:
-    """Register (or re-register) services with dynamic schemas."""
-    active_coordinator: BlueprintUpdateCoordinator | None = next(
-        iter(hass.data.get(DOMAIN, {}).values()), None
-    )
-    if not active_coordinator:
-        return
+def _async_register_services(hass: HomeAssistant) -> None:
+    """Register services."""
+
+    async def _get_coordinator() -> BlueprintUpdateCoordinator | None:
+        return next(iter(hass.data.get(DOMAIN, {}).values()), None)
 
     async def _translate(key: str, **kwargs: str) -> str:
         lang = hass.config.language
@@ -91,13 +95,21 @@ async def _async_register_services(hass: HomeAssistant) -> None:
 
     async def async_reload_action_handler(_: ServiceCall) -> None:
         """Handle the reload action call."""
+        active_coordinator = await _get_coordinator()
         if active_coordinator:
             await active_coordinator.async_request_refresh()
 
-    hass.services.async_register(DOMAIN, "reload", async_reload_action_handler)
+    async_register_admin_service(hass, DOMAIN, "reload", async_reload_action_handler)
 
     async def async_restore_blueprint_handler(call: ServiceCall) -> dict:
         """Handle the restore blueprint action."""
+        active_coordinator = await _get_coordinator()
+        if not active_coordinator:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="not_found",
+            )
+
         entity_id = call.data.get("entity_id")
         if not entity_id:
             raise ServiceValidationError(
@@ -127,9 +139,14 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             )
 
         version = int(call.data.get("version", 1))
-        max_backups = active_coordinator.config_entry.options.get(
-            CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS
-        )
+        config_entry = active_coordinator.config_entry
+        if not config_entry:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="system_error",
+            )
+
+        max_backups = config_entry.options.get(CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS)
         if version < 1 or version > max_backups:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -156,7 +173,8 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         }
     )
 
-    hass.services.async_register(
+    async_register_admin_service(
+        hass,
         DOMAIN,
         "restore_blueprint",
         async_restore_blueprint_handler,
@@ -166,6 +184,10 @@ async def _async_register_services(hass: HomeAssistant) -> None:
 
     async def async_update_all_handler(call: ServiceCall) -> None:
         """Handle updating all available blueprints."""
+        active_coordinator = await _get_coordinator()
+        if not active_coordinator:
+            return
+
         backup_pref = call.data.get("backup", True)
 
         updatable_paths = [
@@ -177,10 +199,14 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         if not updatable_paths:
             return
 
+        config_entry = active_coordinator.config_entry
+        if not config_entry:
+            return
+
         _LOGGER.info(
             "Starting bulk update for %d blueprints in %s",
             len(updatable_paths),
-            active_coordinator.config_entry.entry_id,
+            config_entry.entry_id,
         )
 
         for path in updatable_paths:
@@ -193,7 +219,8 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         await active_coordinator.async_reload_services()
         await active_coordinator.async_request_refresh()
 
-    hass.services.async_register(
+    async_register_admin_service(
+        hass,
         DOMAIN,
         "update_all",
         async_update_all_handler,
@@ -212,7 +239,6 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     interval_hours = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_HOURS)
     blueprint_coordinator.update_interval = timedelta(hours=interval_hours)
 
-    await _async_register_services(hass)
     await blueprint_coordinator.async_request_refresh()
 
 

@@ -22,7 +22,7 @@
 - **Usage Insight**: Before updating, the integration calculates and displays the exact number of Automations and Scripts that currently rely on the blueprint, helping you understand the impact of the update.
 - **Backup & Restore**: Automatically creates rotating, numbered backups (`.bak.1`, `.bak.2`, `.bak.3`) before updating blueprints, keeping up to N previous versions (configurable, default 3). If an update breaks your automations, easily restore any previous version with a single service call.
 - **Update All (Bulk Update)**: Instantly update all eligible blueprints simultaneously via the `blueprints_updater.update_all` service, without freezing Home Assistant.
-- **Manual Refresh**: Trigger an immediate scan via the **`blueprints_updater.reload`** action in Developer Tools.
+- **Manual Refresh**: Trigger an immediate scan via the **`blueprints_updater.reload`** action in Developer Tools or the **YAML configuration reloading** menu.
 - **Dynamic Discovery**: Automatically detects and adds new blueprints as `update` entities without requiring a restart.
 - **Multilingual Support**: Fully localized in several languages. The integration automatically adapts to your Home Assistant language settings.
 
@@ -75,7 +75,7 @@ When installing an update from the Home Assistant dashboard, you will have the o
 
 If you find that a newly updated blueprint breaks your automations or has an incompatible change, you can easily revert to the previous version:
 
-1. Go to **Developer Tools** > **Actions** (or **Services**).
+1. Go to **Developer Tools** > **Actions**. _Note: Administrative privileges are required._
 2. Search for the **`blueprints_updater.restore_blueprint`** action.
 3. Select the `update` entity associated with the blueprint you want to restore.
 4. (Optional) Provide the **Backup Version** you wish to restore (default is **1** for the most recent).
@@ -89,7 +89,7 @@ Since Home Assistant does not constantly monitor the file system to save resourc
 
 To apply changes instantly without waiting for the next scheduled background scan, you must do **one** of the following:
 
-1. **Run the Reload Action (Recommended)**: Go to **Developer Tools** > **Actions**, search for **`blueprints_updater.reload`**, and click **Perform Action**. The integration will instantly scan your blueprints directory and create any new entities or update statuses.
+1. **Run the Reload Action (Recommended)**: Go to **Developer Tools** > **YAML**, find **Blueprints Updater** in the **YAML configuration reloading** list, and click **Reload**. Alternatively, use the **`blueprints_updater.reload`** action in **Developer Tools** > **Actions** (Administrator only).
 2. **Reload the Integration**: Go to **Settings** > **Devices & Services** > **Blueprints Updater**, click the three dots, and select **Reload**.
 3. **Restart Home Assistant**.
 
