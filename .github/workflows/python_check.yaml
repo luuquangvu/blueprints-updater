@@ -1,4 +1,4 @@
-name: Lint and Type Check
+name: Python Checks
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
       - "**.py"
       - "pyproject.toml"
       - "uv.lock"
-      - ".github/workflows/lint.yaml"
+      - ".github/workflows/python_check.yaml"
   pull_request:
     branches:
       - main
@@ -16,10 +16,10 @@ on:
       - "**.py"
       - "pyproject.toml"
       - "uv.lock"
-      - ".github/workflows/lint.yaml"
+      - ".github/workflows/python_check.yaml"
 
 jobs:
-  lint:
+  python-checks:
     runs-on: ubuntu-latest
 
     steps:
@@ -40,3 +40,6 @@ jobs:
 
       - name: Run Ty Check
         run: uv run ty check
+
+      - name: Run Tests
+        run: uv run pytest
