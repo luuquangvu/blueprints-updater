@@ -44,6 +44,7 @@ from .const import (
     RE_SOURCE_URL_LINE,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
+    STAGGER_DELAY,
 )
 from .utils import retry_async
 
@@ -75,6 +76,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=update_interval,
         )
         self._translations: dict[str, str] = {}
+        self._background_task: asyncio.Task | None = None
 
     async def async_translate(self, key: str, **kwargs: Any) -> str:
         """Translate a key using the current language.
@@ -99,7 +101,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return template
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch blueprint update data."""
+        """Fetch blueprint update data.
+
+        This method performs a fast local scan and returns immediate results
+        to ensure the integration starts instantly. Remote updates are
+        triggered in a background task.
+        """
         filter_mode = (
             self.config_entry.options.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
             if self.config_entry
@@ -110,10 +117,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         _LOGGER.debug(
-            "Starting blueprint update check (filter_mode=%s, selected_blueprints=%s)",
+            "Starting fast local blueprint scan (filter_mode=%s)",
             filter_mode,
-            selected_blueprints,
         )
+
         blueprints = await self.hass.async_add_executor_job(
             self.scan_blueprints,
             self.hass,
@@ -135,55 +142,99 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for path, info in blueprints.items()
         }
 
-        semaphore = asyncio.Semaphore(CONCURRENT_REQUESTS_LIMIT)
-        session = async_get_clientsession(self.hass)
+        if self.data:
+            for path, info in results.items():
+                if path in self.data and self.data[path]["local_hash"] == info["local_hash"]:
+                    info.update(
+                        {
+                            "updatable": self.data[path]["updatable"],
+                            "remote_hash": self.data[path]["remote_hash"],
+                            "remote_content": self.data[path]["remote_content"],
+                            "last_error": self.data[path]["last_error"],
+                        }
+                    )
 
-        tasks = [
-            self._async_staggered_update(i * 0.5, session, semaphore, path, info, results)
-            for i, (path, info) in enumerate(blueprints.items())
-        ]
-        await asyncio.gather(*tasks)
+        self._start_background_refresh(blueprints)
 
-        auto_updated_names = sorted(
-            [info["name"] for info in results.values() if info.get("_auto_updated")]
-        )
-        for info in results.values():
-            info.pop("_auto_updated", None)
-
-        if auto_updated_names:
-            _LOGGER.info(
-                "Auto-updated %d blueprints: %s", len(auto_updated_names), auto_updated_names
-            )
-            await self.async_reload_services()
-
-            try:
-                language = self.hass.config.language
-                translations = await async_get_translations(self.hass, language, "common", [DOMAIN])
-                title_key = f"component.{DOMAIN}.common.auto_update_title"
-                message_key = f"component.{DOMAIN}.common.auto_update_message"
-
-                title = translations.get(title_key, "Blueprints Updater: Auto-Updated")
-                message_template = translations.get(
-                    message_key,
-                    "The following blueprints have been automatically updated:\n\n{blueprints}",
-                )
-
-                blueprints_list = "\n".join(f"- {name}" for name in auto_updated_names)
-                message = message_template.format(blueprints=blueprints_list)
-
-                await self.hass.services.async_call(
-                    "persistent_notification",
-                    "create",
-                    {
-                        "title": title,
-                        "message": message,
-                        "notification_id": f"{DOMAIN}_auto_update",
-                    },
-                )
-            except Exception as err:
-                _LOGGER.warning("Failed to send auto-update notification: %s", err)
-
+        _LOGGER.debug("Instant setup complete with %d blueprints", len(results))
         return results
+
+    def _start_background_refresh(self, blueprints: dict[str, Any]) -> None:
+        """Start or restart the background remote refresh task."""
+        if self._background_task and not self._background_task.done():
+            self._background_task.cancel()
+
+        self._background_task = self.hass.async_create_background_task(
+            self._async_background_refresh(blueprints),
+            name=f"{DOMAIN}_background_refresh",
+        )
+
+    async def _async_background_refresh(self, blueprints: dict[str, Any]) -> None:
+        """Fetch remote hashes in a throttled background queue."""
+        _LOGGER.debug("Starting background remote refresh for %d blueprints", len(blueprints))
+
+        session = async_get_clientsession(self.hass)
+        queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
+        for item in blueprints.items():
+            queue.put_nowait(item)
+
+        results_to_notify: list[str] = []
+
+        async def worker() -> None:
+            """Worker to process the queue."""
+            while not queue.empty():
+                path, info = await queue.get()
+                try:
+                    await self._async_update_blueprint_in_place(
+                        session, path, info, results_to_notify
+                    )
+                    self.async_set_updated_data(self.data)
+                    await asyncio.sleep(STAGGER_DELAY)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as err:
+                    _LOGGER.error("Error in background worker for %s: %s", path, err)
+                finally:
+                    queue.task_done()
+
+        await asyncio.gather(*[worker() for _ in range(CONCURRENT_REQUESTS_LIMIT)])
+
+        _LOGGER.debug("Background refresh complete")
+        if results_to_notify:
+            await self._async_handle_notifications(results_to_notify)
+
+    async def _async_handle_notifications(self, auto_updated_names: list[str]) -> None:
+        """Handle services reload and persistent notifications."""
+        auto_updated_names.sort()
+        _LOGGER.info("Auto-updated %d blueprints: %s", len(auto_updated_names), auto_updated_names)
+        await self.async_reload_services()
+
+        try:
+            language = self.hass.config.language
+            translations = await async_get_translations(self.hass, language, "common", [DOMAIN])
+            title_key = f"component.{DOMAIN}.common.auto_update_title"
+            message_key = f"component.{DOMAIN}.common.auto_update_message"
+
+            title = translations.get(title_key, "Blueprints Updater: Auto-Updated")
+            message_template = translations.get(
+                message_key,
+                "The following blueprints have been automatically updated:\n\n{blueprints}",
+            )
+
+            blueprints_list = "\n".join(f"- {name}" for name in auto_updated_names)
+            message = message_template.format(blueprints=blueprints_list)
+
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": title,
+                    "message": message,
+                    "notification_id": f"{DOMAIN}_auto_update",
+                },
+            )
+        except Exception as err:
+            _LOGGER.warning("Failed to send auto-update notification: %s", err)
 
     @staticmethod
     def _validate_blueprint(data: Any, source_url: str) -> str | None:
@@ -325,88 +376,65 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "translation_kwargs": {"error": str(err)},
             }
 
-    async def _async_staggered_update(
-        self,
-        delay: float,
-        session: aiohttp.ClientSession,
-        semaphore: asyncio.Semaphore,
-        path: str,
-        info: dict[str, Any],
-        results: dict[str, Any],
-    ) -> None:
-        """Update a single blueprint with a staggered delay."""
-        if delay > 0:
-            await asyncio.sleep(delay)
-        await self._async_update_blueprint(session, semaphore, path, info, results)
-
-    async def _async_update_blueprint(
+    async def _async_update_blueprint_in_place(
         self,
         session: aiohttp.ClientSession,
-        semaphore: asyncio.Semaphore,
         path: str,
         info: dict[str, Any],
-        results: dict[str, Any],
+        results_to_notify: list[str],
     ) -> None:
-        """Update a single blueprint."""
+        """Update a single blueprint directly in self.data."""
         source_url = info.get("source_url")
         if not source_url:
-            _LOGGER.debug("Skipping blueprint at %s: no source_url defined", path)
             return
 
-        _LOGGER.debug("Checking for updates: %s (source: %s)", info["name"], source_url)
+        _LOGGER.debug("Checking for updates: %s", info["name"])
         normalized_url = self._normalize_url(source_url)
-        _LOGGER.debug("Normalized URL for %s: %s", source_url, normalized_url)
 
-        async with semaphore:
+        try:
+            remote_content = await self._async_fetch_content(session, normalized_url)
+
+            if not remote_content:
+                if path in self.data:
+                    self.data[path]["last_error"] = "empty_content"
+                return
+
+            remote_content = self._ensure_source_url(remote_content, source_url)
+            remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
+            local_hash = info["hash"]
+            updatable = remote_hash != local_hash
+
+            last_error = None
             try:
-                remote_content = await self._async_fetch_content(session, normalized_url)
+                data = yaml_util.parse_yaml(remote_content)
+                last_error = self._validate_blueprint(data, source_url)
+            except Exception as err:
+                last_error = f"yaml_syntax_error|{err}"
 
-                _LOGGER.debug("Fetched %d bytes from %s", len(remote_content or ""), normalized_url)
-
-                if not remote_content:
-                    _LOGGER.warning("Empty content received from %s", normalized_url)
-                    results[path]["last_error"] = "empty_content"
-                    return
-
-                remote_content = self._ensure_source_url(remote_content, source_url)
-
-                remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
-                local_hash = info["hash"]
-                updatable = remote_hash != local_hash
-
-                try:
-                    data = yaml_util.parse_yaml(remote_content)
-                    last_error = self._validate_blueprint(data, source_url)
-                except Exception as err:
-                    _LOGGER.warning(
-                        "Could not parse remote blueprint from %s: %s",
-                        source_url,
-                        err,
-                    )
-                    last_error = f"yaml_syntax_error|{err}"
-
-                if (
-                    updatable
-                    and not last_error
-                    and self.config_entry
-                    and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
-                ):
-                    await self.async_install_blueprint(
-                        path, remote_content, reload_services=False, backup=True
-                    )
-                    results[path].update(
+            if (
+                updatable
+                and not last_error
+                and self.config_entry
+                and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
+            ):
+                await self.async_install_blueprint(
+                    path, remote_content, reload_services=False, backup=True
+                )
+                if path in self.data:
+                    self.data[path].update(
                         {
                             "remote_hash": remote_hash,
                             "remote_content": None,
                             "updatable": False,
                             "local_hash": remote_hash,
                             "last_error": None,
-                            "_auto_updated": True,
                         }
                     )
-                    return
+                results_to_notify.append(info["name"])
+                return
 
-                results[path].update(
+            if path in self.data:
+                self.data[path].update(
                     {
                         "remote_hash": remote_hash,
                         "remote_content": remote_content if updatable and not last_error else None,
@@ -414,9 +442,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "last_error": last_error,
                     }
                 )
-            except Exception as err:
-                _LOGGER.error("Error fetching blueprint after retries from %s: %s", source_url, err)
-                results[path]["last_error"] = f"fetch_error|{err}"
+        except Exception as err:
+            _LOGGER.error("Error fetching blueprint from %s: %s", source_url, err)
+            if path in self.data:
+                self.data[path]["last_error"] = f"fetch_error|{err}"
 
     @retry_async(max_retries=MAX_RETRIES, base_delay=RETRY_BACKOFF)
     async def _async_fetch_content(self, session: aiohttp.ClientSession, url: str) -> str:

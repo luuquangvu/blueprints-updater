@@ -1,6 +1,6 @@
-import asyncio
 import os
 from datetime import timedelta
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,13 +20,25 @@ def coordinator(hass):
     entry.options = {}
     entry.data = {}
     with patch(
-        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__", return_value=None
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
     ):
-        return BlueprintUpdateCoordinator(
+        coord = BlueprintUpdateCoordinator(
             hass,
             entry,
             timedelta(hours=24),
         )
+
+        coord._listeners = cast(Any, {})
+        coord.hass = hass
+        coord.data = {}
+
+        def _mock_set_data(data):
+            coord.data = data
+
+        coord.async_set_updated_data = cast(Any, MagicMock(side_effect=_mock_set_data))
+        coord.async_update_listeners = cast(Any, MagicMock())
+        return coord
 
 
 def test_normalize_url(coordinator):
@@ -163,15 +175,16 @@ async def test_async_update_blueprint(coordinator):
     mock_session = MagicMock()
     mock_session.get.return_value.__aenter__.return_value = mock_response
 
-    semaphore = asyncio.Semaphore(1)
-
     with (
         patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
         patch.object(coordinator, "_validate_blueprint", return_value=None),
     ):
         mock_hash.return_value.hexdigest.return_value = "new_hash"
-
-        await coordinator._async_update_blueprint(mock_session, semaphore, path, info, results)
+        coordinator.data = results
+        results_to_notify = []
+        await coordinator._async_update_blueprint_in_place(
+            mock_session, path, info, results_to_notify
+        )
 
     assert path in results
     assert results[path]["updatable"] is True
@@ -256,7 +269,11 @@ async def test_async_update_data_partial_failure(coordinator):
             patch.object(coordinator, "_validate_blueprint", return_value=None),
         ):
             mock_hash.return_value.hexdigest.return_value = "new_hash"
-            return await coordinator._async_update_data()
+            with patch.object(coordinator, "_start_background_refresh"):
+                results = await coordinator._async_update_data()
+                coordinator.data = results
+                await coordinator._async_background_refresh(blueprints)
+            return results
 
     results = await run_test()
 
@@ -271,11 +288,19 @@ async def test_async_update_data_partial_failure(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_update_blueprint_errors(coordinator):
-    """Test various error conditions in _async_update_blueprint."""
+async def test_async_update_blueprint_in_place_errors(coordinator):
+    """Test various error conditions in _async_update_blueprint_in_place."""
     path = "/config/blueprints/test.yaml"
     info = {"name": "Test", "source_url": "https://url", "hash": "hash"}
-    results = {path: {"last_error": None, "hash": "hash"}}
+    results = {
+        path: {
+            "last_error": None,
+            "hash": "hash",
+            "name": "Test",
+            "source_url": "https://url",
+        }
+    }
+    coordinator.data = results
 
     mock_resp_empty = AsyncMock()
     mock_resp_empty.status = 200
@@ -284,10 +309,10 @@ async def test_async_update_blueprint_errors(coordinator):
 
     mock_session = MagicMock()
     mock_session.get.return_value.__aenter__.return_value = mock_resp_empty
-    sem = asyncio.Semaphore(1)
+    results_to_notify = []
 
-    await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert results[path]["last_error"] == "empty_content"
+    await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
+    assert coordinator.data[path]["last_error"] == "empty_content"
 
     mock_resp_invalid = AsyncMock()
     mock_resp_invalid.status = 200
@@ -295,8 +320,8 @@ async def test_async_update_blueprint_errors(coordinator):
     mock_resp_invalid.text.return_value = "}invalid yaml: {\n"
     mock_session.get.return_value.__aenter__.return_value = mock_resp_invalid
 
-    await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert "yaml_syntax_error" in str(results[path]["last_error"])
+    await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
+    assert "yaml_syntax_error" in str(coordinator.data[path]["last_error"])
 
     mock_resp_missing_bp = AsyncMock()
     mock_resp_missing_bp.status = 200
@@ -304,13 +329,13 @@ async def test_async_update_blueprint_errors(coordinator):
     mock_resp_missing_bp.text.return_value = "other_key: value\nsource_url: https://url"
     mock_session.get.return_value.__aenter__.return_value = mock_resp_missing_bp
 
-    await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert "invalid_blueprint" in str(results[path]["last_error"])
+    await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
+    assert "invalid_blueprint" in str(coordinator.data[path]["last_error"])
 
     mock_session.get.side_effect = Exception("Connection Failed")
-    await coordinator._async_update_blueprint(mock_session, sem, path, info, results)
-    assert "fetch_error" in str(results[path]["last_error"])
-    assert "Connection Failed" in str(results[path]["last_error"])
+    await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
+    assert "fetch_error" in str(coordinator.data[path]["last_error"])
+    assert "Connection Failed" in str(coordinator.data[path]["last_error"])
 
 
 @pytest.mark.asyncio
@@ -327,16 +352,15 @@ async def test_async_install_blueprint_error(coordinator):
 async def test_async_update_data_auto_update(coordinator):
     """Test _async_update_data with auto_update enabled."""
     coordinator.config_entry.options = {"auto_update": True}
-    coordinator.scan_blueprints = MagicMock(
-        return_value={
-            "/test.yaml": {
-                "name": "Test",
-                "rel_path": "test.yaml",
-                "source_url": "https://url",
-                "hash": "old",
-            }
+    blueprints = {
+        "/test.yaml": {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "source_url": "https://url",
+            "hash": "old",
         }
-    )
+    }
+    coordinator.scan_blueprints = MagicMock(return_value=blueprints)
 
     mock_resp = AsyncMock()
     mock_resp.status = 200
@@ -366,7 +390,10 @@ async def test_async_update_data_auto_update(coordinator):
         mock_session.__aenter__.return_value = mock_session
         mock_hash.return_value.hexdigest.return_value = "new"
 
-        results = await coordinator._async_update_data()
+        with patch.object(coordinator, "_start_background_refresh"):
+            results = await coordinator._async_update_data()
+            coordinator.data = results
+            await coordinator._async_background_refresh(blueprints)
 
         mock_install.assert_called_once_with(
             "/test.yaml",
@@ -386,33 +413,31 @@ async def test_async_update_data_auto_update(coordinator):
             },
         )
 
-        assert "/test.yaml" in results
-        assert results["/test.yaml"]["updatable"] is False
-        assert results["/test.yaml"]["remote_content"] is None
-        assert results["/test.yaml"]["local_hash"] == "new"
-        assert "_auto_updated" not in results["/test.yaml"]
+        assert "/test.yaml" in coordinator.data
+        assert coordinator.data["/test.yaml"]["updatable"] is False
+        assert coordinator.data["/test.yaml"]["remote_content"] is None
+        assert coordinator.data["/test.yaml"]["local_hash"] == "new"
 
 
 @pytest.mark.asyncio
 async def test_async_update_data_auto_update_multiple_sorted(coordinator):
     """Test _async_update_data sorts multiple auto-updated blueprints."""
     coordinator.config_entry.options = {"auto_update": True}
-    coordinator.scan_blueprints = MagicMock(
-        return_value={
-            "/b.yaml": {
-                "name": "Beta",
-                "rel_path": "b.yaml",
-                "source_url": "https://url/b",
-                "hash": "old",
-            },
-            "/a.yaml": {
-                "name": "Alpha",
-                "rel_path": "a.yaml",
-                "source_url": "https://url/a",
-                "hash": "old",
-            },
-        }
-    )
+    blueprints = {
+        "/b.yaml": {
+            "name": "Beta",
+            "rel_path": "b.yaml",
+            "source_url": "https://url/b",
+            "hash": "old",
+        },
+        "/a.yaml": {
+            "name": "Alpha",
+            "rel_path": "a.yaml",
+            "source_url": "https://url/a",
+            "hash": "old",
+        },
+    }
+    coordinator.scan_blueprints = MagicMock(return_value=blueprints)
 
     mock_resp_a = AsyncMock()
     mock_resp_a.status = 200
@@ -453,7 +478,10 @@ async def test_async_update_data_auto_update_multiple_sorted(coordinator):
     ):
         mock_hash.return_value.hexdigest.return_value = "new"
 
-        await coordinator._async_update_data()
+        with patch.object(coordinator, "_start_background_refresh"):
+            results = await coordinator._async_update_data()
+            coordinator.data = results
+            await coordinator._async_background_refresh(blueprints)
 
         args = coordinator.hass.services.async_call.call_args_list
         notification_call = next(
@@ -683,7 +711,7 @@ async def test_backup_migration_old_bak(coordinator, tmp_path):
 
 @pytest.mark.asyncio
 async def test_async_staggered_update_delays(coordinator):
-    """Test that _async_update_data uses staggered delays for requests."""
+    """Test that background refresh uses staggered delays."""
     blueprints = {
         f"/path/{i}.yaml": {
             "name": f"BP {i}",
@@ -695,6 +723,7 @@ async def test_async_staggered_update_delays(coordinator):
     }
 
     coordinator.scan_blueprints = MagicMock(return_value=blueprints)
+    coordinator.data = {}
     mock_session = MagicMock()
 
     with (
@@ -703,12 +732,13 @@ async def test_async_staggered_update_delays(coordinator):
             return_value=mock_session,
         ),
         patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
-        patch.object(coordinator, "_async_update_blueprint", return_value=None),
+        patch.object(coordinator, "_async_update_blueprint_in_place", return_value=None),
+        patch.object(coordinator, "_start_background_refresh"),
     ):
-        await coordinator._async_update_data()
+        results = await coordinator._async_update_data()
+        coordinator.data = results
+        await coordinator._async_background_refresh(blueprints)
 
     sleep_calls = [call.args[0] for call in mock_sleep.call_args_list]
-    assert 0.5 in sleep_calls
-    assert 1.0 in sleep_calls
-    assert 0.0 not in sleep_calls
-    assert len(sleep_calls) == 2
+    assert all(d == 1.0 for d in sleep_calls)
+    assert len(sleep_calls) == 3
