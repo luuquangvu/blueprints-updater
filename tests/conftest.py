@@ -1,7 +1,14 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+
+
+@pytest.fixture(autouse=True)
+def mock_asyncio_sleep():
+    """Mock asyncio.sleep for all tests to run instantly."""
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        yield
 
 
 @pytest.fixture

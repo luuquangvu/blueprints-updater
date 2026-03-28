@@ -104,6 +104,7 @@
   "common": {
     "auto_update_title": "Blueprints Updater：已自动更新",
     "auto_update_message": "以下蓝图已自动更新：\n\n{blueprints}",
+    "update_available_short": "有可用更新",
     "update_available": "可从 {source_url} 获取更新",
     "auto_update_warning": "警告：如果作者引入重大更改，自动更新可能会带来向后不兼容的风险。",
     "usage_warning": "警告：此更新将影响 {count} 个正在运行的 {domain}。",

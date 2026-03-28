@@ -33,7 +33,7 @@ def retry_async(
                 except exceptions as err:
                     last_err = err
                     if attempt < max_retries:
-                        wait = (base_delay**attempt if exponential else base_delay) + (
+                        wait = (base_delay * (2**attempt) if exponential else base_delay) + (
                             random.uniform(0, 1) if jitter else 0
                         )
                         _LOGGER.warning(

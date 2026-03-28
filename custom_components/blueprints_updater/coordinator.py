@@ -15,6 +15,7 @@ from homeassistant.components.blueprint.models import Blueprint
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import yaml as yaml_util
@@ -135,13 +136,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
         semaphore = asyncio.Semaphore(CONCURRENT_REQUESTS_LIMIT)
+        session = async_get_clientsession(self.hass)
 
-        async with aiohttp.ClientSession() as session:
-            tasks = [
-                self._async_update_blueprint(session, semaphore, path, info, results)
-                for path, info in blueprints.items()
-            ]
-            await asyncio.gather(*tasks)
+        tasks = [
+            self._async_staggered_update(i * 0.5, session, semaphore, path, info, results)
+            for i, (path, info) in enumerate(blueprints.items())
+        ]
+        await asyncio.gather(*tasks)
 
         auto_updated_names = sorted(
             [info["name"] for info in results.values() if info.get("_auto_updated")]
@@ -323,6 +324,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "translation_key": "system_error",
                 "translation_kwargs": {"error": str(err)},
             }
+
+    async def _async_staggered_update(
+        self,
+        delay: float,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        path: str,
+        info: dict[str, Any],
+        results: dict[str, Any],
+    ) -> None:
+        """Update a single blueprint with a staggered delay."""
+        if delay > 0:
+            await asyncio.sleep(delay)
+        await self._async_update_blueprint(session, semaphore, path, info, results)
 
     async def _async_update_blueprint(
         self,

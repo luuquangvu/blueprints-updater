@@ -29,7 +29,7 @@ RE_FORUM_CODE_BLOCK = re.compile(r"<code[^>]*>(.*?)</code>", re.DOTALL)
 RE_BLUEPRINT_KEY = re.compile(r"^(blueprint:.*)$", re.MULTILINE)
 RE_SOURCE_URL_LINE = re.compile(r"^\s*source_url:\s*['\"]?(.*?)['\"]?\s*$", re.MULTILINE)
 
-CONCURRENT_REQUESTS_LIMIT = 5
+CONCURRENT_REQUESTS_LIMIT = 3
 REQUEST_TIMEOUT = 60
 MAX_RETRIES = 3
-RETRY_BACKOFF = 2
+RETRY_BACKOFF = 3

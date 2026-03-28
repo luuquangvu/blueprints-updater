@@ -98,6 +98,7 @@ def coordinator():
     comp.async_translate = AsyncMock(
         side_effect=lambda key, **kwargs: {
             "up_to_date": "Up to date",
+            "update_available_short": "Update available",
             "update_available": f"Update available from {kwargs.get('source_url')}",
             "auto_update_warning": (
                 "Warning: Auto-update may carry backward incompatibility risks "
@@ -131,11 +132,13 @@ async def test_entity_properties(coordinator):
         await entity._async_localize_strings()
 
     assert entity.name == "Test"
+    assert entity.release_url == "https://url.com"
     assert entity._path == "/config/blueprints/test.yaml"
     assert entity.auto_update is True
     assert entity.installed_version == "hash1xxx"
     assert entity.latest_version == "hash2xxx"
-    assert entity.release_summary == (
+    assert entity.release_summary == "Update available"
+    assert await entity.async_release_notes() == (
         "Update available from https://url.com\n\n"
         "Warning: Auto-update may carry backward incompatibility risks "
         "if the author introduces breaking changes."
@@ -143,7 +146,9 @@ async def test_entity_properties(coordinator):
     assert entity.extra_state_attributes == {}
 
     entity_missing = BlueprintUpdateEntity(
-        coordinator, "/missing.yaml", {"name": "Missing", "rel_path": "missing"}
+        coordinator,
+        "/missing.yaml",
+        {"name": "Missing", "rel_path": "missing", "source_url": "https://url.com"},
     )
     entity_missing.hass = coordinator.hass
     entity_missing.entity_id = "update.missing"
@@ -152,6 +157,7 @@ async def test_entity_properties(coordinator):
     assert entity_missing.installed_version is None
     assert entity_missing.latest_version is None
     assert entity_missing.release_summary is None
+    assert await entity_missing.async_release_notes() is None
 
     coordinator.data["/config/blueprints/test.yaml"]["last_error"] = "Fetch Error"
     assert entity.extra_state_attributes == {"last_error": "Fetch Error"}
@@ -228,9 +234,10 @@ async def test_entity_release_summary_with_usage(coordinator):
         patch.object(entity_auto, "async_write_ha_state"),
     ):
         await entity_auto._async_localize_strings()
-        summary = entity_auto.release_summary
-        assert summary is not None
-        assert "affect 2 running automation(s)" in summary
+        assert entity_auto.release_summary == "Update available"
+        notes = await entity_auto.async_release_notes()
+        assert notes is not None
+        assert "affect 2 running automation(s)" in notes
 
     info_script = {
         "name": "Test Script",
@@ -252,9 +259,10 @@ async def test_entity_release_summary_with_usage(coordinator):
         patch.object(entity_script, "async_write_ha_state"),
     ):
         await entity_script._async_localize_strings()
-        summary = entity_script.release_summary
-        assert summary is not None
-        assert "affect 1 running script(s)" in summary
+        assert entity_script.release_summary == "Update available"
+        notes = await entity_script.async_release_notes()
+        assert notes is not None
+        assert "affect 1 running script(s)" in notes
 
 
 @pytest.mark.asyncio
