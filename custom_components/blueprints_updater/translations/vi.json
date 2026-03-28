@@ -104,6 +104,7 @@
   "common": {
     "auto_update_title": "Blueprints Updater: Vừa tự động cập nhật",
     "auto_update_message": "Các blueprint sau đã được tự động cập nhật:\n\n{blueprints}",
+    "update_available_short": "Có bản cập nhật",
     "update_available": "Có bản cập nhật mới từ {source_url}",
     "auto_update_warning": "Cảnh báo: Tự động cập nhật có thể mang lại rủi ro không tương thích ngược nếu tác giả có những thay đổi lớn.",
     "usage_warning": "Cảnh báo: Bản cập nhật này sẽ ảnh hưởng đến {count} {domain} đang chạy.",

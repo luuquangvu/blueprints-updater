@@ -236,10 +236,10 @@ async def test_async_update_data_partial_failure(coordinator):
     mock_bad_resp.status = 404
     mock_bad_resp.raise_for_status = MagicMock(side_effect=Exception("404 Not Found"))
 
-    @patch("aiohttp.ClientSession")
-    async def run_test(mock_session_class):
-        mock_session = mock_session_class.return_value
-        mock_session.__aenter__.return_value = mock_session
+    @patch("custom_components.blueprints_updater.coordinator.async_get_clientsession")
+    async def run_test(mock_get_session):
+        mock_session = MagicMock()
+        mock_get_session.return_value = mock_session
 
         def get_side_effect(url, **_kwargs):
             m = MagicMock()
@@ -347,7 +347,10 @@ async def test_async_update_data_auto_update(coordinator):
     mock_session.get.return_value.__aenter__.return_value = mock_resp
 
     with (
-        patch("aiohttp.ClientSession", return_value=mock_session),
+        patch(
+            "custom_components.blueprints_updater.coordinator.async_get_clientsession",
+            return_value=mock_session,
+        ),
         patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
         patch.object(coordinator, "async_install_blueprint") as mock_install,
         patch.object(coordinator, "async_reload_services") as mock_reload,
@@ -432,7 +435,10 @@ async def test_async_update_data_auto_update_multiple_sorted(coordinator):
     mock_session.get.side_effect = get_side_effect
 
     with (
-        patch("aiohttp.ClientSession", return_value=mock_session),
+        patch(
+            "custom_components.blueprints_updater.coordinator.async_get_clientsession",
+            return_value=mock_session,
+        ),
         patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
         patch.object(coordinator, "async_install_blueprint"),
         patch.object(coordinator, "async_reload_services"),
@@ -673,3 +679,36 @@ async def test_backup_migration_old_bak(coordinator, tmp_path):
     assert (tmp_path / "test.yaml.bak.1").read_text() == "current"
     assert (tmp_path / "test.yaml.bak.2").read_text() == "old_backup"
     assert not (tmp_path / "test.yaml.bak").exists()
+
+
+@pytest.mark.asyncio
+async def test_async_staggered_update_delays(coordinator):
+    """Test that _async_update_data uses staggered delays for requests."""
+    blueprints = {
+        f"/path/{i}.yaml": {
+            "name": f"BP {i}",
+            "rel_path": f"{i}.yaml",
+            "source_url": f"https://url/{i}",
+            "hash": "hash",
+        }
+        for i in range(3)
+    }
+
+    coordinator.scan_blueprints = MagicMock(return_value=blueprints)
+    mock_session = MagicMock()
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.async_get_clientsession",
+            return_value=mock_session,
+        ),
+        patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        patch.object(coordinator, "_async_update_blueprint", return_value=None),
+    ):
+        await coordinator._async_update_data()
+
+    sleep_calls = [call.args[0] for call in mock_sleep.call_args_list]
+    assert 0.5 in sleep_calls
+    assert 1.0 in sleep_calls
+    assert 0.0 not in sleep_calls
+    assert len(sleep_calls) == 2

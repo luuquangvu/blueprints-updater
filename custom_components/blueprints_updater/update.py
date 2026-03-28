@@ -91,7 +91,9 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
     _attr_has_entity_name = True
     _attr_device_class = UpdateDeviceClass.FIRMWARE
-    _attr_supported_features = UpdateEntityFeature.INSTALL | UpdateEntityFeature.BACKUP
+    _attr_supported_features = (
+        UpdateEntityFeature.INSTALL | UpdateEntityFeature.BACKUP | UpdateEntityFeature.RELEASE_NOTES
+    )
     _attr_translation_key = "blueprint"
 
     def __init__(
@@ -112,7 +114,9 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         self._attr_name = info["name"]
         self._attr_unique_id = f"blueprint_{hashlib.sha256(info['rel_path'].encode()).hexdigest()}"
         self._attr_title = info["name"]
+        self._attr_release_url = info.get("source_url")
         self._attr_release_summary = None
+        self._full_notes = None
 
     @property
     def auto_update(self) -> bool:
@@ -127,6 +131,10 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         if self._path in self.coordinator.data:
             return self.coordinator.data[self._path]["local_hash"][:8]
         return None
+
+    async def async_release_notes(self) -> str | None:
+        """Return full release notes for the update."""
+        return self._full_notes
 
     @property
     def latest_version(self) -> str | None:
@@ -168,10 +176,13 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         if not info["updatable"]:
             self._attr_release_summary = await self.coordinator.async_translate("up_to_date")
         else:
-            summary = await self.coordinator.async_translate(
+            self._attr_release_summary = await self.coordinator.async_translate(
+                "update_available_short"
+            )
+            notes = await self.coordinator.async_translate(
                 "update_available", source_url=info["source_url"]
             )
-            summary += "\n\n" + await self.coordinator.async_translate("auto_update_warning")
+            notes += "\n\n" + await self.coordinator.async_translate("auto_update_warning")
 
             rel_path = info.get("rel_path", "")
             parts = rel_path.split("/", 1)
@@ -193,11 +204,11 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 )
 
             if total_usage > 0:
-                summary += "\n\n" + await self.coordinator.async_translate(
+                notes += "\n\n" + await self.coordinator.async_translate(
                     "usage_warning", count=total_usage, domain=domain
                 )
 
-            self._attr_release_summary = summary
+            self._full_notes = notes
 
         if self.hass and self.entity_id:
             self.async_write_ha_state()

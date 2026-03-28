@@ -104,6 +104,7 @@
   "common": {
     "auto_update_title": "Blueprints Updater: Automatisch aktualisiert",
     "auto_update_message": "Die folgenden Blueprints wurden automatisch aktualisiert:\n\n{blueprints}",
+    "update_available_short": "Update verfügbar",
     "update_available": "Update verfügbar von {source_url}",
     "auto_update_warning": "Warnung: Die automatische Aktualisierung kann Risiken in Bezug auf die Abwärtskompatibilität bergen, wenn der Autor bahnbrechende Änderungen einführt.",
     "usage_warning": "Warnung: Dieses Update betrifft {count} laufende {domain}.",

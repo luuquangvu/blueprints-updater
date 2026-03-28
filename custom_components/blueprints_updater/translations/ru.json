@@ -104,6 +104,7 @@
   "common": {
     "auto_update_title": "Blueprints Updater: Автоматически обновлено",
     "auto_update_message": "Следующие чертежи были автоматически обновлены:\n\n{blueprints}",
+    "update_available_short": "Доступно обновление",
     "update_available": "Доступно обновление от {source_url}",
     "auto_update_warning": "Предупреждение: Автоматическое обновление может нести риск обратной несовместимости, если автор внесет критические изменения.",
     "usage_warning": "Предупреждение: Это обновление затронет {count} работающих {domain}.",
