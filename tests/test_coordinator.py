@@ -167,10 +167,11 @@ async def test_async_update_blueprint(coordinator):
     }
     results = {path: {"last_error": None, "hash": "old_hash"}}
 
-    mock_response = AsyncMock()
+    mock_response = MagicMock()
     mock_response.status = 200
+    mock_response.headers = {"ETag": "new_etag"}
     mock_response.raise_for_status = MagicMock()
-    mock_response.text.return_value = "blueprint:\n  name: Test"
+    mock_response.text = AsyncMock(return_value="blueprint:\n  name: Test")
 
     mock_session = MagicMock()
     mock_session.get.return_value.__aenter__.return_value = mock_response
@@ -189,7 +190,46 @@ async def test_async_update_blueprint(coordinator):
     assert path in results
     assert results[path]["updatable"] is True
     assert results[path]["remote_hash"] == "new_hash"
+    assert results[path]["etag"] == "new_etag"
     assert "source_url" in results[path]["remote_content"]
+
+
+@pytest.mark.asyncio
+async def test_async_update_blueprint_not_modified(coordinator):
+    """Test the update flow when server returns 304 Not Modified."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "source_url": "https://url",
+        "hash": "old_hash",
+    }
+    coordinator.data = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "source_url": "https://url",
+            "local_hash": "old_hash",
+            "updatable": False,
+            "remote_hash": "old_hash",
+            "etag": "old_etag",
+        }
+    }
+
+    mock_response = MagicMock()
+    mock_response.status = 304
+    mock_response.headers = {"ETag": "old_etag"}
+    mock_response.raise_for_status = MagicMock()
+
+    mock_session = MagicMock()
+    mock_session.get.return_value.__aenter__.return_value = mock_response
+
+    results_to_notify = []
+    await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
+
+    assert coordinator.data[path]["etag"] == "old_etag"
+    assert coordinator.data[path]["updatable"] is False
+    assert coordinator.data[path].get("remote_content") is None
 
 
 @pytest.mark.asyncio
@@ -240,13 +280,15 @@ async def test_async_update_data_partial_failure(coordinator):
 
     coordinator.scan_blueprints = MagicMock(return_value=blueprints)
 
-    mock_good_resp = AsyncMock()
+    mock_good_resp = MagicMock()
     mock_good_resp.status = 200
+    mock_good_resp.headers = {"ETag": "good_etag"}
     mock_good_resp.raise_for_status = MagicMock()
-    mock_good_resp.text.return_value = "blueprint:\n  name: Good"
+    mock_good_resp.text = AsyncMock(return_value="blueprint:\n  name: Good")
 
-    mock_bad_resp = AsyncMock()
+    mock_bad_resp = MagicMock()
     mock_bad_resp.status = 404
+    mock_bad_resp.headers = {}
     mock_bad_resp.raise_for_status = MagicMock(side_effect=Exception("404 Not Found"))
 
     @patch("custom_components.blueprints_updater.coordinator.async_get_clientsession")
@@ -256,6 +298,7 @@ async def test_async_update_data_partial_failure(coordinator):
 
         def get_side_effect(url, **_kwargs):
             m = MagicMock()
+            m.__aenter__ = AsyncMock()
             if "good.yaml" in url:
                 m.__aenter__.return_value = mock_good_resp
             else:
@@ -302,10 +345,11 @@ async def test_async_update_blueprint_in_place_errors(coordinator):
     }
     coordinator.data = results
 
-    mock_resp_empty = AsyncMock()
+    mock_resp_empty = MagicMock()
     mock_resp_empty.status = 200
+    mock_resp_empty.headers = {}
     mock_resp_empty.raise_for_status = MagicMock()
-    mock_resp_empty.text.return_value = ""
+    mock_resp_empty.text = AsyncMock(return_value="")
 
     mock_session = MagicMock()
     mock_session.get.return_value.__aenter__.return_value = mock_resp_empty
@@ -314,19 +358,21 @@ async def test_async_update_blueprint_in_place_errors(coordinator):
     await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
     assert coordinator.data[path]["last_error"] == "empty_content"
 
-    mock_resp_invalid = AsyncMock()
+    mock_resp_invalid = MagicMock()
     mock_resp_invalid.status = 200
+    mock_resp_invalid.headers = {}
     mock_resp_invalid.raise_for_status = MagicMock()
-    mock_resp_invalid.text.return_value = "}invalid yaml: {\n"
+    mock_resp_invalid.text = AsyncMock(return_value="}invalid yaml: {\n")
     mock_session.get.return_value.__aenter__.return_value = mock_resp_invalid
 
     await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
     assert "yaml_syntax_error" in str(coordinator.data[path]["last_error"])
 
-    mock_resp_missing_bp = AsyncMock()
+    mock_resp_missing_bp = MagicMock()
     mock_resp_missing_bp.status = 200
+    mock_resp_missing_bp.headers = {}
     mock_resp_missing_bp.raise_for_status = MagicMock()
-    mock_resp_missing_bp.text.return_value = "other_key: value\nsource_url: https://url"
+    mock_resp_missing_bp.text = AsyncMock(return_value="other_key: value\nsource_url: https://url")
     mock_session.get.return_value.__aenter__.return_value = mock_resp_missing_bp
 
     await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
@@ -362,10 +408,11 @@ async def test_async_update_data_auto_update(coordinator):
     }
     coordinator.scan_blueprints = MagicMock(return_value=blueprints)
 
-    mock_resp = AsyncMock()
+    mock_resp = MagicMock()
     mock_resp.status = 200
+    mock_resp.headers = {"ETag": "new"}
     mock_resp.raise_for_status = MagicMock()
-    mock_resp.text.return_value = "blueprint:\n  name: Test\n  source_url: https://url"
+    mock_resp.text = AsyncMock(return_value="blueprint:\n  name: Test\n  source_url: https://url")
 
     mock_session = MagicMock()
     mock_session.get.return_value.__aenter__.return_value = mock_resp
@@ -417,6 +464,7 @@ async def test_async_update_data_auto_update(coordinator):
         assert coordinator.data["/test.yaml"]["updatable"] is False
         assert coordinator.data["/test.yaml"]["remote_content"] is None
         assert coordinator.data["/test.yaml"]["local_hash"] == "new"
+        assert coordinator.data["/test.yaml"]["etag"] == "new"
 
 
 @pytest.mark.asyncio
@@ -439,15 +487,21 @@ async def test_async_update_data_auto_update_multiple_sorted(coordinator):
     }
     coordinator.scan_blueprints = MagicMock(return_value=blueprints)
 
-    mock_resp_a = AsyncMock()
+    mock_resp_a = MagicMock()
     mock_resp_a.status = 200
+    mock_resp_a.headers = {"ETag": "new"}
     mock_resp_a.raise_for_status = MagicMock()
-    mock_resp_a.text.return_value = "blueprint:\n  name: Alpha\n  source_url: https://url/a"
+    mock_resp_a.text = AsyncMock(
+        return_value="blueprint:\n  name: Alpha\n  source_url: https://url/a"
+    )
 
-    mock_resp_b = AsyncMock()
+    mock_resp_b = MagicMock()
     mock_resp_b.status = 200
+    mock_resp_b.headers = {"ETag": "new"}
     mock_resp_b.raise_for_status = MagicMock()
-    mock_resp_b.text.return_value = "blueprint:\n  name: Beta\n  source_url: https://url/b"
+    mock_resp_b.text = AsyncMock(
+        return_value="blueprint:\n  name: Beta\n  source_url: https://url/b"
+    )
 
     mock_session = MagicMock()
     mock_session.__aenter__.return_value = mock_session

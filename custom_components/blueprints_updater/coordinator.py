@@ -165,6 +165,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "remote_hash": None,
                 "remote_content": None,
                 "last_error": None,
+                "etag": None,
             }
             for path, info in blueprints.items()
         }
@@ -178,6 +179,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "remote_hash": self.data[path]["remote_hash"],
                             "remote_content": self.data[path]["remote_content"],
                             "last_error": self.data[path]["last_error"],
+                            "etag": self.data[path].get("etag"),
                         }
                     )
 
@@ -216,13 +218,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         session, path, info, results_to_notify
                     )
                     self.async_set_updated_data(self.data)
-                    await asyncio.sleep(STAGGER_DELAY)
                 except asyncio.CancelledError:
                     raise
                 except Exception as err:
                     _LOGGER.error("Error in background worker for %s: %s", path, err)
                 finally:
                     queue.task_done()
+                    await asyncio.sleep(STAGGER_DELAY)
 
         await asyncio.gather(*[worker() for _ in range(CONCURRENT_REQUESTS_LIMIT)])
 
@@ -409,9 +411,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         _LOGGER.debug("Checking for updates: %s", info["name"])
         normalized_url = self._normalize_url(source_url)
+        stored_etag = self.data.get(path, {}).get("etag")
 
         try:
-            remote_content = await self._async_fetch_content(session, normalized_url)
+            remote_content, new_etag = await self._async_fetch_content(
+                session, normalized_url, etag=stored_etag
+            )
+
+            if remote_content is None:
+                _LOGGER.debug("Not modified (304): %s", info["name"])
+                if path in self.data and new_etag:
+                    self.data[path]["etag"] = new_etag
+                return
 
             if not remote_content:
                 if path in self.data:
@@ -423,6 +434,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             local_hash = info["hash"]
             updatable = remote_hash != local_hash
 
+            last_error: str | None = None
             try:
                 data = yaml_util.parse_yaml(remote_content)
                 last_error = self._validate_blueprint(data, source_url)
@@ -446,6 +458,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "updatable": False,
                             "local_hash": remote_hash,
                             "last_error": None,
+                            "etag": new_etag,
                         }
                     )
                 results_to_notify.append(info["name"])
@@ -458,6 +471,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "remote_content": remote_content if updatable and not last_error else None,
                         "updatable": updatable,
                         "last_error": last_error,
+                        "etag": new_etag,
                     }
                 )
         except Exception as err:
@@ -466,16 +480,33 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.data[path]["last_error"] = f"fetch_error|{err}"
 
     @retry_async(max_retries=MAX_RETRIES, base_delay=RETRY_BACKOFF)
-    async def _async_fetch_content(self, session: aiohttp.ClientSession, url: str) -> str:
-        """Fetch content from a URL with retries."""
-        async with session.get(url, timeout=REQUEST_TIMEOUT) as response:
+    async def _async_fetch_content(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        etag: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        """Fetch content from a URL with retries and ETag support.
+
+        Returns (content, etag). Content is None on 304 Not Modified.
+        """
+        headers: dict[str, str] = {}
+        if etag:
+            headers["If-None-Match"] = etag
+
+        async with session.get(url, timeout=REQUEST_TIMEOUT, headers=headers) as response:
+            new_etag = response.headers.get("ETag")
+
+            if response.status == 304:
+                return None, etag
+
             response.raise_for_status()
 
             if DOMAIN_HA_FORUM in url:
                 json_data = await response.json()
-                return self._parse_forum_content(json_data) or ""
+                return self._parse_forum_content(json_data) or "", new_etag
 
-            return await response.text()
+            return await response.text(), new_etag
 
     @staticmethod
     def _normalize_url(url: str) -> str:
