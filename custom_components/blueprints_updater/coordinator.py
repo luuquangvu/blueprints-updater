@@ -236,12 +236,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.info("Auto-updated %d blueprints: %s", len(auto_updated_names), auto_updated_names)
         await self.async_reload_services()
 
-    async def _async_handle_notifications(self, auto_updated_names: list[str]) -> None:
-        """Handle services reload and persistent notifications."""
-        auto_updated_names.sort()
-        _LOGGER.info("Auto-updated %d blueprints: %s", len(auto_updated_names), auto_updated_names)
-        await self.async_reload_services()
-
         try:
             title = await self.async_translate("auto_update_title")
             message_template = await self.async_translate("auto_update_message")
@@ -429,7 +423,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             local_hash = info["hash"]
             updatable = remote_hash != local_hash
 
-            last_error = None
             try:
                 data = yaml_util.parse_yaml(remote_content)
                 last_error = self._validate_blueprint(data, source_url)
