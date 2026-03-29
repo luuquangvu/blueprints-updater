@@ -31,6 +31,8 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.UPDATE]
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 
 async def async_setup(hass: HomeAssistant, _: ConfigType) -> bool:
     """Set up the Blueprints Updater component."""

@@ -76,8 +76,8 @@ jobs:
           git push origin "$TAG"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ steps.get_version.outputs.TAG_NAME }}
-          target_commitish: ${{ steps.commit_push.outputs.COMMIT_SHA }}
-          generate_release_notes: true
+          tag: ${{ steps.get_version.outputs.TAG_NAME }}
+          commit: ${{ steps.commit_push.outputs.COMMIT_SHA }}
+          generateReleaseNotes: true
