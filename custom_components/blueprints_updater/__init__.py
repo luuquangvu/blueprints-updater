@@ -72,21 +72,28 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def _get_coordinator() -> BlueprintUpdateCoordinator | None:
         return next(iter(hass.data.get(DOMAIN, {}).values()), None)
 
-    async def _translate(key: str, **kwargs: str) -> str:
-        lang = hass.config.language
+    async def _translate(key: str, category: str = "exceptions", **kwargs: str) -> str:
+        active_coordinator = await _get_coordinator()
+        if active_coordinator:
+            return await active_coordinator.async_translate(key, category=category, **kwargs)
+
+        lang = getattr(hass.config, "language", "en")
         translations: dict[str, str] = {}
 
         try:
-            if DOMAIN in hass.config.components:
-                translations = await translation.async_get_translations(
-                    hass, lang, "exceptions", [DOMAIN]
-                )
+            translations = await translation.async_get_translations(hass, lang, category, [DOMAIN])
         except Exception as err:
             _LOGGER.debug(
-                "Could not load translations for %s exceptions during setup: %s", DOMAIN, err
+                "Could not load translations for %s %s during setup: %s",
+                DOMAIN,
+                category,
+                err,
             )
 
-        msg = translations.get(f"component.{DOMAIN}.exceptions.{key}.message", key)
+        msg = translations.get(f"component.{DOMAIN}.{category}.{key}.message") or translations.get(
+            f"component.{DOMAIN}.{category}.{key}", key
+        )
+
         try:
             return msg.format(**kwargs) if kwargs else msg
         except (KeyError, ValueError, IndexError) as err:

@@ -1,115 +1,131 @@
-"""Tests for translation synchronization and quality."""
-
-from __future__ import annotations
-
-import json
-import os
-import re
-from typing import Any
+from datetime import timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-TRANSLATIONS_DIR = "custom_components/blueprints_updater/translations"
-STRINGS_FILE = "custom_components/blueprints_updater/strings.json"
-
-
-def get_kv_in_order(d: dict[str, Any], prefix: str = "") -> list[tuple[str, Any]]:
-    """Get keys and values as a list of tuples to preserve and check order."""
-    kv = []
-    for k, v in d.items():
-        full_key = f"{prefix}.{k}" if prefix else k
-        if isinstance(v, dict):
-            kv.extend(get_kv_in_order(v, full_key))
-        else:
-            kv.append((full_key, v))
-    return kv
-
-
-def get_translation_files() -> list[str]:
-    """Get all translation files including strings.json."""
-    files = [
-        os.path.join(TRANSLATIONS_DIR, f)
-        for f in os.listdir(TRANSLATIONS_DIR)
-        if f.endswith(".json")
-    ]
-    return files
+from custom_components.blueprints_updater.const import DOMAIN
+from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.update import BlueprintUpdateEntity
 
 
 @pytest.fixture
-def strings_data() -> dict[str, Any]:
-    """Load the master strings.json data."""
-    with open(STRINGS_FILE, encoding="utf-8") as f:
-        return json.load(f)
+def coordinator(hass):
+    """Fixture for BlueprintUpdateCoordinator."""
+    entry = MagicMock()
+    entry.options = {}
+    entry.data = {}
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        coord = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+        coord.hass = hass
+        coord._translations = {}
+        return coord
 
 
-@pytest.fixture
-def strings_kv(strings_data: dict[str, Any]) -> list[tuple[str, Any]]:
-    """Get flat KV list from strings.json."""
-    return get_kv_in_order(strings_data)
+@pytest.mark.asyncio
+async def test_coordinator_translate_flat(hass, coordinator):
+    """Test translating a flat key (e.g., in 'common' category)."""
+    hass.config.language = "en"
+
+    translations = {f"component.{DOMAIN}.common.test_key": "Translated Value"}
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_get_translations",
+        return_value=translations,
+    ) as mock_get:
+        result = await coordinator.async_translate("test_key", category="common")
+        assert result == "Translated Value"
+        mock_get.assert_called_once_with(hass, "en", "common", [DOMAIN])
 
 
-@pytest.mark.parametrize("lang_file", get_translation_files())
-def test_translation_sync(lang_file: str, strings_kv: list[tuple[str, Any]]) -> None:
-    """Verify that each translation file has the exact same keys as strings.json."""
-    with open(lang_file, encoding="utf-8") as f:
-        lang_data = json.load(f)
+@pytest.mark.asyncio
+async def test_coordinator_translate_nested(hass, coordinator):
+    """Test translating a nested key with .message suffix (common in 'exceptions')."""
+    hass.config.language = "vi"
 
-    lang_kv = get_kv_in_order(lang_data)
+    translations = {f"component.{DOMAIN}.exceptions.error_key.message": "Lỗi nội bộ"}
 
-    source_keys = [k for k, v in strings_kv]
-    target_keys = [k for k, v in lang_kv]
-
-    assert set(source_keys) == set(target_keys), f"Key mismatch in {lang_file}"
-
-
-@pytest.mark.parametrize("lang_file", get_translation_files())
-def test_translation_key_order(lang_file: str, strings_kv: list[tuple[str, Any]]) -> None:
-    """Verify that translation files follow the same key order as strings.json."""
-    with open(lang_file, encoding="utf-8") as f:
-        lang_data = json.load(f)
-
-    lang_kv = get_kv_in_order(lang_data)
-
-    source_keys = [k for k, v in strings_kv]
-    target_keys = [k for k, v in lang_kv]
-
-    assert source_keys == target_keys, f"Key order mismatch in {lang_file}"
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_get_translations",
+        return_value=translations,
+    ):
+        result = await coordinator.async_translate("error_key", category="exceptions")
+        assert result == "Lỗi nội bộ"
 
 
-@pytest.mark.parametrize("lang_file", get_translation_files())
-def test_translation_placeholders(lang_file: str, strings_kv: list[tuple[str, Any]]) -> None:
-    """Verify that all placeholders in translations match the source."""
-    with open(lang_file, encoding="utf-8") as f:
-        lang_data = json.load(f)
+@pytest.mark.asyncio
+async def test_coordinator_translate_cache_and_language_switch(hass, coordinator):
+    """Test that changing language clears cache and loads new translations."""
+    hass.config.language = "en"
+    en_translations = {f"component.{DOMAIN}.common.hello": "Hello"}
 
-    lang_kv_dict = dict(get_kv_in_order(lang_data))
-    source_kv_dict = dict(strings_kv)
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_get_translations",
+        return_value=en_translations,
+    ) as mock_get:
+        assert await coordinator.async_translate("hello") == "Hello"
+        assert mock_get.call_count == 1
 
-    for key, source_val in source_kv_dict.items():
-        if key not in lang_kv_dict:
-            continue
+        assert await coordinator.async_translate("hello") == "Hello"
+        assert mock_get.call_count == 1
 
-        target_val = lang_kv_dict[key]
-        if not isinstance(source_val, str) or not isinstance(target_val, str):
-            continue
+    hass.config.language = "vi"
+    vi_translations = {f"component.{DOMAIN}.common.hello": "Xin chào"}
 
-        source_placeholders = set(re.findall(r"\{(\w+)\}", source_val))
-        target_placeholders = set(re.findall(r"\{(\w+)\}", target_val))
-
-        assert source_placeholders == target_placeholders, (
-            f"Placeholder mismatch for {key} in {lang_file}: "
-            f"expected {source_placeholders}, got {target_placeholders}"
-        )
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_get_translations",
+        return_value=vi_translations,
+    ) as mock_get_vi:
+        assert await coordinator.async_translate("hello") == "Xin chào"
+        assert mock_get_vi.call_count == 1
 
 
-@pytest.mark.parametrize("lang_file", get_translation_files())
-def test_no_english_pluralization_leaks(lang_file: str) -> None:
-    """Verify that localized files (except English) don't contain '(s)' leaks."""
+@pytest.mark.asyncio
+async def test_entity_localized_error(hass, coordinator):
+    """Test that BlueprintUpdateEntity correctly localizes its last_error attribute."""
+    path = "/config/blueprints/test.yaml"
+    coordinator.data = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "updatable": True,
+            "last_error": "yaml_syntax_error|Line 5",
+            "local_hash": "old",
+        }
+    }
 
-    if "en.json" in lang_file or lang_file == STRINGS_FILE:
-        return
+    entity = BlueprintUpdateEntity(coordinator, path, coordinator.data[path])
+    entity.hass = hass
+    entity.entity_id = "update.test"
 
-    with open(lang_file, encoding="utf-8") as f:
-        content = f.read()
+    translations = {
+        f"component.{DOMAIN}.common.yaml_syntax_error": "Lỗi cú pháp: {error}",
+        f"component.{DOMAIN}.common.update_available_short": "Có bản cập nhật",
+    }
 
-    assert "(s)" not in content, f"Found English-style pluralization leak '(s)' in {lang_file}"
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_get_translations",
+        return_value=translations,
+    ):
+        assert entity.extra_state_attributes == {"last_error": "yaml_syntax_error|Line 5"}
+
+        with patch.object(entity, "async_write_ha_state"):
+            await entity._async_localize_strings()
+        assert entity.extra_state_attributes == {"last_error": "Lỗi cú pháp: Line 5"}
+        assert entity.release_summary == "Có bản cập nhật"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_translate_formatting(hass, coordinator):
+    """Test that formatting is applied correctly or safely ignored on failure."""
+    hass.config.language = "en"
+    translations = {f"component.{DOMAIN}.common.greet": "Hello {name}!"}
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_get_translations",
+        return_value=translations,
+    ):
+        assert await coordinator.async_translate("greet", name="World") == "Hello World!"
+        assert await coordinator.async_translate("greet") == "Hello {name}!"

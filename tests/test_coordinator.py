@@ -270,10 +270,10 @@ async def test_async_update_data_partial_failure(coordinator):
         ):
             mock_hash.return_value.hexdigest.return_value = "new_hash"
             with patch.object(coordinator, "_start_background_refresh"):
-                results = await coordinator._async_update_data()
-                coordinator.data = results
+                update_results = await coordinator._async_update_data()
+                coordinator.data = update_results
                 await coordinator._async_background_refresh(blueprints)
-            return results
+            return update_results
 
     results = await run_test()
 

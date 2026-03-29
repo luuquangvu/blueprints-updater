@@ -78,26 +78,53 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._translations: dict[str, str] = {}
         self._background_task: asyncio.Task | None = None
 
-    async def async_translate(self, key: str, **kwargs: Any) -> str:
-        """Translate a key using the current language.
+    async def async_translate(self, key: str, category: str = "common", **kwargs: Any) -> str:
+        """Translate a key using the current language and category.
 
         This method is a wrapper around async_get_translations that provides
         a more convenient API and better error handling for startup race conditions.
         """
-        language = self.hass.config.language
-        translations: dict[str, str] = {}
+        language = getattr(self.hass.config, "language", "en")
 
-        try:
-            if DOMAIN in self.hass.config.components:
-                translations = await async_get_translations(self.hass, language, "common", [DOMAIN])
-        except Exception as err:
-            _LOGGER.debug("Could not load translations for %s during setup: %s", DOMAIN, err)
+        if (
+            not self._translations
+            or self._translations.get("__language") != language
+            or self._translations.get("__category") != category
+        ):
+            try:
+                loaded = await async_get_translations(self.hass, language, category, [DOMAIN])
+                if loaded:
+                    self._translations = loaded
+                    self._translations["__language"] = language
+                    self._translations["__category"] = category
+                    _LOGGER.debug(
+                        "Successfully loaded translations for language: %s, category: %s",
+                        language,
+                        category,
+                    )
+            except Exception as err:
+                _LOGGER.debug(
+                    "Could not load translations for %s (%s) for language %s: %s",
+                    DOMAIN,
+                    category,
+                    language,
+                    err,
+                )
 
-        template = translations.get(f"component.{DOMAIN}.common.{key}", key)
+        full_key = f"component.{DOMAIN}.{category}.{key}"
+        template = self._translations.get(f"{full_key}.message") or self._translations.get(
+            full_key, key
+        )
+
         try:
             return template.format(**kwargs) if kwargs else template
         except (KeyError, ValueError, IndexError) as err:
-            _LOGGER.debug("Error formatting translation for %s: %s", key, err)
+            _LOGGER.debug(
+                "Error formatting translation for key %s in category %s: %s",
+                key,
+                category,
+                err,
+            )
             return template
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -210,16 +237,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_reload_services()
 
         try:
-            language = self.hass.config.language
-            translations = await async_get_translations(self.hass, language, "common", [DOMAIN])
-            title_key = f"component.{DOMAIN}.common.auto_update_title"
-            message_key = f"component.{DOMAIN}.common.auto_update_message"
-
-            title = translations.get(title_key, "Blueprints Updater: Auto-Updated")
-            message_template = translations.get(
-                message_key,
-                "The following blueprints have been automatically updated:\n\n{blueprints}",
-            )
+            title = await self.async_translate("auto_update_title")
+            message_template = await self.async_translate("auto_update_message")
 
             blueprints_list = "\n".join(f"- {name}" for name in auto_updated_names)
             message = message_template.format(blueprints=blueprints_list)
@@ -404,7 +423,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             local_hash = info["hash"]
             updatable = remote_hash != local_hash
 
-            last_error = None
             try:
                 data = yaml_util.parse_yaml(remote_content)
                 last_error = self._validate_blueprint(data, source_url)

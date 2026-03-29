@@ -116,7 +116,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         self._attr_title = info["name"]
         self._attr_release_url = info.get("source_url")
         self._attr_release_summary = None
-        self._full_notes = None
+        self._localized_error: str | None = None
 
     @property
     def auto_update(self) -> bool:
@@ -134,7 +134,47 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
     async def async_release_notes(self) -> str | None:
         """Return full release notes for the update."""
-        return self._full_notes
+        return await self.async_generate_release_notes()
+
+    async def async_generate_release_notes(self) -> str | None:
+        """Generate release notes dynamically based on current language."""
+        if self._path not in self.coordinator.data:
+            return None
+
+        info = self.coordinator.data[self._path]
+        if not info["updatable"]:
+            return None
+
+        notes = await self.coordinator.async_translate(
+            "update_available", source_url=info["source_url"]
+        )
+        notes += "\n\n" + await self.coordinator.async_translate("auto_update_warning")
+
+        rel_path = info.get("rel_path", "")
+        parts = rel_path.split("/", 1)
+        domain = parts[0]
+        bp_id = parts[-1] if len(parts) > 1 else rel_path
+
+        total_usage = 0
+        try:
+            if domain == "automation":
+                total_usage = len(automations_with_blueprint(self.coordinator.hass, bp_id))
+            elif domain == "script":
+                total_usage = len(scripts_with_blueprint(self.coordinator.hass, bp_id))
+        except Exception as err:
+            _LOGGER.warning(
+                "Error calculating %s usage for blueprint %s: %s",
+                domain,
+                bp_id,
+                err,
+            )
+
+        if total_usage > 0:
+            notes += "\n\n" + await self.coordinator.async_translate(
+                "usage_warning", count=total_usage, domain=domain
+            )
+
+        return notes
 
     @property
     def latest_version(self) -> str | None:
@@ -153,11 +193,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         if self._path in self.coordinator.data:
             info = self.coordinator.data[self._path]
             if error := info.get("last_error"):
-                if "|" in error:
-                    key, val = error.split("|", 1)
-                    attrs["last_error"] = f"{key}: {val}"
-                else:
-                    attrs["last_error"] = error
+                attrs["last_error"] = self._localized_error or error
         return attrs
 
     @callback
@@ -179,36 +215,16 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             self._attr_release_summary = await self.coordinator.async_translate(
                 "update_available_short"
             )
-            notes = await self.coordinator.async_translate(
-                "update_available", source_url=info["source_url"]
-            )
-            notes += "\n\n" + await self.coordinator.async_translate("auto_update_warning")
 
-            rel_path = info.get("rel_path", "")
-            parts = rel_path.split("/", 1)
-            domain = parts[0]
-            bp_id = parts[-1] if len(parts) > 1 else rel_path
-
-            total_usage = 0
-            try:
-                if domain == "automation":
-                    total_usage = len(automations_with_blueprint(self.coordinator.hass, bp_id))
-                elif domain == "script":
-                    total_usage = len(scripts_with_blueprint(self.coordinator.hass, bp_id))
-            except Exception as err:
-                _LOGGER.warning(
-                    "Error calculating %s usage for blueprint %s: %s",
-                    domain,
-                    bp_id,
-                    err,
+        self._localized_error = None
+        if error := info.get("last_error"):
+            if "|" in error:
+                key, val = error.split("|", 1)
+                self._localized_error = await self.coordinator.async_translate(
+                    key, errors=val, error=val
                 )
-
-            if total_usage > 0:
-                notes += "\n\n" + await self.coordinator.async_translate(
-                    "usage_warning", count=total_usage, domain=domain
-                )
-
-            self._full_notes = notes
+            else:
+                self._localized_error = await self.coordinator.async_translate(error)
 
         if self.hass and self.entity_id:
             self.async_write_ha_state()
