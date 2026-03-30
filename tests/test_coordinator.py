@@ -9,6 +9,7 @@ from custom_components.blueprints_updater.const import (
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
+    STAGGER_DELAY,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
@@ -794,5 +795,5 @@ async def test_async_staggered_update_delays(coordinator):
         await coordinator._async_background_refresh(blueprints)
 
     sleep_calls = [call.args[0] for call in mock_sleep.call_args_list]
-    assert all(d == 1.0 for d in sleep_calls)
-    assert len(sleep_calls) == 3
+    assert all(d == STAGGER_DELAY for d in sleep_calls)
+    assert len(sleep_calls) == 2

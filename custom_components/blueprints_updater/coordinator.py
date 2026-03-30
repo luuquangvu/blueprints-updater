@@ -21,7 +21,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import yaml as yaml_util
 
 from .const import (
-    CONCURRENT_REQUESTS_LIMIT,
     CONF_AUTO_UPDATE,
     CONF_FILTER_MODE,
     CONF_MAX_BACKUPS,
@@ -77,6 +76,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._translations: dict[str, str] = {}
         self._background_task: asyncio.Task | None = None
+        self._refresh_lock = asyncio.Lock()
 
     async def async_translate(self, key: str, category: str = "common", **kwargs: Any) -> str:
         """Translate a key using the current language and category.
@@ -199,20 +199,30 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _async_background_refresh(self, blueprints: dict[str, Any]) -> None:
-        """Fetch remote hashes in a throttled background queue."""
-        _LOGGER.debug("Starting background remote refresh for %d blueprints", len(blueprints))
+        """Fetch remote hashes sequentially to avoid GitHub rate limits.
 
-        session = async_get_clientsession(self.hass)
-        queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
-        for item in blueprints.items():
-            queue.put_nowait(item)
+        Processes one blueprint at a time with STAGGER_DELAY between each
+        request to prevent 503 Backend.max_conn errors.
+        """
+        if self._refresh_lock.locked():
+            _LOGGER.debug("Background refresh already running, skipping")
+            return
 
-        results_to_notify: list[str] = []
+        async with self._refresh_lock:
+            _LOGGER.debug(
+                "Starting background remote refresh for %d blueprints",
+                len(blueprints),
+            )
 
-        async def worker() -> None:
-            """Worker to process the queue."""
-            while not queue.empty():
-                path, info = await queue.get()
+            session = async_get_clientsession(self.hass)
+            results_to_notify: list[str] = []
+
+            first = True
+            for path, info in blueprints.items():
+                if first:
+                    first = False
+                else:
+                    await asyncio.sleep(STAGGER_DELAY)
                 try:
                     await self._async_update_blueprint_in_place(
                         session, path, info, results_to_notify
@@ -222,15 +232,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     raise
                 except Exception as err:
                     _LOGGER.error("Error in background worker for %s: %s", path, err)
-                finally:
-                    queue.task_done()
-                    await asyncio.sleep(STAGGER_DELAY)
 
-        await asyncio.gather(*[worker() for _ in range(CONCURRENT_REQUESTS_LIMIT)])
-
-        _LOGGER.debug("Background refresh complete")
-        if results_to_notify:
-            await self._async_handle_notifications(results_to_notify)
+            _LOGGER.debug("Background refresh complete")
+            if results_to_notify:
+                await self._async_handle_notifications(results_to_notify)
 
     async def _async_handle_notifications(self, auto_updated_names: list[str]) -> None:
         """Handle services reload and persistent notifications."""
