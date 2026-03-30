@@ -10,12 +10,11 @@ from datetime import timedelta
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
-import aiohttp
+from curl_cffi.requests import AsyncSession
 from homeassistant.components.blueprint.models import Blueprint
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import yaml as yaml_util
@@ -34,6 +33,7 @@ from .const import (
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
+    MAX_CONCURRENT_REQUESTS,
     MAX_RETRIES,
     RE_BLUEPRINT_KEY,
     RE_FORUM_CODE_BLOCK,
@@ -43,7 +43,6 @@ from .const import (
     RE_SOURCE_URL_LINE,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
-    STAGGER_DELAY,
 )
 from .utils import retry_async
 
@@ -199,39 +198,37 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _async_background_refresh(self, blueprints: dict[str, Any]) -> None:
-        """Fetch remote hashes sequentially to avoid GitHub rate limits.
+        """Fetch remote hashes concurrently using HTTP/2 multiplexing.
 
-        Processes one blueprint at a time with STAGGER_DELAY between each
-        request to prevent 503 Backend.max_conn errors.
+        Processes blueprints in parallel (limited by MAX_CONCURRENT_REQUESTS)
+        within a single curl_cffi session to avoid bot detection and stay
+        within GitHub connection limits.
         """
         if self._refresh_lock.locked():
             _LOGGER.debug("Background refresh already running, skipping")
             return
 
         async with self._refresh_lock:
-            _LOGGER.debug(
-                "Starting background remote refresh for %d blueprints",
-                len(blueprints),
-            )
-
-            session = async_get_clientsession(self.hass)
             results_to_notify: list[str] = []
 
-            first = True
-            for path, info in blueprints.items():
-                if first:
-                    first = False
-                else:
-                    await asyncio.sleep(STAGGER_DELAY)
-                try:
-                    await self._async_update_blueprint_in_place(
-                        session, path, info, results_to_notify
-                    )
-                    self.async_set_updated_data(self.data)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as err:
-                    _LOGGER.error("Error in background worker for %s: %s", path, err)
+            async with AsyncSession(impersonate="chrome") as session:
+                semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+
+                async def _worker(path: str, info: dict[str, Any]) -> None:
+                    """Process a single blueprint with concurrency limit."""
+                    async with semaphore:
+                        try:
+                            await self._async_update_blueprint_in_place(
+                                session, path, info, results_to_notify
+                            )
+                            self.async_set_updated_data(self.data)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as err:
+                            _LOGGER.error("Error in background worker for %s: %s", path, err)
+
+                tasks = [_worker(path, info) for path, info in blueprints.items()]
+                await asyncio.gather(*tasks)
 
             _LOGGER.debug("Background refresh complete")
             if results_to_notify:
@@ -404,7 +401,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_blueprint_in_place(
         self,
-        session: aiohttp.ClientSession,
+        session: AsyncSession,
         path: str,
         info: dict[str, Any],
         results_to_notify: list[str],
@@ -439,7 +436,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             local_hash = info["hash"]
             updatable = remote_hash != local_hash
 
-            last_error: str | None = None
             try:
                 data = yaml_util.parse_yaml(remote_content)
                 last_error = self._validate_blueprint(data, source_url)
@@ -487,11 +483,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @retry_async(max_retries=MAX_RETRIES, base_delay=RETRY_BACKOFF)
     async def _async_fetch_content(
         self,
-        session: aiohttp.ClientSession,
+        session: AsyncSession,
         url: str,
         etag: str | None = None,
     ) -> tuple[str | None, str | None]:
-        """Fetch content from a URL with retries and ETag support.
+        """Fetch content from a URL via curl_cffi impersonation.
 
         Returns (content, etag). Content is None on 304 Not Modified.
         """
@@ -499,19 +495,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if etag:
             headers["If-None-Match"] = etag
 
-        async with session.get(url, timeout=REQUEST_TIMEOUT, headers=headers) as response:
-            new_etag = response.headers.get("ETag")
+        response = await session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+        new_etag = response.headers.get("ETag")
 
-            if response.status == 304:
-                return None, etag
+        if response.status_code == 304:
+            return None, etag
 
-            response.raise_for_status()
+        response.raise_for_status()
 
-            if DOMAIN_HA_FORUM in url:
-                json_data = await response.json()
-                return self._parse_forum_content(json_data) or "", new_etag
+        if DOMAIN_HA_FORUM in url:
+            json_data = response.json()
+            return self._parse_forum_content(json_data) or "", new_etag
 
-            return await response.text(), new_etag
+        return response.text, new_etag
 
     @staticmethod
     def _normalize_url(url: str) -> str:

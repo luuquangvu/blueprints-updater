@@ -34,7 +34,7 @@ def retry_async(
                     last_err = err
                     if attempt < max_retries:
                         wait = (base_delay * (2**attempt) if exponential else base_delay) + (
-                            random.uniform(0, 1) if jitter else 0
+                            random.uniform(0, base_delay * 2) if jitter else 0
                         )
                         _LOGGER.warning(
                             "Error in %s: %s. Retrying in %.2fs (attempt %d/%d)",
