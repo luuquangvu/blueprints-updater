@@ -17,6 +17,9 @@ FILTER_MODE_BLACKLIST = "blacklist"
 
 DEFAULT_UPDATE_INTERVAL_HOURS = 24
 
+STORAGE_VERSION = 1
+STORAGE_KEY_DATA = f"{DOMAIN}_data"
+
 DOMAIN_GITHUB = "github.com"
 DOMAIN_GITHUB_RAW = "raw.githubusercontent.com"
 DOMAIN_GIST = "gist.github.com"
@@ -30,6 +33,8 @@ RE_BLUEPRINT_KEY = re.compile(r"^(blueprint:.*)$", re.MULTILINE)
 RE_SOURCE_URL_LINE = re.compile(r"^\s*source_url:\s*['\"]?(.*?)['\"]?\s*$", re.MULTILINE)
 
 MAX_CONCURRENT_REQUESTS = 5
-REQUEST_TIMEOUT = 20
+REQUEST_TIMEOUT = 15
 MAX_RETRIES = 3
-RETRY_BACKOFF = 2
+RETRY_BACKOFF = 5
+MIN_SEND_INTERVAL = 0.5
+MAX_SEND_INTERVAL = 1.0

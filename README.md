@@ -9,7 +9,7 @@
 ## Features
 
 - **Automated Periodic Scanning**: Scans your local `blueprints/` directory every X hours (configurable).
-- **Smart Comparison**: Uses modern **SHA256** hashing to compare your local file content with the latest version from the source URL.
+- **Smart Comparison**: Uses **ETag** support to minimize bandwidth and modern **SHA256** hashing to accurately detect even the smallest changes in blueprint content.
 - **Advanced URL Support**:
   - **GitHub**: Automatically converts standard blob URLs to raw file URLs.
   - **Gist**: Supports GitHub Gists natively.

@@ -5,14 +5,17 @@ from datetime import timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
-from curl_cffi.requests import AsyncSession
 
 from custom_components.blueprints_updater.const import (
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
     MAX_CONCURRENT_REQUESTS,
+    MAX_RETRIES,
+    MAX_SEND_INTERVAL,
+    MIN_SEND_INTERVAL,
     REQUEST_TIMEOUT,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
@@ -173,13 +176,14 @@ async def test_async_update_blueprint(coordinator):
     results = {path: {"last_error": None, "hash": "old_hash"}}
 
     mock_response = MagicMock()
-    mock_response.status_code = 200
+    mock_response.status = 200
     mock_response.headers = {"ETag": "new_etag"}
     mock_response.raise_for_status = MagicMock()
-    mock_response.text = "blueprint:\n  name: Test"
+    mock_response.text = AsyncMock(return_value="blueprint:\n  name: Test")
 
-    mock_session = MagicMock(spec=AsyncSession)
-    mock_session.get = AsyncMock(return_value=mock_response)
+    mock_session = MagicMock(spec=aiohttp.ClientSession)
+    mock_session.get.return_value.__aenter__.return_value = mock_response
+    mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
 
     with (
         patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
@@ -225,12 +229,13 @@ async def test_async_update_blueprint_not_modified(coordinator):
     }
 
     mock_response = MagicMock()
-    mock_response.status_code = 304
+    mock_response.status = 304
     mock_response.headers = {"ETag": "old_etag"}
     mock_response.raise_for_status = MagicMock()
 
-    mock_session = MagicMock(spec=AsyncSession)
-    mock_session.get = AsyncMock(return_value=mock_response)
+    mock_session = MagicMock(spec=aiohttp.ClientSession)
+    mock_session.get.return_value.__aenter__.return_value = mock_response
+    mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
 
     results_to_notify = []
     await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
@@ -289,42 +294,46 @@ async def test_async_update_data_partial_failure(coordinator):
     coordinator.scan_blueprints = MagicMock(return_value=blueprints)
 
     mock_good_resp = MagicMock()
-    mock_good_resp.status_code = 200
+    mock_good_resp.status = 200
     mock_good_resp.headers = {"ETag": "good_etag"}
     mock_good_resp.raise_for_status = MagicMock()
-    mock_good_resp.text = "blueprint:\n  name: Good"
+    mock_good_resp.text = AsyncMock(return_value="blueprint:\n  name: Good")
 
     mock_bad_resp = MagicMock()
-    mock_bad_resp.status_code = 404
+    mock_bad_resp.status = 404
     mock_bad_resp.headers = {}
     mock_bad_resp.raise_for_status = MagicMock(side_effect=Exception("404 Not Found"))
 
-    @patch("custom_components.blueprints_updater.coordinator.AsyncSession")
-    async def run_test(mock_session_class):
-        mock_session = MagicMock(spec=AsyncSession)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock()
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.async_get_clientsession"
+        ) as mock_session_class,
+        patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
+        patch(
+            "custom_components.blueprints_updater.coordinator.asyncio.sleep",
+            new_callable=AsyncMock,
+        ),
+        patch.object(coordinator, "_validate_blueprint", return_value=None),
+    ):
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
         mock_session_class.return_value = mock_session
 
         def get_side_effect(url, **_kwargs):
-            if "good.yaml" in url:
-                return mock_good_resp
-            return mock_bad_resp
+            m = MagicMock()
+            m.__aenter__ = AsyncMock(
+                return_value=mock_good_resp if "good.yaml" in url else mock_bad_resp
+            )
+            m.__aexit__ = AsyncMock(return_value=False)
+            return m
 
-        mock_session.get = AsyncMock(side_effect=get_side_effect)
+        mock_session.get = MagicMock(side_effect=get_side_effect)
+        mock_hash.return_value.hexdigest.return_value = "new_hash"
 
-        with (
-            patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
-            patch.object(coordinator, "_validate_blueprint", return_value=None),
-        ):
-            mock_hash.return_value.hexdigest.return_value = "new_hash"
-            with patch.object(coordinator, "_start_background_refresh"):
-                update_results = await coordinator._async_update_data()
-                coordinator.data = update_results
-                await coordinator._async_background_refresh(blueprints)
-            return update_results
-
-    results = await run_test()
+        with patch.object(coordinator, "_start_background_refresh"):
+            update_results = await coordinator._async_update_data()
+            coordinator.data = update_results
+            await coordinator._async_background_refresh(blueprints)
+            results = update_results
 
     assert "/config/blueprints/bad.yaml" in results
 
@@ -354,14 +363,14 @@ async def test_async_background_refresh_503_resilience(coordinator):
     }
 
     mock_503_resp = MagicMock()
-    mock_503_resp.status_code = 503
+    mock_503_resp.status = 503
     mock_503_resp.raise_for_status = MagicMock(
         side_effect=Exception("503 Backend.max_conn reached")
     )
 
     mock_200_resp = MagicMock()
-    mock_200_resp.status_code = 200
-    mock_200_resp.text = "blueprint:\n  name: B2"
+    mock_200_resp.status = 200
+    mock_200_resp.text = AsyncMock(return_value="blueprint:\n  name: B2")
     mock_200_resp.headers = {"ETag": "e2"}
     mock_200_resp.raise_for_status = MagicMock()
 
@@ -370,27 +379,29 @@ async def test_async_background_refresh_503_resilience(coordinator):
         "/config/blueprints/b2.yaml": {"last_error": None},
     }
 
-    with patch(
-        "custom_components.blueprints_updater.coordinator.AsyncSession"
-    ) as mock_session_class:
-        mock_session = MagicMock(spec=AsyncSession)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock()
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.async_get_clientsession"
+        ) as mock_session_class,
+        patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
+        patch(
+            "custom_components.blueprints_updater.coordinator.asyncio.sleep",
+            new_callable=AsyncMock,
+        ),
+        patch.object(coordinator, "_validate_blueprint", return_value=None),
+    ):
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
         mock_session_class.return_value = mock_session
 
         def get_side_effect(url, **_kwargs):
-            if "b1" in url:
-                return mock_503_resp
-            return mock_200_resp
+            m = MagicMock()
+            m.__aenter__ = AsyncMock(return_value=mock_503_resp if "b1" in url else mock_200_resp)
+            m.__aexit__ = AsyncMock(return_value=False)
+            return m
 
-        mock_session.get = AsyncMock(side_effect=get_side_effect)
-
-        with (
-            patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
-            patch.object(coordinator, "_validate_blueprint", return_value=None),
-        ):
-            mock_hash.return_value.hexdigest.return_value = "new_hash"
-            await coordinator._async_background_refresh(blueprints)
+        mock_session.get = MagicMock(side_effect=get_side_effect)
+        mock_hash.return_value.hexdigest.return_value = "new_hash"
+        await coordinator._async_background_refresh(blueprints)
 
     assert "503" in str(coordinator.data["/config/blueprints/b1.yaml"]["last_error"])
     assert coordinator.data["/config/blueprints/b2.yaml"]["updatable"] is True
@@ -416,7 +427,7 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
     lock = asyncio.Lock()
     barrier = asyncio.Barrier(MAX_CONCURRENT_REQUESTS)
 
-    async def slow_update(*_args, **_kwargs):
+    async def slow_get(*_args, **_kwargs):
         nonlocal active_requests, max_active_requests
         async with lock:
             active_requests += 1
@@ -428,22 +439,35 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
         async with lock:
             active_requests -= 1
 
-    mock_session = MagicMock(spec=AsyncSession)
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.text = AsyncMock(return_value="blueprint: name")
+        mock_response.headers = {}
+        mock_response.raise_for_status = MagicMock()
+        return mock_response
+
+    mock_session = MagicMock(spec=aiohttp.ClientSession)
+
+    def get_side_effect(*_args, **_kwargs):
+        m = MagicMock()
+        m.__aenter__ = AsyncMock(side_effect=slow_get)
+        m.__aexit__ = AsyncMock(return_value=False)
+        return m
+
+    mock_session.get = MagicMock(side_effect=get_side_effect)
 
     with (
         patch(
-            "custom_components.blueprints_updater.coordinator.AsyncSession",
+            "custom_components.blueprints_updater.coordinator.async_get_clientsession",
             return_value=mock_session,
         ),
-        patch.object(
-            coordinator, "_async_update_blueprint_in_place", side_effect=slow_update
-        ) as mock_update,
+        patch(
+            "custom_components.blueprints_updater.coordinator.asyncio.sleep", new_callable=AsyncMock
+        ),
+        patch.object(coordinator, "_validate_blueprint", return_value=None),
     ):
         await coordinator._async_background_refresh(blueprints)
 
-    assert mock_update.call_count == num_blueprints
     assert max_active_requests == MAX_CONCURRENT_REQUESTS
 
 
@@ -463,34 +487,35 @@ async def test_async_update_blueprint_in_place_errors(coordinator):
     coordinator.data = results
 
     mock_resp_empty = MagicMock()
-    mock_resp_empty.status_code = 200
+    mock_resp_empty.status = 200
     mock_resp_empty.headers = {}
     mock_resp_empty.raise_for_status = MagicMock()
-    mock_resp_empty.text = ""
+    mock_resp_empty.text = AsyncMock(return_value="")
 
-    mock_session = MagicMock(spec=AsyncSession)
-    mock_session.get = AsyncMock(return_value=mock_resp_empty)
+    mock_session = MagicMock(spec=aiohttp.ClientSession)
+    mock_session.get.return_value.__aenter__.return_value = mock_resp_empty
+    mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
     results_to_notify = []
 
     await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
     assert coordinator.data[path]["last_error"] == "empty_content"
 
     mock_resp_invalid = MagicMock()
-    mock_resp_invalid.status_code = 200
+    mock_resp_invalid.status = 200
     mock_resp_invalid.headers = {}
     mock_resp_invalid.raise_for_status = MagicMock()
-    mock_resp_invalid.text = "}invalid yaml: {\n"
-    mock_session.get = AsyncMock(return_value=mock_resp_invalid)
+    mock_resp_invalid.text = AsyncMock(return_value="}invalid yaml: {\n")
+    mock_session.get.return_value.__aenter__.return_value = mock_resp_invalid
 
     await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
     assert "yaml_syntax_error" in str(coordinator.data[path]["last_error"])
 
     mock_resp_missing_bp = MagicMock()
-    mock_resp_missing_bp.status_code = 200
+    mock_resp_missing_bp.status = 200
     mock_resp_missing_bp.headers = {}
     mock_resp_missing_bp.raise_for_status = MagicMock()
-    mock_resp_missing_bp.text = "other_key: value\nsource_url: https://url"
-    mock_session.get = AsyncMock(return_value=mock_resp_missing_bp)
+    mock_resp_missing_bp.text = AsyncMock(return_value="other_key: value\nsource_url: https://url")
+    mock_session.get.return_value.__aenter__.return_value = mock_resp_missing_bp
 
     await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
     assert "invalid_blueprint" in str(coordinator.data[path]["last_error"])
@@ -527,12 +552,15 @@ async def test_async_update_data_auto_update(coordinator):
 
     with (
         patch(
-            "custom_components.blueprints_updater.coordinator.AsyncSession",
+            "custom_components.blueprints_updater.coordinator.async_get_clientsession",
             new_callable=MagicMock,
         ) as mock_session_class,
         patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
         patch.object(coordinator, "async_install_blueprint") as mock_install,
         patch.object(coordinator, "async_reload_services") as mock_reload,
+        patch(
+            "custom_components.blueprints_updater.coordinator.asyncio.sleep", new_callable=AsyncMock
+        ),
         patch.object(coordinator, "_validate_blueprint", return_value=None),
         patch(
             "custom_components.blueprints_updater.coordinator.async_get_translations",
@@ -542,17 +570,18 @@ async def test_async_update_data_auto_update(coordinator):
             },
         ),
     ):
-        mock_session = MagicMock(spec=AsyncSession)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock()
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
         mock_session_class.return_value = mock_session
 
         mock_resp = MagicMock()
-        mock_resp.status_code = 200
+        mock_resp.status = 200
         mock_resp.headers = {"ETag": "new"}
         mock_resp.raise_for_status = MagicMock()
-        mock_resp.text = "blueprint:\n  name: Test\n  source_url: https://url"
-        mock_session.get = AsyncMock(return_value=mock_resp)
+        mock_resp.text = AsyncMock(
+            return_value="blueprint:\n  name: Test\n  source_url: https://url"
+        )
+        mock_session.get.return_value.__aenter__.return_value = mock_resp
+        mock_session.get.return_value.__aexit__ = AsyncMock(return_value=False)
 
         mock_hash.return_value.hexdigest.return_value = "new"
 
@@ -608,12 +637,15 @@ async def test_async_update_data_auto_update_multiple_sorted(coordinator):
 
     with (
         patch(
-            "custom_components.blueprints_updater.coordinator.AsyncSession",
+            "custom_components.blueprints_updater.coordinator.async_get_clientsession",
             new_callable=MagicMock,
         ) as mock_session_class,
         patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
         patch.object(coordinator, "async_install_blueprint"),
         patch.object(coordinator, "async_reload_services"),
+        patch(
+            "custom_components.blueprints_updater.coordinator.asyncio.sleep", new_callable=AsyncMock
+        ),
         patch.object(coordinator, "_validate_blueprint", return_value=None),
         patch(
             "custom_components.blueprints_updater.coordinator.async_get_translations",
@@ -623,27 +655,32 @@ async def test_async_update_data_auto_update_multiple_sorted(coordinator):
             },
         ),
     ):
-        mock_session = MagicMock(spec=AsyncSession)
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock()
+        mock_session = MagicMock(spec=aiohttp.ClientSession)
         mock_session_class.return_value = mock_session
 
         mock_resp_a = MagicMock()
-        mock_resp_a.status_code = 200
+        mock_resp_a.status = 200
         mock_resp_a.headers = {"ETag": "new"}
         mock_resp_a.raise_for_status = MagicMock()
-        mock_resp_a.text = "blueprint:\n  name: Alpha\n  source_url: https://url/a"
+        mock_resp_a.text = AsyncMock(
+            return_value="blueprint:\n  name: Alpha\n  source_url: https://url/a"
+        )
 
         mock_resp_b = MagicMock()
-        mock_resp_b.status_code = 200
+        mock_resp_b.status = 200
         mock_resp_b.headers = {"ETag": "new"}
         mock_resp_b.raise_for_status = MagicMock()
-        mock_resp_b.text = "blueprint:\n  name: Beta\n  source_url: https://url/b"
+        mock_resp_b.text = AsyncMock(
+            return_value="blueprint:\n  name: Beta\n  source_url: https://url/b"
+        )
 
         def get_side_effect(url, **_kwargs):
-            return mock_resp_a if "/a" in url else mock_resp_b
+            m = MagicMock()
+            m.__aenter__ = AsyncMock(return_value=mock_resp_a if "/a" in url else mock_resp_b)
+            m.__aexit__ = AsyncMock(return_value=False)
+            return m
 
-        mock_session.get = AsyncMock(side_effect=get_side_effect)
+        mock_session.get = MagicMock(side_effect=get_side_effect)
         mock_hash.return_value.hexdigest.return_value = "new"
 
         with patch.object(coordinator, "_start_background_refresh"):
@@ -875,3 +912,172 @@ async def test_backup_migration_old_bak(coordinator, tmp_path):
     assert (tmp_path / "test.yaml.bak.1").read_text() == "current"
     assert (tmp_path / "test.yaml.bak.2").read_text() == "old_backup"
     assert not (tmp_path / "test.yaml.bak").exists()
+
+
+async def test_background_refresh_deduplication(hass, coordinator):
+    """Test that multiple refresh requests do not start duplicate background tasks."""
+    blueprints = {
+        "path/1": {"name": "BP1", "rel_path": "path/1", "source_url": "url1", "hash": "h1"}
+    }
+    coordinator.config_entry.options = {
+        "filter_mode": "all",
+        "selected_blueprints": [],
+    }
+
+    async def mock_refresh(*_args, **_kwargs):
+        await asyncio.sleep(10)
+
+    def side_effect(coro, name=None):
+        return asyncio.create_task(coro, name=name)
+
+    hass.async_create_background_task = MagicMock(side_effect=side_effect)
+    with (
+        patch.object(coordinator.__class__, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_async_background_refresh", side_effect=mock_refresh),
+    ):
+        await coordinator._async_update_data()
+        task1 = coordinator._background_task
+        assert task1 is not None
+
+        await coordinator._async_update_data()
+        task2 = coordinator._background_task
+
+        assert task1 is task2
+        assert not task1.done()
+        assert not task1.cancelled()
+
+        await coordinator.async_shutdown()
+
+
+async def test_background_refresh_shutdown(hass, coordinator):
+    """Test that shutdown cancels the background task."""
+
+    async def long_running_task():
+        try:
+            await asyncio.sleep(100)
+        except asyncio.CancelledError:
+            raise
+
+    def side_effect(coro, name=None):
+        return asyncio.create_task(coro, name=name)
+
+    hass.async_create_background_task = MagicMock(side_effect=side_effect)
+
+    coordinator._background_task = hass.async_create_background_task(
+        long_running_task(), name="test_shutdown"
+    )
+
+    task = coordinator._background_task
+    assert not task.done()
+
+    await coordinator.async_shutdown()
+
+    assert task.cancelled()
+    assert coordinator._background_task is None
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_content_retry_limit(coordinator):
+    """Test that _async_fetch_content retries exactly MAX_RETRIES times."""
+    mock_session = MagicMock(spec=aiohttp.ClientSession)
+
+    def get_side_effect(*_args, **_kwargs):
+        m = MagicMock()
+        m.__aenter__ = AsyncMock(side_effect=Exception("Fetch failed"))
+        m.__aexit__ = AsyncMock()
+        return m
+
+    mock_session.get = MagicMock(side_effect=get_side_effect)
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.asyncio.sleep", new_callable=AsyncMock
+        ),
+        pytest.raises(Exception, match="Fetch failed"),
+    ):
+        await coordinator._async_fetch_content(mock_session, "https://url")
+
+    assert mock_session.get.call_count == MAX_RETRIES + 1
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_content_pacing_logic(coordinator):
+    """Test that _async_fetch_content respects MIN_SEND_INTERVAL pacing."""
+    mock_session = MagicMock(spec=aiohttp.ClientSession)
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.text = AsyncMock(return_value="content")
+    mock_response.headers = {}
+
+    def get_side_effect(*_args, **_kwargs):
+        m = MagicMock()
+        m.__aenter__ = AsyncMock(return_value=mock_response)
+        m.__aexit__ = AsyncMock()
+        return m
+
+    mock_session.get = MagicMock(side_effect=get_side_effect)
+
+    time_points = [100.0, 100.1]
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.time.monotonic",
+            side_effect=time_points,
+        ),
+        patch(
+            "custom_components.blueprints_updater.coordinator.random.uniform",
+            return_value=MIN_SEND_INTERVAL,
+        ) as mock_random,
+        patch(
+            "custom_components.blueprints_updater.coordinator.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep,
+    ):
+        await coordinator._async_fetch_content(mock_session, "https://url1")
+        await coordinator._async_fetch_content(mock_session, "https://url2")
+
+        mock_random.assert_called_with(MIN_SEND_INTERVAL, MAX_SEND_INTERVAL)
+
+        expected_delay = (100.0 + MIN_SEND_INTERVAL) - 100.1
+        mock_sleep.assert_called_with(expected_delay)
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_content_pacing_logic_max(coordinator):
+    """Test that _async_fetch_content respects MAX_SEND_INTERVAL pacing."""
+    mock_session = MagicMock(spec=aiohttp.ClientSession)
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.text = AsyncMock(return_value="content")
+    mock_response.headers = {}
+
+    def get_side_effect(*_args, **_kwargs):
+        m = MagicMock()
+        m.__aenter__ = AsyncMock(return_value=mock_response)
+        m.__aexit__ = AsyncMock()
+        return m
+
+    mock_session.get = MagicMock(side_effect=get_side_effect)
+    coordinator._last_request_time = 0.0
+
+    time_points = [200.0, 200.1]
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.time.monotonic",
+            side_effect=time_points,
+        ),
+        patch(
+            "custom_components.blueprints_updater.coordinator.random.uniform",
+            return_value=MAX_SEND_INTERVAL,
+        ) as mock_random,
+        patch(
+            "custom_components.blueprints_updater.coordinator.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as mock_sleep,
+    ):
+        await coordinator._async_fetch_content(mock_session, "https://url1")
+        await coordinator._async_fetch_content(mock_session, "https://url2")
+
+        mock_random.assert_called_with(MIN_SEND_INTERVAL, MAX_SEND_INTERVAL)
+
+        expected_delay = (200.0 + MAX_SEND_INTERVAL) - 200.1
+        mock_sleep.assert_called_with(expected_delay)

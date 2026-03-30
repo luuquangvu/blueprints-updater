@@ -1,6 +1,7 @@
 """Utility functions for Blueprints Updater."""
 
 import asyncio
+import inspect
 import logging
 import random
 from collections.abc import Callable, Coroutine
@@ -32,24 +33,32 @@ def retry_async(
                     return await func(*args, **kwargs)
                 except exceptions as err:
                     last_err = err
+
+                    try:
+                        sig = inspect.signature(func)
+                        bound_args = sig.bind(*args, **kwargs)
+                        context = bound_args.arguments.get("url", "unknown")
+                    except (ValueError, TypeError):
+                        context = getattr(func, "__name__", "unknown")
+
                     if attempt < max_retries:
                         wait = (base_delay * (2**attempt) if exponential else base_delay) + (
-                            random.uniform(0, base_delay * 2) if jitter else 0
+                            random.uniform(0, base_delay) if jitter else 0
                         )
-                        _LOGGER.warning(
-                            "Error in %s: %s. Retrying in %.2fs (attempt %d/%d)",
-                            getattr(func, "__name__", "unknown"),
+                        _LOGGER.info(
+                            "Retrying lookup for %s due to %s (Retry %d/%d, wait %.2fs)",
+                            context,
                             err,
-                            wait,
                             attempt + 1,
                             max_retries,
+                            wait,
                         )
                         await asyncio.sleep(wait)
                     else:
                         _LOGGER.error(
-                            "Failed %s after %d retries: %s",
-                            getattr(func, "__name__", "unknown"),
-                            max_retries,
+                            "Could not update from %s after %d attempts: %s",
+                            context,
+                            max_retries + 1,
                             err,
                         )
                         raise last_err from err

@@ -9,7 +9,7 @@
 ## Tính năng
 
 - **Quét định kỳ tự động**: Quét thư mục `blueprints/` cục bộ sau mỗi X giờ (có thể cấu hình).
-- **So sánh thông minh**: Sử dụng băm **SHA256** để so sánh nội dung tệp cục bộ với phiên bản mới nhất từ URL nguồn.
+- **So sánh thông minh**: Hỗ trợ **ETag** giúp tối ưu bộ nhớ đệm, tiết kiệm băng thông và sử dụng mã băm **SHA256** hiện đại để phát hiện chính xác những thay đổi nhỏ nhất trong nội dung blueprint.
 - **Hỗ trợ URL nâng cao**:
   - **GitHub**: Tự động chuyển đổi URL blob tiêu chuẩn sang URL tệp raw.
   - **Gist**: Hỗ trợ GitHub Gist gốc.
