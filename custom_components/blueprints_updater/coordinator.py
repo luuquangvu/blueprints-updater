@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import html
 import logging
 import os
+import random
 import shutil
+import time
 from datetime import timedelta
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
-from curl_cffi.requests import AsyncSession
+import aiohttp
 from homeassistant.components.blueprint.models import Blueprint
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import yaml as yaml_util
@@ -35,6 +40,8 @@ from .const import (
     FILTER_MODE_WHITELIST,
     MAX_CONCURRENT_REQUESTS,
     MAX_RETRIES,
+    MAX_SEND_INTERVAL,
+    MIN_SEND_INTERVAL,
     RE_BLUEPRINT_KEY,
     RE_FORUM_CODE_BLOCK,
     RE_FORUM_TOPIC_ID,
@@ -43,6 +50,8 @@ from .const import (
     RE_SOURCE_URL_LINE,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
+    STORAGE_KEY_DATA,
+    STORAGE_VERSION,
 )
 from .utils import retry_async
 
@@ -76,6 +85,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._translations: dict[str, str] = {}
         self._background_task: asyncio.Task | None = None
         self._refresh_lock = asyncio.Lock()
+        self._last_request_time = 0.0
+        self._pacing_lock = asyncio.Lock()
+        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY_DATA)
+        self._persisted_etags: dict[str, str] = {}
+
+    async def async_setup(self) -> None:
+        """Load persisted data."""
+        data = await self._store.async_load()
+        if data:
+            self._persisted_etags = data.get("etags", {})
+            _LOGGER.debug("Loaded %d persisted ETags", len(self._persisted_etags))
 
     async def async_translate(self, key: str, category: str = "common", **kwargs: Any) -> str:
         """Translate a key using the current language and category.
@@ -164,7 +184,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "remote_hash": None,
                 "remote_content": None,
                 "last_error": None,
-                "etag": None,
+                "etag": self._persisted_etags.get(path) if not self.data else None,
             }
             for path, info in blueprints.items()
         }
@@ -182,15 +202,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         }
                     )
 
+        self.data = results
         self._start_background_refresh(blueprints)
 
         _LOGGER.debug("Instant setup complete with %d blueprints", len(results))
         return results
 
     def _start_background_refresh(self, blueprints: dict[str, Any]) -> None:
-        """Start or restart the background remote refresh task."""
+        """Start the background remote refresh task if not already running."""
         if self._background_task and not self._background_task.done():
-            self._background_task.cancel()
+            _LOGGER.debug("Background refresh already in progress, skipping start")
+            return
 
         self._background_task = self.hass.async_create_background_task(
             self._async_background_refresh(blueprints),
@@ -198,41 +220,78 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _async_background_refresh(self, blueprints: dict[str, Any]) -> None:
-        """Fetch remote hashes concurrently using HTTP/2 multiplexing.
+        """Fetch remote updates in the background using a task queue."""
+        try:
+            if self._refresh_lock.locked():
+                _LOGGER.debug("Background refresh already running, skipping")
+                return
 
-        Processes blueprints in parallel (limited by MAX_CONCURRENT_REQUESTS)
-        within a single curl_cffi session to avoid bot detection and stay
-        within GitHub connection limits.
-        """
-        if self._refresh_lock.locked():
-            _LOGGER.debug("Background refresh already running, skipping")
-            return
+            async with self._refresh_lock:
+                results_to_notify: list[str] = []
+                queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
 
-        async with self._refresh_lock:
-            results_to_notify: list[str] = []
+                for path, info in blueprints.items():
+                    queue.put_nowait((path, info))
 
-            async with AsyncSession(impersonate="chrome") as session:
-                semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+                session = async_get_clientsession(self.hass)
 
-                async def _worker(path: str, info: dict[str, Any]) -> None:
-                    """Process a single blueprint with concurrency limit."""
-                    async with semaphore:
+                async def _worker() -> None:
+                    """Process blueprints from the queue."""
+                    while True:
+                        try:
+                            blueprint_path, blueprint_info = queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+
                         try:
                             await self._async_update_blueprint_in_place(
-                                session, path, info, results_to_notify
+                                session, blueprint_path, blueprint_info, results_to_notify
                             )
                             self.async_set_updated_data(self.data)
-                        except asyncio.CancelledError:
-                            raise
                         except Exception as err:
-                            _LOGGER.error("Error in background worker for %s: %s", path, err)
+                            _LOGGER.error(
+                                "Error in background worker for %s: %s", blueprint_path, err
+                            )
+                        finally:
+                            queue.task_done()
 
-                tasks = [_worker(path, info) for path, info in blueprints.items()]
-                await asyncio.gather(*tasks)
+                workers = [
+                    self.hass.async_create_background_task(_worker(), name=f"{DOMAIN}_worker_{i}")
+                    for i in range(MAX_CONCURRENT_REQUESTS)
+                ]
 
-            _LOGGER.debug("Background refresh complete")
-            if results_to_notify:
-                await self._async_handle_notifications(results_to_notify)
+                if workers:
+                    await asyncio.gather(*workers)
+
+                _LOGGER.debug("Background refresh complete")
+                await self._async_save_etags()
+                if results_to_notify:
+                    await self._async_handle_notifications(results_to_notify)
+        finally:
+            self._background_task = None
+
+    async def _async_save_etags(self) -> None:
+        """Save current ETags to persistent storage."""
+        if not self.data:
+            return
+
+        etags = {path: info.get("etag") for path, info in self.data.items() if info.get("etag")}
+
+        if etags == self._persisted_etags:
+            return
+
+        _LOGGER.debug("Saving %d ETags to storage", len(etags))
+        self._persisted_etags = etags
+        await self._store.async_save({"etags": etags})
+
+    async def async_shutdown(self) -> None:
+        """Shutdown the coordinator and cancel tasks."""
+        if self._background_task and not self._background_task.done():
+            _LOGGER.debug("Cancelling background refresh task due to shutdown")
+            self._background_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._background_task
+            self._background_task = None
 
     async def _async_handle_notifications(self, auto_updated_names: list[str]) -> None:
         """Handle services reload and persistent notifications."""
@@ -401,7 +460,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_blueprint_in_place(
         self,
-        session: AsyncSession,
+        session: aiohttp.ClientSession,
         path: str,
         info: dict[str, Any],
         results_to_notify: list[str],
@@ -411,9 +470,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not source_url:
             return
 
-        _LOGGER.debug("Checking for updates: %s", info["name"])
         normalized_url = self._normalize_url(source_url)
-        stored_etag = self.data.get(path, {}).get("etag")
+        if self.data is None:
+            self.data = {}
+        data = self.data
+        stored_etag = data.get(path, {}).get("etag")
 
         try:
             remote_content, new_etag = await self._async_fetch_content(
@@ -421,13 +482,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
             if remote_content is None:
-                _LOGGER.debug("Not modified (304): %s", info["name"])
-                if path in self.data and new_etag:
+                _LOGGER.debug("[OK] '%s' is up to date (304)", info["name"])
+                if self.data and path in self.data and new_etag:
                     self.data[path]["etag"] = new_etag
                 return
 
             if not remote_content:
-                if path in self.data:
+                if self.data and path in self.data:
                     self.data[path]["last_error"] = "empty_content"
                 return
 
@@ -451,7 +512,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.async_install_blueprint(
                     path, remote_content, reload_services=False, backup=True
                 )
-                if path in self.data:
+                if self.data and path in self.data:
                     self.data[path].update(
                         {
                             "remote_hash": remote_hash,
@@ -465,7 +526,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 results_to_notify.append(info["name"])
                 return
 
-            if path in self.data:
+            if self.data and path in self.data:
                 self.data[path].update(
                     {
                         "remote_hash": remote_hash,
@@ -477,17 +538,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
         except Exception as err:
             _LOGGER.error("Error fetching blueprint from %s: %s", source_url, err)
-            if path in self.data:
+            if self.data and path in self.data:
                 self.data[path]["last_error"] = f"fetch_error|{err}"
 
     @retry_async(max_retries=MAX_RETRIES, base_delay=RETRY_BACKOFF)
     async def _async_fetch_content(
         self,
-        session: AsyncSession,
+        session: aiohttp.ClientSession,
         url: str,
         etag: str | None = None,
     ) -> tuple[str | None, str | None]:
-        """Fetch content from a URL via curl_cffi impersonation.
+        """Fetch content from a URL via aiohttp.
 
         Returns (content, etag). Content is None on 304 Not Modified.
         """
@@ -495,19 +556,32 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if etag:
             headers["If-None-Match"] = etag
 
-        response = await session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-        new_etag = response.headers.get("ETag")
+        async with self._pacing_lock:
+            now = time.monotonic()
+            interval = random.uniform(MIN_SEND_INTERVAL, MAX_SEND_INTERVAL)
+            delay = max(0.0, (self._last_request_time + interval) - now)
+            self._last_request_time = now + delay
 
-        if response.status_code == 304:
-            return None, etag
+        if delay > 0:
+            await asyncio.sleep(delay)
 
-        response.raise_for_status()
+        _LOGGER.debug("[Pacing] Dispatching request for %s", url)
 
-        if DOMAIN_HA_FORUM in url:
-            json_data = response.json()
-            return self._parse_forum_content(json_data) or "", new_etag
+        async with session.get(url, headers=headers, timeout=REQUEST_TIMEOUT) as response:
+            new_etag = response.headers.get("ETag")
 
-        return response.text, new_etag
+            if response.status == 304:
+                return None, etag if etag else new_etag
+
+            response.raise_for_status()
+
+            if DOMAIN_HA_FORUM in url:
+                json_data = await response.json()
+                content = self._parse_forum_content(json_data)
+                return (content or ""), new_etag
+
+            content = await response.text()
+            return content, new_etag
 
     @staticmethod
     def _normalize_url(url: str) -> str:
@@ -559,7 +633,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @staticmethod
     def _parse_forum_content(json_data: dict[str, Any]) -> str | None:
-        """Extract YAML blueprint from Discourse JSON response."""
+        """Extract YAML blueprint from Home Assistant Forum JSON response."""
         try:
             post_stream: dict[str, Any] = json_data.get("post_stream", {})
             posts: list[dict[str, Any]] = post_stream.get("posts", [])

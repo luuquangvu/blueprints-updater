@@ -24,6 +24,7 @@ async def test_setup_entry(hass: HomeAssistant):
     hass.config_entries.async_forward_entry_setups = AsyncMock()
 
     coordinator_mock = MagicMock()
+    coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
 
     with patch(
@@ -52,6 +53,7 @@ async def test_service_registration(hass: HomeAssistant):
 
     coordinator_mock = MagicMock()
     coordinator_mock.config_entry = entry
+    coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
 
     hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
@@ -104,6 +106,7 @@ async def test_service_handlers(hass: HomeAssistant):
 
     coordinator_mock = MagicMock()
     coordinator_mock.config_entry = entry
+    coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
     coordinator_mock.async_request_refresh = AsyncMock()
 
@@ -167,6 +170,7 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
 
     coordinator_mock = MagicMock()
     coordinator_mock.config_entry = entry
+    coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
 
     hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
@@ -264,7 +268,9 @@ async def test_unload_entry(hass: HomeAssistant):
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
 
     coordinator_mock = MagicMock()
+    coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.async_shutdown = AsyncMock()
 
     with (
         patch(

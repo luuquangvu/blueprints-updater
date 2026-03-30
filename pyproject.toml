@@ -8,7 +8,6 @@ dependencies = [
     "PyYAML",
     "aiohttp",
     "voluptuous",
-    "curl-cffi",
 ]
 
 [dependency-groups]
