@@ -6,25 +6,18 @@
 
 ---
 
-## Tính năng
+## Tính năng chính
 
-- **Quét định kỳ tự động**: Quét thư mục `blueprints/` cục bộ sau mỗi X giờ (có thể cấu hình).
-- **So sánh thông minh**: Hỗ trợ **ETag** giúp tối ưu bộ nhớ đệm, tiết kiệm băng thông và sử dụng mã băm **SHA256** hiện đại để phát hiện chính xác những thay đổi nhỏ nhất trong nội dung blueprint.
-- **Hỗ trợ URL nâng cao**:
-  - **GitHub**: Tự động chuyển đổi URL blob tiêu chuẩn sang URL tệp raw.
-  - **Gist**: Hỗ trợ GitHub Gist gốc.
-  - **HA Community Forum**: Phân tích trực tiếp các chủ đề trên diễn đàn để trích xuất mã blueprint YAML mới nhất.
-- **Duy trì nguồn**: Tự động đảm bảo thẻ `source_url` được giữ lại trong các tệp đã cập nhật để các bản cập nhật trong tương lai luôn hoạt động.
-- **Lọc nâng cao (Advanced Filtering)**: Chọn cập nhật tất cả blueprint, hoặc chỉ những blueprint cụ thể (**Whitelist**), hoặc loại trừ các blueprint cụ thể (**Blacklist**).
-- **Tự động Cập nhật**: Tùy chọn tự động tải xuống và áp dụng các bản cập nhật ngay khi được phát hiện. Tiện ích cũng sẽ **gửi một thông báo hệ thống** liệt kê danh sách các blueprint đã được cập nhật để bạn dễ dàng theo dõi.
-- **Cải tiến Logic Reload**: Tự động tải lại các miền `automation`, `script`, và `template` sau khi cập nhật để đảm bảo thay đổi có hiệu lực ngay lập tức.
-- **An toàn là trên hết**: Kiểm tra kỹ lưỡng blueprint trước khi cập nhật - bao gồm cú pháp YAML, cấu trúc blueprint, và tính tương thích phiên bản Home Assistant. Nếu phát hiện bất kỳ vấn đề nào (lỗi cú pháp, thiếu trường bắt buộc, hoặc phiên bản HA quá cũ), bản cập nhật sẽ bị chặn với thông báo lỗi rõ ràng để bảo vệ hệ thống của bạn.
-- **Cảnh báo Tác động (Usage Insight)**: Trước khi cập nhật, tiện ích sẽ tính toán và hiển thị chính xác số lượng Automation và Script đang phụ thuộc vào blueprint này, giúp bạn lường trước mức độ ảnh hưởng của bản cập nhật.
-- **Sao lưu & Phục hồi (Backup & Restore)**: Tự động tạo bản sao lưu đánh số (`.bak.1`, `.bak.2`, `.bak.3`) trước khi cập nhật blueprint, giữ lại tối đa N phiên bản cũ (có thể cấu hình, mặc định 3). Nếu bản cập nhật làm hỏng tự động hóa, bạn có thể dễ dàng khôi phục bất kỳ phiên bản cũ nào.
-- **Cập nhật hàng loạt (Update All)**: Cập nhật đồng loạt tất cả các blueprint đang có bản mới thông qua dịch vụ `blueprints_updater.update_all` cực kỳ nhanh chóng mà không làm treo Home Assistant.
-- **Làm mới thủ công (Manual Refresh)**: Kích hoạt quét ngay lập tức thông qua dịch vụ **`blueprints_updater.reload`** trong Developer Tools hoặc menu **YAML configuration reloading**.
-- **Tự động nhận diện (Dynamic Discovery)**: Tự động phát hiện và thêm các blueprint mới dưới dạng thực thể cập nhật mà không cần khởi động lại.
-- **Hỗ trợ đa ngôn ngữ (Multilingual)**: Được địa phương hóa hoàn toàn cho nhiều ngôn ngữ khác nhau. Tích hợp tự động thích ứng với cài đặt ngôn ngữ trong Home Assistant của bạn.
+- **Trải nghiệm như hàng chính chủ**: Tích hợp mượt mà vào Home Assistant, hoạt động y hệt các bản cập nhật hệ thống hay HACS. Bạn sẽ thấy các thực thể cập nhật hiện ngay trên dashboard, dễ dàng cập nhật từng cái hoặc tất cả cùng lúc chỉ với một cú nhấp chuột.
+- **An toàn tuyệt đối, tự động sao lưu**: Mỗi bản cập nhật đều được xác thực kỹ lưỡng về cú pháp YAML và độ tương thích phiên bản trước khi áp dụng. Hệ thống tự động lưu lại các bản sao lưu xoay vòng, giúp bạn trở về bản cũ ngay lập tức nếu bản mới phát sinh lỗi.
+- **Cài đặt một lần, dùng mãi mãi**: Khi bật chế độ tự động cập nhật, bạn có thể hoàn toàn rảnh tay. Hệ thống sẽ tự sao lưu bản đang dùng, tải bản mới nhất và gửi thông báo cho biết chính xác những blueprint nào vừa được cập nhật.
+- **Phát hiện thay đổi thông minh**: Thay vì tải tệp tin liên tục, công cụ này sử dụng mã băm SHA256 và tiêu đề ETag để chỉ tải về khi thực sự có thay đổi. Cách làm này giúp tiết kiệm băng thông và giữ cho hệ thống luôn vận hành nhẹ nhàng.
+- **Hỗ trợ nhiều nguồn khác nhau**: Dù blueprint nằm trên GitHub, Gist hay được chia sẻ trong các bài viết trên Diễn đàn cộng đồng Home Assistant, trình cập nhật này đều có khả năng xử lý chính xác và tin cậy.
+- **Biết rõ tác động trước khi thực hiện**: Hệ thống hiển thị số lượng Automation hoặc Script đang sử dụng blueprint đó, giúp bạn đánh giá nhanh tác động của bản cập nhật đối với hệ thống nhà thông minh của mình.
+- **Kiểm soát hoàn toàn theo ý muốn**: Bạn có quyền chọn theo dõi tất cả blueprint hoặc sử dụng danh sách Whitelist/Blacklist để chỉ tập trung vào những mục thực sự quan trọng.
+- **Cập nhật tức thì, không cần khởi động lại**: Các miền liên quan (automation, script hoặc template) sẽ tự động được làm mới ngay sau khi cập nhật. Mọi thay đổi có hiệu lực tức thì mà không làm gián đoạn hoạt động của Home Assistant.
+- **Duy trì liên kết nguồn vĩnh viễn**: Tự động bảo tồn các thẻ thông tin link gốc trong tệp YAML, đảm bảo blueprint của bạn luôn giữ được kết nối để nhận các bản cập nhật trong tương lai.
+- **Tự động nhận diện và đa ngôn ngữ**: Các blueprint mới thêm vào sẽ được nhận diện ngay mà không cần khởi động lại. Giao diện được dịch ra nhiều ngôn ngữ và tự động điều chỉnh theo cấu hình Home Assistant của bạn.
 
 ---
 

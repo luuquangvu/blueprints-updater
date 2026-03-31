@@ -8,23 +8,16 @@
 
 ## Features
 
-- **Automated Periodic Scanning**: Scans your local `blueprints/` directory every X hours (configurable).
-- **Smart Comparison**: Uses **ETag** support to minimize bandwidth and modern **SHA256** hashing to accurately detect even the smallest changes in blueprint content.
-- **Advanced URL Support**:
-  - **GitHub**: Automatically converts standard blob URLs to raw file URLs.
-  - **Gist**: Supports GitHub Gists natively.
-  - **HA Community Forum**: Directly parses forum topics to extract the latest YAML blueprint code.
-- **Source Persistence**: Automatically ensures the `source_url` tag is preserved in updated files so future updates always work.
-- **Advanced Filtering**: Choose to update all blueprints, only specific ones (**Whitelist**), or exclude specific ones (**Blacklist**).
-- **Auto-Update Support**: Optional feature to automatically download and apply updates as soon as they are detected. It also **triggers a system notification** listing all successfully updated blueprints for easy tracking.
-- **Improved Reload Logic**: Automatically reloads `automation`, `script`, and `template` domains after an update to ensure immediate effect.
-- **Safety First**: Thoroughly validates remote blueprints before applying updates - checking YAML syntax, blueprint structure, and Home Assistant version compatibility. If anything is wrong (syntax errors, missing fields, or your HA version is too old for the new blueprint), the update is blocked with a clear error message to protect your system.
-- **Usage Insight**: Before updating, the integration calculates and displays the exact number of Automations and Scripts that currently rely on the blueprint, helping you understand the impact of the update.
-- **Backup & Restore**: Automatically creates rotating, numbered backups (`.bak.1`, `.bak.2`, `.bak.3`) before updating blueprints, keeping up to N previous versions (configurable, default 3). If an update breaks your automations, easily restore any previous version with a single service call.
-- **Update All (Bulk Update)**: Instantly update all eligible blueprints simultaneously via the `blueprints_updater.update_all` service, without freezing Home Assistant.
-- **Manual Refresh**: Trigger an immediate scan via the **`blueprints_updater.reload`** action in Developer Tools or the **YAML configuration reloading** menu.
-- **Dynamic Discovery**: Automatically detects and adds new blueprints as `update` entities without requiring a restart.
-- **Multilingual Support**: Fully localized in several languages. The integration automatically adapts to your Home Assistant language settings.
+- **Feels like a native feature**: Integrates seamlessly with Home Assistant, working just like official or HACS updates. You'll get standard update entities on your dashboard, making it easy to stay up-to-date with a single click or bulk update all blueprints at once.
+- **Safety first with automatic backups**: Every update is validated for YAML syntax and version compatibility before being applied. The integration also maintains rotating backups, so you can instantly roll back if an update causes issues.
+- **Set it and forget it**: Enable auto-updates and let the system do the work for you. It automatically backs up your current blueprint, downloads the new version, and notifies you exactly which blueprints were updated.
+- **Efficient change detection**: Instead of constant downloads, it uses SHA256 hashing and ETag headers to pull data only when an actual change is detected. This saves bandwidth and keeps your system performing at its best.
+- **Broad source support**: Whether a blueprint is hosted on GitHub, GitHub Gist, or shared on the Home Assistant Community Forum, this updater handles it accurately.
+- **Know the impact before you update**: Displays the exact number of Automations or Scripts currently using a blueprint, so you know exactly how the update will affect your setup.
+- **Complete control**: Choose to track all your blueprints or use granulated Whitelists and Blacklists to monitor only the ones you want.
+- **Instant updates without restarts**: Relevant domains (automation, script, or template) are automatically reloaded after an update. Your changes take effect immediately without needing to reboot Home Assistant.
+- **Preserves original source links**: Automatically maintains the source URL metadata in your YAML files, ensuring your blueprints remain trackable and updatable in the long run.
+- **Dynamic discovery and multilingual support**: New blueprints are detected automatically without requiring a restart. The interface is available in several languages and adapts to your Home Assistant settings.
 
 ---
 
