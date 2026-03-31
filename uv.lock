@@ -410,8 +410,8 @@ name = "blueprints-updater"
 version = "1.8.1"
 source = { virtual = "." }
 dependencies = [
-    { name = "aiohttp" },
     { name = "homeassistant" },
+    { name = "httpx" },
     { name = "pyyaml" },
     { name = "voluptuous" },
 ]
@@ -426,8 +426,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp" },
     { name = "homeassistant" },
+    { name = "httpx" },
     { name = "pyyaml" },
     { name = "voluptuous" },
 ]
