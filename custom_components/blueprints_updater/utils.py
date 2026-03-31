@@ -45,7 +45,7 @@ def retry_async(
                         wait = (base_delay * (2**attempt) if exponential else base_delay) + (
                             random.uniform(0, base_delay) if jitter else 0
                         )
-                        _LOGGER.info(
+                        _LOGGER.debug(
                             "Retrying lookup for %s due to %s (Retry %d/%d, wait %.2fs)",
                             context,
                             err,

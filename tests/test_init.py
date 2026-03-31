@@ -1,4 +1,5 @@
 import hashlib
+from types import MappingProxyType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,6 +22,7 @@ async def test_setup_entry(hass: HomeAssistant):
     entry.data = {"old_config": "value"}
 
     hass.config_entries = MagicMock()
+    hass.config_entries.async_update_entry = MagicMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock()
 
     coordinator_mock = MagicMock()
@@ -43,9 +45,11 @@ async def test_service_registration(hass: HomeAssistant):
     """Test that services are registered."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
-    entry.options = {
-        "max_backups": 3,
-    }
+    entry.options = MappingProxyType(
+        {
+            "max_backups": 3,
+        }
+    )
     entry.data = {}
 
     hass.config_entries = MagicMock()

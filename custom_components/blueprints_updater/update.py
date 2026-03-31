@@ -54,7 +54,7 @@ async def async_setup_entry(
             if path not in coordinator.data:
                 removed_paths.append(path)
 
-        entity_registry = er.async_get(hass)
+        entity_registry: Any = er.async_get(hass)
 
         if removed_paths:
             for path in removed_paths:

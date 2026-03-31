@@ -13,16 +13,17 @@ from datetime import timedelta
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
-import aiohttp
+import httpx
 from homeassistant.components.blueprint.models import Blueprint
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import yaml as yaml_util
+from homeassistant.util.ssl import SSL_ALPN_HTTP11_HTTP2
 
 from .const import (
     CONF_AUTO_UPDATE,
@@ -82,7 +83,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             name=DOMAIN,
             update_interval=update_interval,
         )
-        self._translations: dict[str, str] = {}
+        self._translations: dict[tuple[str, str], dict[str, str]] = {}
+        self._translation_lock = asyncio.Lock()
+        self.setup_complete = False
         self._background_task: asyncio.Task | None = None
         self._refresh_lock = asyncio.Lock()
         self._last_request_time = 0.0
@@ -93,7 +96,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_setup(self) -> None:
         """Load persisted data."""
         data = await self._store.async_load()
-        if data:
+        if data and isinstance(data, dict):
             self._persisted_etags = data.get("etags", {})
             _LOGGER.debug("Loaded %d persisted ETags", len(self._persisted_etags))
 
@@ -104,36 +107,38 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         a more convenient API and better error handling for startup race conditions.
         """
         language = getattr(self.hass.config, "language", "en")
+        cache_key = (language, category)
 
-        if (
-            not self._translations
-            or self._translations.get("__language") != language
-            or self._translations.get("__category") != category
-        ):
-            try:
-                loaded = await async_get_translations(self.hass, language, category, [DOMAIN])
-                if loaded:
-                    self._translations = loaded
-                    self._translations["__language"] = language
-                    self._translations["__category"] = category
-                    _LOGGER.debug(
-                        "Successfully loaded translations for language: %s, category: %s",
-                        language,
-                        category,
-                    )
-            except Exception as err:
-                _LOGGER.debug(
-                    "Could not load translations for %s (%s) for language %s: %s",
-                    DOMAIN,
-                    category,
-                    language,
-                    err,
-                )
+        if not self.setup_complete:
+            return key
 
+        if cache_key not in self._translations:
+            async with self._translation_lock:
+                if cache_key not in self._translations:
+                    try:
+                        loaded = await async_get_translations(
+                            self.hass, language, category, [DOMAIN]
+                        )
+                        self._translations[cache_key] = loaded or {}
+                        if loaded:
+                            _LOGGER.debug(
+                                "Successfully loaded translations for language: %s, category: %s",
+                                language,
+                                category,
+                            )
+                    except Exception as err:
+                        _LOGGER.debug(
+                            "Could not load translations for %s (%s) for language %s: %s",
+                            DOMAIN,
+                            category,
+                            language,
+                            err,
+                        )
+                        self._translations[cache_key] = {}
+
+        translations = self._translations.get(cache_key, {})
         full_key = f"component.{DOMAIN}.{category}.{key}"
-        template = self._translations.get(f"{full_key}.message") or self._translations.get(
-            full_key, key
-        )
+        template = translations.get(f"{full_key}.message") or translations.get(full_key, key)
 
         try:
             return template.format(**kwargs) if kwargs else template
@@ -233,7 +238,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 for path, info in blueprints.items():
                     queue.put_nowait((path, info))
 
-                session = async_get_clientsession(self.hass)
+                session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
 
                 async def _worker() -> None:
                     """Process blueprints from the queue."""
@@ -460,13 +465,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_blueprint_in_place(
         self,
-        session: aiohttp.ClientSession,
+        session: httpx.AsyncClient,
         path: str,
         info: dict[str, Any],
         results_to_notify: list[str],
     ) -> None:
         """Update a single blueprint directly in self.data."""
-        source_url = info.get("source_url")
+        source_url: str | None = info.get("source_url")
         if not source_url:
             return
 
@@ -544,11 +549,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @retry_async(max_retries=MAX_RETRIES, base_delay=RETRY_BACKOFF)
     async def _async_fetch_content(
         self,
-        session: aiohttp.ClientSession,
+        session: httpx.AsyncClient,
         url: str,
         etag: str | None = None,
     ) -> tuple[str | None, str | None]:
-        """Fetch content from a URL via aiohttp.
+        """Fetch content from a URL.
 
         Returns (content, etag). Content is None on 304 Not Modified.
         """
@@ -567,21 +572,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         _LOGGER.debug("[Pacing] Dispatching request for %s", url)
 
-        async with session.get(url, headers=headers, timeout=REQUEST_TIMEOUT) as response:
-            new_etag = response.headers.get("ETag")
+        response = await session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+        new_etag = response.headers.get("ETag")
 
-            if response.status == 304:
-                return None, etag if etag else new_etag
+        if response.status_code == 304:
+            return None, etag if etag else new_etag
 
-            response.raise_for_status()
+        response.raise_for_status()
 
-            if DOMAIN_HA_FORUM in url:
-                json_data = await response.json()
-                content = self._parse_forum_content(json_data)
-                return (content or ""), new_etag
+        if DOMAIN_HA_FORUM in url:
+            json_data = response.json()
+            content = self._parse_forum_content(json_data)
+            return (content or ""), new_etag
 
-            content = await response.text()
-            return content, new_etag
+        content = response.text
+        return content, new_etag
 
     @staticmethod
     def _normalize_url(url: str) -> str:
