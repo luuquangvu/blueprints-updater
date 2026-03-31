@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import os
 from datetime import timedelta
+from types import MappingProxyType
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,7 +26,7 @@ from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoor
 def coordinator(hass):
     """Fixture for BlueprintUpdateCoordinator."""
     entry = MagicMock()
-    entry.options = {}
+    entry.options = MappingProxyType({})
     entry.data = {}
     with patch(
         "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
@@ -46,6 +47,7 @@ def coordinator(hass):
 
         coord.async_set_updated_data = cast(Any, MagicMock(side_effect=_mock_set_data))
         coord.async_update_listeners = cast(Any, MagicMock())
+        coord.setup_complete = True
         return coord
 
 
@@ -91,7 +93,7 @@ def test_parse_forum_content(coordinator):
             ]
         }
     }
-    content = coordinator._parse_forum_content(json_data)
+    content: Any = coordinator._parse_forum_content(json_data)
     assert "blueprint:" in content
     assert "name: Test" in content
 
@@ -173,7 +175,7 @@ async def test_async_update_blueprint(coordinator):
         "source_url": "https://github.com/user/repo/blob/main/test.yaml",
         "hash": "old_hash",
     }
-    results = {path: {"last_error": None, "hash": "old_hash"}}
+    results: dict[str, Any] = {path: {"last_error": None, "hash": "old_hash"}}
 
     mock_response = MagicMock()
     mock_response.status = 200
@@ -539,7 +541,7 @@ async def test_async_install_blueprint_error(coordinator):
 @pytest.mark.asyncio
 async def test_async_update_data_auto_update(coordinator):
     """Test _async_update_data with auto_update enabled."""
-    coordinator.config_entry.options = {"auto_update": True}
+    coordinator.config_entry.options = MappingProxyType({"auto_update": True})
     blueprints = {
         "/test.yaml": {
             "name": "Test",
@@ -618,7 +620,7 @@ async def test_async_update_data_auto_update(coordinator):
 @pytest.mark.asyncio
 async def test_async_update_data_auto_update_multiple_sorted(coordinator):
     """Test _async_update_data sorts multiple auto-updated blueprints."""
-    coordinator.config_entry.options = {"auto_update": True}
+    coordinator.config_entry.options = MappingProxyType({"auto_update": True})
     blueprints = {
         "/b.yaml": {
             "name": "Beta",
@@ -707,7 +709,7 @@ async def test_async_install_blueprint_backup(hass, coordinator):
     remote_content = "blueprint:\n  name: Test"
 
     coordinator.config_entry = MagicMock()
-    coordinator.config_entry.options = {"max_backups": 3}
+    coordinator.config_entry.options = MappingProxyType({"max_backups": 3})
     hass.services.has_service = MagicMock(return_value=True)
     hass.services.async_call = AsyncMock()
 
@@ -840,7 +842,7 @@ async def test_backup_rotation(coordinator, tmp_path):
     bp_file.write_text("version_0")
 
     coordinator.config_entry = MagicMock()
-    coordinator.config_entry.options = {"max_backups": 3}
+    coordinator.config_entry.options = MappingProxyType({"max_backups": 3})
     coordinator.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
 
     for i in range(1, 4):
@@ -861,7 +863,7 @@ async def test_backup_max_limit(coordinator, tmp_path):
     bp_file.write_text("v0")
 
     coordinator.config_entry = MagicMock()
-    coordinator.config_entry.options = {"max_backups": 2}
+    coordinator.config_entry.options = MappingProxyType({"max_backups": 2})
     coordinator.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
 
     for i in range(1, 5):
@@ -901,7 +903,7 @@ async def test_backup_migration_old_bak(coordinator, tmp_path):
     (tmp_path / "test.yaml.bak").write_text("old_backup")
 
     coordinator.config_entry = MagicMock()
-    coordinator.config_entry.options = {"max_backups": 3}
+    coordinator.config_entry.options = MappingProxyType({"max_backups": 3})
     coordinator.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
 
     await coordinator.async_install_blueprint(
@@ -919,10 +921,12 @@ async def test_background_refresh_deduplication(hass, coordinator):
     blueprints = {
         "path/1": {"name": "BP1", "rel_path": "path/1", "source_url": "url1", "hash": "h1"}
     }
-    coordinator.config_entry.options = {
-        "filter_mode": "all",
-        "selected_blueprints": [],
-    }
+    coordinator.config_entry.options = MappingProxyType(
+        {
+            "filter_mode": "all",
+            "selected_blueprints": [],
+        }
+    )
 
     async def mock_refresh(*_args, **_kwargs):
         await asyncio.sleep(10)
@@ -936,7 +940,7 @@ async def test_background_refresh_deduplication(hass, coordinator):
         patch.object(coordinator, "_async_background_refresh", side_effect=mock_refresh),
     ):
         await coordinator._async_update_data()
-        task1 = coordinator._background_task
+        task1: Any = coordinator._background_task
         assert task1 is not None
 
         await coordinator._async_update_data()
@@ -967,7 +971,7 @@ async def test_background_refresh_shutdown(hass, coordinator):
         long_running_task(), name="test_shutdown"
     )
 
-    task = coordinator._background_task
+    task: Any = coordinator._background_task
     assert not task.done()
 
     await coordinator.async_shutdown()

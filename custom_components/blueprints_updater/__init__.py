@@ -1,6 +1,7 @@
 import hashlib
 import logging
 from datetime import timedelta
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
@@ -65,6 +66,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(async_update_options))
+    blueprint_coordinator.setup_complete = True
+    blueprint_coordinator.async_set_updated_data(blueprint_coordinator.data)
 
     return True
 
@@ -127,7 +130,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 translation_key="missing_entity_id",
             )
 
-        entity_registry = er.async_get(hass)
+        entity_registry: Any = er.async_get(hass)
         entity_entry = entity_registry.async_get(entity_id)
         if not entity_entry or entity_entry.domain != "update":
             raise ServiceValidationError(

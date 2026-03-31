@@ -21,6 +21,7 @@ def coordinator(hass):
         coord = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
         coord.hass = hass
         coord._translations = {}
+        coord.setup_complete = True
         return coord
 
 
@@ -129,3 +130,15 @@ async def test_coordinator_translate_formatting(hass, coordinator):
     ):
         assert await coordinator.async_translate("greet", name="World") == "Hello World!"
         assert await coordinator.async_translate("greet") == "Hello {name}!"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_translate_not_ready(hass, coordinator):
+    """Test that async_translate returns the key when setup_complete is False."""
+    coordinator.setup_complete = False
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_get_translations"
+    ) as mock_get:
+        result = await coordinator.async_translate("test_key")
+        assert result == "test_key"
+        mock_get.assert_not_called()

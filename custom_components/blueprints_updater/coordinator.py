@@ -82,7 +82,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             name=DOMAIN,
             update_interval=update_interval,
         )
-        self._translations: dict[str, str] = {}
+        self._translations: dict[tuple[str, str], dict[str, str]] = {}
+        self._translation_lock = asyncio.Lock()
+        self.setup_complete = False
         self._background_task: asyncio.Task | None = None
         self._refresh_lock = asyncio.Lock()
         self._last_request_time = 0.0
@@ -93,7 +95,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_setup(self) -> None:
         """Load persisted data."""
         data = await self._store.async_load()
-        if data:
+        if data and isinstance(data, dict):
             self._persisted_etags = data.get("etags", {})
             _LOGGER.debug("Loaded %d persisted ETags", len(self._persisted_etags))
 
@@ -104,36 +106,38 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         a more convenient API and better error handling for startup race conditions.
         """
         language = getattr(self.hass.config, "language", "en")
+        cache_key = (language, category)
 
-        if (
-            not self._translations
-            or self._translations.get("__language") != language
-            or self._translations.get("__category") != category
-        ):
-            try:
-                loaded = await async_get_translations(self.hass, language, category, [DOMAIN])
-                if loaded:
-                    self._translations = loaded
-                    self._translations["__language"] = language
-                    self._translations["__category"] = category
-                    _LOGGER.debug(
-                        "Successfully loaded translations for language: %s, category: %s",
-                        language,
-                        category,
-                    )
-            except Exception as err:
-                _LOGGER.debug(
-                    "Could not load translations for %s (%s) for language %s: %s",
-                    DOMAIN,
-                    category,
-                    language,
-                    err,
-                )
+        if not self.setup_complete:
+            return key
 
+        if cache_key not in self._translations:
+            async with self._translation_lock:
+                if cache_key not in self._translations:
+                    try:
+                        loaded = await async_get_translations(
+                            self.hass, language, category, [DOMAIN]
+                        )
+                        self._translations[cache_key] = loaded or {}
+                        if loaded:
+                            _LOGGER.debug(
+                                "Successfully loaded translations for language: %s, category: %s",
+                                language,
+                                category,
+                            )
+                    except Exception as err:
+                        _LOGGER.debug(
+                            "Could not load translations for %s (%s) for language %s: %s",
+                            DOMAIN,
+                            category,
+                            language,
+                            err,
+                        )
+                        self._translations[cache_key] = {}
+
+        translations = self._translations.get(cache_key, {})
         full_key = f"component.{DOMAIN}.{category}.{key}"
-        template = self._translations.get(f"{full_key}.message") or self._translations.get(
-            full_key, key
-        )
+        template = translations.get(f"{full_key}.message") or translations.get(full_key, key)
 
         try:
             return template.format(**kwargs) if kwargs else template
@@ -466,7 +470,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         results_to_notify: list[str],
     ) -> None:
         """Update a single blueprint directly in self.data."""
-        source_url = info.get("source_url")
+        source_url: str | None = info.get("source_url")
         if not source_url:
             return
 
