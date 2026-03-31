@@ -92,13 +92,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pacing_lock = asyncio.Lock()
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY_DATA)
         self._persisted_etags: dict[str, str] = {}
+        self._persisted_hashes: dict[str, str] = {}
 
     async def async_setup(self) -> None:
         """Load persisted data."""
         data = await self._store.async_load()
         if data and isinstance(data, dict):
             self._persisted_etags = data.get("etags", {})
-            _LOGGER.debug("Loaded %d persisted ETags", len(self._persisted_etags))
+            self._persisted_hashes = data.get("remote_hashes", {})
+            _LOGGER.debug(
+                "Loaded %d persisted ETags and %d remote hashes",
+                len(self._persisted_etags),
+                len(self._persisted_hashes),
+            )
 
     async def async_translate(self, key: str, category: str = "common", **kwargs: Any) -> str:
         """Translate a key using the current language and category.
@@ -186,13 +192,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "source_url": info["source_url"],
                 "local_hash": info["hash"],
                 "updatable": False,
-                "remote_hash": None,
+                "remote_hash": self._persisted_hashes.get(path) if not self.data else None,
                 "remote_content": None,
                 "last_error": None,
                 "etag": self._persisted_etags.get(path) if not self.data else None,
             }
             for path, info in blueprints.items()
         }
+
+        for info in results.values():
+            if info.get("remote_hash"):
+                info["updatable"] = info["local_hash"] != info["remote_hash"]
 
         if self.data:
             for path, info in results.items():
@@ -269,25 +279,31 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await asyncio.gather(*workers)
 
                 _LOGGER.debug("Background refresh complete")
-                await self._async_save_etags()
+                await self._async_save_metadata()
                 if results_to_notify:
                     await self._async_handle_notifications(results_to_notify)
         finally:
             self._background_task = None
 
-    async def _async_save_etags(self) -> None:
-        """Save current ETags to persistent storage."""
+    async def _async_save_metadata(self) -> None:
+        """Save current ETags and remote hashes to persistent storage."""
         if not self.data:
             return
 
         etags = {path: info.get("etag") for path, info in self.data.items() if info.get("etag")}
+        hashes = {
+            path: info.get("remote_hash")
+            for path, info in self.data.items()
+            if info.get("remote_hash")
+        }
 
-        if etags == self._persisted_etags:
+        if etags == self._persisted_etags and hashes == self._persisted_hashes:
             return
 
-        _LOGGER.debug("Saving %d ETags to storage", len(etags))
+        _LOGGER.debug("Saving %d ETags and %d remote hashes to storage", len(etags), len(hashes))
         self._persisted_etags = etags
-        await self._store.async_save({"etags": etags})
+        self._persisted_hashes = hashes
+        await self._store.async_save({"etags": etags, "remote_hashes": hashes})
 
     async def async_shutdown(self) -> None:
         """Shutdown the coordinator and cancel tasks."""
@@ -480,16 +496,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.data = {}
         data = self.data
         stored_etag = data.get(path, {}).get("etag")
+        stored_remote_hash = data.get(path, {}).get("remote_hash")
 
         try:
             remote_content, new_etag = await self._async_fetch_content(
-                session, normalized_url, etag=stored_etag
+                session, normalized_url, etag=stored_etag if stored_remote_hash else None
             )
 
             if remote_content is None:
-                _LOGGER.debug("[OK] '%s' is up to date (304)", info["name"])
-                if self.data and path in self.data and new_etag:
-                    self.data[path]["etag"] = new_etag
+                _LOGGER.debug("[304] '%s' is up to date on server", info["name"])
+                if self.data and path in self.data:
+                    if new_etag:
+                        self.data[path]["etag"] = new_etag
+                    remote_hash = self.data[path].get("remote_hash")
+                    if remote_hash:
+                        self.data[path]["updatable"] = info["hash"] != remote_hash
                 return
 
             if not remote_content:
