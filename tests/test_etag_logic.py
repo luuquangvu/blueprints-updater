@@ -47,6 +47,7 @@ async def test_etag_logic_stale_local_file_after_304(hass, coordinator):
     info = {
         "name": "Test",
         "rel_path": "test.yaml",
+        "domain": "automation",
         "source_url": "https://url/test.yaml",
         "hash": local_hash,
     }
@@ -55,6 +56,7 @@ async def test_etag_logic_stale_local_file_after_304(hass, coordinator):
         path: {
             "name": "Test",
             "rel_path": "test.yaml",
+            "domain": "automation",
             "source_url": "https://url/test.yaml",
             "local_hash": local_hash,
             "updatable": True,
@@ -72,7 +74,10 @@ async def test_etag_logic_stale_local_file_after_304(hass, coordinator):
     mock_session.get = AsyncMock(return_value=mock_response)
 
     results_to_notify = []
-    await coordinator._async_update_blueprint_in_place(mock_session, path, info, results_to_notify)
+    updated_domains = set()
+    await coordinator._async_update_blueprint_in_place(
+        mock_session, path, info, results_to_notify, updated_domains
+    )
 
     assert coordinator.data[path]["updatable"] is True
     assert coordinator.data[path]["remote_hash"] == remote_hash
@@ -124,12 +129,15 @@ async def test_etag_migration_forces_download(hass, coordinator):
     info = {
         "name": "Test",
         "rel_path": "test.yaml",
+        "domain": "automation",
         "source_url": "https://url",
         "hash": "stale_hash",
     }
 
     coordinator.data = {
         path: {
+            "name": "Test",
+            "domain": "automation",
             "etag": "old_etag",
             "remote_hash": None,
         }
@@ -145,10 +153,11 @@ async def test_etag_migration_forces_download(hass, coordinator):
     mock_session.get = AsyncMock(return_value=mock_response)
 
     results_to_notify = []
+    updated_domains = set()
     with patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_sha:
         mock_sha.return_value.hexdigest.return_value = remote_hash
         await coordinator._async_update_blueprint_in_place(
-            mock_session, path, info, results_to_notify
+            mock_session, path, info, results_to_notify, updated_domains
         )
 
     _args, kwargs = mock_session.get.call_args

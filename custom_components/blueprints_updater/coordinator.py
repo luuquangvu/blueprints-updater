@@ -26,6 +26,7 @@ from homeassistant.util import yaml as yaml_util
 from homeassistant.util.ssl import SSL_ALPN_HTTP11_HTTP2
 
 from .const import (
+    ALLOWED_RELOAD_DOMAINS,
     CONF_AUTO_UPDATE,
     CONF_FILTER_MODE,
     CONF_MAX_BACKUPS,
@@ -189,6 +190,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             path: {
                 "name": info["name"],
                 "rel_path": info["rel_path"],
+                "domain": info["domain"],
                 "source_url": info["source_url"],
                 "local_hash": info["hash"],
                 "updatable": False,
@@ -243,6 +245,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             async with self._refresh_lock:
                 results_to_notify: list[str] = []
+                updated_domains: set[str] = set()
                 queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
 
                 for path, info in blueprints.items():
@@ -260,7 +263,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                         try:
                             await self._async_update_blueprint_in_place(
-                                session, blueprint_path, blueprint_info, results_to_notify
+                                session,
+                                blueprint_path,
+                                blueprint_info,
+                                results_to_notify,
+                                updated_domains,
                             )
                             self.async_set_updated_data(self.data)
                         except Exception as err:
@@ -281,7 +288,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Background refresh complete")
                 await self._async_save_metadata()
                 if results_to_notify:
-                    await self._async_handle_notifications(results_to_notify)
+                    await self._async_handle_notifications(results_to_notify, updated_domains)
         finally:
             self._background_task = None
 
@@ -314,11 +321,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self._background_task
             self._background_task = None
 
-    async def _async_handle_notifications(self, auto_updated_names: list[str]) -> None:
+    async def _async_handle_notifications(
+        self, auto_updated_names: list[str], domains: set[str] | None = None
+    ) -> None:
         """Handle services reload and persistent notifications."""
         auto_updated_names.sort()
         _LOGGER.info("Auto-updated %d blueprints: %s", len(auto_updated_names), auto_updated_names)
-        await self.async_reload_services()
+        await self.async_reload_services(domains)
 
         try:
             title = await self.async_translate("auto_update_title")
@@ -374,9 +383,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return f"validation_error|{err}"
         return None
 
-    async def async_reload_services(self) -> None:
-        """Reload automation, script, and template services."""
-        for domain in ("automation", "script", "template"):
+    async def async_reload_services(self, domains: list[str] | set[str] | None = None) -> None:
+        """Reload specific domains or default ones if they are allowed.
+
+        Allowed domains are limited to automation, script, and template
+        to prevent malicious blueprints from triggering unintended reloads.
+        """
+        if domains:
+            targets = [d for d in domains if d in ALLOWED_RELOAD_DOMAINS]
+        else:
+            targets = list(ALLOWED_RELOAD_DOMAINS)
+
+        for domain in targets:
             if self.hass.services.has_service(domain, "reload"):
                 await self.hass.services.async_call(domain, "reload")
 
@@ -428,7 +446,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.hass.async_add_executor_job(_save_file, path, remote_content, max_backups)
 
             if reload_services:
-                await self.async_reload_services()
+                domain = "automation"
+                try:
+                    data = yaml_util.parse_yaml(remote_content)
+                    if isinstance(data, dict) and "blueprint" in data:
+                        domain = data["blueprint"].get("domain", "automation")
+                except Exception:
+                    pass
+                await self.async_reload_services([domain])
 
             if getattr(self, "data", None) and path in self.data:
                 self.data[path]["updatable"] = False
@@ -464,7 +489,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             success, message = await self.hass.async_add_executor_job(_restore_file, path, version)
 
             if success:
-                await self.async_reload_services()
+                domain = "automation"
+                if self.data and path in self.data:
+                    domain = self.data[path].get("domain", "automation")
+                await self.async_reload_services([domain])
                 await self.async_request_refresh()
 
             return {
@@ -485,6 +513,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         path: str,
         info: dict[str, Any],
         results_to_notify: list[str],
+        updated_domains: set[str],
     ) -> None:
         """Update a single blueprint directly in self.data."""
         source_url: str | None = info.get("source_url")
@@ -550,6 +579,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         }
                     )
                 results_to_notify.append(info["name"])
+                updated_domains.add(info.get("domain", "automation"))
                 return
 
             if self.data and path in self.data:
@@ -744,6 +774,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             found_blueprints[full_path] = {
                                 "name": bp_info.get("name", file),
                                 "rel_path": rel_path,
+                                "domain": bp_info.get("domain", "automation"),
                                 "source_url": source_url,
                                 "hash": hashlib.sha256(content.encode()).hexdigest(),
                             }
