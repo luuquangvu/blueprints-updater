@@ -228,7 +228,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "rel_path": info["rel_path"],
                 "domain": info["domain"],
                 "source_url": info["source_url"],
-                "local_hash": info["hash"],
+                "local_hash": info["local_hash"],
                 "updatable": False,
                 "remote_hash": self._persisted_hashes.get(path) if not self.data else None,
                 "remote_content": None,
@@ -661,7 +661,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         self.data[path]["etag"] = new_etag
                     remote_hash = self.data[path].get("remote_hash")
                     if remote_hash:
-                        self.data[path]["updatable"] = info["hash"] != remote_hash
+                        local_hash = info["local_hash"]
+                        self.data[path]["updatable"] = local_hash != remote_hash
                 return
 
             if not remote_content:
@@ -671,7 +672,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             remote_content = self._ensure_source_url(remote_content, source_url)
             remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
-            local_hash = info["hash"]
+            local_hash = info["local_hash"]
             updatable = remote_hash != local_hash
 
             try:
@@ -898,7 +899,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                                 "rel_path": rel_path,
                                 "domain": bp_info.get("domain", "automation"),
                                 "source_url": source_url,
-                                "hash": hashlib.sha256(content.encode()).hexdigest(),
+                                "local_hash": hashlib.sha256(content.encode()).hexdigest(),
                             }
                 except Exception as err:
                     _LOGGER.error("Error reading blueprint at %s: %s", full_path, err)

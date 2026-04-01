@@ -51,7 +51,7 @@ async def test_etag_logic_stale_local_file_after_304(hass, coordinator):
         "rel_path": "test.yaml",
         "domain": "automation",
         "source_url": "https://github.com/user/repo/test.yaml",
-        "hash": local_hash,
+        "local_hash": local_hash,
     }
 
     coordinator.data = {
@@ -133,7 +133,7 @@ async def test_etag_migration_forces_download(hass, coordinator):
         "rel_path": "test.yaml",
         "domain": "automation",
         "source_url": "https://github.com/user/repo/bp.yaml",
-        "hash": "stale_hash",
+        "local_hash": "stale_hash",
     }
 
     coordinator.data = {
