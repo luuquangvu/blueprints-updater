@@ -23,6 +23,14 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Set and clean version
         id: get_version
         run: |
@@ -49,6 +57,14 @@ jobs:
           VERSION="${{ steps.get_version.outputs.VERSION }}"
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
 
+      - name: Update package.json version
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          npm version "$VERSION" --no-git-tag-version
+
+      - name: Format files
+        run: npx prettier --write custom_components/blueprints_updater/manifest.json pyproject.toml package.json
+
       - name: Update uv.lock
         run: uv lock
 
@@ -57,7 +73,7 @@ jobs:
         run: |
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git add custom_components/blueprints_updater/manifest.json pyproject.toml uv.lock
+          git add custom_components/blueprints_updater/manifest.json pyproject.toml package.json package-lock.json uv.lock
           if git diff --staged --quiet; then
             echo "No changes to commit"
             echo "COMMIT_SHA=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT

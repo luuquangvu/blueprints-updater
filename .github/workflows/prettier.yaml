@@ -9,6 +9,7 @@ on:
       - "**.yml"
       - "**.json"
       - "**.md"
+      - "**.toml"
   pull_request:
     branches:
       - main
@@ -17,6 +18,7 @@ on:
       - "**.yml"
       - "**.json"
       - "**.md"
+      - "**.toml"
 
 jobs:
   prettier:
@@ -30,6 +32,9 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run Prettier
         run: npx prettier --check .
