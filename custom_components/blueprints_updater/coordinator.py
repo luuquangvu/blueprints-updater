@@ -746,7 +746,24 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     if remote_hash:
                         local_hash = info["local_hash"]
                         self.data[path]["updatable"] = local_hash != remote_hash
-                return
+
+                        if (
+                            self.data[path]["updatable"]
+                            and self.config_entry
+                            and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
+                        ):
+                            _LOGGER.debug(
+                                "Auto-update enabled for '%s', fetching on-demand",
+                                info["name"],
+                            )
+                            remote_content, _ = await self._async_fetch_content(
+                                session,
+                                normalized_url,
+                                force=True,
+                            )
+
+                if remote_content is None:
+                    return
 
             if not remote_content:
                 if self.data and path in self.data:
