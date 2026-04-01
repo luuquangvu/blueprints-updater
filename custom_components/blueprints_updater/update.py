@@ -29,14 +29,20 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the Blueprints Updater update entities."""
+    """Set up the Blueprints Updater update entities.
+
+    Args:
+        hass: HomeAssistant instance.
+        entry: Config entry.
+        async_add_entities: Callback to add entities.
+    """
     coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     current_entities: dict[str, BlueprintUpdateEntity] = {}
 
     @callback
     def async_update_entities() -> None:
-        """Add new blueprint entities or remove deleted ones."""
+        """Add new blueprint entities or remove deleted ones from Home Assistant."""
         new_entities = []
 
         for path, info in coordinator.data.items():
@@ -120,24 +126,42 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
     @property
     def auto_update(self) -> bool:
-        """Return True if auto update is enabled."""
+        """Return True if auto update is enabled for this entity.
+
+        Returns:
+            Boolean indicating auto-update preference from config options.
+        """
         if not self.coordinator.config_entry:
             return False
         return self.coordinator.config_entry.options.get(CONF_AUTO_UPDATE, False)
 
     @property
     def installed_version(self) -> str | None:
-        """Version installed and in use."""
+        """Version of the blueprint currently installed on the local system.
+
+        Returns:
+            The first 8 characters of the local YAML hash or None.
+        """
         if self._path in self.coordinator.data:
             return self.coordinator.data[self._path]["local_hash"][:8]
         return None
 
     async def async_release_notes(self) -> str | None:
-        """Return full release notes for the update."""
+        """Return full release notes for the update.
+
+        This calls the dynamic generator to ensure language-accurate notes.
+
+        Returns:
+            Release notes string or None.
+        """
         return await self.async_generate_release_notes()
 
     async def async_generate_release_notes(self) -> str | None:
-        """Generate release notes dynamically based on current language."""
+        """Generate release notes dynamically based on current language.
+
+        Returns:
+            Formatted release notes string or None if not applicable.
+        """
         if self._path not in self.coordinator.data:
             return None
 
@@ -178,7 +202,11 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
     @property
     def latest_version(self) -> str | None:
-        """Latest version available for install."""
+        """Latest version available for install from the remote source.
+
+        Returns:
+            Remote hash string (trimmed) or local hash if up-to-date.
+        """
         if self._path not in self.coordinator.data:
             return None
         data = self.coordinator.data[self._path]
@@ -188,7 +216,11 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the state attributes."""
+        """Return the extra state attributes like last_error.
+
+        Returns:
+            A dictionary containing entity-specific attributes.
+        """
         attrs = {}
         if self._path in self.coordinator.data:
             info = self.coordinator.data[self._path]
@@ -198,7 +230,10 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
+        """Handle updated data from the coordinator by localizing strings.
+
+        Triggered whenever the coordinator finishes a refresh.
+        """
         if self.hass:
             self.hass.async_create_task(self._async_localize_strings())
         super()._handle_coordinator_update()
@@ -262,7 +297,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         if remote_content is None and info.get("updatable"):
             _LOGGER.debug("Remote content missing for %s, fetching on-demand", self._path)
-            await self.coordinator.async_fetch_blueprint(self._path)
+            await self.coordinator.async_fetch_blueprint(self._path, force=True)
 
             info = self.coordinator.data.get(self._path, info)
             remote_content = info.get("remote_content")
