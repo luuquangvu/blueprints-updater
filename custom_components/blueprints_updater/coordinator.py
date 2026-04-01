@@ -152,16 +152,44 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         self._translations[cache_key] = {}
 
         translations = self._translations.get(cache_key, {})
-        full_key = f"component.{DOMAIN}.{category}.{key}"
-        template = translations.get(f"{full_key}.message") or translations.get(full_key, key)
+
+        search_categories = [category]
+        extra_cats = [
+            "common",
+            "exceptions",
+            "selector",
+            "title",
+            "config",
+            "options",
+            "services",
+            "entity",
+            "device",
+            "device_automation",
+            "entity_component",
+            "issues",
+        ]
+        for cat in extra_cats:
+            if cat not in search_categories:
+                search_categories.append(cat)
+
+        template = None
+        for cat in search_categories:
+            full_key = f"component.{DOMAIN}.{cat}.{key}"
+            template = translations.get(f"{full_key}.message") or translations.get(full_key)
+            if template:
+                break
+
+        if not template:
+            template = key
+            _LOGGER.debug("Translation key not found: %s in search path %s", key, search_categories)
 
         try:
             return template.format(**kwargs) if kwargs else template
         except (KeyError, ValueError, IndexError) as err:
             _LOGGER.debug(
-                "Error formatting translation for key %s in category %s: %s",
+                "Error formatting translation for key %s in categories %s: %s",
                 key,
-                category,
+                search_categories,
                 err,
             )
             return template
