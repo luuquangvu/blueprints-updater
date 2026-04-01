@@ -1,5 +1,7 @@
 .venv/
 .idea/
+.vscode/
 __pycache__/
-*.py[cod]
-*$py.class
+.pytest_cache/
+.ruff_cache/
+node_modules/
