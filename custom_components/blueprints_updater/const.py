@@ -39,3 +39,13 @@ MAX_RETRIES = 4
 RETRY_BACKOFF = 8
 MIN_SEND_INTERVAL = 0.5
 MAX_SEND_INTERVAL = 1.5
+
+SPECIAL_USE_TLDS = {
+    "local",
+    "localhost",
+    "test",
+    "invalid",
+    "example",
+    "internal",
+    "onion",
+}

@@ -29,6 +29,8 @@ def coordinator(hass):
         coord.data = cast(Any, {})
         coord.async_set_updated_data = cast(Any, MagicMock())
         coord.setup_complete = True
+        coord._is_safe_path = cast(Any, MagicMock(return_value=True))
+        coord._is_safe_url = cast(Any, AsyncMock(return_value=True))
         return coord
 
 
@@ -48,7 +50,7 @@ async def test_etag_logic_stale_local_file_after_304(hass, coordinator):
         "name": "Test",
         "rel_path": "test.yaml",
         "domain": "automation",
-        "source_url": "https://url/test.yaml",
+        "source_url": "https://github.com/user/repo/test.yaml",
         "hash": local_hash,
     }
 
@@ -57,7 +59,7 @@ async def test_etag_logic_stale_local_file_after_304(hass, coordinator):
             "name": "Test",
             "rel_path": "test.yaml",
             "domain": "automation",
-            "source_url": "https://url/test.yaml",
+            "source_url": "https://github.com/user/repo/test.yaml",
             "local_hash": local_hash,
             "updatable": True,
             "remote_hash": remote_hash,
@@ -130,7 +132,7 @@ async def test_etag_migration_forces_download(hass, coordinator):
         "name": "Test",
         "rel_path": "test.yaml",
         "domain": "automation",
-        "source_url": "https://url",
+        "source_url": "https://github.com/user/repo/bp.yaml",
         "hash": "stale_hash",
     }
 

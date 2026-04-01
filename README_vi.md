@@ -17,6 +17,7 @@
 - **Kiểm soát hoàn toàn theo ý muốn**: Bạn có quyền chọn theo dõi tất cả blueprint hoặc sử dụng danh sách Whitelist/Blacklist để chỉ tập trung vào những mục thực sự quan trọng.
 - **Cập nhật tức thì, không cần khởi động lại**: Các miền liên quan (automation, script hoặc template) sẽ tự động được làm mới ngay sau khi cập nhật. Mọi thay đổi có hiệu lực tức thì mà không làm gián đoạn hoạt động của Home Assistant.
 - **Giữ link nguồn vĩnh viễn**: Tự động bảo tồn các thẻ thông tin link gốc trong tệp YAML, đảm bảo blueprint của bạn luôn giữ được kết nối để nhận các bản cập nhật trong tương lai.
+- **Bảo mật tích hợp sẵn**: Tự động kiểm tra an toàn đường dẫn (Path Safety) và URL để bảo vệ mạng nội bộ của bạn khỏi các truy cập trái phép, đồng thời đảm bảo mọi tệp tin blueprint luôn nằm đúng vị trí an toàn.
 - **Khởi động siêu tốc và tự động nhận diện**: Blueprint mới thêm vào sẽ được nhận ngay mà không cần khởi động lại. Danh sách blueprint cũng sẽ hiển thị ngay lập tức mỗi khi bạn mở Home Assistant thay vì phải chờ đợi hệ thống quét mạng chậm chạp. Giao diện cũng hỗ trợ nhiều ngôn ngữ và tự động điều chỉnh theo cài đặt của bạn.
 
 ---
@@ -99,7 +100,7 @@ Nếu bạn muốn thấy quy trình cập nhật hoạt động như thế nào
 2.  Trong Home Assistant, đi tới **Cài đặt** > **Tự động hóa & Cảnh** > **Bản thiết kế**.
 3.  Nhấp vào **Nhập bản thiết kế** và dán URL vào.
 
-Sau khi nhập xong, **Blueprints Updater** sẽ tự động phát hiện nó trong lần quét định kỳ tiếp theo. Để thấy kết quả ngay lập tức, bạn có thể [kích hoạt quét thủ công](#áp-dụng-thay-đổi-thêmxóa-blueprints). Khi GitHub Action cập nhật bản thiết kế, bạn sẽ nhận được thông báo trong Home Assistant và có thể thực hiện cập nhật.
+Sau khi nhập xong, **Blueprints Updater** sẽ tự động phát hiện nó trong lần quét định kỳ tiếp theo. Để thấy kết quả ngay lập tức, bạn có thể [kích hoạt quét thủ công](#làm-mới-danh-sách-blueprint). Khi GitHub Action cập nhật bản thiết kế, bạn sẽ nhận được thông báo trong Home Assistant và có thể thực hiện cập nhật.
 
 ---
 

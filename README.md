@@ -17,6 +17,7 @@
 - **Complete control**: Choose to track all your blueprints or use granulated Whitelists and Blacklists to monitor only the ones you want.
 - **No-restart reloads**: Relevant domains (automation, script, or template) are automatically reloaded after an update. Your changes take effect immediately without needing to reboot Home Assistant.
 - **Preserves source links**: Automatically maintains the source URL metadata in your YAML files, ensuring your blueprints remain trackable and updatable in the long run.
+- **Built-in Security Protection**: Includes automatic Path Safety and URL Safety checks to protect your home network from unauthorized access and ensure all blueprint files stay strictly where they belong.
 - **Instant results and dynamic discovery**: New blueprints are detected automatically without a restart. Your entire blueprint list appears instantly whenever you open Home Assistant. No more waiting for slow network scans to finish before you can see your data. The interface is available in several languages and adapts to your Home Assistant settings.
 
 ---
@@ -99,7 +100,7 @@ If you want to see how the update process works immediately, you can use the **M
 2.  In Home Assistant, go to **Settings** > **Automations & Scenes** > **Blueprints**.
 3.  Click **Import Blueprint** and paste the URL.
 
-Once imported, **Blueprints Updater** will detect it on the next scheduled scan. To see it immediately, you can [trigger a manual refresh](#applying-changes-addingdeleting-blueprints). When the GitHub Action updates the blueprint, you will receive a notification and can perform the update.
+Once imported, **Blueprints Updater** will detect it on the next scheduled scan. To see it immediately, you can [trigger a manual refresh](#refreshing-the-blueprint-list). When the GitHub Action updates the blueprint, you will receive a notification and can perform the update.
 
 ---
 

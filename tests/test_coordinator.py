@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import os
+import socket
 from datetime import timedelta
 from types import MappingProxyType
 from typing import Any, cast
@@ -48,6 +49,8 @@ def coordinator(hass):
         coord.async_set_updated_data = cast(Any, MagicMock(side_effect=_mock_set_data))
         coord.async_update_listeners = cast(Any, MagicMock())
         coord.setup_complete = True
+        coord._is_safe_path = cast(Any, MagicMock(return_value=True))
+        coord._is_safe_url = cast(Any, AsyncMock(return_value=True))
         return coord
 
 
@@ -1153,3 +1156,84 @@ def test_scan_blueprints_domain_extraction(hass, coordinator):
 
         assert results[script_path]["domain"] == "script"
         assert results[auto_path]["domain"] == "automation"
+
+
+def test_is_safe_path(coordinator):
+    """Test _is_safe_path logic."""
+    coordinator._is_safe_path = BlueprintUpdateCoordinator._is_safe_path.__get__(coordinator)
+    assert coordinator._is_safe_path("/config/blueprints/test.yaml")
+    assert coordinator._is_safe_path("/config/blueprints/automation/test.yaml")
+    assert not coordinator._is_safe_path("/config/secrets.yaml")
+    assert not coordinator._is_safe_path("/etc/passwd")
+    assert not coordinator._is_safe_path("/config/blueprints/../secrets.yaml")
+
+
+@pytest.mark.asyncio
+async def test_is_safe_url(coordinator):
+    """Test _is_safe_url logic."""
+    coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
+    coord: Any = coordinator
+
+    assert await coord._is_safe_url("https://github.com/user/repo")
+    assert await coord._is_safe_url("https://raw.githubusercontent.com/user/repo/main/bp.yaml")
+    assert await coord._is_safe_url("https://gist.github.com/user/gistid")
+    assert await coord._is_safe_url("https://community.home-assistant.io/t/topic/123")
+    assert await coord._is_safe_url("https://gitlab.com/user/repo/-/raw/main/bp.yaml")
+    assert await coord._is_safe_url("https://bitbucket.org/user/repo/raw/main/bp.yaml")
+
+    assert not await coord._is_safe_url("http://localhost:8123")
+    assert not await coord._is_safe_url("http://homeassistant.local:8123")
+    assert not await coord._is_safe_url("http://test.example/api")
+    assert not await coord._is_safe_url("http://192.168.1.1/admin")
+    assert not await coord._is_safe_url("http://127.0.0.1/admin")
+
+
+@pytest.mark.asyncio
+async def test_is_safe_url_dns_resolution(coordinator):
+    """Test _is_safe_url logic with DNS resolution."""
+    coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
+    coord: Any = coordinator
+
+    with patch("socket.getaddrinfo") as mock_getaddr:
+        mock_getaddr.return_value = [(None, None, None, None, ("192.168.1.50", 0))]
+        assert not await coord._is_safe_url("https://malicious-dns.com/bp.yaml")
+
+    with patch("socket.getaddrinfo") as mock_getaddr:
+        mock_getaddr.return_value = [(None, None, None, None, ("8.8.8.8", 0))]
+        assert await coord._is_safe_url("https://google.com/bp.yaml")
+    with patch("socket.getaddrinfo", side_effect=socket.gaierror):
+        assert not await coord._is_safe_url("https://unresolvable.com/bp.yaml")
+
+
+@pytest.mark.asyncio
+async def test_async_install_blueprint_unsafe_path(coordinator):
+    """Test that installing to an unsafe path is blocked."""
+    coordinator._is_safe_path = BlueprintUpdateCoordinator._is_safe_path.__get__(coordinator)
+    with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
+        await coordinator.async_install_blueprint("/config/secrets.yaml", "content")
+        mock_logger.error.assert_called_with(
+            "Security violation: Attempted to install to unsafe path: %s", "/config/secrets.yaml"
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_restore_blueprint_unsafe_path(coordinator):
+    """Test that restoring to an unsafe path is blocked."""
+    coordinator._is_safe_path = BlueprintUpdateCoordinator._is_safe_path.__get__(coordinator)
+    result = await coordinator.async_restore_blueprint("/config/secrets.yaml")
+    assert result["success"] is False
+    assert result["translation_key"] == "system_error"
+
+
+@pytest.mark.asyncio
+async def test_async_update_blueprint_in_place_unsafe_url(coordinator):
+    """Test that updating from an unsafe URL is blocked."""
+    coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
+    path = "/config/blueprints/test.yaml"
+    info = {"source_url": "http://192.168.1.1/exploit", "domain": "automation"}
+
+    with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
+        await coordinator._async_update_blueprint_in_place(MagicMock(), path, info, [], set())
+        mock_logger.warning.assert_called_with(
+            "Blocking update from untrusted URL: %s", "http://192.168.1.1/exploit"
+        )
