@@ -38,7 +38,14 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, Any]]:
-    """Scan blueprints and return options for the selector."""
+    """Scan blueprints and return options for the selector.
+
+    Args:
+        hass: HomeAssistant instance.
+
+    Returns:
+        List of blueprint options with value and label.
+    """
     blueprints = await hass.async_add_executor_job(
         BlueprintUpdateCoordinator.scan_blueprints, hass, FILTER_MODE_ALL, []
     )
@@ -59,7 +66,15 @@ def _get_config_schema(
     defaults: dict[str, Any],
     blueprint_options: list[dict[str, Any]],
 ) -> vol.Schema:
-    """Return the config schema."""
+    """Return the configuration schema for the flow.
+
+    Args:
+        defaults: Current or default configuration values.
+        blueprint_options: Available blueprints to select from.
+
+    Returns:
+        A voluptuous Schema object.
+    """
     return vol.Schema(
         {
             vol.Required(

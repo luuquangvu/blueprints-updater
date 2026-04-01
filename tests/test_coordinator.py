@@ -169,6 +169,52 @@ def test_scan_blueprints(hass, coordinator):
 
 
 @pytest.mark.asyncio
+async def test_async_fetch_blueprint_force(coordinator):
+    """Test that async_fetch_blueprint with force=True bypasses ETag."""
+    path = "/config/blueprints/test.yaml"
+    source_url = "https://url/test.yaml"
+    coordinator.data = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "source_url": source_url,
+            "local_hash": "old_hash",
+            "updatable": True,
+            "remote_hash": "new_hash",
+            "etag": "stored_etag",
+            "remote_content": None,
+        }
+    }
+
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.status_code = 200
+    mock_response.headers = {"ETag": "new_etag"}
+    mock_response.text = "blueprint:\n  name: Test\n  source_url: https://url/test.yaml"
+    mock_response.raise_for_status = MagicMock()
+
+    mock_session = MagicMock(spec=httpx.AsyncClient)
+    mock_session.get = AsyncMock(return_value=mock_response)
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_async_client",
+            return_value=mock_session,
+        ),
+        patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
+        patch.object(coordinator, "_validate_blueprint", return_value=None),
+    ):
+        mock_hash.return_value.hexdigest.return_value = "new_hash"
+        await coordinator.async_fetch_blueprint(path, force=True)
+
+    _args, kwargs = mock_session.get.call_args
+    assert "If-None-Match" not in kwargs.get("headers", {})
+    content = coordinator.data[path]["remote_content"]
+    assert isinstance(content, str)
+    assert "source_url" in content
+    assert coordinator.data[path]["etag"] == "new_etag"
+
+
+@pytest.mark.asyncio
 async def test_async_update_blueprint(coordinator):
     """Test the full update flow for a single blueprint."""
     path = "/config/blueprints/test.yaml"

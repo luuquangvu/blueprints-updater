@@ -203,14 +203,16 @@ async def test_entity_async_install_on_demand_fetch(coordinator):
     coordinator.data["/config/blueprints/test.yaml"]["remote_content"] = None
     coordinator.data["/config/blueprints/test.yaml"]["updatable"] = True
 
-    async def mock_fetch(path):
+    async def mock_fetch(path, force=False):
         coordinator.data[path].update({"remote_content": "fetched content"})
 
     coordinator.async_fetch_blueprint = AsyncMock(side_effect=mock_fetch)
 
     await entity.async_install(version=None, backup=False)
 
-    coordinator.async_fetch_blueprint.assert_called_once_with("/config/blueprints/test.yaml")
+    coordinator.async_fetch_blueprint.assert_called_once_with(
+        "/config/blueprints/test.yaml", force=True
+    )
     coordinator.async_install_blueprint.assert_called_once_with(
         "/config/blueprints/test.yaml",
         "fetched content",
