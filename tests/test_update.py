@@ -192,6 +192,50 @@ async def test_entity_async_install(coordinator):
 
 
 @pytest.mark.asyncio
+async def test_entity_async_install_on_demand_fetch(coordinator):
+    """Test async_install triggers on-demand fetch if content is missing."""
+    entity = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/test.yaml",
+        coordinator.data["/config/blueprints/test.yaml"],
+    )
+
+    coordinator.data["/config/blueprints/test.yaml"]["remote_content"] = None
+    coordinator.data["/config/blueprints/test.yaml"]["updatable"] = True
+
+    async def mock_fetch(path):
+        coordinator.data[path].update({"remote_content": "fetched content"})
+
+    coordinator.async_fetch_blueprint = AsyncMock(side_effect=mock_fetch)
+
+    await entity.async_install(version=None, backup=False)
+
+    coordinator.async_fetch_blueprint.assert_called_once_with("/config/blueprints/test.yaml")
+    coordinator.async_install_blueprint.assert_called_once_with(
+        "/config/blueprints/test.yaml",
+        "fetched content",
+        reload_services=True,
+        backup=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_entity_async_install_content_missing_fail(coordinator):
+    """Test async_install fails if content is still missing after fetch."""
+    entity = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/test.yaml",
+        coordinator.data["/config/blueprints/test.yaml"],
+    )
+
+    coordinator.data["/config/blueprints/test.yaml"]["remote_content"] = None
+    coordinator.async_fetch_blueprint = AsyncMock()
+
+    with pytest.raises(HomeAssistantError, match="Cannot install blueprint: content_missing"):
+        await entity.async_install(version=None, backup=False)
+
+
+@pytest.mark.asyncio
 async def test_entity_async_install_backup(coordinator):
     """Test async_install method with backup enabled."""
     entity = BlueprintUpdateEntity(

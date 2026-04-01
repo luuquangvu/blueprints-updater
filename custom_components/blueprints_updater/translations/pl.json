@@ -115,6 +115,7 @@
     "validation_error": "Błąd walidacji: {error}",
     "empty_content": "Otrzymano pustą zawartość",
     "yaml_syntax_error": "Błąd składni YAML: {error}",
-    "fetch_error": "Błąd pobierania: {error}"
+    "fetch_error": "Błąd pobierania: {error}",
+    "content_missing": "Brakuje zawartości projektu lub nie można jej pobrać"
   }
 }

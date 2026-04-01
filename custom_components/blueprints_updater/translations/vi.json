@@ -115,6 +115,7 @@
     "validation_error": "Lỗi xác thực: {error}",
     "empty_content": "Nội dung nhận được bị trống",
     "yaml_syntax_error": "Lỗi cú pháp YAML: {error}",
-    "fetch_error": "Lỗi tải xuống: {error}"
+    "fetch_error": "Lỗi tải xuống: {error}",
+    "content_missing": "Nội dung blueprint bị thiếu hoặc không thể tải xuống"
   }
 }

@@ -258,7 +258,20 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             )
 
         _LOGGER.info("Starting manual update for %s from %s", self._attr_name, info["source_url"])
-        remote_content = info["remote_content"]
+        remote_content = info.get("remote_content")
+
+        if remote_content is None and info.get("updatable"):
+            _LOGGER.debug("Remote content missing for %s, fetching on-demand", self._path)
+            await self.coordinator.async_fetch_blueprint(self._path)
+
+            info = self.coordinator.data.get(self._path, info)
+            remote_content = info.get("remote_content")
+
+        if not remote_content:
+            _LOGGER.error("Failed to install blueprint: content is missing for %s", self._path)
+            raise HomeAssistantError(
+                await self.coordinator.async_translate("install_error", error="content_missing")
+            )
 
         await self.coordinator.async_install_blueprint(
             self._path, remote_content, reload_services=True, backup=backup

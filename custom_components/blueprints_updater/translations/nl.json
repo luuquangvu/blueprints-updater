@@ -115,6 +115,7 @@
     "validation_error": "Validatiefout: {error}",
     "empty_content": "Lege inhoud ontvangen",
     "yaml_syntax_error": "YAML-syntaxfout: {error}",
-    "fetch_error": "Ophaalfout: {error}"
+    "fetch_error": "Ophaalfout: {error}",
+    "content_missing": "De inhoud van de blauwdruk ontbreekt of kon niet worden opgehaald."
   }
 }

@@ -115,6 +115,7 @@
     "validation_error": "Erreur de validation : {error}",
     "empty_content": "Contenu vide reçu",
     "yaml_syntax_error": "Erreur de syntaxe YAML : {error}",
-    "fetch_error": "Erreur de récupération : {error}"
+    "fetch_error": "Erreur de récupération : {error}",
+    "content_missing": "Le contenu du plan est manquant ou n'a pas pu être récupéré."
   }
 }

@@ -115,6 +115,7 @@
     "validation_error": "Error de validación: {error}",
     "empty_content": "Se ha recibido contenido vacío",
     "yaml_syntax_error": "Error de sintaxis YAML: {error}",
-    "fetch_error": "Error de obtención: {error}"
+    "fetch_error": "Error de obtención: {error}",
+    "content_missing": "Falta el contenido del plano o no se pudo obtener."
   }
 }

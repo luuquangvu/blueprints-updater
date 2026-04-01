@@ -20,6 +20,7 @@ from homeassistant.components.blueprint.models import Blueprint
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
@@ -408,6 +409,24 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if self.hass.services.has_service(domain, "reload"):
                 await self.hass.services.async_call(domain, "reload")
 
+    async def async_fetch_blueprint(self, path: str) -> None:
+        """Fetch content for a single blueprint if needed."""
+        if not self.data or path not in self.data:
+            return
+
+        info = self.data[path]
+        if not info.get("source_url"):
+            return
+
+        session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
+        results_to_notify: list[str] = []
+        updated_domains: set[str] = set()
+
+        await self._async_update_blueprint_in_place(
+            session, path, info, results_to_notify, updated_domains
+        )
+        self.async_set_updated_data(self.data)
+
     async def async_install_blueprint(
         self,
         path: str,
@@ -419,6 +438,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not self._is_safe_path(path):
             _LOGGER.error("Security violation: Attempted to install to unsafe path: %s", path)
             return
+
+        if not remote_content:
+            _LOGGER.error("Cannot install blueprint at %s: content is empty or None", path)
+            raise HomeAssistantError("Blueprint content is missing or empty")
 
         max_backups = DEFAULT_MAX_BACKUPS
         if self.config_entry:

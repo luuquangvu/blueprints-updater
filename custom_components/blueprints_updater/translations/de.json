@@ -115,6 +115,7 @@
     "validation_error": "Validierungsfehler: {error}",
     "empty_content": "Leerer Inhalt empfangen",
     "yaml_syntax_error": "YAML-Syntaxfehler: {error}",
-    "fetch_error": "Abruffehler: {error}"
+    "fetch_error": "Abruffehler: {error}",
+    "content_missing": "Der Blueprint-Inhalt fehlt oder konnte nicht abgerufen werden."
   }
 }

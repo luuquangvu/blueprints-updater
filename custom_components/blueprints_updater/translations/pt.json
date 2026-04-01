@@ -115,6 +115,7 @@
     "validation_error": "Erro de validação: {error}",
     "empty_content": "Conteúdo recebido vazio",
     "yaml_syntax_error": "Erro de sintaxe YAML: {error}",
-    "fetch_error": "Erro ao procurar: {error}"
+    "fetch_error": "Erro ao procurar: {error}",
+    "content_missing": "O conteúdo do projeto está ausente ou não pôde ser obtido."
   }
 }

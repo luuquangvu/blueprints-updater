@@ -115,6 +115,7 @@
     "validation_error": "Validation Error: {error}",
     "empty_content": "Empty content received",
     "yaml_syntax_error": "YAML Syntax Error: {error}",
-    "fetch_error": "Fetch Error: {error}"
+    "fetch_error": "Fetch Error: {error}",
+    "content_missing": "Blueprint content is missing or could not be fetched"
   }
 }

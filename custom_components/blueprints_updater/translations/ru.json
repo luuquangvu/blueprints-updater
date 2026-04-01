@@ -115,6 +115,7 @@
     "validation_error": "Ошибка валидации: {error}",
     "empty_content": "Получено пустое содержимое",
     "yaml_syntax_error": "Ошибка синтаксиса YAML: {error}",
-    "fetch_error": "Ошибка получения: {error}"
+    "fetch_error": "Ошибка получения: {error}",
+    "content_missing": "Содержимое чертежа отсутствует или не может быть получено."
   }
 }
