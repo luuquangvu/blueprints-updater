@@ -177,9 +177,9 @@ async def test_async_update_blueprint(coordinator):
         "rel_path": "test.yaml",
         "source_url": "https://github.com/user/repo/blob/main/test.yaml",
         "domain": "automation",
-        "hash": "old_hash",
+        "local_hash": "old_hash",
     }
-    results: dict[str, Any] = {path: {"last_error": None, "hash": "old_hash"}}
+    results: dict[str, Any] = {path: {"last_error": None, "local_hash": "old_hash"}}
 
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
@@ -221,7 +221,7 @@ async def test_async_update_blueprint_not_modified(coordinator):
         "rel_path": "test.yaml",
         "source_url": "https://url",
         "domain": "automation",
-        "hash": "old_hash",
+        "local_hash": "old_hash",
     }
     coordinator.data = {
         path: {
@@ -290,14 +290,14 @@ async def test_async_update_data_partial_failure(coordinator):
             "rel_path": "good.yaml",
             "source_url": "https://url.com/good.yaml",
             "domain": "automation",
-            "hash": "good_hash",
+            "local_hash": "good_hash",
         },
         "/config/blueprints/bad.yaml": {
             "name": "Bad",
             "rel_path": "bad.yaml",
             "source_url": "https://url.com/bad.yaml",
             "domain": "automation",
-            "hash": "bad_hash",
+            "local_hash": "bad_hash",
         },
     }
 
@@ -359,14 +359,14 @@ async def test_async_background_refresh_503_resilience(coordinator):
             "rel_path": "b1.yaml",
             "source_url": "https://url/b1",
             "domain": "automation",
-            "hash": "h1",
+            "local_hash": "h1",
         },
         "/config/blueprints/b2.yaml": {
             "name": "B2",
             "rel_path": "b2.yaml",
             "source_url": "https://url/b2",
             "domain": "automation",
-            "hash": "h2",
+            "local_hash": "h2",
         },
     }
 
@@ -423,7 +423,7 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
             "rel_path": f"bp{i}.yaml",
             "source_url": f"https://url/bp{i}",
             "domain": "automation",
-            "hash": "h",
+            "local_hash": "h",
         }
         for i in range(num_blueprints)
     }
@@ -474,11 +474,11 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
 async def test_async_update_blueprint_in_place_errors(coordinator):
     """Test various error conditions in _async_update_blueprint_in_place."""
     path = "/config/blueprints/test.yaml"
-    info = {"name": "Test", "source_url": "https://url", "hash": "hash"}
+    info = {"name": "Test", "source_url": "https://url", "local_hash": "hash"}
     results = {
         path: {
             "last_error": None,
-            "hash": "hash",
+            "local_hash": "hash",
             "name": "Test",
             "source_url": "https://url",
         }
@@ -553,7 +553,7 @@ async def test_async_update_data_auto_update(coordinator):
             "rel_path": "test.yaml",
             "source_url": "https://url",
             "domain": "automation",
-            "hash": "old",
+            "local_hash": "old",
         }
     }
     coordinator.scan_blueprints = MagicMock(return_value=blueprints)
@@ -630,14 +630,14 @@ async def test_async_update_data_auto_update_multiple_sorted(coordinator):
             "rel_path": "b.yaml",
             "source_url": "https://url/b",
             "domain": "automation",
-            "hash": "old",
+            "local_hash": "old",
         },
         "/a.yaml": {
             "name": "Alpha",
             "rel_path": "a.yaml",
             "source_url": "https://url/a",
             "domain": "automation",
-            "hash": "old",
+            "local_hash": "old",
         },
     }
     coordinator.scan_blueprints = MagicMock(return_value=blueprints)
@@ -921,7 +921,7 @@ async def test_background_refresh_deduplication(hass, coordinator):
             "rel_path": "path/1",
             "domain": "automation",
             "source_url": "url1",
-            "hash": "h1",
+            "local_hash": "h1",
         }
     }
     coordinator.config_entry.options = MappingProxyType(
@@ -1237,3 +1237,52 @@ async def test_async_update_blueprint_in_place_unsafe_url(coordinator):
         mock_logger.warning.assert_called_with(
             "Blocking update from untrusted URL: %s", "http://192.168.1.1/exploit"
         )
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_blueprint_regression_key_error_hash(coordinator):
+    """Regression test for KeyError: 'hash' when fetching on-demand.
+
+    This ensures that when async_fetch_blueprint is called (e.g. from update.py),
+    it correctly handles the 'local_hash' key instead of crashing on 'hash'.
+    """
+    path = "/config/blueprints/automation/test.yaml"
+
+    coordinator.data = {
+        path: {
+            "name": "Test",
+            "rel_path": "automation/test.yaml",
+            "domain": "automation",
+            "source_url": "https://github.com/user/repo/blob/main/test.yaml",
+            "local_hash": "old_hash",
+            "updatable": True,
+            "remote_hash": None,
+            "remote_content": None,
+            "last_error": None,
+            "etag": None,
+        }
+    }
+
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.status_code = 200
+    mock_response.headers = {"ETag": "new_etag"}
+    mock_response.text = "blueprint:\n  name: Test"
+    mock_response.raise_for_status = MagicMock()
+
+    mock_session = MagicMock(spec=httpx.AsyncClient)
+    mock_session.get = AsyncMock(return_value=mock_response)
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_async_client",
+            return_value=mock_session,
+        ),
+        patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_hash,
+        patch.object(coordinator, "_validate_blueprint", return_value=None),
+    ):
+        mock_hash.return_value.hexdigest.return_value = "new_hash"
+        await coordinator.async_fetch_blueprint(path)
+
+    assert coordinator.data[path]["remote_hash"] == "new_hash"
+    assert coordinator.data[path]["etag"] == "new_etag"
+    assert coordinator.data[path]["updatable"] is True
