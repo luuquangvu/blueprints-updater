@@ -1,7 +1,4 @@
 {
-  "name": "blueprints-updater",
-  "version": "1.11.3",
-  "private": true,
   "devDependencies": {
     "prettier": "^3.8.1",
     "prettier-plugin-toml": "^2.0.6"
