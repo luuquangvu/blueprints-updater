@@ -1,11 +1,12 @@
 # Blueprints Updater cho Home Assistant
 
-[![CodeQL](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql)
+[![GitHub Release](https://img.shields.io/github/v/release/luuquangvu/blueprints-updater?style=flat-square&color=6f42c1)](https://github.com/luuquangvu/blueprints-updater/releases)
+[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg?style=flat-square)](https://github.com/hacs/integration)
+![HA Min Version](https://img.shields.io/badge/homeassistant-%3E%3D%202024.12.0-03a9f4?logo=homeassistant&style=flat-square)
+
 [![Python Checks](https://github.com/luuquangvu/blueprints-updater/actions/workflows/python_check.yaml/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/python_check.yaml)
 [![Validate](https://github.com/luuquangvu/blueprints-updater/actions/workflows/validate.yaml/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/validate.yaml)
-![GitHub Release](https://img.shields.io/github/v/release/luuquangvu/blueprints-updater)
-[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-![GitHub License](https://img.shields.io/github/license/luuquangvu/blueprints-updater)
+[![CodeQL](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql)
 
 **[ [🇺🇸 English](README.md) | 🇻🇳 Tiếng Việt ]**
 
