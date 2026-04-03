@@ -52,8 +52,6 @@ from .const import (
     RE_FORUM_TOPIC_ID,
     RE_GIST_RAW,
     RE_GITHUB_BLOB,
-    RE_NEXT_TOP_LEVEL_KEY,
-    RE_SOURCE_URL_LINE,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
     SPECIAL_USE_TLDS,
@@ -955,32 +953,33 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _ensure_source_url(content: str, source_url: str) -> str:
-        """Ensure a source_url is present in the blueprint metadata block.
+        """Ensure a source_url is present in the blueprint metadata.
 
-        Only considers source_url lines inside the ``blueprint:`` mapping
-        (from the ``blueprint:`` key to the next top-level key). Lines
-        elsewhere in the file are ignored to avoid false positives.
+        Parses the YAML to check for ``blueprint.source_url`` (matching
+        the same lookup used by ``scan_blueprints``). If a valid
+        source_url already exists, the content is returned unchanged.
+        Otherwise, the fallback URL is injected after the ``blueprint:``
+        key via text substitution.
 
         Args:
-            content: Raw YAML blueprint content.
-            source_url: Fallback URL to inject when the content has none.
+            `content`: Raw YAML blueprint content.
+            `source_url`: Fallback URL to inject when the content has none.
 
         Returns:
             The YAML content with a source_url guaranteed to be present
             in the blueprint block.
         """
-        bp_match = RE_BLUEPRINT_KEY.search(content)
-        if not bp_match:
-            return content
+        try:
+            parsed = yaml_util.parse_yaml(content)
+        except HomeAssistantError:
+            parsed = None
 
-        bp_start = bp_match.end()
-        next_top = RE_NEXT_TOP_LEVEL_KEY.search(content[bp_start:])
-        bp_block = (
-            content[bp_start : bp_start + next_top.start()] if next_top else content[bp_start:]
-        )
-
-        if RE_SOURCE_URL_LINE.search(bp_block):
-            return content
+        if isinstance(parsed, dict):
+            blueprint = parsed.get("blueprint")
+            if isinstance(blueprint, dict):
+                existing = blueprint.get("source_url")
+                if isinstance(existing, str) and existing.strip():
+                    return content
 
         return RE_BLUEPRINT_KEY.sub(
             rf"\1\n  source_url: {source_url}",
