@@ -121,6 +121,31 @@ def test_ensure_source_url(coordinator):
     content_with_quotes = f"blueprint:\n  name: Test\n  source_url: '{source_url}'"
     assert coordinator._ensure_source_url(content_with_quotes, source_url) == content_with_quotes
 
+    different_url = "https://github.com/user/new-repo/blob/main/test.yaml"
+    content_different = f"blueprint:\n  name: Test\n  source_url: {different_url}"
+    result = coordinator._ensure_source_url(content_different, source_url)
+    assert result == content_different
+    assert result.count("source_url") == 1
+
+    content_outside = (
+        "blueprint:\n  name: Test\n  domain: automation\n"
+        "action:\n  - service: rest.post\n    data:\n"
+        "      source_url: https://api.example.com"
+    )
+    result_outside = coordinator._ensure_source_url(content_outside, source_url)
+    assert f"source_url: {source_url}" in result_outside
+    bp_block = result_outside.split("action:")[0]
+    assert f"source_url: {source_url}" in bp_block
+
+    content_nested_input = (
+        "blueprint:\n  name: Test\n  domain: automation\n"
+        "  input:\n    source_url:\n      name: Enter URL\n"
+        "trigger:\n  - platform: webhook"
+    )
+    result_nested = coordinator._ensure_source_url(content_nested_input, source_url)
+    assert f"  source_url: {source_url}" in result_nested
+    assert result_nested.count("source_url") == 2
+
 
 def test_scan_blueprints(hass, coordinator):
     """Test scanning blueprints directory."""

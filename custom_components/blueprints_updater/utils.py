@@ -16,7 +16,7 @@ AsyncFunc = Callable[..., Coroutine[Any, Any, _T]]
 
 def retry_async(
     max_retries: int,
-    base_delay: float = 2.0,
+    base_delay: float = 5.0,
     exponential: bool = True,
     jitter: bool = True,
     exceptions: tuple[type[Exception], ...] = (Exception,),
@@ -24,11 +24,11 @@ def retry_async(
     """Decorator to retry an async function with exponential backoff and jitter.
 
     Args:
-        max_retries: Number of retry attempts.
-        base_delay: Initial delay between retries.
-        exponential: If True, use exponential backoff.
-        jitter: If True, add random jitter to delay.
-        exceptions: Tuple of exception types to catch and retry.
+        `max_retries`: Number of retry attempts.
+        `base_delay`: Initial delay between retries.
+        `exponential`: If True, use exponential backoff.
+        `jitter`: If True, add random jitter to delay.
+        `exceptions`: Tuple of exception types to catch and retry.
 
     Returns:
         Decorated function.

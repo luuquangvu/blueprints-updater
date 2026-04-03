@@ -1,12 +1,14 @@
 # Blueprints Updater cho Home Assistant
 
-[![GitHub Release](https://img.shields.io/github/v/release/luuquangvu/blueprints-updater?style=flat&color=purple)](https://github.com/luuquangvu/blueprints-updater/releases)
-[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg?style=flat)](https://github.com/hacs/integration)
-[![HA Min Version](https://img.shields.io/badge/homeassistant-%3E%3D%202024.12.0-03a9f4?logo=homeassistant&style=flat)](https://github.com/home-assistant/core/releases/tag/2024.12.0)
+[![GitHub Release](https://img.shields.io/github/v/release/luuquangvu/blueprints-updater?style=flat&logo=github&label=GitHub+Release&color=purple)](https://github.com/luuquangvu/blueprints-updater/releases)
+[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg?style=flat&logo=homeassistantcommunitystore&label=HACS)](https://github.com/hacs/integration)
+[![Home Assistant](https://img.shields.io/badge/homeassistant-%3E%3D%202024.12.0-03a9f4?style=flat&logo=homeassistant&label=Home+Assistant)](https://www.home-assistant.io)
 
-[![Python Checks](https://github.com/luuquangvu/blueprints-updater/actions/workflows/python_check.yaml/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/python_check.yaml)
-[![Validate](https://github.com/luuquangvu/blueprints-updater/actions/workflows/validate.yaml/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/validate.yaml)
-[![CodeQL](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql)
+[![CI](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/python_check.yaml?style=flat&logo=github&label=CI)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/python_check.yaml)
+[![Validation](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/validate.yaml?style=flat&logo=github&label=Validation)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/validate.yaml)
+[![CodeQL](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/github-code-scanning/codeql?style=flat&logo=github&label=CodeQL)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql)
+[![Prettier](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/prettier.yaml?style=flat&logo=prettier&label=Prettier)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/prettier.yaml)
+[![CodeRabbit Reviews](https://img.shields.io/coderabbit/prs/github/luuquangvu/blueprints-updater?style=flat&logo=coderabbit&label=CodeRabbit+Reviews&color=orange)](https://github.com/luuquangvu/blueprints-updater/pulls)
 
 **[ [🇺🇸 English](README.md) | 🇻🇳 Tiếng Việt ]**
 
