@@ -7,6 +7,7 @@
 [![Python Checks](https://github.com/luuquangvu/blueprints-updater/actions/workflows/python_check.yaml/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/python_check.yaml)
 [![Validate](https://github.com/luuquangvu/blueprints-updater/actions/workflows/validate.yaml/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/validate.yaml)
 [![CodeQL](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql)
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/luuquangvu/blueprints-updater?utm_source=oss&utm_medium=github&utm_campaign=luuquangvu%2Fblueprints-updater&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
 **[ 🇺🇸 English | [🇻🇳 Tiếng Việt](README_vi.md) ]**
 

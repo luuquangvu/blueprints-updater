@@ -32,9 +32,9 @@ async def async_setup_entry(
     """Set up the Blueprints Updater update entities.
 
     Args:
-        hass: HomeAssistant instance.
-        entry: Config entry.
-        async_add_entities: Callback to add entities.
+        `hass`: HomeAssistant instance.
+        `entry`: Config entry.
+        `async_add_entities`: Callback to add entities.
     """
     coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
@@ -111,9 +111,9 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         """Initialize the update entity.
 
         Args:
-            coordinator: Update coordinator.
-            path: Path to the blueprint.
-            info: Blueprint metadata dict.
+            `coordinator`: Update coordinator.
+            `path`: Path to the blueprint.
+            `info`: Blueprint metadata dict.
         """
         super().__init__(coordinator)
         self._path = path
@@ -273,8 +273,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         """Install the update.
 
         Args:
-            version: The desired version to install (unused).
-            backup: Whether a backup should be created (passed to coordinator).
+            `version`: The desired version to install (unused).
+            `backup`: Whether a backup should be created (passed to coordinator).
         """
         if self._path not in self.coordinator.data:
             _LOGGER.error("Blueprint path %s not found in coordinator data", self._path)

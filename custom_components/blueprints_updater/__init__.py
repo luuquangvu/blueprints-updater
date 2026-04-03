@@ -39,8 +39,8 @@ async def async_setup(hass: HomeAssistant, _: ConfigType) -> bool:
     """Set up the Blueprints Updater component.
 
     Args:
-        hass: HomeAssistant instance.
-        _: Unused config object.
+        `hass`: HomeAssistant instance.
+        `_`: Unused config object.
 
     Returns:
         True if initialization was successful.
@@ -53,8 +53,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Blueprints Updater from a config entry.
 
     Args:
-        hass: HomeAssistant instance.
-        entry: Configuration entry from the user.
+        `hass`: HomeAssistant instance.
+        `entry`: Configuration entry from the user.
 
     Returns:
         True if the entry was set up successfully.
@@ -92,7 +92,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
     """Register custom services for the integration.
 
     Args:
-        hass: HomeAssistant instance.
+        `hass`: HomeAssistant instance.
     """
 
     async def _get_coordinator() -> BlueprintUpdateCoordinator | None:
@@ -107,9 +107,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
         """Translate a key using the coordinator if available, otherwise fallback.
 
         Args:
-            key: Translation key.
-            category: Translation category.
-            **kwargs: Placeholder values.
+            `key`: Translation key.
+            `category`: Translation category.
+            `**kwargs`: Placeholder values.
 
         Returns:
             Translated string.
@@ -238,13 +238,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         backup_pref = call.data.get("backup", True)
 
-        updatable_paths = [
-            path
+        updatable = [
+            (path, info["remote_content"])
             for path, info in active_coordinator.data.items()
             if info.get("updatable") and info.get("remote_content") and not info.get("last_error")
         ]
 
-        if not updatable_paths:
+        if not updatable:
             return
 
         config_entry = active_coordinator.config_entry
@@ -253,13 +253,11 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         _LOGGER.info(
             "Starting bulk update for %d blueprints in %s",
-            len(updatable_paths),
+            len(updatable),
             config_entry.entry_id,
         )
 
-        for path in updatable_paths:
-            info = active_coordinator.data[path]
-            remote_content = info["remote_content"]
+        for path, remote_content in updatable:
             await active_coordinator.async_install_blueprint(
                 path, remote_content, reload_services=False, backup=backup_pref
             )
@@ -284,8 +282,8 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Update options for a config entry.
 
     Args:
-        hass: HomeAssistant instance.
-        entry: Configuration entry.
+        `hass`: HomeAssistant instance.
+        `entry`: Configuration entry.
     """
     _LOGGER.debug("Updating options for Blueprints Updater entry: %s", entry.entry_id)
     blueprint_coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
@@ -299,8 +297,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry.
 
     Args:
-        hass: HomeAssistant instance.
-        entry: Configuration entry to unload.
+        `hass`: HomeAssistant instance.
+        `entry`: Configuration entry to unload.
 
     Returns:
         True if the entry was unloaded successfully.

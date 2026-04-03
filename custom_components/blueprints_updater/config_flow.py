@@ -41,7 +41,7 @@ async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, An
     """Scan blueprints and return options for the selector.
 
     Args:
-        hass: HomeAssistant instance.
+        `hass`: HomeAssistant instance.
 
     Returns:
         List of blueprint options with value and label.
@@ -69,8 +69,8 @@ def _get_config_schema(
     """Return the configuration schema for the flow.
 
     Args:
-        defaults: Current or default configuration values.
-        blueprint_options: Available blueprints to select from.
+        `defaults`: Current or default configuration values.
+        `blueprint_options`: Available blueprints to select from.
 
     Returns:
         A voluptuous Schema object.

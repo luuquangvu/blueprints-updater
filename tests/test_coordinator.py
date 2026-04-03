@@ -121,6 +121,12 @@ def test_ensure_source_url(coordinator):
     content_with_quotes = f"blueprint:\n  name: Test\n  source_url: '{source_url}'"
     assert coordinator._ensure_source_url(content_with_quotes, source_url) == content_with_quotes
 
+    different_url = "https://github.com/user/new-repo/blob/main/test.yaml"
+    content_different = f"blueprint:\n  name: Test\n  source_url: {different_url}"
+    result = coordinator._ensure_source_url(content_different, source_url)
+    assert result == content_different
+    assert result.count("source_url") == 1
+
 
 def test_scan_blueprints(hass, coordinator):
     """Test scanning blueprints directory."""
