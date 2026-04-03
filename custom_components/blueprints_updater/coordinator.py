@@ -52,6 +52,7 @@ from .const import (
     RE_FORUM_TOPIC_ID,
     RE_GIST_RAW,
     RE_GITHUB_BLOB,
+    RE_NEXT_TOP_LEVEL_KEY,
     RE_SOURCE_URL_LINE,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
@@ -954,20 +955,31 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _ensure_source_url(content: str, source_url: str) -> str:
-        """Ensure a source_url is present in the blueprint content.
+        """Ensure a source_url is present in the blueprint metadata block.
 
-        If the remote content already contains a source_url line, it is kept
-        as-is (prioritizing the remote author's value). If no source_url
-        exists, the canonical URL is injected after the 'blueprint:' key.
+        Only considers source_url lines inside the ``blueprint:`` mapping
+        (from the ``blueprint:`` key to the next top-level key). Lines
+        elsewhere in the file are ignored to avoid false positives.
 
         Args:
-            `content`: Raw YAML blueprint content.
-            `source_url`: Fallback URL to inject when the content has none.
+            content: Raw YAML blueprint content.
+            source_url: Fallback URL to inject when the content has none.
 
         Returns:
-            The YAML content with a source_url guaranteed to be present.
+            The YAML content with a source_url guaranteed to be present
+            in the blueprint block.
         """
-        if RE_SOURCE_URL_LINE.search(content):
+        bp_match = RE_BLUEPRINT_KEY.search(content)
+        if not bp_match:
+            return content
+
+        bp_start = bp_match.end()
+        next_top = RE_NEXT_TOP_LEVEL_KEY.search(content[bp_start:])
+        bp_block = (
+            content[bp_start : bp_start + next_top.start()] if next_top else content[bp_start:]
+        )
+
+        if RE_SOURCE_URL_LINE.search(bp_block):
             return content
 
         return RE_BLUEPRINT_KEY.sub(

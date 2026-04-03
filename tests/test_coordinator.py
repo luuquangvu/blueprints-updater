@@ -127,6 +127,16 @@ def test_ensure_source_url(coordinator):
     assert result == content_different
     assert result.count("source_url") == 1
 
+    content_outside = (
+        "blueprint:\n  name: Test\n  domain: automation\n"
+        "action:\n  - service: rest.post\n    data:\n"
+        "      source_url: https://api.example.com"
+    )
+    result_outside = coordinator._ensure_source_url(content_outside, source_url)
+    assert f"source_url: {source_url}" in result_outside
+    bp_block = result_outside.split("action:")[0]
+    assert f"source_url: {source_url}" in bp_block
+
 
 def test_scan_blueprints(hass, coordinator):
     """Test scanning blueprints directory."""

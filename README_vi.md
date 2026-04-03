@@ -1,13 +1,13 @@
 # Blueprints Updater cho Home Assistant
 
-[![GitHub Release](https://img.shields.io/github/v/release/luuquangvu/blueprints-updater?style=flat&color=purple)](https://github.com/luuquangvu/blueprints-updater/releases)
-[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg?style=flat)](https://github.com/hacs/integration)
-[![HA Min Version](https://img.shields.io/badge/homeassistant-%3E%3D%202024.12.0-03a9f4?logo=homeassistant&style=flat)](https://github.com/home-assistant/core/releases/tag/2024.12.0)
+[![GitHub Release](https://img.shields.io/github/v/release/luuquangvu/blueprints-updater?logo=github&style=flat&color=purple&label=GitHub+Release)](https://github.com/luuquangvu/blueprints-updater/releases)
+[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg?style=flat&label=HACS)](https://github.com/hacs/integration)
+[![Home Assistant Version](https://img.shields.io/badge/homeassistant-%3E%3D%202024.12.0-03a9f4?logo=homeassistant&style=flat&label=Home+Assistant)](https://github.com/home-assistant/core/releases/tag/2024.12.0)
 
 [![Python Checks](https://github.com/luuquangvu/blueprints-updater/actions/workflows/python_check.yaml/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/python_check.yaml)
 [![Validate](https://github.com/luuquangvu/blueprints-updater/actions/workflows/validate.yaml/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/validate.yaml)
 [![CodeQL](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql)
-![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/luuquangvu/blueprints-updater?utm_source=oss&utm_medium=github&utm_campaign=luuquangvu%2Fblueprints-updater&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
+[![CodeRabbit Reviews](https://img.shields.io/coderabbit/prs/github/luuquangvu/blueprints-updater?logo=github&style=flat&color=orange&label=CodeRabbit+Reviews)](https://github.com/luuquangvu/blueprints-updater/pulls)
 
 **[ [🇺🇸 English](README.md) | 🇻🇳 Tiếng Việt ]**
 
