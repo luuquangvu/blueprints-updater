@@ -30,6 +30,8 @@ def get_schema_defaults(schema: vol.Schema) -> dict[str, Any]:
     defaults = {}
     for key in schema.schema:
         if hasattr(key, "default"):
+            if key.default is vol.UNDEFINED:
+                continue
             key_str = str(key)
             defaults[key_str] = key.default() if callable(key.default) else key.default
     return defaults
@@ -103,4 +105,37 @@ async def test_options_flow_clamping(hass: HomeAssistant):
         assert isinstance(data_schema, vol.Schema)
         defaults = get_schema_defaults(data_schema)
         assert defaults.get(CONF_MAX_BACKUPS) == 1
+        assert defaults.get(CONF_UPDATE_INTERVAL) == 24
+
+
+@pytest.mark.asyncio
+async def test_options_flow_safe_coercion(hass: HomeAssistant):
+    """Test that the options flow safely coerces None or string values."""
+    config_entry = MagicMock()
+    config_entry.options = {
+        CONF_MAX_BACKUPS: "8",
+        CONF_UPDATE_INTERVAL: None,
+    }
+    config_entry.entry_id = "test_entry"
+
+    handler = BlueprintsUpdaterOptionsFlowHandler()
+    handler.hass = hass
+
+    cast(Any, handler).handler = config_entry.entry_id
+
+    hass.config_entries = MagicMock()
+    hass.config_entries.async_get_known_entry = MagicMock(return_value=config_entry)
+
+    with patch(
+        "custom_components.blueprints_updater.config_flow._async_get_blueprint_options",
+        return_value=[],
+    ):
+        result = await handler.async_step_init()
+        assert result["type"] == "form"
+
+        data_schema = result["data_schema"]
+        assert isinstance(data_schema, vol.Schema)
+        defaults = get_schema_defaults(data_schema)
+
+        assert defaults.get(CONF_MAX_BACKUPS) == 8
         assert defaults.get(CONF_UPDATE_INTERVAL) == 24

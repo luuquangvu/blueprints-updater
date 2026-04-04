@@ -173,6 +173,18 @@ def test_ensure_source_url(coordinator):
     assert coordinator._ensure_source_url(content_none, source_url) == content_none
 
 
+def test_ensure_source_url_indented_key(coordinator):
+    """Test that indented blueprint keys do NOT trigger injection."""
+    source_url = "https://url.com/blueprint.yaml"
+    content = """
+not_blueprint:
+  something: else
+  blueprint:
+    nested: true
+"""
+    assert coordinator._ensure_source_url(content, source_url) == content
+
+
 def test_scan_blueprints(hass, coordinator):
     """Test scanning blueprints directory."""
     bp_path = "/config/blueprints"

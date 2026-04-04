@@ -444,6 +444,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                                 updated_domains,
                             )
                             self.async_set_updated_data(self.data)
+                        except asyncio.CancelledError:
+                            raise
                         except Exception as err:
                             _LOGGER.exception(
                                 "Error in background worker for %s: %s", blueprint_path, err
@@ -672,8 +674,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             except OSError as err:
                 _LOGGER.warning("Error removing stale backup %s: %s", stale_bak, err)
 
-        except Exception as err:
-            _LOGGER.error("Uncaught error during backup rotation for %s: %s", file_path, err)
+        except OSError as err:
+            _LOGGER.error("Filesystem error during backup rotation for %s: %s", file_path, err)
 
     async def async_install_blueprint(
         self,
@@ -1293,7 +1295,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if RE_BLUEPRINT_KEY.search(content):
             return RE_BLUEPRINT_KEY.sub(
-                rf"\1\2\n\1  source_url: {source_url}",
+                rf"\1\n  source_url: {source_url}",
                 content,
                 count=1,
             )
