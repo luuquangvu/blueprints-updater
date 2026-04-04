@@ -628,34 +628,52 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _rotate_backups(file_path: str, max_bak: int) -> None:
-        """Rotate backup files for a given file path.
+        """Rotate backup files for a given file path with robust error handling.
 
         Args:
             file_path: Path to the active file to rotate.
             max_bak: Maximum number of backups to keep.
 
         """
-        if not os.path.exists(file_path):
-            return
+        try:
+            if not os.path.isfile(file_path):
+                return
 
-        legacy_bak = f"{file_path}.bak"
-        if os.path.exists(legacy_bak):
-            if not os.path.exists(f"{file_path}.bak.1"):
-                os.rename(legacy_bak, f"{file_path}.bak.1")
-            else:
-                os.remove(legacy_bak)
+            legacy_bak = f"{file_path}.bak"
+            try:
+                if os.path.isfile(legacy_bak):
+                    bak1 = f"{file_path}.bak.1"
+                    if not os.path.isfile(bak1):
+                        os.rename(legacy_bak, bak1)
+                    else:
+                        os.remove(legacy_bak)
+            except OSError as err:
+                _LOGGER.warning("Error migrating legacy backup %s: %s", legacy_bak, err)
 
-        for i in range(max_bak, 0, -1):
-            src = f"{file_path}.bak.{i}"
-            dst = f"{file_path}.bak.{i + 1}"
-            if os.path.exists(src):
-                os.replace(src, dst)
+            for i in range(max_bak, 0, -1):
+                src = f"{file_path}.bak.{i}"
+                dst = f"{file_path}.bak.{i + 1}"
+                try:
+                    os.replace(src, dst)
+                except FileNotFoundError:
+                    pass
+                except OSError as err:
+                    _LOGGER.warning("Error rotating backup %s to %s: %s", src, dst, err)
 
-        shutil.copy2(file_path, f"{file_path}.bak.1")
+            try:
+                shutil.copy2(file_path, f"{file_path}.bak.1")
+            except OSError as err:
+                _LOGGER.warning("Error creating new backup for %s: %s", file_path, err)
 
-        stale_bak = f"{file_path}.bak.{max_bak + 1}"
-        if os.path.exists(stale_bak):
-            os.remove(stale_bak)
+            stale_bak = f"{file_path}.bak.{max_bak + 1}"
+            try:
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(stale_bak)
+            except OSError as err:
+                _LOGGER.warning("Error removing stale backup %s: %s", stale_bak, err)
+
+        except Exception as err:
+            _LOGGER.error("Uncaught error during backup rotation for %s: %s", file_path, err)
 
     async def async_install_blueprint(
         self,
@@ -853,12 +871,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             def _restore_file(file_path: str, ver: int, max_bak: int) -> tuple[bool, str]:
                 bak_path = f"{file_path}.bak.{ver}"
-                if ver == 1 and not os.path.exists(bak_path):
+                if ver == 1 and not os.path.isfile(bak_path):
                     old_bak = f"{file_path}.bak"
-                    if os.path.exists(old_bak):
+                    if os.path.isfile(old_bak):
                         bak_path = old_bak
 
-                if not os.path.exists(bak_path):
+                if not os.path.isfile(bak_path):
                     return False, "missing_backup"
 
                 with open(bak_path, encoding="utf-8") as f:

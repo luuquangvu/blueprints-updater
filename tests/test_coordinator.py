@@ -864,7 +864,7 @@ async def test_async_install_blueprint_backup(hass, coordinator):
     with (
         patch("builtins.open", MagicMock()),
         patch("custom_components.blueprints_updater.coordinator.os.replace") as mock_replace,
-        patch("custom_components.blueprints_updater.coordinator.os.path.exists", return_value=True),
+        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
         patch("custom_components.blueprints_updater.coordinator.shutil.copy2") as mock_copy,
         patch("custom_components.blueprints_updater.coordinator.os.remove"),
     ):
@@ -886,7 +886,7 @@ async def test_async_restore_blueprint_success(hass, coordinator):
 
     with (
         patch("builtins.open", MagicMock()),
-        patch("custom_components.blueprints_updater.coordinator.os.path.exists", return_value=True),
+        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
         patch("custom_components.blueprints_updater.coordinator.os.replace") as mock_replace,
         patch("custom_components.blueprints_updater.coordinator.os.remove"),
         patch("custom_components.blueprints_updater.coordinator.os.rename"),
@@ -906,8 +906,10 @@ async def test_async_restore_blueprint_missing(hass, coordinator):
     path = "/config/blueprints/test.yaml"
     coordinator.data = {path: {"updatable": False}}
 
-    with patch(
-        "custom_components.blueprints_updater.coordinator.os.path.exists", return_value=False
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
+        ),
     ):
         result = await coordinator.async_restore_blueprint(path)
 
@@ -923,7 +925,7 @@ async def test_async_restore_blueprint_error(hass, coordinator):
 
     with (
         patch("builtins.open", MagicMock()),
-        patch("custom_components.blueprints_updater.coordinator.os.path.exists", return_value=True),
+        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
         patch("custom_components.blueprints_updater.coordinator.os.remove"),
         patch("custom_components.blueprints_updater.coordinator.os.rename"),
         patch("custom_components.blueprints_updater.coordinator.shutil.copy2"),
