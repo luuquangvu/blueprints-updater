@@ -16,7 +16,7 @@ AsyncFunc = Callable[..., Coroutine[Any, Any, _T]]
 
 def retry_async(
     max_retries: int,
-    exceptions: tuple[type[BaseException], ...],
+    exceptions: tuple[type[Exception], ...],
     base_delay: float = 5.0,
     exponential: bool = True,
     jitter: bool = True,
