@@ -1,3 +1,5 @@
+"""Tests for Blueprints Updater config flow."""
+
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
@@ -19,10 +21,11 @@ def get_schema_defaults(schema: vol.Schema) -> dict[str, Any]:
     """Extract default values from a voluptuous schema.
 
     Args:
-        `schema`: The voluptuous schema to extract defaults from.
+        schema: The voluptuous schema to extract defaults from.
 
     Returns:
         A dictionary mapping schema keys to their default values.
+
     """
     defaults = {}
     for key in schema.schema:

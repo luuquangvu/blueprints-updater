@@ -1,3 +1,5 @@
+"""Data coordinator for Blueprints Updater."""
+
 from __future__ import annotations
 
 import asyncio
@@ -71,11 +73,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Generate a deterministic unique ID from an entry ID and a blueprint's relative path.
 
         Args:
-            `entry_id`: The config entry ID.
-            `rel_path`: The blueprint's relative path.
+            entry_id: The config entry ID.
+            rel_path: The blueprint's relative path.
 
         Returns:
             The generated unique ID.
+
         """
         combined = f"{entry_id}_{rel_path}"
         return f"blueprint_{hashlib.sha256(combined.encode()).hexdigest()}"
@@ -92,9 +95,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Initialize the coordinator.
 
         Args:
-            `hass`: HomeAssistant instance.
-            `entry`: Integration configuration entry.
-            `update_interval`: Scan interval.
+            hass: HomeAssistant instance.
+            entry: Integration configuration entry.
+            update_interval: Scan interval.
+
         """
         self.hass = hass
         self.config_entry = entry
@@ -187,12 +191,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         a more convenient API and better error handling for startup race conditions.
 
         Args:
-            `key`: Translation key.
-            `category`: Translation category (common, exceptions, etc.).
-            `**kwargs`: Template arguments for the translation string.
+            key: Translation key.
+            category: Translation category (common, exceptions, etc.).
+            **kwargs: Template arguments for the translation string.
 
         Returns:
             Translated and formatted string.
+
         """
         language = getattr(self.hass.config, "language", "en")
         cache_key = (language, category)
@@ -276,6 +281,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         Returns:
             A dictionary containing blueprint information and update status.
+
         """
         filter_mode = (
             self.config_entry.options.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
@@ -359,7 +365,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Start the background remote refresh task if not already running.
 
         Args:
-            `blueprints`: Dictionary of blueprints to scan remotely.
+            blueprints: Dictionary of blueprints to scan remotely.
+
         """
         if self._background_task and not self._background_task.done():
             _LOGGER.debug("Background refresh already in progress, skipping start")
@@ -372,7 +379,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @callback
     def _async_cancel_background_task(self) -> None:
-        """Callback to cancel the background task on unload."""
+        """Cancel the background task on unload."""
         if self._background_task and not self._background_task.done():
             _LOGGER.debug("Cancelling background refresh task on unload")
             self._background_task.cancel()
@@ -381,7 +388,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Fetch remote updates in the background using a task queue.
 
         Args:
-            `blueprints`: Dictionary of blueprints to check for updates.
+            blueprints: Dictionary of blueprints to check for updates.
+
         """
         try:
             if self._refresh_lock.locked():
@@ -485,8 +493,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Handle services reload and persistent notifications.
 
         Args:
-            `auto_updated_names`: List of blueprint names that were updated.
-            `domains`: Set of domains affected (e.g., automation, script).
+            auto_updated_names: List of blueprint names that were updated.
+            domains: Set of domains affected (e.g., automation, script).
+
         """
         auto_updated_names.sort()
         _LOGGER.info("Auto-updated %d blueprints: %s", len(auto_updated_names), auto_updated_names)
@@ -519,11 +528,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         and min_version compatibility check.
 
         Args:
-            `data`: Parsed YAML dictionary of the blueprint.
-            `source_url`: The URL the blueprint was loaded from (for logging).
+            data: Parsed YAML dictionary of the blueprint.
+            source_url: The URL the blueprint was loaded from (for logging).
 
         Returns:
             An error string key if validation fails, or None if valid.
+
         """
         if not isinstance(data, dict) or "blueprint" not in data:
             _LOGGER.warning(
@@ -558,7 +568,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         to prevent malicious blueprints from triggering unintended reloads.
 
         Args:
-            `domains`: List of domains to reload. If None, reloads all allowed.
+            domains: List of domains to reload. If None, reloads all allowed.
+
         """
         if domains:
             targets = [d for d in domains if d in ALLOWED_RELOAD_DOMAINS]
@@ -573,8 +584,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Fetch content for a single blueprint if needed.
 
         Args:
-            `path`: Path to the blueprint.
-            `force`: If True, bypass ETag and force a full download.
+            path: Path to the blueprint.
+            force: If True, bypass ETag and force a full download.
+
         """
         if not self.data or path not in self.data:
             return
@@ -597,8 +609,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Rotate backup files for a given file path.
 
         Args:
-            `file_path`: Path to the active file to rotate.
-            `max_bak`: Maximum number of backups to keep.
+            file_path: Path to the active file to rotate.
+            max_bak: Maximum number of backups to keep.
+
         """
         if not os.path.exists(file_path):
             return
@@ -632,10 +645,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Install a blueprint to the local filesystem.
 
         Args:
-            `path`: Target filesystem path for the blueprint.
-            `remote_content`: Raw YAML content to write.
-            `reload_services`: Whether to reload HA services after writing.
-            `backup`: Whether to create backup files of the old version.
+            path: Target filesystem path for the blueprint.
+            remote_content: Raw YAML content to write.
+            reload_services: Whether to reload HA services after writing.
+            backup: Whether to create backup files of the old version.
+
         """
         if not self._is_safe_path(path):
             _LOGGER.error("Security violation: Attempted to install to unsafe path: %s", path)
@@ -698,10 +712,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Check if the URL is safe (not an internal network address).
 
         Args:
-            `url`: The URL to validate.
+            url: The URL to validate.
 
         Returns:
             True if the URL points to a safe public hostname.
+
         """
         parsed = urlparse(url)
         hostname = parsed.hostname
@@ -728,10 +743,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Perform the actual DNS lookup and safety validation.
 
         Args:
-            `hostname`: The hostname or IP to check.
+            hostname: The hostname or IP to check.
 
         Returns:
             True if the destination is a safe public IP.
+
         """
         with contextlib.suppress(ValueError):
             ip = ipaddress.ip_address(hostname)
@@ -775,10 +791,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Check if the path is within the blueprints' directory.
 
         Args:
-            `path`: Filesystem path to validate.
+            path: Filesystem path to validate.
 
         Returns:
             True if the path is safely contained within blueprints folder.
+
         """
         blueprint_path = self.hass.config.path("blueprints")
         try:
@@ -795,11 +812,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         restore, making the operation reversible.
 
         Args:
-            `path`: Local path of the blueprint file to restore.
-            `version`: Which backup version to restore (1 = newest).
+            path: Local path of the blueprint file to restore.
+            version: Which backup version to restore (1 = newest).
 
         Returns:
             A dictionary with 'success' (bool) and 'translation_key' (str).
+
         """
         if not self._is_safe_path(path):
             _LOGGER.error("Security violation: Attempted to restore unsafe path: %s", path)
@@ -867,12 +885,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Update a single blueprint directly in self.data.
 
         Args:
-            `session`: Async HTTP client session.
-            `path`: Local path of the blueprint.
-            `info`: Current blueprint metadata.
-            `results_to_notify`: List of names for notification.
-            `updated_domains`: Set of domains affected.
-            `force`: If True, ignore ETag and force a full download.
+            session: Async HTTP client session.
+            path: Local path of the blueprint.
+            info: Current blueprint metadata.
+            results_to_notify: List of names for notification.
+            updated_domains: Set of domains affected.
+            force: If True, ignore ETag and force a full download.
+
         """
         if not (source_url := info.get("source_url")):
             return
@@ -940,14 +959,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Handle the 304 Not Modified case for a blueprint.
 
         Args:
-            `session`: Async HTTP client session.
-            `path`: Local path of the blueprint.
-            `info`: Current blueprint metadata.
-            `normalized_url`: The URL used to fetch.
-            `new_etag`: The ETag returned (if any).
+            session: Async HTTP client session.
+            path: Local path of the blueprint.
+            info: Current blueprint metadata.
+            normalized_url: The URL used to fetch.
+            new_etag: The ETag returned (if any).
 
         Returns:
             A tuple of (content, etag). Content is None if still not modified.
+
         """
         _LOGGER.debug("[304] '%s' is up to date on server", info["name"])
         if not (self.data and path in self.data):
@@ -989,13 +1009,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Process and validate newly fetched blueprint content.
 
         Args:
-            `path`: Local path of the blueprint.
-            `info`: Current blueprint metadata.
-            `remote_content`: Raw YAML content.
-            `new_etag`: ETag from response.
-            `source_url`: Original source URL.
-            `results_to_notify`: List to track auto-updates for notification.
-            `updated_domains`: Set to track domains requiring reload.
+            path: Local path of the blueprint.
+            info: Current blueprint metadata.
+            remote_content: Raw YAML content.
+            new_etag: ETag from response.
+            source_url: Original source URL.
+            results_to_notify: List to track auto-updates for notification.
+            updated_domains: Set to track domains requiring reload.
+
         """
         remote_content = self._ensure_source_url(remote_content, source_url)
         remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
@@ -1072,10 +1093,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         Returns (content, etag). Content is None on 304 Not Modified.
 
         Args:
-            `session`: Async HTTP client.
-            `url`: URL to fetch.
-            `etag`: Optional ETag for conditional GET.
-            `force`: If True, bypass ETag (even if provided) and force download.
+            session: Async HTTP client.
+            url: URL to fetch.
+            etag: Optional ETag for conditional GET.
+            force: If True, bypass ETag (even if provided) and force download.
+
         """
         headers: dict[str, str] = {}
         if etag and not force:
@@ -1115,10 +1137,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Convert standard GitHub/Gist/Forum URLs to their raw/API endpoints.
 
         Args:
-            `url`: The user-provided source URL.
+            url: The user-provided source URL.
 
         Returns:
             The normalized URL for direct content fetching.
+
         """
         parsed = urlparse(url)
         path_parts = parsed.path.strip("/").split("/")
@@ -1172,10 +1195,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Extract YAML blueprint from Home Assistant Forum JSON response.
 
         Args:
-            `json_data`: The JSON payload from the Discourse API.
+            json_data: The JSON payload from the Discourse API.
 
         Returns:
             The extracted blueprint YAML string or None if not found.
+
         """
         with contextlib.suppress(KeyError, IndexError):
             post_stream: dict[str, Any] = json_data.get("post_stream", {})
@@ -1205,12 +1229,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         key via text substitution.
 
         Args:
-            `content`: Raw YAML blueprint content.
-            `source_url`: Fallback URL to inject when the content has none.
+            content: Raw YAML blueprint content.
+            source_url: Fallback URL to inject when the content has none.
 
         Returns:
             The YAML content with a source_url guaranteed to be present
             in the blueprint block.
+
         """
         try:
             parsed = yaml_util.parse_yaml(content)
@@ -1254,12 +1279,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Scan the blueprints directory for YAML files with source_url.
 
         Args:
-            `hass`: HomeAssistant instance.
-            `filter_mode`: Blueprint filter mode.
-            `selected_blueprints`: List of selected blueprints.
+            hass: HomeAssistant instance.
+            filter_mode: Blueprint filter mode.
+            selected_blueprints: List of selected blueprints.
 
         Returns:
             Dictionary mapping paths to blueprint properties.
+
         """
         blueprint_path: str = hass.config.path("blueprints")
         found_blueprints = {}

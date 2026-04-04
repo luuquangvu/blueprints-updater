@@ -95,6 +95,22 @@ async def test_retry_async_cancelled_error():
     assert call_count == 1
 
 
+@pytest.mark.asyncio
+async def test_retry_async_zero_retries():
+    """Test retry_async with max_retries=0 performs one attempt and no retries."""
+    call_count = 0
+
+    @retry_async(0, (ValueError,), base_delay=0.01)
+    async def decorated_func():
+        nonlocal call_count
+        call_count += 1
+        raise ValueError("Immediately fail")
+
+    with pytest.raises(ValueError, match="Immediately fail"):
+        await decorated_func()
+    assert call_count == 1
+
+
 def test_retry_async_invalid_args():
     """Test retry_async decorator with invalid arguments."""
     with pytest.raises(ValueError, match="max_retries must be greater than or equal to 0"):

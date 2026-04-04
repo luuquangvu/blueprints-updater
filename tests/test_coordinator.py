@@ -1,3 +1,5 @@
+"""Tests for Blueprints Updater coordinator."""
+
 import asyncio
 import contextlib
 import hashlib

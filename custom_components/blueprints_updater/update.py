@@ -1,3 +1,5 @@
+"""Update entities for Blueprints Updater."""
+
 from __future__ import annotations
 
 import logging
@@ -31,9 +33,10 @@ async def async_setup_entry(
     """Set up the Blueprints Updater update entities.
 
     Args:
-        `hass`: HomeAssistant instance.
-        `entry`: Config entry.
-        `async_add_entities`: Callback to add entities.
+        hass: HomeAssistant instance.
+        entry: Config entry.
+        async_add_entities: Callback to add entities.
+
     """
     coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
@@ -110,9 +113,9 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         """Initialize the update entity.
 
         Args:
-            `coordinator`: Update coordinator.
-            `path`: Path to the blueprint.
-            `info`: Blueprint metadata dict.
+            coordinator: Update coordinator.
+            path: Path to the blueprint.
+            info: Blueprint metadata dict.
         """
         super().__init__(coordinator)
         self._path = path
@@ -142,6 +145,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         Returns:
             The first 8 characters of the local YAML hash or None.
+
         """
         if self._path in self.coordinator.data:
             return self.coordinator.data[self._path]["local_hash"][:8]
@@ -154,6 +158,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         Returns:
             Release notes string or None.
+
         """
         return await self.async_generate_release_notes()
 
@@ -208,6 +213,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         Returns:
             Remote hash string (trimmed) or local hash if up-to-date.
+
         """
         if self._path not in self.coordinator.data:
             return None
@@ -222,6 +228,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         Returns:
             A dictionary containing entity-specific attributes.
+
         """
         attrs = {}
         if self._path in self.coordinator.data:
@@ -275,8 +282,10 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         """Install the update.
 
         Args:
-            `version`: The desired version to install (unused).
-            `backup`: Whether a backup should be created (passed to coordinator).
+            version: The desired version to install (unused).
+            backup: Whether a backup should be created (passed to coordinator).
+            **kwargs: Additional arguments passed by the Home Assistant entity component.
+
         """
         if self._path not in self.coordinator.data:
             _LOGGER.error("Blueprint path %s not found in coordinator data", self._path)

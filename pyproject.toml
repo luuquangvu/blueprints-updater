@@ -24,7 +24,11 @@ select = [
   "SIM", # flake8-simplify
   "RUF", # ruff-specific rules
   "TID", # flake8-tidy-imports
+  "D",   # pydocstyle
 ]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.format]
 quote-style = "double"

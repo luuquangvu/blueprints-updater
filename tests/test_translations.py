@@ -1,3 +1,5 @@
+"""Tests for Blueprints Updater translations."""
+
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 

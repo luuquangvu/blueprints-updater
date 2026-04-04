@@ -24,15 +24,14 @@ def retry_async(
     """Decorator to retry an async function with exponential backoff and jitter.
 
     Args:
-        `max_retries`: Number of retry attempts.
-        `base_delay`: Initial delay between retries.
-        `exponential`: If True, use exponential backoff.
-        `jitter`: If True, add random jitter to delay.
-        `exceptions`: Tuple of exception types to catch and retry. This parameter
-            is required to ensure that only expected errors are retried.
+        max_retries: The maximum number of retry attempts.
+        exceptions: A tuple of exception classes to catch and retry on.
+        base_delay: The initial delay before retrying.
+        exponential: Whether to use exponential backoff.
+        jitter: Whether to add random jitter to the delay.
 
     Returns:
-        Decorated function.
+        Decorated async function.
     """
     if max_retries < 0:
         raise ValueError("max_retries must be greater than or equal to 0")

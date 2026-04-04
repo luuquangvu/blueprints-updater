@@ -1,3 +1,5 @@
+"""Blueprints Updater integration for Home Assistant."""
+
 import logging
 from datetime import timedelta
 
@@ -38,11 +40,12 @@ async def async_setup(hass: HomeAssistant, _: ConfigType) -> bool:
     """Set up the Blueprints Updater component.
 
     Args:
-        `hass`: HomeAssistant instance.
-        `_`: Unused config object.
+        hass: HomeAssistant instance.
+        _: Unused config object.
 
     Returns:
         True if initialization was successful.
+
     """
     _async_register_services(hass)
     return True
@@ -52,11 +55,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Blueprints Updater from a config entry.
 
     Args:
-        `hass`: HomeAssistant instance.
-        `entry`: Configuration entry from the user.
+        hass: HomeAssistant instance.
+        entry: Configuration entry from the user.
 
     Returns:
         True if the entry was set up successfully.
+
     """
     _LOGGER.debug("Setting up Blueprints Updater entry: %s", entry.entry_id)
 
@@ -91,7 +95,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
     """Register custom services for the integration.
 
     Args:
-        `hass`: HomeAssistant instance.
+        hass: HomeAssistant instance.
+
     """
     _translation_cache: dict[tuple[str, str], dict[str, str]] = {}
 
@@ -100,6 +105,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         Returns:
             List of BlueprintUpdateCoordinator instances.
+
         """
         return list(hass.data.get(DOMAIN, {}).values())
 
@@ -107,12 +113,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
         """Translate a key using the coordinator if available, otherwise fallback.
 
         Args:
-            `key`: Translation key.
-            `category`: Translation category.
-            `**kwargs`: Placeholder values.
+            key: Translation key.
+            category: Translation category (e.g. 'exceptions', 'common').
+            **kwargs: Placeholder values.
 
         Returns:
             Translated string.
+
         """
         coordinators = _get_coordinators()
         if coordinators:
@@ -296,8 +303,9 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Update options for a config entry.
 
     Args:
-        `hass`: HomeAssistant instance.
-        `entry`: Configuration entry.
+        hass: HomeAssistant instance.
+        entry: Configuration entry.
+
     """
     _LOGGER.debug("Updating options for Blueprints Updater entry: %s", entry.entry_id)
     blueprint_coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
@@ -311,11 +319,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry.
 
     Args:
-        `hass`: HomeAssistant instance.
-        `entry`: Configuration entry to unload.
+        hass: HomeAssistant instance.
+        entry: Configuration entry to unload.
 
     Returns:
         True if the entry was unloaded successfully.
+
     """
     blueprint_coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     await blueprint_coordinator.async_shutdown()

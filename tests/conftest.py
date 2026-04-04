@@ -1,3 +1,5 @@
+"""Fixtures for Blueprints Updater tests."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

@@ -1,3 +1,5 @@
+"""Tests for Blueprints Updater update entities."""
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -261,7 +263,6 @@ async def test_entity_async_install_backup(coordinator):
 @pytest.mark.asyncio
 async def test_entity_release_summary_with_usage(coordinator):
     """Test release summary includes usage warning."""
-
     info_auto = {
         "name": "Test Auto",
         "rel_path": "automation/test.yaml",

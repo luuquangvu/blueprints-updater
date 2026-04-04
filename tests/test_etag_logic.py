@@ -1,3 +1,5 @@
+"""Tests for Blueprints Updater ETag logic."""
+
 import hashlib
 from datetime import timedelta
 from typing import Any, cast
@@ -35,9 +37,10 @@ def coordinator(hass):
 
 
 @pytest.mark.asyncio
-async def test_etag_logic_stale_local_file_after_304(hass, coordinator):
-    """Test that a 304 response doesn't flip 'Update available' back to 'Up to date'
-    if the local file hasn't been updated.
+async def test_304_response_preserves_updatable_status(hass, coordinator):
+    """Test that a 304 response doesn't flip 'Update available' back to 'Up to date'.
+
+    This occurs if the local file hasn't been updated.
     """
     path = "/config/blueprints/test.yaml"
     local_content = "blueprint:\n  name: Old"
@@ -121,8 +124,9 @@ async def test_persistence_of_remote_hashes(hass, coordinator):
 
 @pytest.mark.asyncio
 async def test_etag_migration_forces_download(hass, coordinator):
-    """Test that if remote_hash is missing from persisted data,
-    the ETag is ignored to force a full download and populate the hash.
+    """Test that if remote_hash is missing from persisted data.
+
+    The ETag is ignored to force a full download and populate the hash.
     """
     path = "/config/blueprints/test.yaml"
     remote_content = "blueprint:\n  name: fresh\n  domain: automation"
