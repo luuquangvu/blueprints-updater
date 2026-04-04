@@ -1468,7 +1468,10 @@ async def test_metadata_pruning(coordinator):
         }
     }
 
-    with patch.object(coordinator, "scan_blueprints", return_value=blueprints):
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
         await coordinator._async_update_data()
 
     assert path_valid in coordinator._persisted_etags

@@ -93,3 +93,18 @@ async def test_retry_async_cancelled_error():
     with pytest.raises(asyncio.CancelledError):
         await decorated_func()
     assert call_count == 1
+
+
+def test_retry_async_invalid_args():
+    """Test retry_async decorator with invalid arguments."""
+    with pytest.raises(ValueError, match="max_retries must be greater than or equal to 0"):
+
+        @retry_async(-1, (Exception,))
+        async def mock_func_1():
+            pass
+
+    with pytest.raises(ValueError, match="base_delay must be greater than or equal to 0"):
+
+        @retry_async(3, (Exception,), base_delay=-1.0)
+        async def mock_func_2():
+            pass

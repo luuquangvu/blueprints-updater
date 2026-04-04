@@ -73,7 +73,7 @@ async def async_setup_entry(
                     hass.async_create_task(entity.async_remove(force_remove=True))
 
         valid_unique_ids = {
-            BlueprintUpdateCoordinator.generate_unique_id(info["rel_path"])
+            BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, info["rel_path"])
             for info in coordinator.data.values()
         }
 
@@ -117,7 +117,9 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         super().__init__(coordinator)
         self._path = path
         self._attr_name = info["name"]
-        self._attr_unique_id = BlueprintUpdateCoordinator.generate_unique_id(info["rel_path"])
+        self._attr_unique_id = BlueprintUpdateCoordinator.generate_unique_id(
+            coordinator.config_entry.entry_id, info["rel_path"]
+        )
         self._attr_title = info["name"]
         self._attr_release_url = info.get("source_url")
         self._attr_release_summary = None

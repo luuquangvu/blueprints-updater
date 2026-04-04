@@ -332,7 +332,7 @@ async def test_entity_release_notes_usage_error_handled(coordinator):
     ):
         notes = await entity.async_generate_release_notes()
         assert notes is not None
-        assert "usage_warning" not in notes
+        assert "affect" not in notes
         mock_logger.warning.assert_called()
         _, kwargs = mock_logger.warning.call_args
         assert kwargs.get("exc_info") is True

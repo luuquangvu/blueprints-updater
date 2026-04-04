@@ -238,7 +238,9 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
             assert exc.value.translation_key == "not_found"
 
             coordinator_mock.data = {"test.yaml": {"rel_path": "test.yaml", "updatable": True}}
-            good_entity.unique_id = BlueprintUpdateCoordinator.generate_unique_id("test.yaml")
+            good_entity.unique_id = BlueprintUpdateCoordinator.generate_unique_id(
+                "test_entry", "test.yaml"
+            )
             with pytest.raises(ServiceValidationError) as exc:
                 await restore_handler(
                     ServiceCall(

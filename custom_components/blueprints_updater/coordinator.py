@@ -67,17 +67,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     """Class to manage fetching blueprint updates."""
 
     @staticmethod
-    def generate_unique_id(rel_path: str) -> str:
-        """Generate a deterministic unique ID from a blueprint's relative path.
+    def generate_unique_id(entry_id: str, rel_path: str) -> str:
+        """Generate a deterministic unique ID from an entry ID and a blueprint's relative path.
 
         Args:
+            `entry_id`: The config entry ID.
             `rel_path`: The blueprint's relative path.
 
         Returns:
             The generated unique ID.
         """
-        return f"blueprint_{hashlib.sha256(rel_path.encode()).hexdigest()}"
+        combined = f"{entry_id}_{rel_path}"
+        return f"blueprint_{hashlib.sha256(combined.encode()).hexdigest()}"
 
+    config_entry: ConfigEntry
     data: dict[str, dict[str, Any]]
 
     def __init__(
@@ -96,6 +99,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.hass = hass
         self.config_entry = entry
         self.data: dict[str, dict[str, Any]] = {}
+        self.setup_complete = False
         super().__init__(
             hass,
             _LOGGER,
@@ -104,7 +108,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
         self._translations: dict[tuple[str, str], dict[str, str]] = {}
         self._translation_lock = asyncio.Lock()
-        self.setup_complete = False
         self._background_task: asyncio.Task | None = None
         self._refresh_lock = asyncio.Lock()
         self._last_request_time = 0.0
@@ -814,14 +817,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     old_bak = f"{file_path}.bak"
                     if os.path.exists(old_bak):
                         bak_path = old_bak
+
                 if not os.path.exists(bak_path):
                     return False, "missing_backup"
+
                 with open(bak_path, encoding="utf-8") as f:
                     content = f.read()
 
-                self._rotate_backups(file_path, max_bak)
-                with open(file_path, "w", encoding="utf-8") as f:
+                tmp_path = f"{file_path}.tmp"
+                with open(tmp_path, "w", encoding="utf-8") as f:
                     f.write(content)
+
+                self._rotate_backups(file_path, max_bak)
+                os.replace(tmp_path, file_path)
                 return True, "success"
 
             success, message = await self.hass.async_add_executor_job(
@@ -912,7 +920,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         except Exception as err:
             _LOGGER.error("Error fetching blueprint from %s: %s", source_url, err)
             if self.data and path in self.data:
-                self.data[path]["last_error"] = f"fetch_error|{err}"
+                self.data[path].update(
+                    {
+                        "last_error": f"fetch_error|{err}",
+                        "remote_hash": None,
+                        "remote_content": None,
+                        "updatable": False,
+                    }
+                )
 
     async def _handle_not_modified_case(
         self,
@@ -1019,18 +1034,24 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 last_error = f"auto_update_failed|{err}"
 
         if self.data and path in self.data:
-            update_data: dict[str, Any] = {
-                "last_error": last_error,
-                "etag": new_etag,
-            }
             if last_error:
-                update_data["invalid_remote_hash"] = remote_hash
-                update_data["remote_content"] = None
+                update_data = {
+                    "last_error": last_error,
+                    "etag": new_etag,
+                    "invalid_remote_hash": remote_hash,
+                    "remote_hash": None,
+                    "remote_content": None,
+                    "updatable": False,
+                }
             else:
-                update_data["invalid_remote_hash"] = None
-                update_data["remote_hash"] = remote_hash
-                update_data["remote_content"] = remote_content if updatable else None
-                update_data["updatable"] = updatable
+                update_data = {
+                    "last_error": last_error,
+                    "etag": new_etag,
+                    "invalid_remote_hash": None,
+                    "remote_hash": remote_hash,
+                    "remote_content": remote_content if updatable else None,
+                    "updatable": updatable,
+                }
 
             self.data[path].update(update_data)
 
