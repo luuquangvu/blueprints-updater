@@ -6,7 +6,7 @@ import logging
 import random
 from collections.abc import Callable, Coroutine
 from functools import wraps
-from typing import Any, NoReturn, TypeVar, assert_never, cast
+from typing import Any, TypeVar
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ def retry_async(
                     )
                     await asyncio.sleep(wait)
 
-            assert_never(cast(NoReturn, attempt))
+            raise RuntimeError("Unreachable")
 
         return wrapper
 
