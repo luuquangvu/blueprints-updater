@@ -294,6 +294,19 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         if self.hass and self.entity_id:
             self.async_write_ha_state()
 
+    async def _translate_and_raise_last_error(self, info: dict[str, Any]) -> None:
+        """Translate the last error and raise HomeAssistantError."""
+        if error := info.get("last_error"):
+            if "|" in error:
+                key, val = error.split("|", 1)
+                msg = await self.coordinator.async_translate(key, errors=val, error=val)
+            else:
+                msg = await self.coordinator.async_translate(error)
+
+            raise HomeAssistantError(
+                await self.coordinator.async_translate("install_error", error=msg)
+            )
+
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass."""
         await super().async_added_to_hass()
@@ -313,16 +326,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             return
 
         info = self.coordinator.data[self._path]
-        if error := info.get("last_error"):
-            if "|" in error:
-                key, val = error.split("|", 1)
-                msg = await self.coordinator.async_translate(key, errors=val, error=val)
-            else:
-                msg = await self.coordinator.async_translate(error)
-
-            raise HomeAssistantError(
-                await self.coordinator.async_translate("install_error", error=msg)
-            )
+        await self._translate_and_raise_last_error(info)
 
         _LOGGER.info(
             "Starting manual update for %s from %s",
@@ -338,15 +342,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             info = self.coordinator.data.get(self._path, info)
             remote_content = info.get("remote_content")
 
-        if error := info.get("last_error"):
-            if "|" in error:
-                key, val = error.split("|", 1)
-                msg = await self.coordinator.async_translate(key, errors=val, error=val)
-            else:
-                msg = await self.coordinator.async_translate(error)
-            raise HomeAssistantError(
-                await self.coordinator.async_translate("install_error", error=msg)
-            )
+        await self._translate_and_raise_last_error(info)
 
         if info.get("updatable") is False and remote_content is None:
             _LOGGER.debug("Blueprint %s already updated during forced fetch", self._path)

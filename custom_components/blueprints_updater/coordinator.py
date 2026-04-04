@@ -669,10 +669,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             stale_bak = f"{file_path}.bak.{max_bak + 1}"
             try:
-                with contextlib.suppress(FileNotFoundError):
-                    os.remove(stale_bak)
+                os.remove(stale_bak)
             except OSError as err:
-                _LOGGER.warning("Error removing stale backup %s: %s", stale_bak, err)
+                if not isinstance(err, FileNotFoundError):
+                    _LOGGER.warning("Error removing stale backup %s: %s", stale_bak, err)
 
         except OSError as err:
             _LOGGER.error("Filesystem error during backup rotation for %s: %s", file_path, err)

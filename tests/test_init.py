@@ -21,10 +21,6 @@ async def test_setup_entry(hass: HomeAssistant):
     entry = MagicMock()
     entry.entry_id = "test_entry"
     entry.options = {}
-    entry.data = {}
-    entry.options = {}
-    entry.data = {}
-    entry.options = {}
     entry.data = {"old_config": "value"}
 
     hass.config_entries = MagicMock()
@@ -51,14 +47,12 @@ async def test_service_registration(hass: HomeAssistant):
     """Test that services are registered."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
-    entry.options = {}
     entry.data = {}
     entry.options = MappingProxyType(
         {
             "max_backups": 3,
         }
     )
-    entry.data = {}
 
     hass.config_entries = MagicMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock()
@@ -112,8 +106,6 @@ async def test_service_handlers(hass: HomeAssistant):
     """Test service handlers' logic."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
-    entry.options = {}
-    entry.data = {}
     entry.options = {"max_backups": 3}
     entry.data = {}
 
@@ -180,8 +172,6 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
     """Test restore_blueprint handler specifically."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
-    entry.options = {}
-    entry.data = {}
     entry.options = {"max_backups": 3}
     entry.data = {}
 
@@ -195,8 +185,6 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
 
     hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
 
-    from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
-
     with (
         patch(
             "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
@@ -207,6 +195,9 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
         ) as mock_register,
     ):
         mock_coordinator_class.generate_unique_id = BlueprintUpdateCoordinator.generate_unique_id
+        mock_coordinator_class.generate_legacy_unique_id = (
+            BlueprintUpdateCoordinator.generate_legacy_unique_id
+        )
         hass.config_entries = MagicMock()
         hass.config_entries.async_forward_entry_setups = AsyncMock()
         await async_setup(hass, {})
@@ -282,13 +273,30 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
                 )
             assert exc.value.translation_key == "invalid_version"
 
+            legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id("test.yaml")
+            good_entity.unique_id = legacy_id
+            coordinator_mock.async_restore_blueprint = AsyncMock(
+                return_value={"success": True, "translation_key": "success"}
+            )
+            coordinator_mock.async_request_refresh = AsyncMock()
+            coordinator_mock.async_translate = AsyncMock(return_value="Success")
+
+            result = await restore_handler(
+                ServiceCall(
+                    hass,
+                    DOMAIN,
+                    "restore_blueprint",
+                    {"entity_id": "update.test", "version": 1},
+                )
+            )
+            assert result["success"] is True
+            assert coordinator_mock.async_restore_blueprint.called
+
 
 async def test_unload_entry(hass: HomeAssistant):
     """Test unloading the entry and service cleanup."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
-    entry.options = {}
-    entry.data = {}
     entry.options = {}
     entry.data = {}
 

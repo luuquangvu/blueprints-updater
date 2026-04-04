@@ -37,6 +37,11 @@ def retry_async(
         raise ValueError("max_retries must be greater than or equal to 0")
     if base_delay < 0:
         raise ValueError("base_delay must be greater than or equal to 0")
+    if not exceptions:
+        raise ValueError("exceptions tuple must not be empty")
+    for exc in exceptions:
+        if not (inspect.isclass(exc) and issubclass(exc, Exception)):
+            raise TypeError(f"All items in exceptions must be subclasses of Exception, got {exc}")
 
     def decorator(func: AsyncFunc[_T]) -> AsyncFunc[_T]:
         @wraps(func)

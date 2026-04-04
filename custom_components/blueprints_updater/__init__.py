@@ -194,7 +194,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
             expected_id = BlueprintUpdateCoordinator.generate_unique_id(
                 active_coordinator.config_entry.entry_id, info["rel_path"]
             )
-            if expected_id == entity_entry.unique_id:
+            legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id(info["rel_path"])
+            if entity_entry.unique_id in (expected_id, legacy_id):
                 target_path = path
                 break
 
