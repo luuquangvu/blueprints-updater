@@ -83,6 +83,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         combined = f"{entry_id}_{rel_path}"
         return f"blueprint_{hashlib.sha256(combined.encode()).hexdigest()}"
 
+    @staticmethod
+    def generate_legacy_unique_id(rel_path: str) -> str:
+        """Generate a legacy unique ID from rel_path only.
+
+        Args:
+            rel_path: The blueprint's relative path.
+
+        Returns:
+            The legacy generated unique ID.
+
+        """
+        return f"blueprint_{hashlib.sha256(rel_path.encode()).hexdigest()}"
+
     config_entry: ConfigEntry
     data: dict[str, dict[str, Any]]
 
@@ -387,6 +400,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     async def _async_background_refresh(self, blueprints: dict[str, Any]) -> None:
         """Fetch remote updates in the background using a task queue.
 
+        This method initializes a pool of background workers to process
+        blueprint updates concurrently. It ensures that workers are cleaned up
+        gracefully by enqueuing a sentinel (None) for each worker and waiting
+        for them to terminate using asyncio.gather, even if the task is cancelled
+        while awaiting the queue to join.
+
         Args:
             blueprints: Dictionary of blueprints to check for updates.
 
@@ -437,11 +456,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     for i in range(MAX_CONCURRENT_REQUESTS)
                 ]
 
-                if workers:
-                    await queue.join()
+                try:
+                    if workers:
+                        await queue.join()
+                finally:
                     for _ in workers:
                         await queue.put(None)
-                    await asyncio.gather(*workers)
+                    if workers:
+                        await asyncio.gather(*workers, return_exceptions=True)
 
                 if not queue.empty():
                     _LOGGER.warning(

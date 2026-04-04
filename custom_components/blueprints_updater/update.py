@@ -45,8 +45,45 @@ async def async_setup_entry(
     @callback
     def async_update_entities() -> None:
         """Add new blueprint entities or remove deleted ones from Home Assistant."""
-        new_entities = []
+        entity_registry = er.async_get(hass)
 
+        entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+        for entity_entry in entries:
+            if entity_entry.domain != "update":
+                continue
+
+            matched = False
+            for info in coordinator.data.values():
+                new_id = BlueprintUpdateCoordinator.generate_unique_id(
+                    entry.entry_id, info["rel_path"]
+                )
+                legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id(info["rel_path"])
+
+                if entity_entry.unique_id == new_id:
+                    matched = True
+                    break
+
+                if entity_entry.unique_id == legacy_id:
+                    _LOGGER.info(
+                        "Migrating legacy unique_id for %s: %s -> %s",
+                        entity_entry.entity_id,
+                        legacy_id,
+                        new_id,
+                    )
+                    entity_registry.async_update_entity(
+                        entity_entry.entity_id, new_unique_id=new_id
+                    )
+                    matched = True
+                    break
+
+            if not matched:
+                _LOGGER.debug(
+                    "Removing orphaned registry entry for entity: %s", entity_entry.entity_id
+                )
+                entity_registry.async_remove(entity_entry.entity_id)
+                hass.states.async_remove(entity_entry.entity_id)
+
+        new_entities = []
         for path, info in coordinator.data.items():
             if path not in current_entities:
                 entity = BlueprintUpdateEntity(coordinator, path, info)
@@ -62,8 +99,6 @@ async def async_setup_entry(
             if path not in coordinator.data:
                 removed_paths.append(path)
 
-        entity_registry = er.async_get(hass)
-
         if removed_paths:
             for path in removed_paths:
                 _LOGGER.debug("Removing blueprint update entity for deleted file: %s", path)
@@ -74,20 +109,6 @@ async def async_setup_entry(
                     hass.states.async_remove(entity.entity_id)
                 else:
                     hass.async_create_task(entity.async_remove(force_remove=True))
-
-        valid_unique_ids = {
-            BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, info["rel_path"])
-            for info in coordinator.data.values()
-        }
-
-        entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
-        for entity_entry in entries:
-            if entity_entry.domain == "update" and entity_entry.unique_id not in valid_unique_ids:
-                _LOGGER.debug(
-                    "Removing orphaned registry entry for entity: %s", entity_entry.entity_id
-                )
-                entity_registry.async_remove(entity_entry.entity_id)
-                hass.states.async_remove(entity_entry.entity_id)
 
     async_update_entities()
 
@@ -316,6 +337,20 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
             info = self.coordinator.data.get(self._path, info)
             remote_content = info.get("remote_content")
+
+        if error := info.get("last_error"):
+            if "|" in error:
+                key, val = error.split("|", 1)
+                msg = await self.coordinator.async_translate(key, errors=val, error=val)
+            else:
+                msg = await self.coordinator.async_translate(error)
+            raise HomeAssistantError(
+                await self.coordinator.async_translate("install_error", error=msg)
+            )
+
+        if info.get("updatable") is False and remote_content is None:
+            _LOGGER.debug("Blueprint %s already updated during forced fetch", self._path)
+            return
 
         if remote_content is None:
             _LOGGER.error("Failed to install blueprint: content is missing for %s", self._path)

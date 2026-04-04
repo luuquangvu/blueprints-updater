@@ -257,15 +257,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
         backup_pref = call.data.get("backup", True)
 
         for active_coordinator in coordinators:
-            updatable = [
-                (path, info["remote_content"])
+            targets = [
+                (path, info)
                 for path, info in active_coordinator.data.items()
-                if info.get("updatable")
-                and info.get("remote_content")
-                and not info.get("last_error")
+                if info.get("updatable") and not info.get("last_error")
             ]
 
-            if not updatable:
+            if not targets:
                 continue
 
             config_entry = active_coordinator.config_entry
@@ -273,18 +271,30 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 continue
 
             _LOGGER.info(
-                "Starting bulk update for %d blueprints in %s",
-                len(updatable),
+                "Starting bulk update for up to %d blueprints in %s",
+                len(targets),
                 config_entry.entry_id,
             )
 
-            for path, remote_content in updatable:
-                await active_coordinator.async_install_blueprint(
-                    path, remote_content, reload_services=False, backup=backup_pref
-                )
+            processed_count = 0
+            for path, info in targets:
+                remote_content = info.get("remote_content")
 
-            await active_coordinator.async_reload_services()
-            await active_coordinator.async_request_refresh()
+                if remote_content is None:
+                    _LOGGER.debug("Fetching missing content for bulk update of %s", path)
+                    await active_coordinator.async_fetch_blueprint(path, force=True)
+                    info = active_coordinator.data.get(path, info)
+                    remote_content = info.get("remote_content")
+
+                if remote_content:
+                    await active_coordinator.async_install_blueprint(
+                        path, remote_content, reload_services=False, backup=backup_pref
+                    )
+                    processed_count += 1
+
+            if processed_count > 0:
+                await active_coordinator.async_reload_services()
+                await active_coordinator.async_request_refresh()
 
     async_register_admin_service(
         hass,
