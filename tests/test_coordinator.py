@@ -1588,3 +1588,54 @@ async def test_async_install_blueprint_state_synchronization(coordinator):
     assert coordinator.data[path]["local_hash"] == new_hash
     assert coordinator.data[path]["updatable"] is False
     assert coordinator.data[path]["last_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_async_setup_sanitization(hass, coordinator):
+    """Test that async_setup sanitizes corrupted or invalid storage data."""
+    mock_store = MagicMock()
+    coordinator._store = mock_store
+
+    mock_store.async_load = AsyncMock(
+        return_value={
+            "etags": "not_a_dict",
+            "remote_hashes": ["not", "a", "dict"],
+        }
+    )
+
+    with patch("custom_components.blueprints_updater.coordinator._LOGGER.warning") as mock_warn:
+        await coordinator.async_setup()
+        assert coordinator._persisted_etags == {}
+        assert coordinator._persisted_hashes == {}
+        assert coordinator.setup_complete
+        assert mock_warn.call_count == 2
+        warn_msgs = [call.args[0] for call in mock_warn.call_args_list]
+        assert any("Ignoring invalid persisted etags" in msg for msg in warn_msgs)
+        assert any("Ignoring invalid persisted remote_hashes" in msg for msg in warn_msgs)
+
+    mock_store.async_load = AsyncMock(
+        return_value={
+            "etags": {
+                "valid_key": "valid_value",
+                "invalid_key": 123,
+                456: "invalid_val",
+            },
+            "remote_hashes": {
+                "valid_hash_key": "hash_val",
+                "broken": None,
+            },
+        }
+    )
+
+    coordinator.setup_complete = False
+    with patch("custom_components.blueprints_updater.coordinator._LOGGER.warning") as mock_warn:
+        await coordinator.async_setup()
+        assert coordinator._persisted_etags == {"valid_key": "valid_value"}
+        assert coordinator._persisted_hashes == {"valid_hash_key": "hash_val"}
+        assert coordinator.setup_complete
+        assert mock_warn.call_count == 2
+
+        mock_warn.assert_any_call(
+            "Dropped %d invalid ETag entries from storage (non-string keys or values)", 2
+        )
+        mock_warn.assert_any_call("Dropped %d invalid remote hash entries from storage", 1)

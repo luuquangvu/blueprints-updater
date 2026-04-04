@@ -7,6 +7,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.blueprints_updater.update as update_module
 from custom_components.blueprints_updater.const import DOMAIN
+from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.update import BlueprintUpdateEntity, async_setup_entry
 
 
@@ -395,3 +396,57 @@ async def test_entity_skip_version(coordinator):
 
         await entity.async_clear_skipped()
         assert entity.state == "on"
+
+
+@pytest.mark.asyncio
+async def test_async_update_entities_migration(hass):
+    """Validate legacy rel_path IDs are migrated and unknown entities removed."""
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+
+    coordinator = MagicMock(spec=BlueprintUpdateCoordinator)
+    coordinator.config_entry = entry
+    coordinator.data = {
+        "/config/blueprints/kept.yaml": {
+            "rel_path": "kept.yaml",
+            "name": "Kept",
+            "local_hash": "hash",
+        },
+    }
+    coordinator.async_add_listener = MagicMock()
+
+    hass.data = {DOMAIN: {entry.entry_id: coordinator}}
+    hass.states = MagicMock()
+
+    mock_entity_registry = MagicMock()
+
+    legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id("kept.yaml")
+    new_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, "kept.yaml")
+
+    legacy_entity = MagicMock()
+    legacy_entity.domain = "update"
+    legacy_entity.unique_id = legacy_id
+    legacy_entity.entity_id = "update.kept"
+
+    orphan_entity = MagicMock()
+    orphan_entity.domain = "update"
+    orphan_entity.unique_id = "test_entry_orphan.yaml"
+    orphan_entity.entity_id = "update.orphan"
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.update.er.async_get",
+            return_value=mock_entity_registry,
+        ),
+        patch(
+            "custom_components.blueprints_updater.update.er.async_entries_for_config_entry",
+            return_value=[legacy_entity, orphan_entity],
+        ),
+    ):
+        async_add_entities = MagicMock()
+        await async_setup_entry(hass, entry, async_add_entities)
+
+        mock_entity_registry.async_update_entity.assert_called_once_with(
+            "update.kept", new_unique_id=new_id
+        )
+        mock_entity_registry.async_remove.assert_called_with("update.orphan")

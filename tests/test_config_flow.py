@@ -29,9 +29,9 @@ def get_schema_defaults(schema: vol.Schema) -> dict[str, Any]:
     """
     defaults = {}
     for key in schema.schema:
-        if hasattr(key, "default") and callable(key.default):
+        if hasattr(key, "default"):
             key_str = str(key)
-            defaults[key_str] = key.default()
+            defaults[key_str] = key.default() if callable(key.default) else key.default
     return defaults
 
 
