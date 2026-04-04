@@ -1,4 +1,3 @@
-import hashlib
 from types import MappingProxyType
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -179,15 +178,18 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
 
     hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
 
+    from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+
     with (
         patch(
             "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
             return_value=coordinator_mock,
-        ),
+        ) as mock_coordinator_class,
         patch(
             "custom_components.blueprints_updater.__init__.async_register_admin_service"
         ) as mock_register,
     ):
+        mock_coordinator_class.generate_unique_id = BlueprintUpdateCoordinator.generate_unique_id
         await async_setup(hass, {})
         await async_setup_entry(hass, entry)
 
@@ -236,7 +238,7 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
             assert exc.value.translation_key == "not_found"
 
             coordinator_mock.data = {"test.yaml": {"rel_path": "test.yaml", "updatable": True}}
-            good_entity.unique_id = f"blueprint_{hashlib.sha256(b'test.yaml').hexdigest()}"
+            good_entity.unique_id = BlueprintUpdateCoordinator.generate_unique_id("test.yaml")
             with pytest.raises(ServiceValidationError) as exc:
                 await restore_handler(
                     ServiceCall(

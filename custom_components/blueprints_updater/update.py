@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 from typing import Any
 
@@ -60,7 +59,7 @@ async def async_setup_entry(
             if path not in coordinator.data:
                 removed_paths.append(path)
 
-        entity_registry: Any = er.async_get(hass)
+        entity_registry = er.async_get(hass)
 
         if removed_paths:
             for path in removed_paths:
@@ -74,7 +73,7 @@ async def async_setup_entry(
                     hass.async_create_task(entity.async_remove(force_remove=True))
 
         valid_unique_ids = {
-            f"blueprint_{hashlib.sha256(info['rel_path'].encode()).hexdigest()}"
+            BlueprintUpdateCoordinator.generate_unique_id(info["rel_path"])
             for info in coordinator.data.values()
         }
 
@@ -118,7 +117,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         super().__init__(coordinator)
         self._path = path
         self._attr_name = info["name"]
-        self._attr_unique_id = f"blueprint_{hashlib.sha256(info['rel_path'].encode()).hexdigest()}"
+        self._attr_unique_id = BlueprintUpdateCoordinator.generate_unique_id(info["rel_path"])
         self._attr_title = info["name"]
         self._attr_release_url = info.get("source_url")
         self._attr_release_summary = None
@@ -170,7 +169,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             return None
 
         notes = await self.coordinator.async_translate(
-            "update_available", source_url=info["source_url"]
+            "update_available", source_url=info.get("source_url", "<unknown>")
         )
         notes += "\n\n" + await self.coordinator.async_translate("auto_update_warning")
 
@@ -185,12 +184,13 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 total_usage = len(automations_with_blueprint(self.coordinator.hass, bp_id))
             elif domain == "script":
                 total_usage = len(scripts_with_blueprint(self.coordinator.hass, bp_id))
-        except Exception as err:
+        except HomeAssistantError as err:
             _LOGGER.warning(
                 "Error calculating %s usage for blueprint %s: %s",
                 domain,
                 bp_id,
                 err,
+                exc_info=True,
             )
 
         if total_usage > 0:
@@ -292,7 +292,11 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 await self.coordinator.async_translate("install_error", error=msg)
             )
 
-        _LOGGER.info("Starting manual update for %s from %s", self._attr_name, info["source_url"])
+        _LOGGER.info(
+            "Starting manual update for %s from %s",
+            self._attr_name,
+            info.get("source_url", "<unknown>"),
+        )
         remote_content = info.get("remote_content")
 
         if remote_content is None and info.get("updatable"):
@@ -302,7 +306,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             info = self.coordinator.data.get(self._path, info)
             remote_content = info.get("remote_content")
 
-        if not remote_content:
+        if remote_content is None:
             _LOGGER.error("Failed to install blueprint: content is missing for %s", self._path)
             raise HomeAssistantError(
                 await self.coordinator.async_translate("install_error", error="content_missing")

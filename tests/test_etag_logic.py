@@ -125,7 +125,7 @@ async def test_etag_migration_forces_download(hass, coordinator):
     the ETag is ignored to force a full download and populate the hash.
     """
     path = "/config/blueprints/test.yaml"
-    remote_content = "blueprint: fresh"
+    remote_content = "blueprint:\n  name: fresh\n  domain: automation"
     remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
 
     info = {

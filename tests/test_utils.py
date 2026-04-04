@@ -1,5 +1,6 @@
 """Tests for Blueprints Updater utilities."""
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,7 +18,7 @@ async def test_retry_async_success():
         mock()
         return "success"
 
-    @retry_async(max_retries=3)
+    @retry_async(3, (Exception,))
     async def decorated_func():
         return await mock_func()
 
@@ -31,7 +32,7 @@ async def test_retry_async_retry_success():
     """Test retry_async decorator when it succeeds after some retries."""
     call_count = 0
 
-    @retry_async(max_retries=3, base_delay=0.01)
+    @retry_async(3, (ValueError,), base_delay=0.01)
     async def decorated_func():
         nonlocal call_count
         call_count += 1
@@ -49,7 +50,7 @@ async def test_retry_async_failure():
     """Test retry_async decorator when it fails after all retries."""
     call_count = 0
 
-    @retry_async(max_retries=2, base_delay=0.01)
+    @retry_async(2, (ValueError,), base_delay=0.01)
     async def decorated_func():
         nonlocal call_count
         call_count += 1
@@ -65,7 +66,7 @@ async def test_retry_async_specific_exceptions():
     """Test retry_async decorator with specific exceptions."""
     call_count = 0
 
-    @retry_async(max_retries=3, base_delay=0.01, exceptions=(ValueError,))
+    @retry_async(3, (ValueError,), base_delay=0.01)
     async def decorated_func():
         nonlocal call_count
         call_count += 1
@@ -76,3 +77,19 @@ async def test_retry_async_specific_exceptions():
     with pytest.raises(TypeError, match="Not retryable"):
         await decorated_func()
     assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_retry_async_cancelled_error():
+    """Test that retry_async does not catch CancelledError."""
+    call_count = 0
+
+    @retry_async(3, (BaseException,), base_delay=0.01)
+    async def decorated_func():
+        nonlocal call_count
+        call_count += 1
+        raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await decorated_func()
+    assert call_count == 1

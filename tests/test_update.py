@@ -314,6 +314,51 @@ async def test_entity_release_summary_with_usage(coordinator):
 
 
 @pytest.mark.asyncio
+async def test_entity_release_notes_usage_error_handled(coordinator):
+    """Test that HomeAssistantError in usage calculation is handled."""
+    path = "/config/blueprints/automation/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "automation/test.yaml",
+        "updatable": True,
+    }
+    coordinator.data[path] = info
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    with (
+        patch.object(update_module, "automations_with_blueprint", side_effect=HomeAssistantError),
+        patch("custom_components.blueprints_updater.update._LOGGER") as mock_logger,
+    ):
+        notes = await entity.async_generate_release_notes()
+        assert notes is not None
+        assert "usage_warning" not in notes
+        mock_logger.warning.assert_called()
+        _, kwargs = mock_logger.warning.call_args
+        assert kwargs.get("exc_info") is True
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_usage_error_unhandled(coordinator):
+    """Test that TypeError in usage calculation is NOT handled."""
+    path = "/config/blueprints/automation/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "automation/test.yaml",
+        "updatable": True,
+    }
+    coordinator.data[path] = info
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    with (
+        patch.object(update_module, "automations_with_blueprint", side_effect=TypeError),
+        pytest.raises(TypeError),
+    ):
+        await entity.async_generate_release_notes()
+
+
+@pytest.mark.asyncio
 async def test_entity_skip_version(coordinator):
     """Test that skipping a version works natively."""
     entity = BlueprintUpdateEntity(

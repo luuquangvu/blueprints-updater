@@ -1,7 +1,5 @@
-import hashlib
 import logging
 from datetime import timedelta
-from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
@@ -11,6 +9,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
+from homeassistant.helpers.entity_registry import EntityRegistry
 from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
@@ -94,14 +93,15 @@ def _async_register_services(hass: HomeAssistant) -> None:
     Args:
         `hass`: HomeAssistant instance.
     """
+    _translation_cache: dict[tuple[str, str], dict[str, str]] = {}
 
-    async def _get_coordinator() -> BlueprintUpdateCoordinator | None:
-        """Get the first available coordinator from hass data.
+    def _get_coordinators() -> list[BlueprintUpdateCoordinator]:
+        """Get all available coordinators from hass data.
 
         Returns:
-            The BlueprintUpdateCoordinator instance or None.
+            List of BlueprintUpdateCoordinator instances.
         """
-        return next(iter(hass.data.get(DOMAIN, {}).values()), None)
+        return list(hass.data.get(DOMAIN, {}).values())
 
     async def _translate(key: str, category: str = "exceptions", **kwargs: str) -> str:
         """Translate a key using the coordinator if available, otherwise fallback.
@@ -114,22 +114,28 @@ def _async_register_services(hass: HomeAssistant) -> None:
         Returns:
             Translated string.
         """
-        active_coordinator = await _get_coordinator()
-        if active_coordinator:
-            return await active_coordinator.async_translate(key, category=category, **kwargs)
+        coordinators = _get_coordinators()
+        if coordinators:
+            return await coordinators[0].async_translate(key, category=category, **kwargs)
 
         lang = getattr(hass.config, "language", "en")
-        translations: dict[str, str] = {}
+        cache_key = (lang, category)
 
-        try:
-            translations = await translation.async_get_translations(hass, lang, category, [DOMAIN])
-        except Exception as err:
-            _LOGGER.debug(
-                "Could not load translations for %s %s during setup: %s",
-                DOMAIN,
-                category,
-                err,
-            )
+        if cache_key not in _translation_cache:
+            try:
+                _translation_cache[cache_key] = await translation.async_get_translations(
+                    hass, lang, category, [DOMAIN]
+                )
+            except (OSError, ValueError) as err:
+                _LOGGER.debug(
+                    "Could not load translations for %s %s during setup: %s",
+                    DOMAIN,
+                    category,
+                    err,
+                )
+                _translation_cache[cache_key] = {}
+
+        translations = _translation_cache[cache_key]
 
         msg = translations.get(f"component.{DOMAIN}.{category}.{key}.message") or translations.get(
             f"component.{DOMAIN}.{category}.{key}", key
@@ -143,21 +149,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def async_reload_action_handler(_: ServiceCall) -> None:
         """Handle the reload action call."""
-        active_coordinator = await _get_coordinator()
-        if active_coordinator:
-            await active_coordinator.async_request_refresh()
+        for coordinator in _get_coordinators():
+            await coordinator.async_request_refresh()
 
     async_register_admin_service(hass, DOMAIN, "reload", async_reload_action_handler)
 
     async def async_restore_blueprint_handler(call: ServiceCall) -> dict:
         """Handle the restore blueprint action."""
-        active_coordinator = await _get_coordinator()
-        if not active_coordinator:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="not_found",
-            )
-
         entity_id = call.data.get("entity_id")
         if not entity_id:
             raise ServiceValidationError(
@@ -165,7 +163,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 translation_key="missing_entity_id",
             )
 
-        entity_registry: Any = er.async_get(hass)
+        entity_registry: EntityRegistry = er.async_get(hass)
         entity_entry = entity_registry.async_get(entity_id)
         if not entity_entry or entity_entry.domain != "update":
             raise ServiceValidationError(
@@ -173,9 +171,20 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 translation_key="invalid_entity",
             )
 
+        config_entry_id = entity_entry.config_entry_id
+        active_coordinator = (
+            hass.data.get(DOMAIN, {}).get(config_entry_id) if config_entry_id else None
+        )
+
+        if not active_coordinator:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="not_found",
+            )
+
         target_path = None
         for path, info in active_coordinator.data.items():
-            expected_id = f"blueprint_{hashlib.sha256(info['rel_path'].encode()).hexdigest()}"
+            expected_id = BlueprintUpdateCoordinator.generate_unique_id(info["rel_path"])
             if expected_id == entity_entry.unique_id:
                 target_path = path
                 break
@@ -232,38 +241,41 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def async_update_all_handler(call: ServiceCall) -> None:
         """Handle updating all available blueprints."""
-        active_coordinator = await _get_coordinator()
-        if not active_coordinator:
+        coordinators = _get_coordinators()
+        if not coordinators:
             return
 
         backup_pref = call.data.get("backup", True)
 
-        updatable = [
-            (path, info["remote_content"])
-            for path, info in active_coordinator.data.items()
-            if info.get("updatable") and info.get("remote_content") and not info.get("last_error")
-        ]
+        for active_coordinator in coordinators:
+            updatable = [
+                (path, info["remote_content"])
+                for path, info in active_coordinator.data.items()
+                if info.get("updatable")
+                and info.get("remote_content")
+                and not info.get("last_error")
+            ]
 
-        if not updatable:
-            return
+            if not updatable:
+                continue
 
-        config_entry = active_coordinator.config_entry
-        if not config_entry:
-            return
+            config_entry = active_coordinator.config_entry
+            if not config_entry:
+                continue
 
-        _LOGGER.info(
-            "Starting bulk update for %d blueprints in %s",
-            len(updatable),
-            config_entry.entry_id,
-        )
-
-        for path, remote_content in updatable:
-            await active_coordinator.async_install_blueprint(
-                path, remote_content, reload_services=False, backup=backup_pref
+            _LOGGER.info(
+                "Starting bulk update for %d blueprints in %s",
+                len(updatable),
+                config_entry.entry_id,
             )
 
-        await active_coordinator.async_reload_services()
-        await active_coordinator.async_request_refresh()
+            for path, remote_content in updatable:
+                await active_coordinator.async_install_blueprint(
+                    path, remote_content, reload_services=False, backup=backup_pref
+                )
+
+            await active_coordinator.async_reload_services()
+            await active_coordinator.async_request_refresh()
 
     async_register_admin_service(
         hass,
