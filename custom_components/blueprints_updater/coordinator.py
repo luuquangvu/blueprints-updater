@@ -425,6 +425,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     queue.put_nowait((path, info))
 
                 session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
+                session.follow_redirects = True
 
                 async def _worker() -> None:
                     """Process blueprints from the queue."""
@@ -620,6 +621,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return
 
         session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
+        session.follow_redirects = True
+
         results_to_notify: list[str] = []
         updated_domains: set[str] = set()
 
