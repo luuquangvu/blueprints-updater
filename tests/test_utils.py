@@ -131,6 +131,12 @@ def test_retry_async_invalid_args():
         async def mock_func_3():
             pass
 
+    with pytest.raises(TypeError, match="exceptions must be a tuple of Exception subclasses"):
+
+        @retry_async(3, [Exception])  # type: ignore
+        async def mock_func_list():
+            pass
+
     with pytest.raises(TypeError, match="All items in exceptions must be subclasses of Exception"):
 
         @retry_async(3, (str,))  # type: ignore

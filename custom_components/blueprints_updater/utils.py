@@ -37,6 +37,8 @@ def retry_async(
         raise ValueError("max_retries must be greater than or equal to 0")
     if base_delay < 0:
         raise ValueError("base_delay must be greater than or equal to 0")
+    if not isinstance(exceptions, tuple):
+        raise TypeError("exceptions must be a tuple of Exception subclasses")
     if not exceptions:
         raise ValueError("exceptions tuple must not be empty")
     for exc in exceptions:

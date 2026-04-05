@@ -48,40 +48,36 @@ async def async_setup_entry(
         entity_registry = er.async_get(hass)
 
         entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+        new_id_to_path: dict[str, str] = {}
+        legacy_id_to_new_id: dict[str, str] = {}
+        for info in coordinator.data.values():
+            rel_path = info["rel_path"]
+            new_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, rel_path)
+            legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id(rel_path)
+            new_id_to_path[new_id] = rel_path
+            legacy_id_to_new_id[legacy_id] = new_id
+
         for entity_entry in entries:
             if entity_entry.domain != "update":
                 continue
 
-            matched = False
-            for info in coordinator.data.values():
-                new_id = BlueprintUpdateCoordinator.generate_unique_id(
-                    entry.entry_id, info["rel_path"]
+            unique_id = entity_entry.unique_id
+            if unique_id in new_id_to_path:
+                continue
+
+            if new_id := legacy_id_to_new_id.get(unique_id):
+                _LOGGER.info(
+                    "Migrating legacy unique_id for %s: %s -> %s",
+                    entity_entry.entity_id,
+                    unique_id,
+                    new_id,
                 )
-                legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id(info["rel_path"])
+                entity_registry.async_update_entity(entity_entry.entity_id, new_unique_id=new_id)
+                continue
 
-                if entity_entry.unique_id == new_id:
-                    matched = True
-                    break
-
-                if entity_entry.unique_id == legacy_id:
-                    _LOGGER.info(
-                        "Migrating legacy unique_id for %s: %s -> %s",
-                        entity_entry.entity_id,
-                        legacy_id,
-                        new_id,
-                    )
-                    entity_registry.async_update_entity(
-                        entity_entry.entity_id, new_unique_id=new_id
-                    )
-                    matched = True
-                    break
-
-            if not matched:
-                _LOGGER.debug(
-                    "Removing orphaned registry entry for entity: %s", entity_entry.entity_id
-                )
-                entity_registry.async_remove(entity_entry.entity_id)
-                hass.states.async_remove(entity_entry.entity_id)
+            _LOGGER.debug("Removing orphaned registry entry for entity: %s", entity_entry.entity_id)
+            entity_registry.async_remove(entity_entry.entity_id)
+            hass.states.async_remove(entity_entry.entity_id)
 
         new_entities = []
         for path, info in coordinator.data.items():
