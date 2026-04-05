@@ -38,7 +38,7 @@ async def async_setup_entry(
         async_add_entities: Callback to add entities.
 
     """
-    coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
 
     current_entities: dict[str, BlueprintUpdateEntity] = {}
 

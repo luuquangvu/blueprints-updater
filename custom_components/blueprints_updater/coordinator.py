@@ -795,14 +795,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         with contextlib.suppress(ValueError):
             ip = ipaddress.ip_address(hostname)
-            return not (
-                ip.is_private
-                or ip.is_loopback
-                or ip.is_link_local
-                or ip.is_multicast
-                or ip.is_reserved
-                or ip.is_unspecified
-            )
+            return self._is_ip_safe(ip)
 
         try:
             async with asyncio.timeout(REQUEST_TIMEOUT):
@@ -816,20 +809,33 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     ip = ipaddress.ip_address(ip_str)
                 except ValueError:
                     continue
-                if (
-                    ip.is_private
-                    or ip.is_loopback
-                    or ip.is_link_local
-                    or ip.is_multicast
-                    or ip.is_reserved
-                    or ip.is_unspecified
-                ):
+                if not self._is_ip_safe(ip):
                     return False
                 found_safe_ip = True
         except (TimeoutError, socket.gaierror):
             return False
 
         return found_safe_ip
+
+    @staticmethod
+    def _is_ip_safe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        """Check if an IP address is safe (public).
+
+        Args:
+            ip: The IP address to check.
+
+        Returns:
+            True if the IP is public and safe.
+
+        """
+        return not (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        )
 
     def _is_safe_path(self, path: str) -> bool:
         """Check if the path is within the blueprints' directory.

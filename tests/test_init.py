@@ -38,7 +38,7 @@ async def test_setup_entry(hass: HomeAssistant):
         assert await async_setup_entry(hass, entry) is True
 
     assert DOMAIN in hass.data
-    assert entry.entry_id in hass.data[DOMAIN]
+    assert entry.entry_id in hass.data[DOMAIN]["coordinators"]
     assert hass.config_entries.async_update_entry.called
     assert hass.config_entries.async_forward_entry_setups.called
 
@@ -62,7 +62,7 @@ async def test_service_registration(hass: HomeAssistant):
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
 
-    hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
+    hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator_mock}}}
 
     with (
         patch(
@@ -117,8 +117,7 @@ async def test_service_handlers(hass: HomeAssistant):
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
     coordinator_mock.async_request_refresh = AsyncMock()
-
-    hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
+    hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator_mock}}}
 
     with (
         patch(
@@ -183,7 +182,7 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
 
-    hass.data = {DOMAIN: {entry.entry_id: coordinator_mock}}
+    hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator_mock}}}
 
     with (
         patch(
@@ -319,7 +318,7 @@ async def test_unload_entry(hass: HomeAssistant):
         await async_setup_entry(hass, entry)
         await async_unload_entry(hass, entry)
 
-        assert entry.entry_id not in hass.data[DOMAIN]
+        assert entry.entry_id not in hass.data[DOMAIN].get("coordinators", {})
         assert mock_remove.called
 
 
@@ -343,9 +342,9 @@ async def test_restore_handler_multi_coordinator_selection(hass: HomeAssistant):
     coordinator_two.config_entry = entry_two
     coordinator_two.data = {}
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry_one.entry_id] = coordinator_one
-    hass.data[DOMAIN][entry_two.entry_id] = coordinator_two
+    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})
+    hass.data[DOMAIN]["coordinators"][entry_one.entry_id] = coordinator_one
+    hass.data[DOMAIN]["coordinators"][entry_two.entry_id] = coordinator_two
 
     mock_entity_registry = MagicMock()
 
@@ -399,7 +398,7 @@ async def test_restore_handler_multi_coordinator_selection(hass: HomeAssistant):
         coordinator_two.async_restore_blueprint.assert_called_once()
         coordinator_one.async_restore_blueprint.assert_not_called()
 
-        hass.data[DOMAIN].pop("entry_two")
+        hass.data[DOMAIN]["coordinators"].pop("entry_two")
         assert restore_handler is not None
         with pytest.raises(ServiceValidationError, match="not_found"):
             await restore_handler(
@@ -425,8 +424,8 @@ async def test_async_update_all_handler_fetches_remote_content(hass: HomeAssista
         }
     }
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})
+    hass.data[DOMAIN]["coordinators"][entry.entry_id] = coordinator
 
     mock_coordinator = MagicMock()
     mock_coordinator.data = {

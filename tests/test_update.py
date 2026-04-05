@@ -31,7 +31,7 @@ async def test_update_entities_lifecycle(hass):
     }
     coordinator.async_add_listener = MagicMock()
 
-    hass.data = {DOMAIN: {"test_entry": coordinator}}
+    hass.data = {DOMAIN: {"coordinators": {"test_entry": coordinator}}}
     hass.async_create_task = MagicMock()
     hass.states = MagicMock()
 
@@ -415,7 +415,7 @@ async def test_async_update_entities_migration(hass):
     }
     coordinator.async_add_listener = MagicMock()
 
-    hass.data = {DOMAIN: {entry.entry_id: coordinator}}
+    hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator}}}
     hass.states = MagicMock()
 
     mock_entity_registry = MagicMock()

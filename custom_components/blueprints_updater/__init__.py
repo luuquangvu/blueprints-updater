@@ -89,7 +89,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await blueprint_coordinator.async_setup()
     await blueprint_coordinator.async_config_entry_first_refresh()
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = blueprint_coordinator
+    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})[entry.entry_id] = (
+        blueprint_coordinator
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -115,9 +117,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             List of BlueprintUpdateCoordinator instances.
 
         """
-        return [
-            coord for key, coord in hass.data.get(DOMAIN, {}).items() if key != "translation_cache"
-        ]
+        return list(hass.data.get(DOMAIN, {}).get("coordinators", {}).values())
 
     async def _translate(key: str, category: str = "exceptions", **kwargs: str) -> str:
         """Translate a key using the coordinator if available, otherwise fallback.
@@ -137,7 +137,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         lang = getattr(hass.config, "language", "en")
         cache_key = (lang, category)
-        cache = hass.data.get(DOMAIN, {}).get("translation_cache", {})
+        cache = hass.data.setdefault(DOMAIN, {}).setdefault("translation_cache", {})
 
         if cache_key not in cache:
             try:
@@ -191,7 +191,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         config_entry_id = entity_entry.config_entry_id
         active_coordinator = (
-            hass.data.get(DOMAIN, {}).get(config_entry_id) if config_entry_id else None
+            hass.data.get(DOMAIN, {}).get("coordinators", {}).get(config_entry_id)
+            if config_entry_id
+            else None
         )
 
         if not active_coordinator:
@@ -340,7 +342,9 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     """
     _LOGGER.debug("Updating options for Blueprints Updater entry: %s", entry.entry_id)
-    blueprint_coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    blueprint_coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN]["coordinators"][
+        entry.entry_id
+    ]
     interval_hours = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_HOURS)
     blueprint_coordinator.update_interval = timedelta(hours=interval_hours)
 
@@ -358,16 +362,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         True if the entry was unloaded successfully.
 
     """
-    blueprint_coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    blueprint_coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN]["coordinators"][
+        entry.entry_id
+    ]
     await blueprint_coordinator.async_shutdown()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
-        if len(hass.data[DOMAIN]) == 1 and "translation_cache" in hass.data[DOMAIN]:
+        hass.data[DOMAIN].get("coordinators", {}).pop(entry.entry_id, None)
+
+        if not hass.data[DOMAIN].get("coordinators"):
             hass.data[DOMAIN].pop("translation_cache", None)
 
-        if not hass.data[DOMAIN]:
+        if not any(hass.data[DOMAIN].values()):
             for service in ["reload", "restore_blueprint", "update_all"]:
                 hass.services.async_remove(DOMAIN, service)
     return unload_ok
