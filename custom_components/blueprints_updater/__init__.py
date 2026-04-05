@@ -5,8 +5,8 @@ from datetime import timedelta
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.const import EVENT_CORE_CONFIG_UPDATE, Platform
+from homeassistant.core import Event, HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
@@ -47,6 +47,15 @@ async def async_setup(hass: HomeAssistant, _: ConfigType) -> bool:
         True if initialization was successful.
 
     """
+    hass.data.setdefault(DOMAIN, {})["translation_cache"] = {}
+
+    def _clear_cache(_: Event) -> None:
+        """Clear translation cache on config update."""
+        _LOGGER.debug("Clearing Blueprints Updater translation cache due to config change")
+        hass.data.setdefault(DOMAIN, {})["translation_cache"] = {}
+
+    hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _clear_cache)
+
     _async_register_services(hass)
     return True
 
@@ -98,7 +107,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
         hass: HomeAssistant instance.
 
     """
-    _translation_cache: dict[tuple[str, str], dict[str, str]] = {}
 
     def _get_coordinators() -> list[BlueprintUpdateCoordinator]:
         """Get all available coordinators from hass data.
@@ -107,7 +115,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
             List of BlueprintUpdateCoordinator instances.
 
         """
-        return list(hass.data.get(DOMAIN, {}).values())
+        return [
+            coord for key, coord in hass.data.get(DOMAIN, {}).items() if key != "translation_cache"
+        ]
 
     async def _translate(key: str, category: str = "exceptions", **kwargs: str) -> str:
         """Translate a key using the coordinator if available, otherwise fallback.
@@ -127,10 +137,11 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         lang = getattr(hass.config, "language", "en")
         cache_key = (lang, category)
+        cache = hass.data.get(DOMAIN, {}).get("translation_cache", {})
 
-        if cache_key not in _translation_cache:
+        if cache_key not in cache:
             try:
-                _translation_cache[cache_key] = await translation.async_get_translations(
+                cache[cache_key] = await translation.async_get_translations(
                     hass, lang, category, [DOMAIN]
                 )
             except (OSError, ValueError) as err:
@@ -140,9 +151,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
                     category,
                     err,
                 )
-                _translation_cache[cache_key] = {}
+                cache[cache_key] = {}
 
-        translations = _translation_cache[cache_key]
+        translations = cache[cache_key]
 
         msg = translations.get(f"component.{DOMAIN}.{category}.{key}.message") or translations.get(
             f"component.{DOMAIN}.{category}.{key}", key
@@ -258,44 +269,50 @@ def _async_register_services(hass: HomeAssistant) -> None:
         backup_pref = call.data.get("backup", True)
 
         for active_coordinator in coordinators:
-            targets = [
-                (path, info)
-                for path, info in active_coordinator.data.items()
-                if info.get("updatable") and not info.get("last_error")
-            ]
+            try:
+                targets = [
+                    (path, info)
+                    for path, info in active_coordinator.data.items()
+                    if info.get("updatable") and not info.get("last_error")
+                ]
 
-            if not targets:
-                continue
+                if not targets:
+                    continue
 
-            config_entry = active_coordinator.config_entry
-            if not config_entry:
-                continue
+                config_entry = active_coordinator.config_entry
+                if not config_entry:
+                    continue
 
-            _LOGGER.info(
-                "Starting bulk update for up to %d blueprints in %s",
-                len(targets),
-                config_entry.entry_id,
-            )
+                _LOGGER.info(
+                    "Starting bulk update for up to %d blueprints in %s",
+                    len(targets),
+                    config_entry.entry_id,
+                )
 
-            processed_count = 0
-            for path, info in targets:
-                remote_content = info.get("remote_content")
-
-                if remote_content is None:
-                    _LOGGER.debug("Fetching missing content for bulk update of %s", path)
-                    await active_coordinator.async_fetch_blueprint(path, force=True)
-                    info = active_coordinator.data.get(path, info)
+                processed_count = 0
+                for path, info in targets:
                     remote_content = info.get("remote_content")
 
-                if remote_content:
-                    await active_coordinator.async_install_blueprint(
-                        path, remote_content, reload_services=False, backup=backup_pref
-                    )
-                    processed_count += 1
+                    if remote_content is None:
+                        _LOGGER.debug("Fetching missing content for bulk update of %s", path)
+                        await active_coordinator.async_fetch_blueprint(path, force=True)
+                        info = active_coordinator.data.get(path, info)
+                        remote_content = info.get("remote_content")
 
-            if processed_count > 0:
-                await active_coordinator.async_reload_services()
-                await active_coordinator.async_request_refresh()
+                    if remote_content:
+                        await active_coordinator.async_install_blueprint(
+                            path, remote_content, reload_services=False, backup=backup_pref
+                        )
+                        processed_count += 1
+
+                if processed_count > 0:
+                    await active_coordinator.async_reload_services()
+                    await active_coordinator.async_request_refresh()
+            except Exception:
+                _LOGGER.exception(
+                    "Failed to update blueprints for config entry %s",
+                    getattr(active_coordinator, "config_entry", {}).get("entry_id", "unknown"),
+                )
 
     async_register_admin_service(
         hass,

@@ -76,9 +76,10 @@ def _safe_int(value: Any, default: int) -> int:
         The coerced integer or the default value.
 
     """
-    if isinstance(value, int):
-        return value
-    return int(value) if isinstance(value, str) and value.isdigit() else default
+    try:
+        return int(str(value).strip())
+    except (ValueError, TypeError):
+        return default
 
 
 def _get_config_schema(

@@ -31,6 +31,9 @@ def hass():
     hass_mock.services = MagicMock()
     hass_mock.services.async_call = AsyncMock()
 
+    hass_mock.bus = MagicMock()
+    hass_mock.bus.async_listen = MagicMock()
+
     async def async_add_executor_job(target, *args, **kwargs):
         return target(*args, **kwargs)
 

@@ -53,8 +53,7 @@ async def test_config_flow_defaults(hass: HomeAssistant):
         assert result["type"] == "form"
         assert result["step_id"] == "user"
 
-        data_schema = result["data_schema"]
-        assert isinstance(data_schema, vol.Schema)
+        data_schema = cast(vol.Schema, result["data_schema"])
         defaults = get_schema_defaults(data_schema)
         assert defaults.get(CONF_UPDATE_INTERVAL) == 24
         assert defaults.get(CONF_MAX_BACKUPS) == 3
@@ -139,3 +138,33 @@ async def test_options_flow_safe_coercion(hass: HomeAssistant):
 
         assert defaults.get(CONF_MAX_BACKUPS) == 8
         assert defaults.get(CONF_UPDATE_INTERVAL) == 24
+
+
+@pytest.mark.asyncio
+async def test_options_flow_enhanced_coercion(hass: HomeAssistant):
+    """Test that the options flow handles whitespace and negative string values."""
+    config_entry = MagicMock()
+    config_entry.options = {
+        CONF_MAX_BACKUPS: " -5 ",
+        CONF_UPDATE_INTERVAL: "  10  ",
+    }
+    config_entry.entry_id = "test_entry"
+
+    handler = BlueprintsUpdaterOptionsFlowHandler()
+    handler.hass = hass
+
+    cast(Any, handler).handler = config_entry.entry_id
+
+    hass.config_entries = MagicMock()
+    hass.config_entries.async_get_known_entry = MagicMock(return_value=config_entry)
+
+    with patch(
+        "custom_components.blueprints_updater.config_flow._async_get_blueprint_options",
+        return_value=[],
+    ):
+        result = await handler.async_step_init()
+        data_schema = cast(vol.Schema, result["data_schema"])
+        defaults = get_schema_defaults(data_schema)
+
+        assert defaults.get(CONF_MAX_BACKUPS) == 1
+        assert defaults.get(CONF_UPDATE_INTERVAL) == 10
