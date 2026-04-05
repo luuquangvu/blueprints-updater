@@ -470,3 +470,77 @@ async def test_async_update_all_handler_fetches_remote_content(hass: HomeAssista
         await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
 
         mock_coordinator.async_fetch_blueprint.assert_called_once_with("test.yaml", force=True)
+
+
+@pytest.mark.asyncio
+async def test_async_update_all_handler_continues_on_failure(hass: HomeAssistant):
+    """Ensure update_all continues to next blueprint if one fails."""
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.options = {}
+    entry.data = {}
+
+    mock_coordinator = MagicMock()
+    mock_coordinator.config_entry = entry
+    mock_coordinator.data = {
+        "fail.yaml": {
+            "rel_path": "fail.yaml",
+            "updatable": True,
+            "remote_content": "...",
+            "last_error": None,
+        },
+        "success.yaml": {
+            "rel_path": "success.yaml",
+            "updatable": True,
+            "remote_content": "...",
+            "last_error": None,
+        },
+    }
+
+    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})
+    hass.data[DOMAIN]["coordinators"][entry.entry_id] = mock_coordinator
+
+    mock_coordinator.async_setup = AsyncMock()
+    mock_coordinator.async_config_entry_first_refresh = AsyncMock()
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch(
+            "custom_components.blueprints_updater.__init__.async_register_admin_service"
+        ) as mock_register,
+    ):
+        hass.config_entries = MagicMock()
+        hass.config_entries.async_forward_entry_setups = AsyncMock()
+        await async_setup(hass, {})
+        await async_setup_entry(hass, entry)
+
+        update_all_handler = next(
+            (
+                call.args[3] if len(call.args) > 3 else call.kwargs.get("service_func")
+                for call in mock_register.call_args_list
+                if (len(call.args) > 2 and call.args[2] == "update_all")
+                or call.kwargs.get("service") == "update_all"
+            ),
+            None,
+        )
+
+        async def mock_install(path, *_args, **_kwargs):
+            """Mock install blueprint."""
+            if path == "fail.yaml":
+                raise ValueError("Update failed")
+            return
+
+        mock_coordinator.async_install_blueprint = AsyncMock(side_effect=mock_install)
+        mock_coordinator.async_reload_services = AsyncMock()
+        mock_coordinator.async_request_refresh = AsyncMock()
+
+        assert update_all_handler is not None
+        await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
+
+        assert mock_coordinator.async_install_blueprint.call_count == 2
+
+        mock_coordinator.async_reload_services.assert_called_once()
+        mock_coordinator.async_request_refresh.assert_called_once()

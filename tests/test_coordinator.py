@@ -788,6 +788,78 @@ async def test_async_update_data_auto_update(coordinator):
 
 
 @pytest.mark.asyncio
+async def test_async_update_blueprint_unsafe_url_invalidates_cache(coordinator):
+    """Test that an unsafe source URL invalidates the cached remote metadata."""
+    path = "/config/blueprints/test.yaml"
+    coordinator.data = {
+        path: {
+            "name": "Test",
+            "source_url": "http://malicious.com",
+            "remote_hash": "old_hash",
+            "remote_content": "old_content",
+            "etag": "old_etag",
+            "updatable": True,
+            "last_error": None,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "_is_safe_url", return_value=False),
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_async_client",
+            return_value=MagicMock(),
+        ),
+    ):
+        await coordinator.async_fetch_blueprint(path)
+
+    assert coordinator.data[path]["remote_hash"] is None
+    assert coordinator.data[path]["remote_content"] is None
+    assert coordinator.data[path]["etag"] is None
+    assert coordinator.data[path]["updatable"] is False
+    assert "unsafe_url|" in str(coordinator.data[path]["last_error"])
+
+
+@pytest.mark.asyncio
+async def test_async_background_refresh_cancellation_stops_workers(coordinator):
+    """Test that cancelling the background refresh task stops workers promptly."""
+    num_blueprints = 100
+    blueprints = {
+        f"/bp{i}.yaml": {
+            "name": f"BP{i}",
+            "rel_path": f"bp{i}.yaml",
+            "source_url": f"https://url/bp{i}",
+            "domain": "automation",
+            "local_hash": "h",
+        }
+        for i in range(num_blueprints)
+    }
+
+    processed_count = 0
+
+    async def slow_update(*_args, **_kwargs):
+        """Slow update to ensure we can cancel while processing."""
+        nonlocal processed_count
+        processed_count += 1
+        await asyncio.sleep(0.2)
+
+    with (
+        patch.object(coordinator, "_async_update_blueprint_in_place", side_effect=slow_update),
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_async_client",
+            return_value=MagicMock(),
+        ),
+    ):
+        task = asyncio.create_task(coordinator._async_background_refresh(blueprints))
+
+        await asyncio.sleep(0.3)
+
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        assert processed_count < num_blueprints
+
+
+@pytest.mark.asyncio
 async def test_async_update_data_auto_update_multiple_sorted(coordinator):
     """Test _async_update_data sorts multiple auto-updated blueprints."""
     coordinator.config_entry.options = MappingProxyType({"auto_update": True})

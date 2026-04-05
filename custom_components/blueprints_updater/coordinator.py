@@ -459,12 +459,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     for i in range(MAX_CONCURRENT_REQUESTS)
                 ]
 
+                cancelled = False
                 try:
                     if workers:
                         await queue.join()
+                except asyncio.CancelledError:
+                    cancelled = True
+                    for worker in workers:
+                        worker.cancel()
+                    raise
                 finally:
-                    for _ in workers:
-                        await queue.put(None)
+                    if not cancelled:
+                        for _ in workers:
+                            await queue.put(None)
                     if workers:
                         await asyncio.gather(*workers, return_exceptions=True)
 
@@ -640,6 +647,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         try:
+            try:
+                max_bak = max(1, min(10, max_bak))
+            except (TypeError, ValueError):
+                max_bak = DEFAULT_MAX_BACKUPS
+
             if not os.path.isfile(file_path):
                 return
 
@@ -948,6 +960,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if not await self._is_safe_url(source_url):
             _LOGGER.warning("Blocking update from untrusted URL: %s", source_url)
+            if self.data and path in self.data:
+                self.data[path].update(
+                    {
+                        "remote_hash": None,
+                        "remote_content": None,
+                        "updatable": False,
+                        "last_error": "unsafe_url|",
+                        "etag": None,
+                    }
+                )
             return
 
         normalized_url = self._normalize_url(source_url)
@@ -1185,7 +1207,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
 
             if response.status_code == 304:
-                return None, etag or response.headers.get("ETag")
+                return None, response.headers.get("ETag") or etag
 
             if not response.is_redirect:
                 response.raise_for_status()
@@ -1405,7 +1427,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
                     if isinstance(blueprint_dict, dict) and "blueprint" in blueprint_dict:
                         bp_info = blueprint_dict["blueprint"]
-                        if source_url := bp_info.get("source_url"):
+                        if not isinstance(bp_info, dict):
+                            continue
+                        source_url = bp_info.get("source_url")
+                        if isinstance(source_url, str) and source_url.strip():
                             found_blueprints[full_path] = {
                                 "name": bp_info.get("name", file),
                                 "rel_path": rel_path,

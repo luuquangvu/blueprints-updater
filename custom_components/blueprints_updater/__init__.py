@@ -293,19 +293,27 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
                 processed_count = 0
                 for path, info in targets:
-                    remote_content = info.get("remote_content")
-
-                    if remote_content is None:
-                        _LOGGER.debug("Fetching missing content for bulk update of %s", path)
-                        await active_coordinator.async_fetch_blueprint(path, force=True)
-                        info = active_coordinator.data.get(path, info)
+                    try:
                         remote_content = info.get("remote_content")
 
-                    if remote_content:
-                        await active_coordinator.async_install_blueprint(
-                            path, remote_content, reload_services=False, backup=backup_pref
+                        if remote_content is None:
+                            _LOGGER.debug("Fetching missing content for bulk update of %s", path)
+                            await active_coordinator.async_fetch_blueprint(path, force=True)
+                            info = active_coordinator.data.get(path, info)
+                            remote_content = info.get("remote_content")
+
+                        if remote_content:
+                            await active_coordinator.async_install_blueprint(
+                                path, remote_content, reload_services=False, backup=backup_pref
+                            )
+                            processed_count += 1
+                    except Exception as err:
+                        _LOGGER.exception(
+                            "Failed to update blueprint path %s: %s",
+                            path,
+                            err,
                         )
-                        processed_count += 1
+                        continue
 
                 if processed_count > 0:
                     await active_coordinator.async_reload_services()
