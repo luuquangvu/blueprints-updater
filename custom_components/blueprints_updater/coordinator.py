@@ -404,7 +404,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         This method initializes a pool of background workers to process
         blueprint updates concurrently. It ensures that workers are cleaned up
         gracefully by enqueuing a sentinel (None) for each worker and waiting
-        for them to terminate using asyncio.gather, even if the task is cancelled
+        for them to terminate using asyncio.gather, even if the task is canceled
         while awaiting the queue to join.
 
         Args:
@@ -1198,6 +1198,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         current_url = url
         current_headers = headers.copy()
 
+        response: httpx.Response | None = None
         for redirect_count in range(21):
             response = await session.get(
                 current_url,
@@ -1230,6 +1231,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             current_url = next_url
             current_headers = {}
+
+        if response is None:
+            raise httpx.HTTPError("Request failed without response")
 
         new_etag = response.headers.get("ETag")
         parsed_url = urlparse(current_url)

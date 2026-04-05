@@ -167,8 +167,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def async_reload_action_handler(_: ServiceCall) -> None:
         """Handle the reload action call."""
-        for coordinator in _get_coordinators():
-            await coordinator.async_request_refresh()
+        for active_coordinator in _get_coordinators():
+            await active_coordinator.async_request_refresh()
 
     async_register_admin_service(hass, DOMAIN, "reload", async_reload_action_handler)
 
