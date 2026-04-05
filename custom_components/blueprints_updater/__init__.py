@@ -47,12 +47,12 @@ async def async_setup(hass: HomeAssistant, _: ConfigType) -> bool:
         True if initialization was successful.
 
     """
-    hass.data.setdefault(DOMAIN, {})["translation_cache"] = {}
 
     def _clear_cache(_: Event) -> None:
         """Clear translation cache on config update."""
-        _LOGGER.debug("Clearing Blueprints Updater translation cache due to config change")
-        hass.data.setdefault(DOMAIN, {})["translation_cache"] = {}
+        if DOMAIN in hass.data and "translation_cache" in hass.data[DOMAIN]:
+            _LOGGER.debug("Clearing Blueprints Updater translation cache due to config change")
+            hass.data[DOMAIN]["translation_cache"] = {}
 
     hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _clear_cache)
 
@@ -309,9 +309,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
                     await active_coordinator.async_reload_services()
                     await active_coordinator.async_request_refresh()
             except Exception:
+                config_entry = getattr(active_coordinator, "config_entry", None)
+                entry_id = (
+                    getattr(config_entry, "entry_id", "unknown") if config_entry else "unknown"
+                )
                 _LOGGER.exception(
                     "Failed to update blueprints for config entry %s",
-                    getattr(active_coordinator, "config_entry", {}).get("entry_id", "unknown"),
+                    entry_id,
                 )
 
     async_register_admin_service(
@@ -360,6 +364,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
+        if len(hass.data[DOMAIN]) == 1 and "translation_cache" in hass.data[DOMAIN]:
+            hass.data[DOMAIN].pop("translation_cache", None)
+
         if not hass.data[DOMAIN]:
             for service in ["reload", "restore_blueprint", "update_all"]:
                 hass.services.async_remove(DOMAIN, service)

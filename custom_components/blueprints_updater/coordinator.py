@@ -124,6 +124,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             update_interval=update_interval,
         )
         self._translations: dict[tuple[str, str], dict[str, str]] = {}
+        self.hass.data.setdefault(DOMAIN, {}).setdefault("translation_cache", {})
         self._translation_lock = asyncio.Lock()
         self._background_task: asyncio.Task | None = None
         self._refresh_lock = asyncio.Lock()
@@ -425,7 +426,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     queue.put_nowait((path, info))
 
                 session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
-                session.follow_redirects = True
 
                 async def _worker() -> None:
                     """Process blueprints from the queue."""
@@ -621,7 +621,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return
 
         session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
-        session.follow_redirects = True
 
         results_to_notify: list[str] = []
         updated_domains: set[str] = set()
@@ -968,7 +967,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             if remote_content == "":
                 if self.data and path in self.data:
-                    self.data[path]["last_error"] = "empty_content|"
+                    self.data[path].update(
+                        {
+                            "last_error": "empty_content|",
+                            "remote_hash": None,
+                            "remote_content": None,
+                            "updatable": False,
+                            "invalid_remote_hash": None,
+                        }
+                    )
                 return
 
             await self._process_blueprint_content(
@@ -1160,15 +1167,44 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         _LOGGER.debug("[Pacing] Dispatching request for %s", url)
 
-        response = await session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+        current_url = url
+        current_headers = headers.copy()
+
+        for redirect_count in range(21):
+            response = await session.get(
+                current_url,
+                headers=current_headers,
+                timeout=REQUEST_TIMEOUT,
+                follow_redirects=False,
+            )
+
+            if response.status_code == 304:
+                return None, etag or response.headers.get("ETag")
+
+            if not response.is_redirect:
+                response.raise_for_status()
+                break
+
+            if redirect_count >= 20:
+                _LOGGER.error("Too many redirects fetching %s", url)
+                raise httpx.HTTPError("Too many redirects")
+
+            next_url = response.headers.get("Location")
+            if not next_url:
+                response.raise_for_status()
+                break
+
+            next_url = str(response.url.join(next_url))
+
+            if not await self._is_safe_url(next_url):
+                _LOGGER.warning("Blocking redirect to unsafe URL: %s", next_url)
+                raise httpx.HTTPError(f"Security violation: Redirected to unsafe URL {next_url}")
+
+            current_url = next_url
+            current_headers = {}
+
         new_etag = response.headers.get("ETag")
-
-        if response.status_code == 304:
-            return None, etag or new_etag
-
-        response.raise_for_status()
-
-        parsed_url = urlparse(url)
+        parsed_url = urlparse(current_url)
         if DOMAIN_HA_FORUM in parsed_url.netloc:
             json_data = response.json()
             content = self._parse_forum_content(json_data)

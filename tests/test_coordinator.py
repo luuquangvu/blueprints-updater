@@ -663,6 +663,10 @@ async def test_async_update_blueprint_in_place_errors(coordinator):
         mock_session, path, info, results_to_notify, updated_domains
     )
     assert coordinator.data[path]["last_error"] == "empty_content|"
+    assert coordinator.data[path]["remote_hash"] is None
+    assert coordinator.data[path]["remote_content"] is None
+    assert coordinator.data[path]["updatable"] is False
+    assert coordinator.data[path]["invalid_remote_hash"] is None
 
     mock_resp_invalid = MagicMock(spec=httpx.Response)
     mock_resp_invalid.status_code = 200
