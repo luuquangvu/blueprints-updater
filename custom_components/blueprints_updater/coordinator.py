@@ -965,7 +965,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             if remote_content == "":
                 if self.data and path in self.data:
-                    self.data[path]["last_error"] = "empty_content"
+                    self.data[path]["last_error"] = "empty_content|"
                 return
 
             await self._process_blueprint_content(

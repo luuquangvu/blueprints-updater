@@ -44,13 +44,21 @@ def retry_async(
             raise TypeError(f"All items in exceptions must be subclasses of Exception, got {exc}")
 
     def decorator(func: AsyncFunc[_T]) -> AsyncFunc[_T]:
+        try:
+            sig = inspect.signature(func)
+        except (ValueError, TypeError):
+            sig = None
+
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> _T:
-            try:
-                sig = inspect.signature(func)
-                bound_args = sig.bind(*args, **kwargs)
-                context = bound_args.arguments.get("url", "unknown")
-            except (ValueError, TypeError):
+            context = "unknown"
+            if sig:
+                try:
+                    bound_args = sig.bind(*args, **kwargs)
+                    context = bound_args.arguments.get("url", "unknown")
+                except (ValueError, TypeError):
+                    context = getattr(func, "__name__", "unknown")
+            else:
                 context = getattr(func, "__name__", "unknown")
 
             for attempt in range(max_retries + 1):

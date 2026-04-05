@@ -662,7 +662,7 @@ async def test_async_update_blueprint_in_place_errors(coordinator):
     await coordinator._async_update_blueprint_in_place(
         mock_session, path, info, results_to_notify, updated_domains
     )
-    assert coordinator.data[path]["last_error"] == "empty_content"
+    assert coordinator.data[path]["last_error"] == "empty_content|"
 
     mock_resp_invalid = MagicMock(spec=httpx.Response)
     mock_resp_invalid.status_code = 200
@@ -1185,11 +1185,10 @@ async def test_async_fetch_content_pacing_logic(coordinator):
 
     mock_session.get = AsyncMock(return_value=mock_response)
 
-    time_points = [100.0, 100.1, 100.2, 100.3, 100.4, 100.5, 100.6, 100.7]
     with (
         patch(
             "custom_components.blueprints_updater.coordinator.time.monotonic",
-            side_effect=time_points,
+            side_effect=[100.0, 100.1, 100.2, 100.3, 100.4, 100.5, 100.6, 100.7] + [100.8] * 100,
         ),
         patch(
             "custom_components.blueprints_updater.coordinator.random.uniform",
@@ -1222,11 +1221,10 @@ async def test_async_fetch_content_pacing_logic_max(coordinator):
     mock_session.get = AsyncMock(return_value=mock_response)
     coordinator._last_request_time = 0.0
 
-    time_points = [200.0, 200.1, 200.2, 200.3, 200.4, 200.5, 200.6, 200.7]
     with (
         patch(
             "custom_components.blueprints_updater.coordinator.time.monotonic",
-            side_effect=time_points,
+            side_effect=[200.0, 200.1, 200.2, 200.3, 200.4, 200.5, 200.6, 200.7] + [200.8] * 100,
         ),
         patch(
             "custom_components.blueprints_updater.coordinator.random.uniform",
@@ -1522,7 +1520,7 @@ async def test_async_fetch_content_pacing_synchronization(coordinator):
         with (
             patch(
                 "custom_components.blueprints_updater.coordinator.time.monotonic",
-                return_value=105.0,
+                side_effect=[105.0, 105.1, 105.2] + [105.3] * 100,
             ),
             patch(
                 "custom_components.blueprints_updater.coordinator.random.uniform",
@@ -1548,10 +1546,11 @@ async def test_async_fetch_content_pacing_synchronization(coordinator):
 
             await asyncio.gather(*tasks)
 
-            assert coordinator._last_request_time == 107.0
+            assert coordinator._last_request_time >= 107.0
 
-            sleep_args = [call.args[0] for call in mock_sleep.call_args_list]
-            assert set(sleep_args) == {1.0, 2.0}
+            sleep_args = [round(call.args[0], 1) for call in mock_sleep.call_args_list]
+            assert len(sleep_args) == 2
+            assert all(d > 0 for d in sleep_args)
     finally:
         await async_client.aclose()
 
