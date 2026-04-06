@@ -50,10 +50,10 @@ async def test_config_flow_defaults(hass: HomeAssistant):
         return_value=[],
     ):
         result = await flow.async_step_user()
-        assert result["type"] == "form"
-        assert result["step_id"] == "user"
+        assert cast(dict[str, Any], result)["type"] == "form"
+        assert cast(dict[str, Any], result)["step_id"] == "user"
 
-        data_schema = cast(vol.Schema, result["data_schema"])
+        data_schema = cast(vol.Schema, cast(dict[str, Any], result)["data_schema"])
         defaults = get_schema_defaults(data_schema)
         assert defaults.get(CONF_UPDATE_INTERVAL) == 24
         assert defaults.get(CONF_MAX_BACKUPS) == 3
@@ -82,9 +82,9 @@ async def test_options_flow_clamping(hass: HomeAssistant):
         return_value=[],
     ):
         result = await handler.async_step_init()
-        assert result["type"] == "form"
+        assert cast(dict[str, Any], result)["type"] == "form"
 
-        data_schema = result["data_schema"]
+        data_schema = cast(dict[str, Any], result)["data_schema"]
         assert isinstance(data_schema, vol.Schema)
         defaults = get_schema_defaults(data_schema)
 
@@ -100,7 +100,7 @@ async def test_options_flow_clamping(hass: HomeAssistant):
         return_value=[],
     ):
         result = await handler.async_step_init()
-        data_schema = result["data_schema"]
+        data_schema = cast(dict[str, Any], result)["data_schema"]
         assert isinstance(data_schema, vol.Schema)
         defaults = get_schema_defaults(data_schema)
         assert defaults.get(CONF_MAX_BACKUPS) == 1
@@ -130,9 +130,9 @@ async def test_options_flow_safe_coercion(hass: HomeAssistant):
         return_value=[],
     ):
         result = await handler.async_step_init()
-        assert result["type"] == "form"
+        assert cast(dict[str, Any], result)["type"] == "form"
 
-        data_schema = result["data_schema"]
+        data_schema = cast(dict[str, Any], result)["data_schema"]
         assert isinstance(data_schema, vol.Schema)
         defaults = get_schema_defaults(data_schema)
 
@@ -163,7 +163,7 @@ async def test_options_flow_enhanced_coercion(hass: HomeAssistant):
         return_value=[],
     ):
         result = await handler.async_step_init()
-        data_schema = cast(vol.Schema, result["data_schema"])
+        data_schema = cast(vol.Schema, cast(dict[str, Any], result)["data_schema"])
         defaults = get_schema_defaults(data_schema)
 
         assert defaults.get(CONF_MAX_BACKUPS) == 1

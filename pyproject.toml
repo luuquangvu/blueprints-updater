@@ -6,7 +6,14 @@ requires-python = ">=3.14.2"
 dependencies = []
 
 [dependency-groups]
-dev = ["homeassistant>=2026.4.0", "ruff", "ty", "pytest", "pytest-asyncio"]
+dev = [
+  "homeassistant>=2026.4.0",
+  "ruff",
+  "ty",
+  "pyright",
+  "pytest",
+  "pytest-asyncio",
+]
 
 [tool.ruff]
 line-length = 100

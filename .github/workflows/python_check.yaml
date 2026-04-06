@@ -44,5 +44,8 @@ jobs:
       - name: Run Ty Check
         run: uv run ty check
 
+      - name: Run Pyright
+        run: uv run pyright
+
       - name: Run Tests
         run: uv run pytest

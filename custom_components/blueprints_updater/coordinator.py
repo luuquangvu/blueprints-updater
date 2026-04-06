@@ -1394,22 +1394,45 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content
 
     @staticmethod
+    def _should_include_blueprint(rel_path: str, filter_mode: str, selected_set: set[str]) -> bool:
+        """Check if a blueprint should be included based on filtering rules."""
+        if filter_mode == FILTER_MODE_BLACKLIST and rel_path in selected_set:
+            return False
+        return filter_mode != FILTER_MODE_WHITELIST or rel_path in selected_set
+
+    @staticmethod
+    def _parse_blueprint_data(path: str, content: str) -> dict[str, Any] | None:
+        """Parse raw YAML content and extract blueprint metadata if valid."""
+        try:
+            blueprint_dict = yaml_util.parse_yaml(content)
+            if not isinstance(blueprint_dict, dict) or "blueprint" not in blueprint_dict:
+                return None
+
+            bp_info = blueprint_dict["blueprint"]
+            if not isinstance(bp_info, dict):
+                return None
+
+            source_url = bp_info.get("source_url")
+            if not isinstance(source_url, str) or not source_url.strip():
+                return None
+
+            return {
+                "name": bp_info.get("name", os.path.basename(path)),
+                "domain": bp_info.get("domain", "automation"),
+                "source_url": source_url.strip(),
+                "local_hash": hashlib.sha256(content.encode()).hexdigest(),
+            }
+        except Exception as err:
+            _LOGGER.error("Error parsing blueprint at %s: %s", path, err)
+            return None
+
+    @staticmethod
     def scan_blueprints(
         hass: HomeAssistant,
         filter_mode: str,
         selected_blueprints: list[str],
     ) -> dict[str, Any]:
-        """Scan the blueprints directory for YAML files with source_url.
-
-        Args:
-            hass: HomeAssistant instance.
-            filter_mode: Blueprint filter mode.
-            selected_blueprints: List of selected blueprints.
-
-        Returns:
-            Dictionary mapping paths to blueprint properties.
-
-        """
+        """Scan the blueprints directory for YAML files with source_url."""
         blueprint_path: str = hass.config.path("blueprints")
         found_blueprints = {}
 
@@ -1418,7 +1441,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return found_blueprints
 
         _LOGGER.debug("Scanning blueprints in: %s", blueprint_path)
-
         selected_set = set(selected_blueprints)
 
         for root, _, files in os.walk(blueprint_path):
@@ -1429,29 +1451,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 full_path = os.path.join(root, file)
                 rel_path = os.path.relpath(full_path, blueprint_path).replace("\\", "/")
 
-                if filter_mode == FILTER_MODE_BLACKLIST and rel_path in selected_set:
-                    continue
-                if filter_mode == FILTER_MODE_WHITELIST and rel_path not in selected_set:
+                if not BlueprintUpdateCoordinator._should_include_blueprint(
+                    rel_path, filter_mode, selected_set
+                ):
                     continue
 
                 try:
                     with open(full_path, encoding="utf-8") as f:
                         content = f.read()
-                    blueprint_dict = yaml_util.parse_yaml(content)
 
-                    if isinstance(blueprint_dict, dict) and "blueprint" in blueprint_dict:
-                        bp_info = blueprint_dict["blueprint"]
-                        if not isinstance(bp_info, dict):
-                            continue
-                        source_url = bp_info.get("source_url")
-                        if isinstance(source_url, str) and (normalized_url := source_url.strip()):
-                            found_blueprints[full_path] = {
-                                "name": bp_info.get("name", file),
-                                "rel_path": rel_path,
-                                "domain": bp_info.get("domain", "automation"),
-                                "source_url": normalized_url,
-                                "local_hash": hashlib.sha256(content.encode()).hexdigest(),
-                            }
+                    if metadata := BlueprintUpdateCoordinator._parse_blueprint_data(
+                        full_path, content
+                    ):
+                        metadata["rel_path"] = rel_path
+                        found_blueprints[full_path] = metadata
+
                 except Exception as err:
                     _LOGGER.error("Error reading blueprint at %s: %s", full_path, err)
 

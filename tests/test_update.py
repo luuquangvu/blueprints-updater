@@ -163,6 +163,7 @@ async def test_entity_properties(coordinator):
     assert await entity_missing.async_release_notes() is None
 
     coordinator.data["/config/blueprints/test.yaml"]["last_error"] = "Fetch Error"
+    entity._clear_cached_properties()
     assert entity.extra_state_attributes == {"last_error": "Fetch Error"}
 
 

@@ -135,7 +135,7 @@ To ensure long-term reliability and stability, this project utilizes a modern st
 - **Static Analysis & Security**: [CodeQL](https://codeql.github.com) performs industry-standard scans to detect security vulnerabilities and ensure compliance with best practices.
 - **Rigorous Development Workflow**:
   - **[Ruff](https://github.com/astral-sh/ruff)**: High-performance linting and formatting for consistent Python code.
-  - **[Ty](https://github.com/astral-sh/ty)**: Strict type checking to prevent runtime errors and enhance stability.
+  - **[Ty](https://github.com/astral-sh/ty)** & **[Pyright](https://github.com/Microsoft/pyright)**: Strict type checking to prevent runtime errors and enhance stability.
   - **[Pytest](https://github.com/pytest-dev/pytest)**: A comprehensive test suite ensuring every update is functional and regression-free.
   - **[Prettier](https://github.com/prettier/prettier)**: Consistent formatting for documentation and configuration files.
 

@@ -62,7 +62,7 @@ async def test_service_registration(hass: HomeAssistant):
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
 
-    hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator_mock}}}
+    hass.data[DOMAIN] = {"coordinators": {entry.entry_id: coordinator_mock}}
 
     with (
         patch(
@@ -117,7 +117,7 @@ async def test_service_handlers(hass: HomeAssistant):
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
     coordinator_mock.async_request_refresh = AsyncMock()
-    hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator_mock}}}
+    hass.data[DOMAIN] = {"coordinators": {entry.entry_id: coordinator_mock}}
 
     with (
         patch(
@@ -182,7 +182,7 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
 
-    hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator_mock}}}
+    hass.data[DOMAIN] = {"coordinators": {entry.entry_id: coordinator_mock}}
 
     with (
         patch(
