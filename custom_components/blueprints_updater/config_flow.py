@@ -27,14 +27,13 @@ from .const import (
     CONF_MAX_BACKUPS,
     CONF_SELECTED_BLUEPRINTS,
     CONF_UPDATE_INTERVAL,
-    DEFAULT_MAX_BACKUPS,
-    DEFAULT_UPDATE_INTERVAL_HOURS,
     DOMAIN,
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
 )
 from .coordinator import BlueprintUpdateCoordinator
+from .utils import get_max_backups, get_update_interval
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,23 +64,6 @@ async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, An
     return options
 
 
-def _safe_int(value: Any, default: int) -> int:
-    """Safely coerce a value to an integer.
-
-    Args:
-        value: The value to coerce.
-        default: The default value if coercion fails.
-
-    Returns:
-        The coerced integer or the default value.
-
-    """
-    try:
-        return int(str(value).strip())
-    except (ValueError, TypeError):
-        return default
-
-
 def _get_config_schema(
     defaults: dict[str, Any],
     blueprint_options: list[dict[str, Any]],
@@ -104,9 +86,7 @@ def _get_config_schema(
             ): cv.boolean,
             vol.Required(
                 CONF_UPDATE_INTERVAL,
-                default=max(
-                    1, _safe_int(defaults.get(CONF_UPDATE_INTERVAL), DEFAULT_UPDATE_INTERVAL_HOURS)
-                ),
+                default=get_update_interval(defaults),
             ): NumberSelector(
                 NumberSelectorConfig(
                     min=1,
@@ -116,9 +96,7 @@ def _get_config_schema(
             ),
             vol.Required(
                 CONF_MAX_BACKUPS,
-                default=max(
-                    1, min(10, _safe_int(defaults.get(CONF_MAX_BACKUPS), DEFAULT_MAX_BACKUPS))
-                ),
+                default=get_max_backups(defaults),
             ): NumberSelector(
                 NumberSelectorConfig(
                     min=1,

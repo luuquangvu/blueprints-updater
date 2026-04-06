@@ -34,9 +34,7 @@ from .const import (
     ALLOWED_RELOAD_DOMAINS,
     CONF_AUTO_UPDATE,
     CONF_FILTER_MODE,
-    CONF_MAX_BACKUPS,
     CONF_SELECTED_BLUEPRINTS,
-    DEFAULT_MAX_BACKUPS,
     DOMAIN,
     DOMAIN_GIST,
     DOMAIN_GITHUB,
@@ -45,11 +43,9 @@ from .const import (
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
-    MAX_BACKUPS,
     MAX_CONCURRENT_REQUESTS,
     MAX_RETRIES,
     MAX_SEND_INTERVAL,
-    MIN_BACKUPS,
     MIN_SEND_INTERVAL,
     RE_BLUEPRINT_KEY,
     RE_FORUM_CODE_BLOCK,
@@ -62,7 +58,7 @@ from .const import (
     STORAGE_KEY_DATA,
     STORAGE_VERSION,
 )
-from .utils import retry_async
+from .utils import get_max_backups, retry_async
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -148,25 +144,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         _LOGGER.debug("Clearing translations for Blueprints Updater coordinator")
         self._translations = {}
-
-    @callback
-    def _get_max_backups(self) -> int:
-        """Get the maximum number of backups allowed from configuration.
-
-        Returns:
-            The normalized number of backups to keep (clamped within bounds).
-
-        """
-        if not self.config_entry:
-            return DEFAULT_MAX_BACKUPS
-
-        val = self.config_entry.options.get(CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS)
-        try:
-            max_bak = int(str(val).strip())
-        except (ValueError, TypeError):
-            return DEFAULT_MAX_BACKUPS
-
-        return max(MIN_BACKUPS, min(MAX_BACKUPS, max_bak))
 
     async def async_setup(self) -> None:
         """Load persisted data from storage.
@@ -743,7 +720,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.error("Cannot install blueprint at %s: content is empty or None", path)
             raise HomeAssistantError("Blueprint content is missing or empty")
 
-        max_backups = self._get_max_backups()
+        max_backups = get_max_backups(self.config_entry)
 
         try:
 
@@ -912,7 +889,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.error("Security violation: Attempted to restore unsafe path: %s", real_path)
             return {"success": False, "translation_key": "system_error"}
 
-        max_backups = self._get_max_backups()
+        max_backups = get_max_backups(self.config_entry)
         if version < 1 or version > max_backups:
             _LOGGER.error(
                 "Invalid backup version %s requested for %s (current limit: %s)",

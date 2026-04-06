@@ -8,6 +8,16 @@ from collections.abc import Callable, Coroutine
 from functools import wraps
 from typing import Any, TypeVar
 
+from .const import (
+    CONF_MAX_BACKUPS,
+    CONF_UPDATE_INTERVAL,
+    DEFAULT_MAX_BACKUPS,
+    DEFAULT_UPDATE_INTERVAL_HOURS,
+    MAX_BACKUPS,
+    MIN_BACKUPS,
+    MIN_UPDATE_INTERVAL,
+)
+
 _LOGGER = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
@@ -98,3 +108,82 @@ def retry_async(
         return wrapper
 
     return decorator
+
+
+def get_config_int(
+    config: Any,
+    key: str,
+    default: int,
+    min_val: int | None = None,
+    max_val: int | None = None,
+) -> int:
+    """Get an integer value from config entry options or data with clamping.
+
+    Args:
+        config: ConfigEntry, dict or None.
+        key: Configuration key.
+        default: Default value if not found or invalid.
+        min_val: Optional minimum value for clamping.
+        max_val: Optional maximum value for clamping.
+
+    Returns:
+        The coerced and clamped integer value.
+
+    """
+    if config is None:
+        return default
+
+    if hasattr(config, "options"):
+        val = config.options.get(key, config.data.get(key, default))
+    elif isinstance(config, dict):
+        val = config.get(key, default)
+    else:
+        val = default
+
+    try:
+        res = int(str(val).strip())
+    except (ValueError, TypeError):
+        return default
+
+    if min_val is not None:
+        res = max(min_val, res)
+    if max_val is not None:
+        res = min(max_val, res)
+    return res
+
+
+def get_update_interval(config: Any) -> int:
+    """Get the normalized update interval in hours.
+
+    Args:
+        config: ConfigEntry, dict or None.
+
+    Returns:
+        The normalized interval.
+
+    """
+    return get_config_int(
+        config,
+        CONF_UPDATE_INTERVAL,
+        DEFAULT_UPDATE_INTERVAL_HOURS,
+        min_val=MIN_UPDATE_INTERVAL,
+    )
+
+
+def get_max_backups(config: Any) -> int:
+    """Get the normalized maximum number of backups.
+
+    Args:
+        config: ConfigEntry, dict or None.
+
+    Returns:
+        The normalized number of backups.
+
+    """
+    return get_config_int(
+        config,
+        CONF_MAX_BACKUPS,
+        DEFAULT_MAX_BACKUPS,
+        min_val=MIN_BACKUPS,
+        max_val=MAX_BACKUPS,
+    )
