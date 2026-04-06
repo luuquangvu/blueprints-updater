@@ -400,10 +400,11 @@ async def test_restore_handler_multi_coordinator_selection(hass: HomeAssistant):
 
         hass.data[DOMAIN]["coordinators"].pop("entry_two")
         assert restore_handler is not None
-        with pytest.raises(ServiceValidationError, match="not_found"):
+        with pytest.raises(ServiceValidationError) as exc:
             await restore_handler(
                 ServiceCall(hass, DOMAIN, "restore_blueprint", {"entity_id": "update.two"})
             )
+        assert exc.value.translation_key == "not_found"
 
 
 @pytest.mark.asyncio

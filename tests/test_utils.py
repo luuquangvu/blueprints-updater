@@ -5,7 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.blueprints_updater.utils import retry_async
+from custom_components.blueprints_updater.utils import (
+    get_config_int,
+    get_max_backups,
+    get_update_interval,
+    retry_async,
+)
 
 
 @pytest.mark.asyncio
@@ -148,3 +153,45 @@ def test_retry_async_invalid_args():
         @retry_async(3, (Exception, str))  # type: ignore
         async def mock_func_5():
             pass
+
+
+def test_get_config_int():
+    """Test get_config_int helper."""
+    config = MagicMock()
+    config.options = {"key": " 10 "}
+    assert get_config_int(config, "key", 5) == 10
+    assert get_config_int(config, "missing", 5) == 5
+    assert get_config_int(None, "key", 5) == 5
+    assert get_config_int(config, "key", 5, min_val=20) == 20
+    assert get_config_int(config, "key", 5, max_val=5) == 5
+
+    config.options = {"key": "invalid"}
+    assert get_config_int(config, "key", 5) == 5
+
+
+def test_get_update_interval():
+    """Test get_update_interval helper."""
+    config = MagicMock()
+
+    config.options = {"update_interval": 48}
+    assert get_update_interval(config) == 48
+
+    config.options = {"update_interval": 0}
+    assert get_update_interval(config) == 1
+
+    config.options = {"update_interval": 1000}
+    assert get_update_interval(config) == 720
+
+
+def test_get_max_backups():
+    """Test get_max_backups helper."""
+    config = MagicMock()
+
+    config.options = {"max_backups": 5}
+    assert get_max_backups(config) == 5
+
+    config.options = {"max_backups": 0}
+    assert get_max_backups(config) == 1
+
+    config.options = {"max_backups": 20}
+    assert get_max_backups(config) == 10

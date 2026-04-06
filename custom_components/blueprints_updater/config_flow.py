@@ -31,6 +31,10 @@ from .const import (
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
+    MAX_BACKUPS,
+    MAX_UPDATE_INTERVAL_HOURS,
+    MIN_BACKUPS,
+    MIN_UPDATE_INTERVAL,
 )
 from .coordinator import BlueprintUpdateCoordinator
 from .utils import get_max_backups, get_update_interval
@@ -89,7 +93,8 @@ def _get_config_schema(
                 default=get_update_interval(defaults),
             ): NumberSelector(
                 NumberSelectorConfig(
-                    min=1,
+                    min=MIN_UPDATE_INTERVAL,
+                    max=MAX_UPDATE_INTERVAL_HOURS,
                     mode=NumberSelectorMode.BOX,
                     unit_of_measurement=UnitOfTime.HOURS,
                 )
@@ -99,8 +104,8 @@ def _get_config_schema(
                 default=get_max_backups(defaults),
             ): NumberSelector(
                 NumberSelectorConfig(
-                    min=1,
-                    max=10,
+                    min=MIN_BACKUPS,
+                    max=MAX_BACKUPS,
                     mode=NumberSelectorMode.BOX,
                 )
             ),

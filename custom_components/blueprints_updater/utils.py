@@ -14,6 +14,7 @@ from .const import (
     DEFAULT_MAX_BACKUPS,
     DEFAULT_UPDATE_INTERVAL_HOURS,
     MAX_BACKUPS,
+    MAX_UPDATE_INTERVAL_HOURS,
     MIN_BACKUPS,
     MIN_UPDATE_INTERVAL,
 )
@@ -43,7 +44,7 @@ def retry_async(
     Returns:
         Decorated async function.
     """
-    if not isinstance(max_retries, int):
+    if isinstance(max_retries, bool) or not isinstance(max_retries, int):
         raise TypeError("max_retries must be an integer")
     if max_retries < 0:
         raise ValueError("max_retries must be greater than or equal to 0")
@@ -167,6 +168,7 @@ def get_update_interval(config: Any) -> int:
         CONF_UPDATE_INTERVAL,
         DEFAULT_UPDATE_INTERVAL_HOURS,
         min_val=MIN_UPDATE_INTERVAL,
+        max_val=MAX_UPDATE_INTERVAL_HOURS,
     )
 
 

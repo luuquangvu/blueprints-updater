@@ -1444,12 +1444,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         if not isinstance(bp_info, dict):
                             continue
                         source_url = bp_info.get("source_url")
-                        if isinstance(source_url, str) and source_url.strip():
+                        if isinstance(source_url, str) and (normalized_url := source_url.strip()):
                             found_blueprints[full_path] = {
                                 "name": bp_info.get("name", file),
                                 "rel_path": rel_path,
                                 "domain": bp_info.get("domain", "automation"),
-                                "source_url": source_url,
+                                "source_url": normalized_url,
                                 "local_hash": hashlib.sha256(content.encode()).hexdigest(),
                             }
                 except Exception as err:
