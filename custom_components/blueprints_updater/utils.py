@@ -33,6 +33,8 @@ def retry_async(
     Returns:
         Decorated async function.
     """
+    if not isinstance(max_retries, int):
+        raise TypeError("max_retries must be an integer")
     if max_retries < 0:
         raise ValueError("max_retries must be greater than or equal to 0")
     if base_delay < 0:

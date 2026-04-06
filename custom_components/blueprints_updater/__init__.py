@@ -21,11 +21,10 @@ from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
-    CONF_MAX_BACKUPS,
     CONF_UPDATE_INTERVAL,
-    DEFAULT_MAX_BACKUPS,
     DEFAULT_UPDATE_INTERVAL_HOURS,
     DOMAIN,
+    MIN_UPDATE_INTERVAL,
 )
 from .coordinator import BlueprintUpdateCoordinator
 
@@ -50,9 +49,16 @@ async def async_setup(hass: HomeAssistant, _: ConfigType) -> bool:
 
     def _clear_cache(_: Event) -> None:
         """Clear translation cache on config update."""
-        if DOMAIN in hass.data and "translation_cache" in hass.data[DOMAIN]:
+        if DOMAIN not in hass.data:
+            return
+
+        if "translation_cache" in hass.data[DOMAIN]:
             _LOGGER.debug("Clearing Blueprints Updater translation cache due to config change")
             hass.data[DOMAIN]["translation_cache"] = {}
+
+        for coordinator in hass.data[DOMAIN].get("coordinators", {}).values():
+            if hasattr(coordinator, "clear_translations"):
+                coordinator.clear_translations()
 
     hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _clear_cache)
 
@@ -79,7 +85,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry, data={}, options={**entry.options, **entry.data}
         )
 
-    interval_hours = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_HOURS)
+    try:
+        interval_hours = int(
+            str(entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_HOURS)).strip()
+        )
+    except (ValueError, TypeError):
+        interval_hours = DEFAULT_UPDATE_INTERVAL_HOURS
+
+    interval_hours = max(MIN_UPDATE_INTERVAL, interval_hours)
 
     blueprint_coordinator = BlueprintUpdateCoordinator(
         hass,
@@ -226,7 +239,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 translation_key="system_error",
             )
 
-        max_backups = config_entry.options.get(CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS)
+        max_backups = active_coordinator._get_max_backups()
         if version < 1 or version > max_backups:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -353,7 +366,14 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     blueprint_coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN]["coordinators"][
         entry.entry_id
     ]
-    interval_hours = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_HOURS)
+    try:
+        interval_hours = int(
+            str(entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL_HOURS)).strip()
+        )
+    except (ValueError, TypeError):
+        interval_hours = DEFAULT_UPDATE_INTERVAL_HOURS
+
+    interval_hours = max(MIN_UPDATE_INTERVAL, interval_hours)
     blueprint_coordinator.update_interval = timedelta(hours=interval_hours)
 
     await blueprint_coordinator.async_request_refresh()

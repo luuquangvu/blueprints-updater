@@ -45,9 +45,11 @@ from .const import (
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
+    MAX_BACKUPS,
     MAX_CONCURRENT_REQUESTS,
     MAX_RETRIES,
     MAX_SEND_INTERVAL,
+    MIN_BACKUPS,
     MIN_SEND_INTERVAL,
     RE_BLUEPRINT_KEY,
     RE_FORUM_CODE_BLOCK,
@@ -137,6 +139,34 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._safe_hostname_lock = asyncio.Lock()
         if self.config_entry:
             self.config_entry.async_on_unload(self._async_cancel_background_task)
+
+    def clear_translations(self) -> None:
+        """Clear the internal translation cache.
+
+        This method resets the coordinator's translation dictionary, allowing
+        it to be re-populated on the next translation request.
+        """
+        _LOGGER.debug("Clearing translations for Blueprints Updater coordinator")
+        self._translations = {}
+
+    @callback
+    def _get_max_backups(self) -> int:
+        """Get the maximum number of backups allowed from configuration.
+
+        Returns:
+            The normalized number of backups to keep (clamped within bounds).
+
+        """
+        if not self.config_entry:
+            return DEFAULT_MAX_BACKUPS
+
+        val = self.config_entry.options.get(CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS)
+        try:
+            max_bak = int(str(val).strip())
+        except (ValueError, TypeError):
+            return DEFAULT_MAX_BACKUPS
+
+        return max(MIN_BACKUPS, min(MAX_BACKUPS, max_bak))
 
     async def async_setup(self) -> None:
         """Load persisted data from storage.
@@ -647,11 +677,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         try:
-            try:
-                max_bak = max(1, min(10, max_bak))
-            except (TypeError, ValueError):
-                max_bak = DEFAULT_MAX_BACKUPS
-
             if not os.path.isfile(file_path):
                 return
 
@@ -707,8 +732,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             backup: Whether to create backup files of the old version.
 
         """
-        if not self._is_safe_path(path):
-            _LOGGER.error("Security violation: Attempted to install to unsafe path: %s", path)
+        real_path = os.path.realpath(path)
+        if not self._is_safe_path(real_path):
+            _LOGGER.error("Security violation: Attempted to install to unsafe path: %s", real_path)
             raise HomeAssistantError(
                 "Security violation: Attempted to install to an unsafe location"
             )
@@ -717,9 +743,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.error("Cannot install blueprint at %s: content is empty or None", path)
             raise HomeAssistantError("Blueprint content is missing or empty")
 
-        max_backups = DEFAULT_MAX_BACKUPS
-        if self.config_entry:
-            max_backups = self.config_entry.options.get(CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS)
+        max_backups = self._get_max_backups()
 
         try:
 
@@ -734,7 +758,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
                 os.replace(tmp_path, file_path)
 
-            await self.hass.async_add_executor_job(_save_file, path, remote_content, max_backups)
+            await self.hass.async_add_executor_job(
+                _save_file, real_path, remote_content, max_backups
+            )
 
             if reload_services:
                 domain = "automation"
@@ -759,7 +785,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 if self.data[path].get("remote_hash") == new_hash:
                     self.data[path]["invalid_remote_hash"] = None
 
-            _LOGGER.info("Blueprint at %s updated successfully", path)
+            _LOGGER.info("Blueprint at %s updated successfully", real_path)
         except Exception as err:
             _LOGGER.error("Failed to update blueprint at %s: %s", path, err)
             raise
@@ -861,9 +887,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         blueprint_path = self.hass.config.path("blueprints")
         try:
-            abs_path = str(os.path.abspath(path))
-            abs_blueprints = str(os.path.abspath(blueprint_path))
-            return os.path.commonpath([abs_path, abs_blueprints]) == abs_blueprints
+            real_path = os.path.realpath(path)
+            real_blueprints = os.path.realpath(blueprint_path)
+            return os.path.commonpath([real_path, real_blueprints]) == real_blueprints
         except (ValueError, OSError):
             return False
 
@@ -881,13 +907,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A dictionary with 'success' (bool) and 'translation_key' (str).
 
         """
-        if not self._is_safe_path(path):
-            _LOGGER.error("Security violation: Attempted to restore unsafe path: %s", path)
+        real_path = os.path.realpath(path)
+        if not self._is_safe_path(real_path):
+            _LOGGER.error("Security violation: Attempted to restore unsafe path: %s", real_path)
             return {"success": False, "translation_key": "system_error"}
 
-        max_backups = DEFAULT_MAX_BACKUPS
-        if self.config_entry:
-            max_backups = self.config_entry.options.get(CONF_MAX_BACKUPS, DEFAULT_MAX_BACKUPS)
+        max_backups = self._get_max_backups()
+        if version < 1 or version > max_backups:
+            _LOGGER.error(
+                "Invalid backup version %s requested for %s (current limit: %s)",
+                version,
+                real_path,
+                max_backups,
+            )
+            return {"success": False, "translation_key": "system_error"}
 
         try:
 
@@ -913,7 +946,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 return True, "success"
 
             success, message = await self.hass.async_add_executor_job(
-                _restore_file, path, version, max_backups
+                _restore_file, real_path, version, max_backups
             )
 
             if success:
@@ -928,7 +961,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "translation_key": message,
             }
         except Exception as err:
-            _LOGGER.error("Failed to restore blueprint at %s: %s", path, err)
+            _LOGGER.error("Failed to restore blueprint at %s: %s", real_path, err)
             return {
                 "success": False,
                 "translation_key": "system_error",

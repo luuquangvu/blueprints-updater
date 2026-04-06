@@ -951,6 +951,10 @@ async def test_async_install_blueprint_backup(hass, coordinator):
 
     with (
         patch("builtins.open", MagicMock()),
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.path.realpath",
+            side_effect=os.path.normpath,
+        ),
         patch("custom_components.blueprints_updater.coordinator.os.replace") as mock_replace,
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
         patch("custom_components.blueprints_updater.coordinator.shutil.copy2") as mock_copy,
@@ -958,8 +962,8 @@ async def test_async_install_blueprint_backup(hass, coordinator):
     ):
         await coordinator.async_install_blueprint(path, remote_content, backup=True)
 
-    mock_copy.assert_called_once_with(path, f"{path}.bak.1")
-    mock_replace.assert_any_call(f"{path}.tmp", path)
+    mock_copy.assert_called_once_with(os.path.normpath(path), os.path.normpath(f"{path}.bak.1"))
+    mock_replace.assert_any_call(os.path.normpath(f"{path}.tmp"), os.path.normpath(path))
 
 
 @pytest.mark.asyncio
@@ -974,6 +978,10 @@ async def test_async_restore_blueprint_success(hass, coordinator):
 
     with (
         patch("builtins.open", MagicMock()),
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.path.realpath",
+            side_effect=os.path.normpath,
+        ),
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
         patch("custom_components.blueprints_updater.coordinator.os.replace") as mock_replace,
         patch("custom_components.blueprints_updater.coordinator.os.remove"),
@@ -982,7 +990,9 @@ async def test_async_restore_blueprint_success(hass, coordinator):
     ):
         result = await coordinator.async_restore_blueprint(path)
 
-    mock_replace.assert_any_call(f"{path}.bak.1", f"{path}.bak.2")
+    mock_replace.assert_any_call(
+        os.path.normpath(f"{path}.bak.1"), os.path.normpath(f"{path}.bak.2")
+    )
     assert result["success"] is True
     assert result["translation_key"] == "success"
     hass.services.async_call.assert_any_call("automation", "reload")
@@ -1408,11 +1418,15 @@ def test_scan_blueprints_domain_extraction(hass, coordinator):
 def test_is_safe_path(coordinator):
     """Test _is_safe_path logic."""
     coordinator._is_safe_path = BlueprintUpdateCoordinator._is_safe_path.__get__(coordinator)
-    assert coordinator._is_safe_path("/config/blueprints/test.yaml")
-    assert coordinator._is_safe_path("/config/blueprints/automation/test.yaml")
-    assert not coordinator._is_safe_path("/config/secrets.yaml")
-    assert not coordinator._is_safe_path("/etc/passwd")
-    assert not coordinator._is_safe_path("/config/blueprints/../secrets.yaml")
+    with patch(
+        "custom_components.blueprints_updater.coordinator.os.path.realpath",
+        side_effect=os.path.normpath,
+    ):
+        assert coordinator._is_safe_path("/config/blueprints/test.yaml")
+        assert coordinator._is_safe_path("/config/blueprints/automation/test.yaml")
+        assert not coordinator._is_safe_path("/config/secrets.yaml")
+        assert not coordinator._is_safe_path("/etc/passwd")
+        assert not coordinator._is_safe_path("/config/blueprints/../secrets.yaml")
 
 
 @pytest.mark.asyncio
@@ -1456,14 +1470,21 @@ async def test_is_safe_url_dns_resolution(coordinator):
 async def test_async_install_blueprint_unsafe_path(coordinator):
     """Test that installing to an unsafe path is blocked."""
     coordinator._is_safe_path = BlueprintUpdateCoordinator._is_safe_path.__get__(coordinator)
-    with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.path.realpath",
+            side_effect=os.path.normpath,
+        ),
+        patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger,
+    ):
         with pytest.raises(
             HomeAssistantError,
             match=r"Security violation: Attempted to install to an unsafe location",
         ):
             await coordinator.async_install_blueprint("/config/secrets.yaml", "content")
         mock_logger.error.assert_called_with(
-            "Security violation: Attempted to install to unsafe path: %s", "/config/secrets.yaml"
+            "Security violation: Attempted to install to unsafe path: %s",
+            os.path.normpath("/config/secrets.yaml"),
         )
 
 

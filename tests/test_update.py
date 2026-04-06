@@ -449,4 +449,5 @@ async def test_async_update_entities_migration(hass):
         mock_entity_registry.async_update_entity.assert_called_once_with(
             "update.kept", new_unique_id=new_id
         )
-        mock_entity_registry.async_remove.assert_called_with("update.orphan")
+        mock_entity_registry.async_remove.assert_called_once_with("update.orphan")
+        hass.states.async_remove.assert_called_once_with("update.orphan")

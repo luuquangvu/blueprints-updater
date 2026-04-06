@@ -117,6 +117,7 @@ async def test_service_handlers(hass: HomeAssistant):
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
     coordinator_mock.async_request_refresh = AsyncMock()
+    coordinator_mock._get_max_backups.return_value = 3
     hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator_mock}}}
 
     with (
@@ -181,6 +182,7 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
     coordinator_mock.config_entry = entry
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock._get_max_backups.return_value = 3
 
     hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator_mock}}}
 
@@ -337,10 +339,12 @@ async def test_restore_handler_multi_coordinator_selection(hass: HomeAssistant):
     coordinator_one = MagicMock(spec=BlueprintUpdateCoordinator)
     coordinator_one.config_entry = entry_one
     coordinator_one.data = {}
+    coordinator_one._get_max_backups.return_value = 3
 
     coordinator_two = MagicMock(spec=BlueprintUpdateCoordinator)
     coordinator_two.config_entry = entry_two
     coordinator_two.data = {}
+    coordinator_two._get_max_backups.return_value = 3
 
     hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})
     hass.data[DOMAIN]["coordinators"][entry_one.entry_id] = coordinator_one
