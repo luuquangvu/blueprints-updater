@@ -45,3 +45,6 @@ indent-style = "space"
 asyncio_mode = "auto"
 pythonpath = ["."]
 filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.pyright]
+typeCheckingMode = "standard"

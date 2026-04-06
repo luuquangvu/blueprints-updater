@@ -1,6 +1,7 @@
 """Tests for Blueprints Updater initialization."""
 
 from types import MappingProxyType
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -528,7 +529,7 @@ async def test_async_update_all_handler_continues_on_failure(hass: HomeAssistant
             None,
         )
 
-        async def mock_install(path, *_args, **_kwargs):
+        async def mock_install(path: str, *args: Any, **kwargs: Any):
             """Mock install blueprint."""
             if path == "fail.yaml":
                 raise ValueError("Update failed")

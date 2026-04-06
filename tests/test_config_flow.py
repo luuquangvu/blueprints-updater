@@ -5,6 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import voluptuous as vol
+from homeassistant.config_entries import (
+    ConfigFlowResult,
+)
 from homeassistant.core import HomeAssistant
 
 from custom_components.blueprints_updater.config_flow import (
@@ -49,11 +52,12 @@ async def test_config_flow_defaults(hass: HomeAssistant):
         "custom_components.blueprints_updater.config_flow._async_get_blueprint_options",
         return_value=[],
     ):
-        result = await flow.async_step_user()
-        assert cast(dict[str, Any], result)["type"] == "form"
-        assert cast(dict[str, Any], result)["step_id"] == "user"
+        result: ConfigFlowResult = await flow.async_step_user()
+        assert result.get("type") == "form"
+        assert result.get("step_id") == "user"
 
-        data_schema = cast(vol.Schema, cast(dict[str, Any], result)["data_schema"])
+        data_schema = result.get("data_schema")
+        assert isinstance(data_schema, vol.Schema)
         defaults = get_schema_defaults(data_schema)
         assert defaults.get(CONF_UPDATE_INTERVAL) == 24
         assert defaults.get(CONF_MAX_BACKUPS) == 3
@@ -81,10 +85,10 @@ async def test_options_flow_clamping(hass: HomeAssistant):
         "custom_components.blueprints_updater.config_flow._async_get_blueprint_options",
         return_value=[],
     ):
-        result = await handler.async_step_init()
-        assert cast(dict[str, Any], result)["type"] == "form"
+        result: ConfigFlowResult = await handler.async_step_init()
+        assert result.get("type") == "form"
 
-        data_schema = cast(dict[str, Any], result)["data_schema"]
+        data_schema = result.get("data_schema")
         assert isinstance(data_schema, vol.Schema)
         defaults = get_schema_defaults(data_schema)
 
@@ -99,8 +103,8 @@ async def test_options_flow_clamping(hass: HomeAssistant):
         "custom_components.blueprints_updater.config_flow._async_get_blueprint_options",
         return_value=[],
     ):
-        result = await handler.async_step_init()
-        data_schema = cast(dict[str, Any], result)["data_schema"]
+        result: ConfigFlowResult = await handler.async_step_init()
+        data_schema = result.get("data_schema")
         assert isinstance(data_schema, vol.Schema)
         defaults = get_schema_defaults(data_schema)
         assert defaults.get(CONF_MAX_BACKUPS) == 1
@@ -129,10 +133,10 @@ async def test_options_flow_safe_coercion(hass: HomeAssistant):
         "custom_components.blueprints_updater.config_flow._async_get_blueprint_options",
         return_value=[],
     ):
-        result = await handler.async_step_init()
-        assert cast(dict[str, Any], result)["type"] == "form"
+        result: ConfigFlowResult = await handler.async_step_init()
+        assert result.get("type") == "form"
 
-        data_schema = cast(dict[str, Any], result)["data_schema"]
+        data_schema = result.get("data_schema")
         assert isinstance(data_schema, vol.Schema)
         defaults = get_schema_defaults(data_schema)
 
@@ -162,8 +166,9 @@ async def test_options_flow_enhanced_coercion(hass: HomeAssistant):
         "custom_components.blueprints_updater.config_flow._async_get_blueprint_options",
         return_value=[],
     ):
-        result = await handler.async_step_init()
-        data_schema = cast(vol.Schema, cast(dict[str, Any], result)["data_schema"])
+        result: ConfigFlowResult = await handler.async_step_init()
+        data_schema = result.get("data_schema")
+        assert isinstance(data_schema, vol.Schema)
         defaults = get_schema_defaults(data_schema)
 
         assert defaults.get(CONF_MAX_BACKUPS) == 1
