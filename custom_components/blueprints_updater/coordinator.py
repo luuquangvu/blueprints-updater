@@ -745,7 +745,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     blueprint_dict = yaml_util.parse_yaml(remote_content)
                     if isinstance(blueprint_dict, dict) and "blueprint" in blueprint_dict:
                         domain = blueprint_dict["blueprint"].get("domain", "automation")
-                except Exception as err:
+                except HomeAssistantError as err:
                     _LOGGER.warning("Failed to parse blueprint at %s: %s", path, err)
                 await self.async_reload_services([domain])
 
@@ -1116,7 +1116,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         try:
             blueprint_dict = yaml_util.parse_yaml(remote_content)
             last_error = self._validate_blueprint(blueprint_dict, source_url)
-        except Exception as err:
+        except HomeAssistantError as err:
             last_error = f"yaml_syntax_error|{err}"
 
         auto_update = self.config_entry and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
@@ -1396,35 +1396,48 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     @staticmethod
     def _should_include_blueprint(rel_path: str, filter_mode: str, selected_set: set[str]) -> bool:
         """Check if a blueprint should be included based on filtering rules."""
-        if filter_mode == FILTER_MODE_BLACKLIST and rel_path in selected_set:
-            return False
-        return filter_mode != FILTER_MODE_WHITELIST or rel_path in selected_set
+        if filter_mode == FILTER_MODE_BLACKLIST:
+            return rel_path not in selected_set
+
+        if filter_mode == FILTER_MODE_WHITELIST:
+            return rel_path in selected_set
+
+        if filter_mode == FILTER_MODE_ALL:
+            return True
+
+        _LOGGER.warning(
+            "Unknown blueprint filter_mode '%s' for '%s'; excluding from scan",
+            filter_mode,
+            rel_path,
+        )
+        return False
 
     @staticmethod
     def _parse_blueprint_data(path: str, content: str) -> dict[str, Any] | None:
         """Parse raw YAML content and extract blueprint metadata if valid."""
         try:
             blueprint_dict = yaml_util.parse_yaml(content)
-            if not isinstance(blueprint_dict, dict) or "blueprint" not in blueprint_dict:
-                return None
-
-            bp_info = blueprint_dict["blueprint"]
-            if not isinstance(bp_info, dict):
-                return None
-
-            source_url = bp_info.get("source_url")
-            if not isinstance(source_url, str) or not source_url.strip():
-                return None
-
-            return {
-                "name": bp_info.get("name", os.path.basename(path)),
-                "domain": bp_info.get("domain", "automation"),
-                "source_url": source_url.strip(),
-                "local_hash": hashlib.sha256(content.encode()).hexdigest(),
-            }
-        except Exception as err:
-            _LOGGER.error("Error parsing blueprint at %s: %s", path, err)
+        except HomeAssistantError as err:
+            _LOGGER.warning("Failed to parse blueprint at %s: %s", path, err)
             return None
+
+        if not isinstance(blueprint_dict, dict) or "blueprint" not in blueprint_dict:
+            return None
+
+        bp_info = blueprint_dict["blueprint"]
+        if not isinstance(bp_info, dict):
+            return None
+
+        source_url = bp_info.get("source_url")
+        if not isinstance(source_url, str) or not source_url.strip():
+            return None
+
+        return {
+            "name": bp_info.get("name", os.path.basename(path)),
+            "domain": bp_info.get("domain", "automation"),
+            "source_url": source_url.strip(),
+            "local_hash": hashlib.sha256(content.encode()).hexdigest(),
+        }
 
     @staticmethod
     def scan_blueprints(

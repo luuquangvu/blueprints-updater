@@ -263,7 +263,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             info = self.coordinator.data[self._path]
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
-        return attrs
+        return attrs.copy()
 
     @callback
     def _clear_cached_properties(self) -> None:
