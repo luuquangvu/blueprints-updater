@@ -81,7 +81,7 @@ async def test_304_response_preserves_updatable_status(
     mock_session = MagicMock(spec=httpx.AsyncClient)
     mock_session.get = AsyncMock(return_value=mock_response)
 
-    results_to_notify: list[Any] = []
+    results_to_notify: list[str] = []
     updated_domains: set[str] = set()
     await cast(Any, coordinator)._async_update_blueprint_in_place(
         mock_session, path, info, results_to_notify, updated_domains
