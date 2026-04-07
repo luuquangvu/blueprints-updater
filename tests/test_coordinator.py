@@ -67,11 +67,9 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
 def test_coordinator_protocol_conformance(coordinator):
     """Verify that BlueprintUpdateCoordinator conforms to BlueprintCoordinatorProtocol."""
     from protocols import (
-        BlueprintCoordinatorCore,
-        BlueprintCoordinatorFetch,
-        BlueprintCoordinatorPersistence,
+        BlueprintCoordinatorInternal,
         BlueprintCoordinatorProtocol,
-        BlueprintCoordinatorTasks,
+        BlueprintCoordinatorPublic,
     )
 
     def check_protocol(inst, protocol, name):
@@ -86,10 +84,8 @@ def test_coordinator_protocol_conformance(coordinator):
                 missing.append(f"Method/Member: {attr}")
         assert not missing, f"{name} is missing members: {missing}"
 
-    check_protocol(coordinator, BlueprintCoordinatorCore, "BlueprintCoordinatorCore")
-    check_protocol(coordinator, BlueprintCoordinatorPersistence, "BlueprintCoordinatorPersistence")
-    check_protocol(coordinator, BlueprintCoordinatorFetch, "BlueprintCoordinatorFetch")
-    check_protocol(coordinator, BlueprintCoordinatorTasks, "BlueprintCoordinatorTasks")
+    check_protocol(coordinator, BlueprintCoordinatorPublic, "BlueprintCoordinatorPublic")
+    check_protocol(coordinator, BlueprintCoordinatorInternal, "BlueprintCoordinatorInternal")
     check_protocol(coordinator, BlueprintCoordinatorProtocol, "BlueprintCoordinatorProtocol")
     assert isinstance(coordinator, BlueprintCoordinatorProtocol)
 
@@ -243,6 +239,43 @@ not_blueprint:
     nested: true
 """
     assert coordinator._ensure_source_url(content, source_url) == content
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinator):
+    """Test that invalid JSON from forum URLs sets fetch_error."""
+    path = "/config/blueprints/test.yaml"
+    source_url = "https://community.home-assistant.io/t/123"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "source_url": source_url,
+        "domain": "automation",
+        "local_hash": "old_hash",
+    }
+    coordinator.data = {path: info}
+
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.status_code = 200
+    mock_response.headers = {"Content-Type": "application/json"}
+    mock_response.text = '{"posts": [ {"cooked": "invalid"}'
+    mock_response.json = MagicMock(side_effect=ValueError("Expecting value"))
+    mock_response.raise_for_status = MagicMock()
+
+    mock_session = MagicMock(spec=httpx.AsyncClient)
+    mock_session.get = AsyncMock(return_value=mock_response)
+
+    results_to_notify = []
+    updated_domains = set()
+
+    await coordinator._async_update_blueprint_in_place(
+        mock_session, path, info, results_to_notify, updated_domains
+    )
+
+    assert "fetch_error" in coordinator.data[path]["last_error"]
+    assert "Invalid JSON response" in coordinator.data[path]["last_error"]
+    assert "123.json" in coordinator.data[path]["last_error"]
+    assert coordinator.data[path]["updatable"] is False
 
 
 def test_scan_blueprints(hass, coordinator):

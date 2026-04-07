@@ -12,6 +12,7 @@ import os
 import random
 import shutil
 import socket
+import textwrap
 import time
 from datetime import timedelta
 from typing import Any, TypedDict, cast
@@ -62,6 +63,21 @@ from .const import (
 from .utils import get_max_backups, retry_async
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _sanitize_error_detail(detail: str, max_length: int = 120) -> str:
+    """Sanitize error detail to avoid delimiter clashes and overly long messages.
+
+    Args:
+        detail: The raw error message string.
+        max_length: Maximum allowed length for the sanitized string.
+
+    Returns:
+        The sanitized and potentially truncated error string.
+
+    """
+    cleaned = detail.replace("|", "/")
+    return textwrap.shorten(cleaned, width=max_length, placeholder="...")
 
 
 class ParsedBlueprintData(TypedDict):
@@ -607,14 +623,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     source_url,
                     error_msg,
                 )
-                return f"incompatible|{error_msg}"
+                return f"incompatible|{_sanitize_error_detail(error_msg)}"
         except InvalidBlueprint as err:
             _LOGGER.warning(
                 "Blueprint validation failed for %s: %s",
                 source_url,
                 err,
             )
-            return f"validation_error|{err}"
+            return f"validation_error|{_sanitize_error_detail(str(err))}"
         return None
 
     async def async_reload_services(self, domains: list[str] | set[str] | None = None) -> None:
@@ -1003,7 +1019,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "remote_hash": None,
                         "remote_content": None,
                         "updatable": False,
-                        "last_error": f"unsafe_url|{source_url}",
+                        "last_error": f"unsafe_url|{_sanitize_error_detail(str(source_url))}",
                         "etag": None,
                     }
                 )
@@ -1035,7 +1051,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if self.data and path in self.data:
                 self.data[path].update(
                     {
-                        "last_error": f"fetch_error|{err}",
+                        "last_error": f"fetch_error|{_sanitize_error_detail(str(err))}",
                         "remote_hash": None,
                         "remote_content": None,
                         "updatable": False,
@@ -1074,7 +1090,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if self.data and path in self.data:
                 self.data[path].update(
                     {
-                        "last_error": f"processing_error|{err}",
+                        "last_error": f"processing_error|{_sanitize_error_detail(str(err))}",
                         "remote_hash": None,
                         "remote_content": None,
                         "updatable": False,
@@ -1161,7 +1177,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             blueprint_dict = yaml_util.parse_yaml(remote_content)
             last_error = self._validate_blueprint(blueprint_dict, source_url)
         except (HomeAssistantError, InvalidBlueprint) as err:
-            last_error = f"yaml_syntax_error|{err}"
+            last_error = f"yaml_syntax_error|{_sanitize_error_detail(str(err))}"
 
         auto_update = self.config_entry and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
 
@@ -1186,7 +1202,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 return
             except Exception as err:
                 _LOGGER.error("Auto-update failed for %s: %s", path, err)
-                last_error = f"auto_update_failed|{err}"
+                last_error = f"auto_update_failed|{_sanitize_error_detail(str(err))}"
 
         if self.data and path in self.data:
             if last_error:
@@ -1295,7 +1311,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             try:
                 json_data = response.json()
             except ValueError as err:
-                raise httpx.HTTPError(f"Invalid JSON response from forum URL: {err}") from err
+                raise httpx.HTTPError(
+                    f"Invalid JSON response from forum URL {current_url}: {err}"
+                ) from err
             content = self._parse_forum_content(json_data)
             return (content or ""), new_etag
 
