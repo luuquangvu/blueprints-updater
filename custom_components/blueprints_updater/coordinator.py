@@ -1074,7 +1074,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "updatable": False,
                     }
                 )
-            raise
+            return
 
     async def _handle_not_modified_case(
         self,
