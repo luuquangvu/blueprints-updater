@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
 
+from custom_components.blueprints_updater.coordinator import BlueprintMetadata
+
 
 @runtime_checkable
 class BlueprintCoordinatorProtocol(Protocol):
@@ -25,8 +27,8 @@ class BlueprintCoordinatorProtocol(Protocol):
     _persisted_etags: dict[str, str]
     _persisted_hashes: dict[str, str]
 
-    async_set_updated_data: Callable[..., Any]
-    async_update_listeners: Callable[..., Any]
+    async_set_updated_data: Callable[..., None]
+    async_update_listeners: Callable[..., None]
     _is_safe_path: Callable[..., bool]
     _is_safe_url: Callable[..., Awaitable[bool]]
     _store: Any
@@ -41,7 +43,7 @@ class BlueprintCoordinatorProtocol(Protocol):
     _start_background_refresh: Callable[..., None]
     async_setup: Callable[..., Awaitable[None]]
     async_refresh: Callable[..., Awaitable[None]]
-    scan_blueprints: Callable[..., dict[str, Any]]
+    scan_blueprints: Callable[..., dict[str, BlueprintMetadata]]
 
 
 @pytest.fixture(autouse=True)

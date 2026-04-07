@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import logging
 from functools import cached_property
 from typing import Any
@@ -268,10 +269,9 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
     @callback
     def _clear_cached_properties(self) -> None:
         """Invalidate cached properties after state changes."""
-        for attr, value in self.__class__.__dict__.items():
-            if isinstance(value, cached_property):
-                with contextlib.suppress(AttributeError):
-                    delattr(self, attr)
+        for name, _ in inspect.getmembers(self.__class__, lambda x: isinstance(x, cached_property)):
+            with contextlib.suppress(AttributeError):
+                delattr(self, name)
 
     @callback
     def _handle_coordinator_update(self) -> None:
