@@ -1395,7 +1395,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         try:
             parsed = yaml_util.parse_yaml(content)
-        except HomeAssistantError:
+        except (HomeAssistantError, ValueError):
             parsed = None
 
         if isinstance(parsed, dict) and "blueprint" in parsed:
@@ -1500,7 +1500,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Extract the 'blueprint' metadata block from YAML content."""
         try:
             blueprint_dict = yaml_util.parse_yaml(content)
-        except HomeAssistantError as err:
+        except (HomeAssistantError, ValueError) as err:
             _LOGGER.warning("Failed to parse blueprint at %s: %s", path, err)
             return None
 

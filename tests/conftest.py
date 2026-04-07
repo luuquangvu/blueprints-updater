@@ -113,7 +113,7 @@ class BlueprintCoordinatorProtocol(Protocol):
         """Trigger an manual data refresh."""
         ...
 
-    async def _async_update_data(self) -> None:
+    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Async update method used by Home Assistant DataUpdateCoordinator."""
         ...
 
