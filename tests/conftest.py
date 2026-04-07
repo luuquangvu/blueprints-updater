@@ -27,8 +27,8 @@ class BlueprintCoordinatorProtocol(Protocol):
     _persisted_etags: dict[str, str]
     _persisted_hashes: dict[str, str]
 
-    async_set_updated_data: Callable[..., None]
-    async_update_listeners: Callable[..., None]
+    async_set_updated_data: Callable[..., Awaitable[None]]
+    async_update_listeners: Callable[..., Awaitable[None]]
     _is_safe_path: Callable[..., bool]
     _is_safe_url: Callable[..., Awaitable[bool]]
     _store: Any

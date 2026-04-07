@@ -55,8 +55,8 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
         def _mock_set_data(data):
             coord.data = data
 
-        coord.async_set_updated_data = MagicMock(side_effect=_mock_set_data)
-        coord.async_update_listeners = MagicMock()
+        coord.async_set_updated_data = AsyncMock(side_effect=_mock_set_data)
+        coord.async_update_listeners = AsyncMock()
         coord.setup_complete = True
         coord._is_safe_path = MagicMock(return_value=True)
         coord._is_safe_url = AsyncMock(return_value=True)

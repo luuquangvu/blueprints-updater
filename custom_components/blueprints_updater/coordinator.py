@@ -1012,7 +1012,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 remote_content, new_etag = await self._handle_not_modified_case(
                     session, path, info, normalized_url, new_etag
                 )
-        except (TimeoutError, httpx.HTTPError, HomeAssistantError, ValueError) as err:
+        except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
             _LOGGER.debug(
                 "Failed to fetch blueprint from %s: %s",
                 source_url,
@@ -1278,7 +1278,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         new_etag = response.headers.get("ETag")
         parsed_url = urlparse(current_url)
         if DOMAIN_HA_FORUM in parsed_url.netloc:
-            json_data = response.json()
+            try:
+                json_data = response.json()
+            except ValueError as err:
+                raise httpx.HTTPError(f"Invalid JSON response from forum URL: {err}") from err
             content = self._parse_forum_content(json_data)
             return (content or ""), new_etag
 
