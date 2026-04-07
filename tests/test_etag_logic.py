@@ -121,12 +121,13 @@ async def test_persistence_of_remote_hashes(
     assert save_args["etags"][path] == etag
     assert save_args["remote_hashes"][path] == remote_hash
 
-    coordinator._persisted_etags = {path: etag}
-    coordinator._persisted_hashes = {path: remote_hash}
+    coordinator._persisted_etags = {}
+    coordinator._persisted_hashes = {}
     mock_store.async_load = AsyncMock(return_value=save_args)
 
     await coordinator.async_setup()
 
+    mock_store.async_load.assert_awaited_once()
     assert coordinator._persisted_etags[path] == etag
     assert coordinator._persisted_hashes[path] == remote_hash
 

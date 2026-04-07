@@ -1119,7 +1119,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         try:
             blueprint_dict = yaml_util.parse_yaml(remote_content)
             last_error = self._validate_blueprint(blueprint_dict, source_url)
-        except HomeAssistantError as err:
+        except Exception as err:
             last_error = f"yaml_syntax_error|{err}"
 
         auto_update = self.config_entry and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
@@ -1443,8 +1443,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not isinstance(source_url, str) or not source_url.strip():
             return None
 
-        name = str(bp_info.get("name", "")).strip() or os.path.basename(path)
-        domain = str(bp_info.get("domain", "")).strip() or "automation"
+        raw_name = bp_info.get("name")
+        name = (
+            raw_name.strip()
+            if isinstance(raw_name, str) and raw_name.strip()
+            else os.path.basename(path)
+        )
+        raw_domain = bp_info.get("domain")
+        domain = (
+            raw_domain.strip()
+            if isinstance(raw_domain, str) and raw_domain.strip()
+            else "automation"
+        )
         return {
             "name": name,
             "domain": domain,
