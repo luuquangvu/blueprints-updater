@@ -326,7 +326,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             else FILTER_MODE_ALL
         )
 
-        selected_blueprints = (
+        selected_blueprints = self._get_validated_selected_blueprints(
             self.config_entry.options.get(CONF_SELECTED_BLUEPRINTS, []) if self.config_entry else []
         )
 
@@ -1012,7 +1012,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 remote_content, new_etag = await self._handle_not_modified_case(
                     session, path, info, normalized_url, new_etag
                 )
-        except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
+        except (TimeoutError, httpx.HTTPError, HomeAssistantError, ValueError) as err:
             _LOGGER.debug(
                 "Failed to fetch blueprint from %s: %s",
                 source_url,
@@ -1467,6 +1467,30 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         _LOGGER.error("Invalid filter mode '%s' in config; falling back to all", filter_mode)
         return FILTER_MODE_ALL
+
+    @staticmethod
+    def _get_validated_selected_blueprints(selected: Any) -> list[str]:
+        """Validate and coerce selected blueprints into a list of strings.
+
+        Args:
+            selected: The selection value to validate.
+
+        Returns:
+            A valid list of blueprint paths.
+
+        """
+        if selected is None:
+            return []
+        if isinstance(selected, str):
+            return [selected.strip()] if selected.strip() else []
+        if isinstance(selected, list):
+            return [str(item).strip() for item in selected if item and str(item).strip()]
+        if hasattr(selected, "__iter__"):
+            try:
+                return [str(item).strip() for item in selected if item and str(item).strip()]
+            except (TypeError, ValueError):
+                return []
+        return []
 
     @staticmethod
     def _get_blueprint_block(path: str, content: str) -> dict[str, Any] | None:
