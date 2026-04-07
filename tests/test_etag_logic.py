@@ -2,7 +2,7 @@
 
 import hashlib
 from datetime import timedelta
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -34,10 +34,10 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
         )
         coord.hass = hass
         coord.data = {}
-        coord.async_set_updated_data = MagicMock()
+        coord.async_set_updated_data = cast(Any, MagicMock())
         coord.setup_complete = True
-        coord._is_safe_path = MagicMock(return_value=True)
-        coord._is_safe_url = AsyncMock(return_value=True)
+        coord._is_safe_path = cast(Any, MagicMock(return_value=True))
+        coord._is_safe_url = cast(Any, AsyncMock(return_value=True))
         return coord
 
 

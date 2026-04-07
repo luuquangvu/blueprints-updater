@@ -1,7 +1,7 @@
 """Fixtures for Blueprints Updater tests."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -28,35 +28,158 @@ class BlueprintCoordinatorProtocol(Protocol):
     _persisted_etags: dict[str, str]
     _persisted_hashes: dict[str, str]
 
-    async_set_updated_data: Callable[..., Awaitable[None]]
-    async_update_listeners: Callable[..., Awaitable[None]]
-    _is_safe_path: Callable[..., bool]
-    _is_safe_url: Callable[..., Awaitable[bool]]
+    def async_set_updated_data(self, data: dict[str, Any]) -> None:
+        """Set the data in the coordinator."""
+        ...
+
+    def async_update_listeners(self) -> None:
+        """Update any listeners with new data."""
+        ...
+
+    def _is_safe_path(self, path: str) -> bool:
+        """Check if path is within blueprints directory."""
+        ...
+
+    async def _is_safe_url(self, url: str) -> bool:
+        """Check if the URL is safe."""
+        ...
+
     _store: Any
-    _async_update_blueprint_in_place: Callable[..., Awaitable[None]]
-    _async_save_metadata: Callable[..., Awaitable[None]]
-    _async_background_refresh: Callable[..., Awaitable[None]]
-    _validate_blueprint: Callable[..., str | None]
-    async_install_blueprint: Callable[..., Awaitable[None]]
-    async_reload_services: Callable[..., Awaitable[None]]
-    async_translate: Callable[..., Awaitable[str]]
-    _process_blueprint_content: Callable[..., Awaitable[None]]
-    _start_background_refresh: Callable[..., None]
-    async_setup: Callable[..., Awaitable[None]]
-    async_refresh: Callable[..., Awaitable[None]]
-    scan_blueprints: Callable[[HomeAssistant, str, list[str]], dict[str, BlueprintMetadata]]
-    _normalize_url: Callable[[str], str]
-    _parse_forum_content: Callable[[dict[str, Any]], str | None]
-    _ensure_source_url: Callable[[str, str], str]
-    _normalize_domain: Callable[[Any], str]
-    _should_include_blueprint: Callable[[str, str, set[str]], bool]
-    async_fetch_blueprint: Callable[[str], Awaitable[None]]
-    async_restore_blueprint: Callable[[str, int], Awaitable[None]]
-    _async_fetch_content: Callable[..., Awaitable[tuple[str | None, str | None]]]
+
+    async def _async_update_blueprint_in_place(
+        self,
+        session: Any,
+        path: str,
+        info: dict[str, Any],
+        results_to_notify: list[str],
+        updated_domains: set[str],
+        force: bool = False,
+    ) -> None:
+        """Update a blueprint file in place."""
+        ...
+
+    async def _async_save_metadata(self) -> None:
+        """Save coordinator metadata to persistent storage."""
+        ...
+
+    async def _async_background_refresh(self) -> None:
+        """Perform a background refresh of all blueprints."""
+        ...
+
+    def _validate_blueprint(self, blueprint_dict: dict[str, Any], source_url: str) -> str | None:
+        """Validate blueprint structure and return error tag if invalid."""
+        ...
+
+    async def async_install_blueprint(
+        self,
+        path: str,
+        remote_content: str,
+        reload_services: bool = True,
+        backup: bool = True,
+    ) -> None:
+        """Install a new blueprint or update an existing one."""
+        ...
+
+    async def async_reload_services(self, domains: list[str]) -> None:
+        """Reload services associated with defined domains."""
+        ...
+
+    async def async_translate(self, key: str, **kwargs: Any) -> str:
+        """Translate a localizable string."""
+        ...
+
+    async def _process_blueprint_content(
+        self,
+        path: str,
+        info: dict[str, Any],
+        remote_content: str,
+        new_etag: str | None,
+        source_url: str,
+        results_to_notify: list[str],
+        updated_domains: set[str],
+    ) -> None:
+        """Process results of a network fetch for a blueprint."""
+        ...
+
+    def _start_background_refresh(self) -> None:
+        """Initiate background refresh task."""
+        ...
+
+    async def async_setup(self) -> None:
+        """Execute initial setup logic."""
+        ...
+
+    async def async_refresh(self) -> None:
+        """Trigger an manual data refresh."""
+        ...
+
+    async def _async_update_data(self) -> None:
+        """Async update method used by Home Assistant DataUpdateCoordinator."""
+        ...
+
+    @staticmethod
+    def scan_blueprints(
+        hass: HomeAssistant,
+        filter_mode: str,
+        selected_blueprints: list[str],
+    ) -> dict[str, BlueprintMetadata]:
+        """Statically scan local blueprints directory."""
+        ...
+
+    @staticmethod
+    def _normalize_url(url: str) -> str:
+        """Normalize URL for consistent identifier usage."""
+        ...
+
+    @staticmethod
+    def _parse_forum_content(json_data: dict[str, Any]) -> str | None:
+        """Parse blueprint content from forum JSON responses."""
+        ...
+
+    @staticmethod
+    def _ensure_source_url(content: str, source_url: str) -> str:
+        """Inject or normalize source_url in blueprint metadata."""
+        ...
+
+    @staticmethod
+    def _normalize_domain(domain: Any) -> str:
+        """Normalize domain string for Home Assistant reload services."""
+        ...
+
+    @staticmethod
+    def _should_include_blueprint(rel_path: str, filter_mode: str, selected_set: set[str]) -> bool:
+        """Determine if a blueprint file should be processed."""
+        ...
+
+    async def async_fetch_blueprint(self, path: str, *, force: bool = False) -> None:
+        """Force a network refresh for a specific blueprint."""
+        ...
+
+    async def async_restore_blueprint(self, path: str, version: int = 1) -> dict[str, Any]:
+        """Restore blueprint from a local backup file."""
+        ...
+
+    async def _async_fetch_content(
+        self,
+        session: Any,
+        url: str,
+        etag: str | None = None,
+        force: bool = False,
+    ) -> tuple[str | None, str | None]:
+        """Perform raw network fetch with pacing and retry logic."""
+        ...
+
     _last_request_time: float
     _background_task: asyncio.Task[None] | None
-    async_shutdown: Callable[[], Awaitable[None]]
-    async_add_listener: Callable[[Callable[[], None]], Callable[[], None]]
+
+    async def async_shutdown(self) -> None:
+        """Gracefully terminate background tasks."""
+        ...
+
+    def async_add_listener(self, cb: Callable[[], None]) -> Callable[[], None]:
+        """Register a callback for data updates."""
+        ...
+
     last_update_success: bool
 
 
