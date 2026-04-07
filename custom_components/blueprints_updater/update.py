@@ -21,7 +21,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_AUTO_UPDATE, DOMAIN, UPDATE_ENTITY_CACHED_PROPERTIES
+from .const import CONF_AUTO_UPDATE, DOMAIN
 from .coordinator import BlueprintUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -268,9 +268,10 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
     @callback
     def _clear_cached_properties(self) -> None:
         """Invalidate cached properties after state changes."""
-        for attr in UPDATE_ENTITY_CACHED_PROPERTIES:
-            with contextlib.suppress(AttributeError):
-                delattr(self, attr)
+        for attr, value in self.__class__.__dict__.items():
+            if isinstance(value, cached_property):
+                with contextlib.suppress(AttributeError):
+                    delattr(self, attr)
 
     @callback
     def _handle_coordinator_update(self) -> None:

@@ -14,7 +14,7 @@ import shutil
 import socket
 import time
 from datetime import timedelta
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -62,6 +62,21 @@ from .const import (
 from .utils import get_max_backups, retry_async
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class ParsedBlueprintData(TypedDict):
+    """Data extracted from a blueprint YAML file."""
+
+    name: str
+    domain: str
+    source_url: str
+    local_hash: str
+
+
+class BlueprintMetadata(ParsedBlueprintData):
+    """Metadata for a single blueprint file, including its relative path."""
+
+    rel_path: str
 
 
 class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
@@ -1425,7 +1440,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return FILTER_MODE_ALL
 
     @staticmethod
-    def _parse_blueprint_data(path: str, content: str) -> dict[str, Any] | None:
+    def _parse_blueprint_data(path: str, content: str) -> ParsedBlueprintData | None:
         """Parse raw YAML content and extract blueprint metadata if valid."""
         try:
             blueprint_dict = yaml_util.parse_yaml(content)
@@ -1468,7 +1483,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         hass: HomeAssistant,
         filter_mode: str,
         selected_blueprints: list[str],
-    ) -> dict[str, Any]:
+    ) -> dict[str, BlueprintMetadata]:
         """Scan the blueprints directory for YAML files with source_url."""
         blueprint_path: str = hass.config.path("blueprints")
         found_blueprints = {}
@@ -1497,10 +1512,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     with open(full_path, encoding="utf-8") as f:
                         content = f.read()
 
-                    if metadata := BlueprintUpdateCoordinator._parse_blueprint_data(
+                    if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
                         full_path, content
                     ):
-                        metadata["rel_path"] = rel_path
+                        metadata: BlueprintMetadata = {
+                            "name": parsed_data["name"],
+                            "domain": parsed_data["domain"],
+                            "source_url": parsed_data["source_url"],
+                            "local_hash": parsed_data["local_hash"],
+                            "rel_path": rel_path,
+                        }
                         found_blueprints[full_path] = metadata
 
                 except Exception as err:

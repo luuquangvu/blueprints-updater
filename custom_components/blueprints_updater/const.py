@@ -17,11 +17,6 @@ FILTER_MODE_ALL = "all"
 FILTER_MODE_WHITELIST = "whitelist"
 FILTER_MODE_BLACKLIST = "blacklist"
 ALLOWED_RELOAD_DOMAINS = {"automation", "script", "template"}
-UPDATE_ENTITY_CACHED_PROPERTIES = (
-    "auto_update",
-    "installed_version",
-    "latest_version",
-)
 
 DEFAULT_UPDATE_INTERVAL_HOURS = 24
 MIN_UPDATE_INTERVAL = 1

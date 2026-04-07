@@ -449,6 +449,32 @@ async def test_async_install_blueprint(hass, coordinator):
 
 
 @pytest.mark.asyncio
+async def test_async_install_blueprint_domain_normalization(hass, coordinator):
+    """Test that async_install_blueprint correctly normalizes the domain."""
+    path = "/config/blueprints/test.yaml"
+
+    hass.services.has_service = MagicMock(return_value=True)
+    hass.services.async_call = AsyncMock()
+
+    with (
+        patch("builtins.open", MagicMock()),
+        patch("custom_components.blueprints_updater.coordinator.os.replace"),
+        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+    ):
+        content_domain = "blueprint:\n  name: Test\n  domain:  script  "
+        await coordinator.async_install_blueprint(path, content_domain)
+        hass.services.async_call.assert_any_call("script", "reload")
+        hass.services.async_call.reset_mock()
+        content_no_domain = "blueprint:\n  name: Test"
+        await coordinator.async_install_blueprint(path, content_no_domain)
+        hass.services.async_call.assert_any_call("automation", "reload")
+        hass.services.async_call.reset_mock()
+        content_empty_domain = "blueprint:\n  name: Test\n  domain: ''"
+        await coordinator.async_install_blueprint(path, content_empty_domain)
+        hass.services.async_call.assert_any_call("automation", "reload")
+
+
+@pytest.mark.asyncio
 async def test_async_update_data_partial_failure(coordinator):
     """Test that one failed blueprint does not stop others."""
     blueprints = {
