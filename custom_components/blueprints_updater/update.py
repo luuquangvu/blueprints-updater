@@ -149,7 +149,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         self._localized_error: str | None = None
 
     @property
-    def available(self) -> bool:  # type: ignore[reportIncompatibleVariableOverride]
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return True if entity is available.
 
         This override resolves a descriptor conflict between the base classes
@@ -252,7 +252,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         return data["local_hash"][:8]
 
     @property
-    def extra_state_attributes(self) -> dict[str, Any]:  # type: ignore[reportIncompatibleVariableOverride]
+    def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return the extra state attributes like last_error.
 
         Returns:

@@ -1049,15 +1049,28 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
             return
 
-        await self._process_blueprint_content(
-            path,
-            info,
-            remote_content,
-            new_etag,
-            source_url,
-            results_to_notify,
-            updated_domains,
-        )
+        try:
+            await self._process_blueprint_content(
+                path,
+                info,
+                remote_content,
+                new_etag,
+                source_url,
+                results_to_notify,
+                updated_domains,
+            )
+        except Exception as err:
+            _LOGGER.error("Error processing blueprint from %s: %s", source_url, err)
+            if self.data and path in self.data:
+                self.data[path].update(
+                    {
+                        "last_error": f"processing_error|{err}",
+                        "remote_hash": None,
+                        "remote_content": None,
+                        "updatable": False,
+                    }
+                )
+            raise
 
     async def _handle_not_modified_case(
         self,
@@ -1416,16 +1429,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _normalize_domain(domain: Any) -> str:
-        """Normalize the blueprint domain, defaulting to 'automation'.
+        """Normalize and validate the blueprint domain, defaulting to 'automation'.
 
         Args:
             domain: The domain to normalize.
 
         Returns:
-            The normalized domain string.
+            The normalized lowercase domain string.
 
         """
-        return str(domain).strip() if isinstance(domain, str) and domain.strip() else "automation"
+        if isinstance(domain, str):
+            norm_domain = domain.strip().lower()
+            if norm_domain in ALLOWED_RELOAD_DOMAINS:
+                return norm_domain
+
+        return "automation"
 
     @staticmethod
     def _should_include_blueprint(rel_path: str, filter_mode: str, selected_set: set[str]) -> bool:

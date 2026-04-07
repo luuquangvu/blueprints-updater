@@ -43,7 +43,7 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
 
 @pytest.mark.asyncio
 async def test_304_response_preserves_updatable_status(
-    hass: HomeAssistant, coordinator: BlueprintUpdateCoordinator
+    hass: HomeAssistant, coordinator: BlueprintCoordinatorProtocol
 ):
     """Test that a 304 response doesn't flip 'Update available' back to 'Up to date'.
 
@@ -98,7 +98,7 @@ async def test_304_response_preserves_updatable_status(
 
 @pytest.mark.asyncio
 async def test_persistence_of_remote_hashes(
-    hass: HomeAssistant, coordinator: BlueprintUpdateCoordinator
+    hass: HomeAssistant, coordinator: BlueprintCoordinatorProtocol
 ):
     """Test that remote hashes are correctly saved and restored."""
     path = "/config/blueprints/test.yaml"

@@ -463,15 +463,15 @@ async def test_async_install_blueprint_domain_normalization(hass, coordinator):
     ):
         content_domain = "blueprint:\n  name: Test\n  domain:  script  "
         await coordinator.async_install_blueprint(path, content_domain)
-        hass.services.async_call.assert_any_call("script", "reload")
+        hass.services.async_call.assert_called_once_with("script", "reload")
         hass.services.async_call.reset_mock()
         content_no_domain = "blueprint:\n  name: Test"
         await coordinator.async_install_blueprint(path, content_no_domain)
-        hass.services.async_call.assert_any_call("automation", "reload")
+        hass.services.async_call.assert_called_once_with("automation", "reload")
         hass.services.async_call.reset_mock()
         content_empty_domain = "blueprint:\n  name: Test\n  domain: ''"
         await coordinator.async_install_blueprint(path, content_empty_domain)
-        hass.services.async_call.assert_any_call("automation", "reload")
+        hass.services.async_call.assert_called_once_with("automation", "reload")
 
 
 @pytest.mark.asyncio
