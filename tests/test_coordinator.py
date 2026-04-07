@@ -473,6 +473,12 @@ async def test_async_install_blueprint_domain_normalization(hass, coordinator):
         await coordinator.async_install_blueprint(path, content_empty_domain)
         hass.services.async_call.assert_called_once_with("automation", "reload")
 
+        # Unsupported domain should fall back to 'automation'
+        hass.services.async_call.reset_mock()
+        content_invalid_domain = "blueprint:\n  name: Test\n  domain:  unknown_domain  "
+        await coordinator.async_install_blueprint(path, content_invalid_domain)
+        hass.services.async_call.assert_called_once_with("automation", "reload")
+
 
 @pytest.mark.asyncio
 async def test_async_update_data_partial_failure(coordinator):

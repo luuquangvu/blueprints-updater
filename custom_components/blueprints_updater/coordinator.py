@@ -758,16 +758,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             if reload_services:
                 domain = "automation"
-                try:
-                    blueprint_dict = yaml_util.parse_yaml(remote_content)
-                    if isinstance(blueprint_dict, dict) and isinstance(
-                        blueprint_block := blueprint_dict.get("blueprint"), dict
-                    ):
-                        domain = BlueprintUpdateCoordinator._normalize_domain(
-                            blueprint_block.get("domain")
-                        )
-                except HomeAssistantError as err:
-                    _LOGGER.warning("Failed to parse blueprint at %s: %s", path, err)
+                if bp_block := self._get_blueprint_block(path, remote_content):
+                    domain = self._normalize_domain(bp_block.get("domain"))
                 await self.async_reload_services([domain])
 
             if self.data and path in self.data:
@@ -1477,8 +1469,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return FILTER_MODE_ALL
 
     @staticmethod
-    def _parse_blueprint_data(path: str, content: str) -> ParsedBlueprintData | None:
-        """Parse raw YAML content and extract blueprint metadata if valid."""
+    def _get_blueprint_block(path: str, content: str) -> dict[str, Any] | None:
+        """Extract the 'blueprint' metadata block from YAML content."""
         try:
             blueprint_dict = yaml_util.parse_yaml(content)
         except HomeAssistantError as err:
@@ -1507,6 +1499,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 path,
                 type(bp_info).__name__,
             )
+            return None
+
+        return bp_info
+
+    @staticmethod
+    def _parse_blueprint_data(path: str, content: str) -> ParsedBlueprintData | None:
+        """Parse raw YAML content and extract blueprint metadata if valid."""
+        bp_info = BlueprintUpdateCoordinator._get_blueprint_block(path, content)
+        if bp_info is None:
             return None
 
         source_url = bp_info.get("source_url")
