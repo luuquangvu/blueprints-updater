@@ -1020,8 +1020,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 remote_content, new_etag = await self._handle_not_modified_case(
                     session, path, info, normalized_url, new_etag
                 )
-        except Exception as err:
-            _LOGGER.error("Error fetching blueprint from %s: %s", source_url, err)
+        except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
+            _LOGGER.debug(
+                "Failed to fetch blueprint from %s: %s",
+                source_url,
+                err,
+            )
             if self.data and path in self.data:
                 self.data[path].update(
                     {
@@ -1481,15 +1485,36 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.warning("Failed to parse blueprint at %s: %s", path, err)
             return None
 
-        if not isinstance(blueprint_dict, dict) or "blueprint" not in blueprint_dict:
+        if not isinstance(blueprint_dict, dict):
+            _LOGGER.debug(
+                "Skipping blueprint at %s: parsed YAML is not a mapping (got %s)",
+                path,
+                type(blueprint_dict).__name__,
+            )
+            return None
+
+        if "blueprint" not in blueprint_dict:
+            _LOGGER.debug(
+                "Skipping blueprint at %s: missing top-level 'blueprint' key",
+                path,
+            )
             return None
 
         bp_info = blueprint_dict["blueprint"]
         if not isinstance(bp_info, dict):
+            _LOGGER.debug(
+                "Skipping blueprint at %s: 'blueprint' key is not a mapping (got %s)",
+                path,
+                type(bp_info).__name__,
+            )
             return None
 
         source_url = bp_info.get("source_url")
         if not isinstance(source_url, str) or not source_url.strip():
+            _LOGGER.debug(
+                "Skipping blueprint at %s: missing or empty 'source_url' in blueprint metadata",
+                path,
+            )
             return None
 
         raw_name = bp_info.get("name")

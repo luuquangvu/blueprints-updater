@@ -6,7 +6,7 @@ import contextlib
 import inspect
 import logging
 from functools import cached_property
-from typing import Any
+from typing import Any, ClassVar
 
 from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.script import scripts_with_blueprint
@@ -266,10 +266,19 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 attrs["last_error"] = self._localized_error or error
         return attrs
 
+    _cached_property_names: ClassVar[list[str]] = []
+
     @callback
     def _clear_cached_properties(self) -> None:
         """Invalidate cached properties after state changes."""
-        for name, _ in inspect.getmembers(self.__class__, lambda x: isinstance(x, cached_property)):
+        cls = self.__class__
+        if not cls._cached_property_names:
+            cls._cached_property_names = [
+                name
+                for name, _ in inspect.getmembers(cls, lambda x: isinstance(x, cached_property))
+            ]
+
+        for name in cls._cached_property_names:
             with contextlib.suppress(AttributeError):
                 delattr(self, name)
 

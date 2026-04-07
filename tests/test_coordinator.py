@@ -505,7 +505,11 @@ async def test_async_update_data_partial_failure(coordinator):
     mock_bad_resp = MagicMock(spec=httpx.Response)
     mock_bad_resp.status_code = 404
     mock_bad_resp.headers = {}
-    mock_bad_resp.raise_for_status = MagicMock(side_effect=Exception("404 Not Found"))
+    mock_bad_resp.raise_for_status = MagicMock(
+        side_effect=httpx.HTTPStatusError(
+            "404 Not Found", request=MagicMock(), response=mock_bad_resp
+        )
+    )
 
     with (
         patch(
@@ -567,7 +571,9 @@ async def test_async_background_refresh_503_resilience(coordinator):
     mock_503_resp.status_code = 503
     mock_503_resp.headers = {}
     mock_503_resp.raise_for_status = MagicMock(
-        side_effect=Exception("503 Backend.max_conn reached")
+        side_effect=httpx.HTTPStatusError(
+            "503 Service Unavailable", request=MagicMock(), response=mock_503_resp
+        )
     )
 
     mock_200_resp = MagicMock(spec=httpx.Response)
@@ -722,7 +728,7 @@ async def test_async_update_blueprint_in_place_errors(coordinator):
     )
     assert "invalid_blueprint" in str(coordinator.data[path]["last_error"])
 
-    mock_session.get.side_effect = Exception("Connection Failed")
+    mock_session.get.side_effect = httpx.ConnectError("Connection Failed")
     await coordinator._async_update_blueprint_in_place(
         mock_session, path, info, results_to_notify, updated_domains
     )
