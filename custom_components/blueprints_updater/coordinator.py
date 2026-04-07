@@ -309,6 +309,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if self.config_entry
             else FILTER_MODE_ALL
         )
+        if filter_mode not in (FILTER_MODE_ALL, FILTER_MODE_WHITELIST, FILTER_MODE_BLACKLIST):
+            _LOGGER.error("Invalid filter mode '%s' in config; falling back to all", filter_mode)
+            filter_mode = FILTER_MODE_ALL
+
         selected_blueprints = (
             self.config_entry.options.get(CONF_SELECTED_BLUEPRINTS, []) if self.config_entry else []
         )
@@ -1405,12 +1409,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if filter_mode == FILTER_MODE_ALL:
             return True
 
-        _LOGGER.warning(
-            "Unknown blueprint filter_mode '%s' for '%s'; excluding from scan",
-            filter_mode,
-            rel_path,
-        )
-        return False
+        raise ValueError(f"Unknown blueprint filter_mode '{filter_mode}'")
 
     @staticmethod
     def _parse_blueprint_data(path: str, content: str) -> dict[str, Any] | None:

@@ -112,19 +112,22 @@ def _get_config_schema(
             vol.Required(
                 CONF_FILTER_MODE,
                 default=defaults.get(CONF_FILTER_MODE, FILTER_MODE_ALL),
-            ): SelectSelector(
-                SelectSelectorConfig(
-                    options=cast(
-                        Any,
-                        [
-                            {"value": FILTER_MODE_ALL, "label": FILTER_MODE_ALL},
-                            {"value": FILTER_MODE_WHITELIST, "label": FILTER_MODE_WHITELIST},
-                            {"value": FILTER_MODE_BLACKLIST, "label": FILTER_MODE_BLACKLIST},
-                        ],
-                    ),
-                    mode=SelectSelectorMode.DROPDOWN,
-                    translation_key="filter_mode",
-                )
+            ): vol.All(
+                vol.In([FILTER_MODE_ALL, FILTER_MODE_WHITELIST, FILTER_MODE_BLACKLIST]),
+                SelectSelector(
+                    SelectSelectorConfig(
+                        options=cast(
+                            Any,
+                            [
+                                {"value": FILTER_MODE_ALL, "label": FILTER_MODE_ALL},
+                                {"value": FILTER_MODE_WHITELIST, "label": FILTER_MODE_WHITELIST},
+                                {"value": FILTER_MODE_BLACKLIST, "label": FILTER_MODE_BLACKLIST},
+                            ],
+                        ),
+                        mode=SelectSelectorMode.DROPDOWN,
+                        translation_key="filter_mode",
+                    )
+                ),
             ),
             vol.Optional(
                 CONF_SELECTED_BLUEPRINTS,
