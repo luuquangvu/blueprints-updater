@@ -165,7 +165,7 @@ async def test_etag_migration_forces_download(
     mock_session = MagicMock(spec=httpx.AsyncClient)
     mock_session.get = AsyncMock(return_value=mock_response)
 
-    results_to_notify: list[Any] = []
+    results_to_notify: list[str] = []
     updated_domains: set[str] = set()
     with patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_sha:
         mock_sha.return_value.hexdigest.return_value = remote_hash

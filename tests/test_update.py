@@ -171,6 +171,15 @@ async def test_entity_properties(coordinator):
         await coro
     assert entity.extra_state_attributes == {"last_error": "Fetch Error"}
 
+    coordinator.data["/config/blueprints/test.yaml"]["local_hash"] = "newlocal"
+    coordinator.data["/config/blueprints/test.yaml"]["remote_hash"] = "newremote"
+    with patch.object(entity, "async_write_ha_state"):
+        entity._handle_coordinator_update()
+        coro = coordinator.hass.async_create_task.call_args[0][0]
+        await coro
+    assert entity.installed_version == "newlocal"[:8]
+    assert entity.latest_version == "newremote"[:8]
+
 
 @pytest.mark.asyncio
 async def test_entity_async_install(coordinator):

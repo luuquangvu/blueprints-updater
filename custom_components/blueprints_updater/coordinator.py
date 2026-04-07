@@ -1409,7 +1409,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if filter_mode == FILTER_MODE_ALL:
             return True
 
-        raise ValueError(f"Unknown blueprint filter_mode '{filter_mode}'")
+        _LOGGER.error("Unknown blueprint filter_mode '%s'; defaulting to all", filter_mode)
+        return True
 
     @staticmethod
     def _parse_blueprint_data(path: str, content: str) -> dict[str, Any] | None:

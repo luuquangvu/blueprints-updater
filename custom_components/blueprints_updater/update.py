@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Mapping
 from functools import cached_property
-from types import MappingProxyType
 from typing import Any
 
 from homeassistant.components.automation import automations_with_blueprint
@@ -252,12 +250,12 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             return data["remote_hash"][:8]
         return data["local_hash"][:8]
 
-    @cached_property
-    def extra_state_attributes(self) -> Mapping[str, Any]:
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:  # type: ignore[reportIncompatibleVariableOverride]
         """Return the extra state attributes like last_error.
 
         Returns:
-            An immutable mapping containing entity-specific attributes.
+            A dictionary containing entity-specific attributes.
 
         """
         attrs = {}
@@ -265,7 +263,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             info = self.coordinator.data[self._path]
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
-        return MappingProxyType(attrs)
+        return attrs
 
     @callback
     def _clear_cached_properties(self) -> None:
@@ -274,7 +272,6 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             "auto_update",
             "installed_version",
             "latest_version",
-            "extra_state_attributes",
         ):
             with contextlib.suppress(AttributeError):
                 delattr(self, attr)
