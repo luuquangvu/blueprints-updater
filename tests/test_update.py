@@ -162,8 +162,6 @@ async def test_entity_properties(coordinator):
     assert entity_missing.release_summary is None
     assert await entity_missing.async_release_notes() is None
 
-    _ = entity.extra_state_attributes
-
     coordinator.data["/config/blueprints/test.yaml"]["last_error"] = "Fetch Error"
     with patch.object(entity, "async_write_ha_state"):
         entity._handle_coordinator_update()
