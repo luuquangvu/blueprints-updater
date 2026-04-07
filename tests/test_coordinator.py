@@ -12,6 +12,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
 
 import httpx
 import pytest
+from conftest import BlueprintCoordinatorProtocol
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import yaml as yaml_util
 
@@ -29,7 +30,7 @@ from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoor
 
 
 @pytest.fixture
-def coordinator(hass):
+def coordinator(hass) -> BlueprintCoordinatorProtocol:
     """Fixture for BlueprintUpdateCoordinator."""
     entry = MagicMock()
     entry.options = MappingProxyType({})
@@ -38,24 +39,27 @@ def coordinator(hass):
         "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
         return_value=None,
     ):
-        coord = BlueprintUpdateCoordinator(
-            hass,
-            entry,
-            timedelta(hours=24),
+        coord = cast(
+            BlueprintCoordinatorProtocol,
+            BlueprintUpdateCoordinator(
+                hass,
+                entry,
+                timedelta(hours=24),
+            ),
         )
 
-        coord._listeners = cast(Any, {})
+        coord._listeners = {}
         coord.hass = hass
         coord.data = {}
 
         def _mock_set_data(data):
             coord.data = data
 
-        coord.async_set_updated_data = cast(Any, MagicMock(side_effect=_mock_set_data))
-        coord.async_update_listeners = cast(Any, MagicMock())
+        coord.async_set_updated_data = MagicMock(side_effect=_mock_set_data)
+        coord.async_update_listeners = MagicMock()
         coord.setup_complete = True
-        coord._is_safe_path = cast(Any, MagicMock(return_value=True))
-        coord._is_safe_url = cast(Any, AsyncMock(return_value=True))
+        coord._is_safe_path = MagicMock(return_value=True)
+        coord._is_safe_url = AsyncMock(return_value=True)
         return coord
 
 

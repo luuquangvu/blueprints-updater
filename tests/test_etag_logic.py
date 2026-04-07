@@ -2,18 +2,19 @@
 
 import hashlib
 from datetime import timedelta
-from typing import Any, cast
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from conftest import BlueprintCoordinatorProtocol
 from homeassistant.core import HomeAssistant
 
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
 @pytest.fixture
-def coordinator(hass: HomeAssistant) -> BlueprintUpdateCoordinator:
+def coordinator(hass) -> BlueprintCoordinatorProtocol:
     """Fixture for BlueprintUpdateCoordinator."""
     entry = MagicMock()
     entry.options = {"auto_update": False}
@@ -23,17 +24,20 @@ def coordinator(hass: HomeAssistant) -> BlueprintUpdateCoordinator:
         "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
         return_value=None,
     ):
-        coord = BlueprintUpdateCoordinator(
-            hass,
-            entry,
-            timedelta(hours=24),
+        coord = cast(
+            BlueprintCoordinatorProtocol,
+            BlueprintUpdateCoordinator(
+                hass,
+                entry,
+                timedelta(hours=24),
+            ),
         )
         coord.hass = hass
-        coord.data = cast(Any, {})
-        coord.async_set_updated_data = cast(Any, MagicMock())
+        coord.data = {}
+        coord.async_set_updated_data = MagicMock()
         coord.setup_complete = True
-        coord._is_safe_path = cast(Any, MagicMock(return_value=True))
-        coord._is_safe_url = cast(Any, AsyncMock(return_value=True))
+        coord._is_safe_path = MagicMock(return_value=True)
+        coord._is_safe_url = AsyncMock(return_value=True)
         return coord
 
 
@@ -83,7 +87,7 @@ async def test_304_response_preserves_updatable_status(
 
     results_to_notify: list[str] = []
     updated_domains: set[str] = set()
-    await cast(Any, coordinator)._async_update_blueprint_in_place(
+    await coordinator._async_update_blueprint_in_place(
         mock_session, path, info, results_to_notify, updated_domains
     )
 
@@ -111,20 +115,20 @@ async def test_persistence_of_remote_hashes(
     mock_store = MagicMock()
     mock_store.async_save = AsyncMock()
     coordinator._store = mock_store
-    await cast(Any, coordinator)._async_save_metadata()
+    await coordinator._async_save_metadata()
 
     save_args = mock_store.async_save.call_args[0][0]
     assert save_args["etags"][path] == etag
     assert save_args["remote_hashes"][path] == remote_hash
 
-    cast(Any, coordinator)._persisted_etags = {}
-    cast(Any, coordinator)._persisted_hashes = {}
+    coordinator._persisted_etags = {path: etag}
+    coordinator._persisted_hashes = {path: remote_hash}
     mock_store.async_load = AsyncMock(return_value=save_args)
 
     await coordinator.async_setup()
 
-    assert cast(Any, coordinator)._persisted_etags[path] == etag
-    assert cast(Any, coordinator)._persisted_hashes[path] == remote_hash
+    assert coordinator._persisted_etags[path] == etag
+    assert coordinator._persisted_hashes[path] == remote_hash
 
 
 @pytest.mark.asyncio
@@ -169,7 +173,7 @@ async def test_etag_migration_forces_download(
     updated_domains: set[str] = set()
     with patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_sha:
         mock_sha.return_value.hexdigest.return_value = remote_hash
-        await cast(Any, coordinator)._async_update_blueprint_in_place(
+        await coordinator._async_update_blueprint_in_place(
             mock_session, path, info, results_to_notify, updated_domains
         )
 

@@ -1,9 +1,46 @@
 """Fixtures for Blueprints Updater tests."""
 
+from typing import Any, Protocol, runtime_checkable
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+
+
+@runtime_checkable
+class BlueprintCoordinatorProtocol(Protocol):
+    """Protocol for BlueprintUpdateCoordinator testing.
+
+    This protocol exposes private methods and attributes to the test suite
+    in a type-safe manner, avoiding the need for # type: ignore or cast(Any, ...).
+    """
+
+    hass: Any
+    config_entry: Any
+    data: dict[str, Any]
+    setup_complete: bool
+
+    _listeners: dict[Any, Any]
+    _persisted_etags: dict[str, str]
+    _persisted_hashes: dict[str, str]
+
+    async_set_updated_data: MagicMock
+    async_update_listeners: MagicMock
+    _is_safe_path: MagicMock
+    _is_safe_url: AsyncMock
+    _store: MagicMock
+    _async_update_blueprint_in_place: AsyncMock
+    _async_save_metadata: AsyncMock
+    _async_background_refresh: AsyncMock
+    _validate_blueprint: MagicMock
+    async_install_blueprint: AsyncMock
+    async_reload_services: AsyncMock
+    async_translate: AsyncMock
+    _process_blueprint_content: AsyncMock
+    _start_background_refresh: AsyncMock
+    async_setup: AsyncMock
+    async_refresh: AsyncMock
+    scan_blueprints: MagicMock
 
 
 @pytest.fixture(autouse=True)
