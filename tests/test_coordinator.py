@@ -1849,3 +1849,23 @@ async def test_async_install_blueprint_yaml_error_logging(coordinator):
         await coordinator.async_install_blueprint(path, content, reload_services=True)
 
     mock_logger.warning.assert_called_with("Failed to parse blueprint at %s: %s", path, ANY)
+
+
+def test_get_validated_selected_blueprints_hardening(coordinator):
+    """Test the hardening of _get_validated_selected_blueprints."""
+    assert coordinator._get_validated_selected_blueprints(None) == []
+
+    res = coordinator._get_validated_selected_blueprints("  path/to/bp.yaml  ")
+    assert res == ["path/to/bp.yaml"]
+    assert coordinator._get_validated_selected_blueprints("   ") == []
+    assert coordinator._get_validated_selected_blueprints(["a", " b ", None, ""]) == ["a", "b"]
+    assert coordinator._get_validated_selected_blueprints(("a", "b")) == ["a", "b"]
+
+    with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
+        assert coordinator._get_validated_selected_blueprints({"key": "value"}) == []
+        mock_logger.error.assert_called()
+        assert "mapping" in mock_logger.error.call_args[0][0]
+    with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
+        assert coordinator._get_validated_selected_blueprints(123) == []
+        mock_logger.error.assert_called()
+        assert "Invalid type" in mock_logger.error.call_args[0][0]

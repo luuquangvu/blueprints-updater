@@ -1013,7 +1013,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     session, path, info, normalized_url, new_etag
                 )
         except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
-            _LOGGER.debug(
+            _LOGGER.warning(
                 "Failed to fetch blueprint from %s: %s",
                 source_url,
                 err,
@@ -1484,15 +1484,27 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         if selected is None:
             return []
+
         if isinstance(selected, str):
-            return [selected.strip()] if selected.strip() else []
-        if isinstance(selected, list):
+            stripped = selected.strip()
+            return [stripped] if stripped else []
+
+        if isinstance(selected, (list, tuple)):
             return [str(item).strip() for item in selected if item and str(item).strip()]
-        if hasattr(selected, "__iter__"):
-            try:
-                return [str(item).strip() for item in selected if item and str(item).strip()]
-            except (TypeError, ValueError):
-                return []
+
+        if isinstance(selected, dict):
+            _LOGGER.error(
+                "Invalid type for selected blueprints: mapping (%s) provided; "
+                "expected string or sequence of strings. Ignoring value.",
+                type(selected).__name__,
+            )
+            return []
+
+        _LOGGER.error(
+            "Invalid type for selected blueprints: %s; expected string or sequence of strings. "
+            "Ignoring value.",
+            type(selected).__name__,
+        )
         return []
 
     @staticmethod
