@@ -116,6 +116,9 @@
     "empty_content": "Otrzymano pustą zawartość",
     "yaml_syntax_error": "Błąd składni YAML: {error}",
     "fetch_error": "Błąd pobierania: {error}",
+    "processing_error": "Błąd przetwarzania: {error}",
+    "auto_update_failed": "Automatyczna aktualizacja nie powiodła się: {error}",
+    "unsafe_url": "Niebezpieczny adres URL: {error}",
     "content_missing": "Brakuje zawartości projektu lub nie można jej pobrać"
   }
 }

@@ -116,6 +116,9 @@
     "empty_content": "Leerer Inhalt empfangen",
     "yaml_syntax_error": "YAML-Syntaxfehler: {error}",
     "fetch_error": "Abruffehler: {error}",
+    "processing_error": "Verarbeitungsfehler: {error}",
+    "auto_update_failed": "Automatisches Update fehlgeschlagen: {error}",
+    "unsafe_url": "Unsichere URL: {error}",
     "content_missing": "Der Blueprint-Inhalt fehlt oder konnte nicht abgerufen werden."
   }
 }

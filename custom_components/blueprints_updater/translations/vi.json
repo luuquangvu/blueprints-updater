@@ -116,6 +116,9 @@
     "empty_content": "Nội dung nhận được bị trống",
     "yaml_syntax_error": "Lỗi cú pháp YAML: {error}",
     "fetch_error": "Lỗi tải xuống: {error}",
+    "processing_error": "Lỗi xử lý: {error}",
+    "auto_update_failed": "Tự động cập nhật thất bại: {error}",
+    "unsafe_url": "URL không an toàn: {error}",
     "content_missing": "Nội dung blueprint bị thiếu hoặc không thể tải xuống"
   }
 }

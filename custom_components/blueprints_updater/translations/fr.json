@@ -116,6 +116,9 @@
     "empty_content": "Contenu vide reçu",
     "yaml_syntax_error": "Erreur de syntaxe YAML : {error}",
     "fetch_error": "Erreur de récupération : {error}",
+    "processing_error": "Erreur de traitement : {error}",
+    "auto_update_failed": "Échec de la mise à jour automatique : {error}",
+    "unsafe_url": "URL non sécurisée : {error}",
     "content_missing": "Le contenu du plan est manquant ou n'a pas pu être récupéré."
   }
 }

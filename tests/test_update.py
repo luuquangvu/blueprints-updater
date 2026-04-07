@@ -11,6 +11,14 @@ from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoor
 from custom_components.blueprints_updater.update import BlueprintUpdateEntity, async_setup_entry
 
 
+async def await_scheduled_update(entity, coordinator):
+    """Wait for a scheduled update task to complete."""
+    with patch.object(entity, "async_write_ha_state"):
+        entity._handle_coordinator_update()
+        coro = coordinator.hass.async_create_task.call_args[0][0]
+        await coro
+
+
 @pytest.mark.asyncio
 async def test_update_entities_lifecycle(hass):
     """Test that entities are added and removed correctly."""
@@ -163,10 +171,7 @@ async def test_entity_properties(coordinator):
     assert await entity_missing.async_release_notes() is None
 
     coordinator.data["/config/blueprints/test.yaml"]["last_error"] = "Fetch Error"
-    with patch.object(entity, "async_write_ha_state"):
-        entity._handle_coordinator_update()
-        coro = coordinator.hass.async_create_task.call_args[0][0]
-        await coro
+    await await_scheduled_update(entity, coordinator)
     assert entity.extra_state_attributes == {"last_error": "Fetch Error"}
 
     path = "/config/blueprints/test.yaml"
@@ -178,10 +183,7 @@ async def test_entity_properties(coordinator):
 
     coordinator.data[path]["local_hash"] = "newlocal"
     coordinator.data[path]["remote_hash"] = "newremote"
-    with patch.object(entity, "async_write_ha_state"):
-        entity._handle_coordinator_update()
-        coro = coordinator.hass.async_create_task.call_args[0][0]
-        await coro
+    await await_scheduled_update(entity, coordinator)
     assert entity.installed_version == "newlocal"[:8]
     assert entity.latest_version == "newremote"[:8]
 
@@ -488,10 +490,7 @@ async def test_entity_auto_update_cache_invalidation(coordinator):
 
     coordinator.config_entry.options = {"auto_update": False}
 
-    with patch.object(entity, "async_write_ha_state"):
-        entity._handle_coordinator_update()
-        coro = coordinator.hass.async_create_task.call_args[0][0]
-        await coro
+    await await_scheduled_update(entity, coordinator)
 
     assert entity.auto_update is False
 

@@ -116,6 +116,9 @@
     "empty_content": "Получено пустое содержимое",
     "yaml_syntax_error": "Ошибка синтаксиса YAML: {error}",
     "fetch_error": "Ошибка получения: {error}",
+    "processing_error": "Ошибка обработки: {error}",
+    "auto_update_failed": "Автоматическое обновление не удалось: {error}",
+    "unsafe_url": "Небезопасный URL: {error}",
     "content_missing": "Содержимое чертежа отсутствует или не может быть получено."
   }
 }

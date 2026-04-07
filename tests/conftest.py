@@ -62,7 +62,7 @@ class BlueprintCoordinatorProtocol(Protocol):
         """Save coordinator metadata to persistent storage."""
         ...
 
-    async def _async_background_refresh(self) -> None:
+    async def _async_background_refresh(self, blueprints: dict[str, Any]) -> None:
         """Perform a background refresh of all blueprints."""
         ...
 

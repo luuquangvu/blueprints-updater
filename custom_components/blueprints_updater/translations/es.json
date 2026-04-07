@@ -116,6 +116,9 @@
     "empty_content": "Se ha recibido contenido vacío",
     "yaml_syntax_error": "Error de sintaxis YAML: {error}",
     "fetch_error": "Error de obtención: {error}",
+    "processing_error": "Error de procesamiento: {error}",
+    "auto_update_failed": "Error en la actualización automática: {error}",
+    "unsafe_url": "URL no segura: {error}",
     "content_missing": "Falta el contenido del plano o no se pudo obtener."
   }
 }

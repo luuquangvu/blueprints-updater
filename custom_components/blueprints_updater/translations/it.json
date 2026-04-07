@@ -116,6 +116,9 @@
     "empty_content": "Contenuto vuoto ricevuto",
     "yaml_syntax_error": "Errore di sintassi YAML: {error}",
     "fetch_error": "Errore di recupero: {error}",
+    "processing_error": "Errore di elaborazione: {error}",
+    "auto_update_failed": "Aggiornamento automatico fallito: {error}",
+    "unsafe_url": "URL non sicuro: {error}",
     "content_missing": "Il contenuto del progetto è mancante o non è stato possibile recuperarlo."
   }
 }

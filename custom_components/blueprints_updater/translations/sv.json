@@ -116,6 +116,9 @@
     "empty_content": "Tomt innehåll mottogs",
     "yaml_syntax_error": "YAML-syntaxfel: {error}",
     "fetch_error": "Hämtningsfel: {error}",
+    "processing_error": "Bearbetningsfel: {error}",
+    "auto_update_failed": "Automatisk uppdatering misslyckades: {error}",
+    "unsafe_url": "Osäker URL: {error}",
     "content_missing": "Innehållet i ritningen saknas eller kunde inte hämtas"
   }
 }

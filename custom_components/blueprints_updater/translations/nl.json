@@ -116,6 +116,9 @@
     "empty_content": "Lege inhoud ontvangen",
     "yaml_syntax_error": "YAML-syntaxfout: {error}",
     "fetch_error": "Ophaalfout: {error}",
+    "processing_error": "Verwerkingsfout: {error}",
+    "auto_update_failed": "Automatische update mislukt: {error}",
+    "unsafe_url": "Onveilige URL: {error}",
     "content_missing": "De inhoud van de blauwdruk ontbreekt of kon niet worden opgehaald."
   }
 }
