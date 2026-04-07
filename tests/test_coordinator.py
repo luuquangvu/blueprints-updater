@@ -1805,6 +1805,9 @@ async def test_process_blueprint_content_unhandled_error(coordinator):
     coordinator.data = {path: info}
 
     with (
+        patch.object(
+            BlueprintUpdateCoordinator, "_ensure_source_url", side_effect=lambda content, _: content
+        ),
         patch(
             "custom_components.blueprints_updater.coordinator.yaml_util.parse_yaml",
             side_effect=ValueError("Unexpected error"),

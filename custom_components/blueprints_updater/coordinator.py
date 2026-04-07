@@ -1020,33 +1020,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 remote_content, new_etag = await self._handle_not_modified_case(
                     session, path, info, normalized_url, new_etag
                 )
-
-            if remote_content is None:
-                return
-
-            if remote_content == "":
-                if self.data and path in self.data:
-                    self.data[path].update(
-                        {
-                            "last_error": "empty_content|",
-                            "remote_hash": None,
-                            "remote_content": None,
-                            "updatable": False,
-                            "invalid_remote_hash": None,
-                        }
-                    )
-                return
-
-            await self._process_blueprint_content(
-                path,
-                info,
-                remote_content,
-                new_etag,
-                source_url,
-                results_to_notify,
-                updated_domains,
-            )
-
         except Exception as err:
             _LOGGER.error("Error fetching blueprint from %s: %s", source_url, err)
             if self.data and path in self.data:
@@ -1058,6 +1031,33 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "updatable": False,
                     }
                 )
+            return
+
+        if remote_content is None:
+            return
+
+        if remote_content == "":
+            if self.data and path in self.data:
+                self.data[path].update(
+                    {
+                        "last_error": "empty_content|",
+                        "remote_hash": None,
+                        "remote_content": None,
+                        "updatable": False,
+                        "invalid_remote_hash": None,
+                    }
+                )
+            return
+
+        await self._process_blueprint_content(
+            path,
+            info,
+            remote_content,
+            new_etag,
+            source_url,
+            results_to_notify,
+            updated_domains,
+        )
 
     async def _handle_not_modified_case(
         self,
