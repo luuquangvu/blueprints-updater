@@ -1442,6 +1442,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if norm_domain in ALLOWED_RELOAD_DOMAINS:
                 return norm_domain
 
+        if domain and str(domain).strip():
+            _LOGGER.warning(
+                "Unsupported or unknown blueprint domain '%s' encountered; "
+                "falling back to 'automation'. Supported: %s",
+                domain,
+                ", ".join(ALLOWED_RELOAD_DOMAINS),
+            )
+
         return "automation"
 
     @staticmethod

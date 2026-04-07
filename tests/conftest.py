@@ -12,7 +12,6 @@ from custom_components.blueprints_updater.coordinator import BlueprintMetadata
 
 
 @runtime_checkable
-@runtime_checkable
 class BlueprintCoordinatorCore(Protocol):
     """Core coordinator attributes and status methods."""
 
