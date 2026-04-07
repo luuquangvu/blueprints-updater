@@ -8,7 +8,7 @@ import socket
 from datetime import timedelta
 from types import MappingProxyType
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
 
 import httpx
 import pytest
@@ -1747,3 +1747,60 @@ async def test_async_setup_sanitization(hass, coordinator):
             "Dropped %d invalid ETag entries from storage (non-string keys or values)", 2
         )
         mock_warn.assert_any_call("Dropped %d invalid remote hash entries from storage", 1)
+
+
+@pytest.mark.asyncio
+async def test_process_blueprint_content_yaml_error(coordinator):
+    """Test handling of YAML syntax error during content processing."""
+    path = "/config/blueprints/test.yaml"
+    info = {"name": "Test", "local_hash": "hash"}
+    coordinator.data = {path: info}
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.yaml_util.parse_yaml",
+        side_effect=HomeAssistantError("Invalid YAML"),
+    ):
+        await coordinator._process_blueprint_content(
+            path, info, "invalid", None, "https://url", [], set()
+        )
+
+    assert "yaml_syntax_error|Invalid YAML" in coordinator.data[path]["last_error"]
+
+
+@pytest.mark.asyncio
+async def test_process_blueprint_content_unhandled_error(coordinator):
+    """Test that non-HomeAssistantErrors propagate during content processing."""
+    path = "/config/blueprints/test.yaml"
+    info = {"name": "Test", "local_hash": "hash"}
+    coordinator.data = {path: info}
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.yaml_util.parse_yaml",
+            side_effect=ValueError("Unexpected error"),
+        ),
+        pytest.raises(ValueError, match="Unexpected error"),
+    ):
+        await coordinator._process_blueprint_content(
+            path, info, "invalid", None, "https://url", [], set()
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_install_blueprint_yaml_error_logging(coordinator):
+    """Test that YAML errors during install reload are logged as warnings."""
+    path = "/config/blueprints/test.yaml"
+    content = "invalid yaml"
+
+    with (
+        patch("builtins.open", MagicMock()),
+        patch("custom_components.blueprints_updater.coordinator.os.replace"),
+        patch(
+            "custom_components.blueprints_updater.coordinator.yaml_util.parse_yaml",
+            side_effect=HomeAssistantError("Parsing failed"),
+        ),
+        patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger,
+    ):
+        await coordinator.async_install_blueprint(path, content, reload_services=True)
+
+    mock_logger.warning.assert_called_with("Failed to parse blueprint at %s: %s", path, ANY)

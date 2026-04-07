@@ -464,3 +464,44 @@ async def test_async_update_entities_migration(hass):
         )
         mock_entity_registry.async_remove.assert_called_once_with("update.orphan")
         hass.states.async_remove.assert_called_once_with("update.orphan")
+
+
+@pytest.mark.asyncio
+async def test_entity_auto_update_cache_invalidation(coordinator):
+    """Test that auto_update property is correctly invalidated and refreshed."""
+    entity = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/test.yaml",
+        coordinator.data["/config/blueprints/test.yaml"],
+    )
+    entity.hass = coordinator.hass
+    entity.entity_id = "update.test"
+
+    assert entity.auto_update is True
+
+    coordinator.config_entry.options = {"auto_update": False}
+
+    with patch.object(entity, "async_write_ha_state"):
+        entity._handle_coordinator_update()
+        coro = coordinator.hass.async_create_task.call_args[0][0]
+        await coro
+
+    assert entity.auto_update is False
+
+
+@pytest.mark.asyncio
+async def test_entity_availability_behavior(coordinator):
+    """Test that entity availability correctly follows coordinator state."""
+    entity = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/test.yaml",
+        coordinator.data["/config/blueprints/test.yaml"],
+    )
+    entity.hass = coordinator.hass
+
+    coordinator.last_update_success = True
+    assert entity.available is True
+    coordinator.last_update_success = False
+    assert entity.available is False
+    coordinator.last_update_success = True
+    assert entity.available is True
