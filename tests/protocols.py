@@ -193,26 +193,6 @@ class BlueprintCoordinatorProtocol(
         ...
 
     @staticmethod
-    def _parse_blueprint_data(path: str, content: str) -> Any:
-        """Parse raw YAML content and extract blueprint metadata if valid."""
-        ...
-
-    @staticmethod
     def _ensure_source_url(content: str, source_url: str) -> str:
         """Inject or normalize source_url in blueprint metadata."""
-        ...
-
-    @staticmethod
-    def _normalize_domain(domain: Any) -> str:
-        """Normalize domain string for Home Assistant reload services."""
-        ...
-
-    @staticmethod
-    def _should_include_blueprint(rel_path: str, filter_mode: str, selected_set: set[str]) -> bool:
-        """Determine if a blueprint file should be processed."""
-        ...
-
-    @staticmethod
-    def _get_blueprint_block(path: str, content: str) -> dict[str, Any] | None:
-        """Extract the 'blueprint' metadata block from YAML content."""
         ...

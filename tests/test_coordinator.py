@@ -84,26 +84,13 @@ def test_coordinator_protocol_conformance(coordinator):
                 missing.append(f"Private member: {attr}")
             elif not attr.startswith("_") and not hasattr(inst, attr):
                 missing.append(f"Method/Member: {attr}")
-        if missing:
-            print(f"\n{name} missing: {missing}")
-            return False
-        return True
+        assert not missing, f"{name} is missing members: {missing}"
 
-    core_ok = check_protocol(coordinator, BlueprintCoordinatorCore, "BlueprintCoordinatorCore")
-    persistence_ok = check_protocol(
-        coordinator, BlueprintCoordinatorPersistence, "BlueprintCoordinatorPersistence"
-    )
-    fetch_ok = check_protocol(coordinator, BlueprintCoordinatorFetch, "BlueprintCoordinatorFetch")
-    tasks_ok = check_protocol(coordinator, BlueprintCoordinatorTasks, "BlueprintCoordinatorTasks")
-    protocol_ok = check_protocol(
-        coordinator, BlueprintCoordinatorProtocol, "BlueprintCoordinatorProtocol"
-    )
-
-    assert core_ok
-    assert persistence_ok
-    assert fetch_ok
-    assert tasks_ok
-    assert protocol_ok
+    check_protocol(coordinator, BlueprintCoordinatorCore, "BlueprintCoordinatorCore")
+    check_protocol(coordinator, BlueprintCoordinatorPersistence, "BlueprintCoordinatorPersistence")
+    check_protocol(coordinator, BlueprintCoordinatorFetch, "BlueprintCoordinatorFetch")
+    check_protocol(coordinator, BlueprintCoordinatorTasks, "BlueprintCoordinatorTasks")
+    check_protocol(coordinator, BlueprintCoordinatorProtocol, "BlueprintCoordinatorProtocol")
     assert isinstance(coordinator, BlueprintCoordinatorProtocol)
 
 
