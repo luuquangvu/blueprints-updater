@@ -744,8 +744,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 domain = "automation"
                 try:
                     blueprint_dict = yaml_util.parse_yaml(remote_content)
-                    if isinstance(blueprint_dict, dict) and "blueprint" in blueprint_dict:
-                        domain = blueprint_dict["blueprint"].get("domain", "automation")
+                    if isinstance(blueprint_dict, dict):
+                        blueprint_block = blueprint_dict.get("blueprint")
+                        if isinstance(blueprint_block, dict):
+                            domain = str(blueprint_block.get("domain", "")).strip() or "automation"
                 except HomeAssistantError as err:
                     _LOGGER.warning("Failed to parse blueprint at %s: %s", path, err)
                 await self.async_reload_services([domain])
@@ -1441,9 +1443,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not isinstance(source_url, str) or not source_url.strip():
             return None
 
+        name = str(bp_info.get("name", "")).strip() or os.path.basename(path)
+        domain = str(bp_info.get("domain", "")).strip() or "automation"
         return {
-            "name": bp_info.get("name", os.path.basename(path)),
-            "domain": bp_info.get("domain", "automation"),
+            "name": name,
+            "domain": domain,
             "source_url": source_url.strip(),
             "local_hash": hashlib.sha256(content.encode()).hexdigest(),
         }
