@@ -1,5 +1,6 @@
 """Fixtures for Blueprints Updater tests."""
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol, runtime_checkable
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -43,7 +44,20 @@ class BlueprintCoordinatorProtocol(Protocol):
     _start_background_refresh: Callable[..., None]
     async_setup: Callable[..., Awaitable[None]]
     async_refresh: Callable[..., Awaitable[None]]
-    scan_blueprints: Callable[..., dict[str, BlueprintMetadata]]
+    scan_blueprints: Callable[[HomeAssistant, str, list[str]], dict[str, BlueprintMetadata]]
+    _normalize_url: Callable[[str], str]
+    _parse_forum_content: Callable[[dict[str, Any]], str | None]
+    _ensure_source_url: Callable[[str, str], str]
+    _normalize_domain: Callable[[Any], str]
+    _should_include_blueprint: Callable[[str, str, set[str]], bool]
+    async_fetch_blueprint: Callable[[str], Awaitable[None]]
+    async_restore_blueprint: Callable[[str, int], Awaitable[None]]
+    _async_fetch_content: Callable[..., Awaitable[tuple[str | None, str | None]]]
+    _last_request_time: float
+    _background_task: asyncio.Task[None] | None
+    async_shutdown: Callable[[], Awaitable[None]]
+    async_add_listener: Callable[[Callable[[], None]], Callable[[], None]]
+    last_update_success: bool
 
 
 @pytest.fixture(autouse=True)
