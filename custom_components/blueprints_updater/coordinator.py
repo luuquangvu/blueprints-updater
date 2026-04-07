@@ -756,10 +756,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 _save_file, real_path, remote_content, max_backups
             )
 
-            if reload_services:
-                domain = "automation"
-                if bp_block := self._get_blueprint_block(path, remote_content):
-                    domain = self._normalize_domain(bp_block.get("domain"))
+            if reload_services and (bp_block := self._get_blueprint_block(path, remote_content)):
+                domain = self._normalize_domain(bp_block.get("domain"))
                 await self.async_reload_services([domain])
 
             if self.data and path in self.data:
@@ -989,7 +987,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "remote_hash": None,
                         "remote_content": None,
                         "updatable": False,
-                        "last_error": "unsafe_url|",
+                        "last_error": f"unsafe_url|{source_url}",
                         "etag": None,
                     }
                 )
@@ -1395,7 +1393,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         try:
             parsed = yaml_util.parse_yaml(content)
-        except (HomeAssistantError, ValueError):
+        except HomeAssistantError:
             parsed = None
 
         if isinstance(parsed, dict) and "blueprint" in parsed:
@@ -1520,7 +1518,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Extract the 'blueprint' metadata block from YAML content."""
         try:
             blueprint_dict = yaml_util.parse_yaml(content)
-        except (HomeAssistantError, ValueError) as err:
+        except HomeAssistantError as err:
             _LOGGER.warning("Failed to parse blueprint at %s: %s", path, err)
             return None
 

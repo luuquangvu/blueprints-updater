@@ -17,6 +17,11 @@ from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
+def _setup_test_coordinator(hass: HomeAssistant, entry_id: str, coordinator: Any) -> None:
+    """Register a coordinator in hass.data for testing."""
+    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})[entry_id] = coordinator
+
+
 async def test_setup_entry(hass: HomeAssistant):
     """Test setting up the entry."""
     entry = MagicMock()
@@ -63,9 +68,7 @@ async def test_service_registration(hass: HomeAssistant):
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
 
-    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})[entry.entry_id] = (
-        coordinator_mock
-    )
+    _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
 
     with (
         patch(
@@ -121,9 +124,7 @@ async def test_service_handlers(hass: HomeAssistant):
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
     coordinator_mock.async_request_refresh = AsyncMock()
 
-    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})[entry.entry_id] = (
-        coordinator_mock
-    )
+    _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
 
     with (
         patch(
@@ -188,9 +189,7 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
 
-    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})[entry.entry_id] = (
-        coordinator_mock
-    )
+    _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
 
     with (
         patch(
@@ -350,9 +349,8 @@ async def test_restore_handler_multi_coordinator_selection(hass: HomeAssistant):
     coordinator_two.config_entry = entry_two
     coordinator_two.data = {}
 
-    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})
-    hass.data[DOMAIN]["coordinators"][entry_one.entry_id] = coordinator_one
-    hass.data[DOMAIN]["coordinators"][entry_two.entry_id] = coordinator_two
+    _setup_test_coordinator(hass, entry_one.entry_id, coordinator_one)
+    _setup_test_coordinator(hass, entry_two.entry_id, coordinator_two)
 
     mock_entity_registry = MagicMock()
 
@@ -433,8 +431,7 @@ async def test_async_update_all_handler_fetches_remote_content(hass: HomeAssista
         }
     }
 
-    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})
-    hass.data[DOMAIN]["coordinators"][entry.entry_id] = coordinator
+    _setup_test_coordinator(hass, entry.entry_id, coordinator)
 
     mock_coordinator = MagicMock()
     mock_coordinator.data = {
@@ -506,8 +503,7 @@ async def test_async_update_all_handler_continues_on_failure(hass: HomeAssistant
         },
     }
 
-    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})
-    hass.data[DOMAIN]["coordinators"][entry.entry_id] = mock_coordinator
+    _setup_test_coordinator(hass, entry.entry_id, mock_coordinator)
 
     mock_coordinator.async_setup = AsyncMock()
     mock_coordinator.async_config_entry_first_refresh = AsyncMock()
