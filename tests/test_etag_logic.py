@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from conftest import BlueprintCoordinatorProtocol
 from homeassistant.core import HomeAssistant
+from protocols import BlueprintCoordinatorProtocol
 
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 

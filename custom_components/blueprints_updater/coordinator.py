@@ -756,8 +756,24 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 _save_file, real_path, remote_content, max_backups
             )
 
-            if reload_services and (bp_block := self._get_blueprint_block(path, remote_content)):
-                domain = self._normalize_domain(bp_block.get("domain"))
+            if reload_services:
+                domain = "automation"
+                if bp_block := self._get_blueprint_block(path, remote_content):
+                    domain = self._normalize_domain(bp_block.get("domain"))
+                elif self.data and path in self.data:
+                    domain = self.data[path].get("domain", "automation")
+                    _LOGGER.debug(
+                        "Blueprint metadata at %s is malformed; "
+                        "using cached domain '%s' for reload",
+                        path,
+                        domain,
+                    )
+                else:
+                    _LOGGER.info(
+                        "Blueprint metadata at %s is malformed and not cached; "
+                        "falling back to 'automation' domain for reload",
+                        path,
+                    )
                 await self.async_reload_services([domain])
 
             if self.data and path in self.data:

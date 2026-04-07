@@ -12,9 +12,9 @@ from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
 
 import httpx
 import pytest
-from conftest import BlueprintCoordinatorProtocol
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import yaml as yaml_util
+from protocols import BlueprintCoordinatorProtocol
 
 from custom_components.blueprints_updater.const import (
     FILTER_MODE_ALL,
@@ -58,9 +58,78 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
         coord.async_set_updated_data = cast(Any, MagicMock(side_effect=_mock_set_data))
         coord.async_update_listeners = cast(Any, MagicMock())
         coord.setup_complete = True
+        coord.last_update_success = True
         coord._is_safe_path = cast(Any, MagicMock(return_value=True))
         coord._is_safe_url = cast(Any, AsyncMock(return_value=True))
         return coord
+
+
+def test_coordinator_protocol_conformance(coordinator):
+    """Verify that BlueprintUpdateCoordinator conforms to BlueprintCoordinatorProtocol."""
+    from protocols import (
+        BlueprintCoordinatorCore,
+        BlueprintCoordinatorFetch,
+        BlueprintCoordinatorPersistence,
+        BlueprintCoordinatorProtocol,
+        BlueprintCoordinatorTasks,
+    )
+
+    def check_protocol(inst, protocol, name):
+        missing = []
+        for attr in protocol.__annotations__:
+            if not hasattr(inst, attr):
+                missing.append(f"Attribute: {attr}")
+        for attr in dir(protocol):
+            if attr.startswith("_") and not attr.startswith("__") and not hasattr(inst, attr):
+                missing.append(f"Private member: {attr}")
+            elif not attr.startswith("_") and not hasattr(inst, attr):
+                missing.append(f"Method/Member: {attr}")
+        if missing:
+            print(f"\n{name} missing: {missing}")
+            return False
+        return True
+
+    core_ok = check_protocol(coordinator, BlueprintCoordinatorCore, "BlueprintCoordinatorCore")
+    persistence_ok = check_protocol(
+        coordinator, BlueprintCoordinatorPersistence, "BlueprintCoordinatorPersistence"
+    )
+    fetch_ok = check_protocol(coordinator, BlueprintCoordinatorFetch, "BlueprintCoordinatorFetch")
+    tasks_ok = check_protocol(coordinator, BlueprintCoordinatorTasks, "BlueprintCoordinatorTasks")
+    protocol_ok = check_protocol(
+        coordinator, BlueprintCoordinatorProtocol, "BlueprintCoordinatorProtocol"
+    )
+
+    assert core_ok
+    assert persistence_ok
+    assert fetch_ok
+    assert tasks_ok
+    assert protocol_ok
+    assert isinstance(coordinator, BlueprintCoordinatorProtocol)
+
+
+@pytest.mark.asyncio
+async def test_async_install_blueprint_reload_fallback(coordinator):
+    """Test that reload fallback works when blueprint block is missing or malformed."""
+    path = "test.yaml"
+    content = "invalid: yaml"
+
+    coordinator.async_reload_services = AsyncMock()
+
+    with (
+        patch("builtins.open", MagicMock()),
+        patch("custom_components.blueprints_updater.coordinator.os.replace"),
+    ):
+        await coordinator.async_install_blueprint(path, content, reload_services=True)
+    coordinator.async_reload_services.assert_called_once_with(["automation"])
+
+    coordinator.async_reload_services.reset_mock()
+    coordinator.data = {path: {"domain": "script", "name": "Test"}}
+    with (
+        patch("builtins.open", MagicMock()),
+        patch("custom_components.blueprints_updater.coordinator.os.replace"),
+    ):
+        await coordinator.async_install_blueprint(path, content, reload_services=True)
+    coordinator.async_reload_services.assert_called_once_with(["script"])
 
 
 def test_normalize_url(coordinator):
