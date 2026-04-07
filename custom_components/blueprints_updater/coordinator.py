@@ -18,6 +18,7 @@ from typing import Any, cast
 from urllib.parse import urlparse, urlunparse
 
 import httpx
+from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.components.blueprint.models import Blueprint
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.config_entries import ConfigEntry
@@ -592,7 +593,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     error_msg,
                 )
                 return f"incompatible|{error_msg}"
-        except Exception as err:
+        except InvalidBlueprint as err:
             _LOGGER.warning(
                 "Blueprint validation failed for %s: %s",
                 source_url,
@@ -1119,7 +1120,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         try:
             blueprint_dict = yaml_util.parse_yaml(remote_content)
             last_error = self._validate_blueprint(blueprint_dict, source_url)
-        except Exception as err:
+        except (HomeAssistantError, InvalidBlueprint) as err:
             last_error = f"yaml_syntax_error|{err}"
 
         auto_update = self.config_entry and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
