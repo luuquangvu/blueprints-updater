@@ -760,10 +760,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 domain = "automation"
                 try:
                     blueprint_dict = yaml_util.parse_yaml(remote_content)
-                    if isinstance(blueprint_dict, dict):
-                        blueprint_block = blueprint_dict.get("blueprint")
-                        if isinstance(blueprint_block, dict):
-                            domain = str(blueprint_block.get("domain", "")).strip() or "automation"
+                    if isinstance(blueprint_dict, dict) and isinstance(
+                        blueprint_block := blueprint_dict.get("blueprint"), dict
+                    ):
+                        domain = BlueprintUpdateCoordinator._normalize_domain(
+                            blueprint_block.get("domain")
+                        )
                 except HomeAssistantError as err:
                     _LOGGER.warning("Failed to parse blueprint at %s: %s", path, err)
                 await self.async_reload_services([domain])
@@ -1413,6 +1415,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content
 
     @staticmethod
+    def _normalize_domain(domain: Any) -> str:
+        """Normalize the blueprint domain, defaulting to 'automation'.
+
+        Args:
+            domain: The domain to normalize.
+
+        Returns:
+            The normalized domain string.
+
+        """
+        return str(domain).strip() if isinstance(domain, str) and domain.strip() else "automation"
+
+    @staticmethod
     def _should_include_blueprint(rel_path: str, filter_mode: str, selected_set: set[str]) -> bool:
         """Check if a blueprint should be included based on filtering rules."""
         if filter_mode == FILTER_MODE_BLACKLIST:
@@ -1465,12 +1480,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if isinstance(raw_name, str) and raw_name.strip()
             else os.path.basename(path)
         )
-        raw_domain = bp_info.get("domain")
-        domain = (
-            raw_domain.strip()
-            if isinstance(raw_domain, str) and raw_domain.strip()
-            else "automation"
-        )
+        domain = BlueprintUpdateCoordinator._normalize_domain(bp_info.get("domain"))
         return {
             "name": name,
             "domain": domain,
@@ -1515,16 +1525,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
                         full_path, content
                     ):
-                        metadata: BlueprintMetadata = {
-                            "name": parsed_data["name"],
-                            "domain": parsed_data["domain"],
-                            "source_url": parsed_data["source_url"],
-                            "local_hash": parsed_data["local_hash"],
+                        found_blueprints[full_path] = {
+                            **parsed_data,
                             "rel_path": rel_path,
                         }
-                        found_blueprints[full_path] = metadata
 
-                except Exception as err:
+                except OSError as err:
                     _LOGGER.error("Error reading blueprint at %s: %s", full_path, err)
 
         return found_blueprints

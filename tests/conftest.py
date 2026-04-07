@@ -1,5 +1,6 @@
 """Fixtures for Blueprints Updater tests."""
 
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol, runtime_checkable
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -24,23 +25,23 @@ class BlueprintCoordinatorProtocol(Protocol):
     _persisted_etags: dict[str, str]
     _persisted_hashes: dict[str, str]
 
-    async_set_updated_data: MagicMock
-    async_update_listeners: MagicMock
-    _is_safe_path: MagicMock
-    _is_safe_url: AsyncMock
-    _store: MagicMock
-    _async_update_blueprint_in_place: AsyncMock
-    _async_save_metadata: AsyncMock
-    _async_background_refresh: AsyncMock
-    _validate_blueprint: MagicMock
-    async_install_blueprint: AsyncMock
-    async_reload_services: AsyncMock
-    async_translate: AsyncMock
-    _process_blueprint_content: AsyncMock
-    _start_background_refresh: AsyncMock
-    async_setup: AsyncMock
-    async_refresh: AsyncMock
-    scan_blueprints: MagicMock
+    async_set_updated_data: Callable[..., Any]
+    async_update_listeners: Callable[..., Any]
+    _is_safe_path: Callable[..., bool]
+    _is_safe_url: Callable[..., Awaitable[bool]]
+    _store: Any
+    _async_update_blueprint_in_place: Callable[..., Awaitable[None]]
+    _async_save_metadata: Callable[..., Awaitable[None]]
+    _async_background_refresh: Callable[..., Awaitable[None]]
+    _validate_blueprint: Callable[..., str | None]
+    async_install_blueprint: Callable[..., Awaitable[None]]
+    async_reload_services: Callable[..., Awaitable[None]]
+    async_translate: Callable[..., Awaitable[str]]
+    _process_blueprint_content: Callable[..., Awaitable[None]]
+    _start_background_refresh: Callable[..., None]
+    async_setup: Callable[..., Awaitable[None]]
+    async_refresh: Callable[..., Awaitable[None]]
+    scan_blueprints: Callable[..., dict[str, Any]]
 
 
 @pytest.fixture(autouse=True)
