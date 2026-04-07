@@ -312,7 +312,6 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 self._localized_error = await self.coordinator.async_translate(error)
 
         if self.hass and self.entity_id:
-            self._clear_cached_properties()
             self.async_write_ha_state()
 
     async def _translate_and_raise_last_error(self, info: dict[str, Any]) -> None:

@@ -304,14 +304,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A dictionary containing blueprint information and update status.
 
         """
-        filter_mode = (
+        filter_mode = self._get_validated_filter_mode(
             self.config_entry.options.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
             if self.config_entry
             else FILTER_MODE_ALL
         )
-        if filter_mode not in (FILTER_MODE_ALL, FILTER_MODE_WHITELIST, FILTER_MODE_BLACKLIST):
-            _LOGGER.error("Invalid filter mode '%s' in config; falling back to all", filter_mode)
-            filter_mode = FILTER_MODE_ALL
 
         selected_blueprints = (
             self.config_entry.options.get(CONF_SELECTED_BLUEPRINTS, []) if self.config_entry else []
@@ -1406,11 +1403,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if filter_mode == FILTER_MODE_WHITELIST:
             return rel_path in selected_set
 
-        if filter_mode == FILTER_MODE_ALL:
-            return True
-
-        _LOGGER.error("Unknown blueprint filter_mode '%s'; defaulting to all", filter_mode)
         return True
+
+    def _get_validated_filter_mode(self, filter_mode: Any) -> str:
+        """Normalize and validate filter mode.
+
+        Args:
+            filter_mode: The filter mode to validate.
+
+        Returns:
+            A valid filter mode (FILTER_MODE_ALL as fallback).
+
+        """
+        if filter_mode in (FILTER_MODE_ALL, FILTER_MODE_WHITELIST, FILTER_MODE_BLACKLIST):
+            return cast(str, filter_mode)
+
+        _LOGGER.error("Invalid filter mode '%s' in config; falling back to all", filter_mode)
+        return FILTER_MODE_ALL
 
     @staticmethod
     def _parse_blueprint_data(path: str, content: str) -> dict[str, Any] | None:
