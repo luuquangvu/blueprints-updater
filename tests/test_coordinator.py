@@ -1960,3 +1960,13 @@ def test_get_validated_selected_blueprints_hardening(coordinator):
         assert coordinator._get_validated_selected_blueprints(123) == []
         mock_logger.error.assert_called()
         assert "Invalid type" in mock_logger.error.call_args[0][0]
+
+
+def test_get_validated_filter_mode_normalization(coordinator):
+    """Test that filter mode is normalized (lowercase and stripped)."""
+    assert coordinator._get_validated_filter_mode("  All  ") == "all"
+    assert coordinator._get_validated_filter_mode("WHITELIST") == "whitelist"
+    assert coordinator._get_validated_filter_mode("Blacklist") == "blacklist"
+    assert coordinator._get_validated_filter_mode("invalid") == "all"
+    assert coordinator._get_validated_filter_mode(None) == "all"
+    assert coordinator._get_validated_filter_mode(123) == "all"

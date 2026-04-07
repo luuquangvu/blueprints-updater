@@ -266,19 +266,19 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 attrs["last_error"] = self._localized_error or error
         return attrs
 
-    _cached_property_names: ClassVar[list[str]] = []
+    _cached_property_names_by_class: ClassVar[dict[type, list[str]]] = {}
 
     @callback
     def _clear_cached_properties(self) -> None:
         """Invalidate cached properties after state changes."""
         cls = self.__class__
-        if not cls._cached_property_names:
-            cls._cached_property_names = [
+        if cls not in self._cached_property_names_by_class:
+            self._cached_property_names_by_class[cls] = [
                 name
                 for name, _ in inspect.getmembers(cls, lambda x: isinstance(x, cached_property))
             ]
 
-        for name in cls._cached_property_names:
+        for name in self._cached_property_names_by_class[cls]:
             with contextlib.suppress(AttributeError):
                 delattr(self, name)
 

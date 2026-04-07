@@ -1505,10 +1505,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A valid filter mode (FILTER_MODE_ALL as fallback).
 
         """
-        if filter_mode in (FILTER_MODE_ALL, FILTER_MODE_WHITELIST, FILTER_MODE_BLACKLIST):
-            return cast(str, filter_mode)
+        if not isinstance(filter_mode, str):
+            if filter_mode is not None:
+                _LOGGER.warning(
+                    "Invalid filter mode type '%s'; falling back to all", type(filter_mode).__name__
+                )
+            return FILTER_MODE_ALL
 
-        _LOGGER.error("Invalid filter mode '%s' in config; falling back to all", filter_mode)
+        normalized_mode = filter_mode.strip().lower()
+        if normalized_mode in (FILTER_MODE_ALL, FILTER_MODE_WHITELIST, FILTER_MODE_BLACKLIST):
+            return normalized_mode
+
+        _LOGGER.warning("Invalid filter mode '%s' in config; falling back to all", filter_mode)
         return FILTER_MODE_ALL
 
     @staticmethod
