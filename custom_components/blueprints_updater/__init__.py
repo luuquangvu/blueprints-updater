@@ -356,6 +356,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
         entry.entry_id
     ]
     interval_hours = get_update_interval(entry)
+    blueprint_coordinator.config_entry = entry
     blueprint_coordinator.update_interval = timedelta(hours=interval_hours)
 
     await blueprint_coordinator.async_request_refresh()

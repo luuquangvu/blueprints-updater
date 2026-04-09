@@ -69,28 +69,48 @@ async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, An
 
 
 def _get_config_schema(
-    defaults: dict[str, Any],
+    config: Any,
     blueprint_options: list[dict[str, Any]],
 ) -> vol.Schema:
     """Return the configuration schema for the flow.
 
     Args:
-        defaults: Current or default configuration values.
+        config: Current or default configuration values (ConfigEntry, dict or None).
         blueprint_options: Available blueprints to select from.
 
     Returns:
         A voluptuous Schema object.
 
     """
+    auto_update = False
+    filter_mode = FILTER_MODE_ALL
+    selected_blueprints = []
+
+    if config is not None:
+        if hasattr(config, "options"):
+            auto_update = config.options.get(
+                CONF_AUTO_UPDATE, config.data.get(CONF_AUTO_UPDATE, False)
+            )
+            filter_mode = config.options.get(
+                CONF_FILTER_MODE, config.data.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
+            )
+            selected_blueprints = config.options.get(
+                CONF_SELECTED_BLUEPRINTS, config.data.get(CONF_SELECTED_BLUEPRINTS, [])
+            )
+        elif isinstance(config, dict):
+            auto_update = config.get(CONF_AUTO_UPDATE, False)
+            filter_mode = config.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
+            selected_blueprints = config.get(CONF_SELECTED_BLUEPRINTS, [])
+
     return vol.Schema(
         {
             vol.Required(
                 CONF_AUTO_UPDATE,
-                default=defaults.get(CONF_AUTO_UPDATE, False),
+                default=auto_update,
             ): cv.boolean,
             vol.Required(
                 CONF_UPDATE_INTERVAL,
-                default=get_update_interval(defaults),
+                default=get_update_interval(config),
             ): NumberSelector(
                 NumberSelectorConfig(
                     min=MIN_UPDATE_INTERVAL,
@@ -101,7 +121,7 @@ def _get_config_schema(
             ),
             vol.Required(
                 CONF_MAX_BACKUPS,
-                default=get_max_backups(defaults),
+                default=get_max_backups(config),
             ): NumberSelector(
                 NumberSelectorConfig(
                     min=MIN_BACKUPS,
@@ -111,7 +131,7 @@ def _get_config_schema(
             ),
             vol.Required(
                 CONF_FILTER_MODE,
-                default=defaults.get(CONF_FILTER_MODE, FILTER_MODE_ALL),
+                default=filter_mode,
             ): SelectSelector(
                 SelectSelectorConfig(
                     options=cast(
@@ -128,7 +148,7 @@ def _get_config_schema(
             ),
             vol.Optional(
                 CONF_SELECTED_BLUEPRINTS,
-                default=defaults.get(CONF_SELECTED_BLUEPRINTS, []),
+                default=selected_blueprints,
             ): SelectSelector(
                 SelectSelectorConfig(
                     options=cast(Any, blueprint_options),
@@ -185,9 +205,7 @@ class BlueprintsUpdaterOptionsFlowHandler(OptionsFlow):
 
         options = await _async_get_blueprint_options(self.hass)
 
-        defaults = dict(self.config_entry.options)
-
         return self.async_show_form(
             step_id="init",
-            data_schema=_get_config_schema(defaults, options),
+            data_schema=_get_config_schema(self.config_entry, options),
         )

@@ -142,7 +142,7 @@ def get_config_int(
         val = default
 
     try:
-        res = int(str(val).strip())
+        res = int(float(str(val).strip()))
     except (ValueError, TypeError):
         return default
 
