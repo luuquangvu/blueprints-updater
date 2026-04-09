@@ -168,6 +168,15 @@ def test_get_config_int():
     config.options = {"key": "invalid"}
     assert get_config_int(config, "key", 5) == 5
 
+    config.options = {"key": "24.0"}
+    assert get_config_int(config, "key", 5) == 24
+
+    config.options = {"key": 24.0}
+    assert get_config_int(config, "key", 5) == 24
+
+    config.options = {"key": " 12.7 "}
+    assert get_config_int(config, "key", 5) == 12
+
 
 def test_get_update_interval():
     """Test get_update_interval helper."""

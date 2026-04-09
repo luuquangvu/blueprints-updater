@@ -1,5 +1,6 @@
 """Tests for Blueprints Updater initialization."""
 
+from datetime import timedelta
 from types import MappingProxyType
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -12,6 +13,7 @@ from custom_components.blueprints_updater.__init__ import (
     async_setup,
     async_setup_entry,
     async_unload_entry,
+    async_update_options,
 )
 from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
@@ -549,3 +551,22 @@ async def test_async_update_all_handler_continues_on_failure(hass: HomeAssistant
 
         mock_coordinator.async_reload_services.assert_called_once()
         mock_coordinator.async_request_refresh.assert_called_once()
+
+
+async def test_async_update_options_refreshes_coordinator(hass: HomeAssistant):
+    """Test that async_update_options refreshes the coordinator's config entry and interval."""
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.options = {"update_interval": 12}
+
+    coordinator_mock = MagicMock(spec=BlueprintUpdateCoordinator)
+    coordinator_mock.config_entry = MagicMock()
+    coordinator_mock.async_request_refresh = AsyncMock()
+
+    _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
+
+    await async_update_options(hass, entry)
+
+    assert coordinator_mock.config_entry == entry
+    assert coordinator_mock.update_interval == timedelta(hours=12)
+    assert coordinator_mock.async_request_refresh.called

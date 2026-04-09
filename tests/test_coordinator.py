@@ -1970,3 +1970,20 @@ def test_get_validated_filter_mode_normalization(coordinator):
     assert coordinator._get_validated_filter_mode("invalid") == "all"
     assert coordinator._get_validated_filter_mode(None) == "all"
     assert coordinator._get_validated_filter_mode(123) == "all"
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_uses_current_options(coordinator):
+    """Test that _async_update_data uses the latest options from config_entry."""
+    coordinator.config_entry.options = {
+        "filter_mode": "whitelist",
+        "selected_blueprints": ["test.yaml"],
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value={}) as mock_scan,
+        patch.object(coordinator, "_start_background_refresh"),
+        patch.object(coordinator, "_async_save_metadata"),
+    ):
+        await coordinator._async_update_data()
+        mock_scan.assert_called_once_with(ANY, "whitelist", ["test.yaml"])
