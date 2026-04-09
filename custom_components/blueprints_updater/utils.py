@@ -143,7 +143,7 @@ def get_config_int(
 
     try:
         res = int(float(str(val).strip()))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return default
 
     if min_val is not None:
