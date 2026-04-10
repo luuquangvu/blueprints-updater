@@ -243,7 +243,13 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             remote_content = info.get("remote_content")
 
         if remote_content:
-            diff_text = info.get("_cached_git_diff")
+            diff_text = None
+            cached_entry = info.get("_cached_git_diff")
+            if isinstance(cached_entry, tuple) and len(cached_entry) == 3:
+                c_local, c_remote, c_text = cached_entry
+                if c_local == info.get("local_hash") and c_remote == info.get("remote_hash"):
+                    diff_text = c_text
+
             if diff_text is None:
 
                 def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
@@ -267,9 +273,23 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                     diff_text = await self.coordinator.hass.async_add_executor_job(
                         _read_and_diff, self._path, remote_content, info.get("source_url", "")
                     )
-                    info["_cached_git_diff"] = diff_text or ""
+                    info["_cached_git_diff"] = (
+                        info.get("local_hash"),
+                        info.get("remote_hash"),
+                        diff_text or "",
+                    )
+                except OSError as err:
+                    _LOGGER.warning(
+                        "I/O error reading blueprint %s for git diff: %s", self._path, err
+                    )
+                    diff_text = ""
                 except Exception as err:
-                    _LOGGER.warning("Could not generate git diff for %s: %s", self._path, err)
+                    _LOGGER.error(
+                        "Unexpected error generating git diff for %s: %s",
+                        self._path,
+                        err,
+                        exc_info=True,
+                    )
                     diff_text = ""
 
             if diff_text:
