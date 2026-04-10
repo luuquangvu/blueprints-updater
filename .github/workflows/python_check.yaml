@@ -36,16 +36,19 @@ jobs:
         run: uv sync --all-groups
 
       - name: Run Ruff
-        run: uv run ruff check .
+        run: uv run ruff check
 
       - name: Run Ruff Format
-        run: uv run ruff format . --check
+        run: uv run ruff format --check
 
       - name: Run Ty Check
         run: uv run ty check
 
       - name: Run Pyright
         run: uv run pyright
+
+      - name: Run Interrogate
+        run: uv run interrogate -v
 
       - name: Run Tests
         run: uv run pytest
