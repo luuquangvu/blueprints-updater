@@ -21,6 +21,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_AUTO_UPDATE, DOMAIN
@@ -236,11 +237,19 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             )
 
         remote_content = info.get("remote_content")
-        if remote_content is None:
-            _LOGGER.debug("Remote content missing for %s, fetching on-demand for diff", self._path)
-            await self.coordinator.async_fetch_blueprint(self._path, force=True)
-            info = self.coordinator.data.get(self._path, info)
-            remote_content = info.get("remote_content")
+        if remote_content is None and info.get("updatable"):
+            _LOGGER.debug("Remote content missing for %s, fetching read-only for diff", self._path)
+            try:
+                session = get_async_client(self.coordinator.hass)
+                url = self.coordinator._normalize_url(info.get("source_url", ""))
+                if url:
+                    remote_content, _ = await self.coordinator._async_fetch_content(
+                        session, url, force=True
+                    )
+            except Exception as err:
+                _LOGGER.warning(
+                    "Could not fetch remote content read-only for %s: %s", self._path, err
+                )
 
         if remote_content:
             diff_text = None

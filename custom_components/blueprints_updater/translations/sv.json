@@ -119,7 +119,7 @@
     "processing_error": "Bearbetningsfel: {error}",
     "auto_update_failed": "Automatisk uppdatering misslyckades: {error}",
     "unsafe_url": "Osäker URL: {error}",
-    "content_missing": "Innehållet i ritningen saknas eller kunde inte hämtas",
+    "content_missing": "Innehållet i blueprint saknas eller kunde inte hämtas.",
     "git_diff_title": "Kodändringar (Git Diff)"
   }
 }

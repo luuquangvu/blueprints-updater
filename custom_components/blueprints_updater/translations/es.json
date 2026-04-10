@@ -119,7 +119,7 @@
     "processing_error": "Error de procesamiento: {error}",
     "auto_update_failed": "Error en la actualización automática: {error}",
     "unsafe_url": "URL no segura: {error}",
-    "content_missing": "Falta el contenido del plano o no se pudo obtener.",
+    "content_missing": "El contenido del blueprint falta o no se pudo obtener.",
     "git_diff_title": "Cambios en el código (Git Diff)"
   }
 }

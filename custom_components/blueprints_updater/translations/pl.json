@@ -119,7 +119,7 @@
     "processing_error": "Błąd przetwarzania: {error}",
     "auto_update_failed": "Automatyczna aktualizacja nie powiodła się: {error}",
     "unsafe_url": "Niebezpieczny adres URL: {error}",
-    "content_missing": "Brakuje zawartości projektu lub nie można jej pobrać",
+    "content_missing": "Brak zawartości Blueprinta lub nie można jej pobrać.",
     "git_diff_title": "Zmiany w kodzie (Git Diff)"
   }
 }

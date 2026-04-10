@@ -119,7 +119,7 @@
     "processing_error": "Errore di elaborazione: {error}",
     "auto_update_failed": "Aggiornamento automatico fallito: {error}",
     "unsafe_url": "URL non sicuro: {error}",
-    "content_missing": "Il contenuto del progetto è mancante o non è stato possibile recuperarlo.",
+    "content_missing": "Il contenuto del blueprint è mancante o non è stato possibile recuperarlo.",
     "git_diff_title": "Modifiche al codice (Git Diff)"
   }
 }
