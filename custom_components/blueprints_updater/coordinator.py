@@ -997,8 +997,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Get cached git diff."""
         info = self.data.get(path, {})
         cached = info.get("_cached_git_diff")
-        if cached and isinstance(cached, tuple) and len(cached) == 3:
-            c_local, c_remote, c_diff = cached
+        if cached and isinstance(cached, dict):
+            c_local = cached.get("local")
+            c_remote = cached.get("remote")
+            c_diff = cached.get("diff")
             if local_hash == c_local and remote_hash == c_remote:
                 return c_diff
         return None
@@ -1008,7 +1010,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> None:
         """Set cached git diff."""
         if path in self.data:
-            self.data[path]["_cached_git_diff"] = (local_hash, remote_hash, diff_text)
+            self.data[path]["_cached_git_diff"] = {
+                "local": local_hash,
+                "remote": remote_hash,
+                "diff": diff_text,
+            }
 
     async def async_fetch_diff_content(self, path: str) -> str | None:
         """Fetch and validate remote content for diff generation.
@@ -1049,6 +1055,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             info["last_error"] = last_error
             return None
 
+        info["last_error"] = None
         info["remote_content"] = remote_content
         return remote_content
 

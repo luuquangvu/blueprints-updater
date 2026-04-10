@@ -1990,7 +1990,9 @@ async def test_async_update_data_uses_current_options(coordinator):
 def test_get_cached_git_diff(coordinator):
     """Test get_cached_git_diff logic."""
     path = "test.yaml"
-    coordinator.data = {path: {"_cached_git_diff": ("local", "remote", "diff")}}
+    coordinator.data = {
+        path: {"_cached_git_diff": {"local": "local", "remote": "remote", "diff": "diff"}}
+    }
     assert coordinator.get_cached_git_diff(path, "local", "remote") == "diff"
     assert coordinator.get_cached_git_diff(path, "wrong", "remote") is None
     assert coordinator.get_cached_git_diff("missing", "local", "remote") is None
@@ -2001,7 +2003,11 @@ def test_set_cached_git_diff(coordinator):
     path = "test.yaml"
     coordinator.data = {path: {}}
     coordinator.set_cached_git_diff(path, "l1", "r1", "d1")
-    assert coordinator.data[path]["_cached_git_diff"] == ("l1", "r1", "d1")
+    assert coordinator.data[path]["_cached_git_diff"] == {
+        "local": "l1",
+        "remote": "r1",
+        "diff": "d1",
+    }
 
 
 @pytest.mark.asyncio
@@ -2012,7 +2018,7 @@ async def test_async_get_git_diff_cache_hit(coordinator):
         path: {
             "local_hash": "h1",
             "remote_hash": "h2",
-            "_cached_git_diff": ("h1", "h2", "cached_diff"),
+            "_cached_git_diff": {"local": "h1", "remote": "h2", "diff": "cached_diff"},
         }
     }
     with patch.object(coordinator, "async_fetch_diff_content") as mock_fetch:
@@ -2044,4 +2050,8 @@ async def test_async_get_git_diff_full_flow(coordinator):
         diff = await coordinator.async_get_git_diff(path)
         assert diff is not None
         assert "+  name: New" in diff
-        assert coordinator.data[path]["_cached_git_diff"] == ("h1", "h2", diff)
+        assert coordinator.data[path]["_cached_git_diff"] == {
+            "local": "h1",
+            "remote": "h2",
+            "diff": diff,
+        }
