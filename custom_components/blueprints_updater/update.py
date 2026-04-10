@@ -300,12 +300,12 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                     )
                     diff_text = ""
 
-            if diff_text:
-                diff_title = await self.coordinator.async_translate("git_diff_title")
-                notes += (
-                    f"\n\n<details>\n<summary>{diff_title}</summary>\n\n"
-                    f"```diff\n{diff_text}```\n</details>"
-                )
+        if diff_text:
+            diff_title = await self.coordinator.async_translate("git_diff_title")
+            notes += (
+                f"\n\n<details>\n<summary>{diff_title}</summary>\n\n"
+                f"```diff\n{diff_text}```\n</details>"
+            )
 
         return notes
 

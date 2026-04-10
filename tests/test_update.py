@@ -619,3 +619,29 @@ async def test_entity_release_notes_git_diff_source_url_normalization(coordinato
     assert "+  source_url: https://url.com" not in notes
     assert "<summary>git_diff_title</summary>" not in notes
     assert "<details>" not in notes
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_git_diff_cached(coordinator):
+    """Test git diff returns cached notes directly."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+    coordinator.data[path] = info
+
+    cached_diff = "cached diff payload"
+    coordinator.get_cached_git_diff.return_value = cached_diff
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    with patch("builtins.open", mock_open(read_data="local")):
+        notes = await entity.async_generate_release_notes()
+
+    assert notes is not None
+    assert f"```diff\n{cached_diff}```" in notes
+    coordinator.async_fetch_diff_content.assert_not_called()
