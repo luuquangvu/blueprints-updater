@@ -1,6 +1,6 @@
 """Tests for Blueprints Updater update entities."""
 
-from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -589,7 +589,7 @@ async def test_entity_release_notes_git_diff_missing_remote(coordinator):
     ):
         notes = await entity.async_generate_release_notes()
 
-    assert coordinator._async_fetch_content.called
+    coordinator._async_fetch_content.assert_called_once_with(ANY, "https://url.com", force=True)
     assert notes is not None
     assert "-  name: Old" in notes
     assert "+  name: New" in notes
@@ -621,3 +621,5 @@ async def test_entity_release_notes_git_diff_source_url_normalization(coordinato
     assert notes is not None
     assert "-  source_url: https://url.com" not in notes
     assert "+  source_url: https://url.com" not in notes
+    assert "<summary>git_diff_title</summary>" not in notes
+    assert "<details>" not in notes

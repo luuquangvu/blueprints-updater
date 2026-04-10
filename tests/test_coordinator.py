@@ -14,7 +14,11 @@ import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import yaml as yaml_util
-from protocols import BlueprintCoordinatorProtocol
+from protocols import (
+    BlueprintCoordinatorInternal,
+    BlueprintCoordinatorProtocol,
+    BlueprintCoordinatorPublic,
+)
 
 from custom_components.blueprints_updater.const import (
     FILTER_MODE_ALL,
@@ -71,12 +75,6 @@ def test_coordinator_protocol_conformance(coordinator):
     protocols for public, internal, and combined interfaces using runtime protocol
     checks.
     """
-    from protocols import (
-        BlueprintCoordinatorInternal,
-        BlueprintCoordinatorProtocol,
-        BlueprintCoordinatorPublic,
-    )
-
     assert isinstance(coordinator, BlueprintCoordinatorPublic)
     assert isinstance(coordinator, BlueprintCoordinatorInternal)
     assert isinstance(coordinator, BlueprintCoordinatorProtocol)
