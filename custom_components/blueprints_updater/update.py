@@ -262,6 +262,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             if diff_text is None:
 
                 def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
+                    """Read and diff content."""
                     with open(local_path, encoding="utf-8") as f:
                         local_text = f.read()
 

@@ -130,6 +130,7 @@ def coordinator():
     comp.hass = MagicMock()
 
     async def mock_exec(func, *args):
+        """Mock executor task."""
         return func(*args)
 
     comp.hass.async_add_executor_job = AsyncMock(side_effect=mock_exec)
@@ -575,6 +576,7 @@ async def test_entity_release_notes_git_diff_missing_remote(coordinator):
     coordinator._normalize_url = MagicMock(return_value="https://url.com")
 
     async def mock_fetch(session, url, force=False):
+        """Mock remote fetch content."""
         return (
             "blueprint:\n  name: New\n  source_url: https://url.com\n",
             None,

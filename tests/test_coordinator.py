@@ -57,6 +57,7 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
         coord.data = {}
 
         def _mock_set_data(data):
+            """Mock _mock_set_data."""
             coord.data = data
 
         coord.async_set_updated_data = cast(Any, MagicMock(side_effect=_mock_set_data))
@@ -278,6 +279,7 @@ def test_scan_blueprints(hass, coordinator):
     no_url_content = "blueprint:\n  name: No URL"
 
     def open_side_effect(path, *_args, **_kwargs):
+        """Mock open_side_effect."""
         path_str = str(path)
         basename = os.path.basename(path_str)
         contents_map = {
@@ -720,6 +722,7 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
     barrier = asyncio.Barrier(MAX_CONCURRENT_REQUESTS)
 
     async def slow_get(*_args, **_kwargs):
+        """Mock slow_get."""
         nonlocal active_requests, max_active_requests
         async with lock:
             active_requests += 1
@@ -1314,9 +1317,11 @@ async def test_background_refresh_deduplication(hass, coordinator):
     )
 
     async def mock_refresh(*_args, **_kwargs):
+        """Mock mock_refresh."""
         await asyncio.sleep(10)
 
     def side_effect(coro, name=None):
+        """Mock side_effect."""
         return asyncio.create_task(coro, name=name)
 
     hass.async_create_background_task = MagicMock(side_effect=side_effect)
@@ -1342,12 +1347,14 @@ async def test_background_refresh_shutdown(hass, coordinator):
     """Test that shutdown cancels the background task."""
 
     async def long_running_task():
+        """Mock long_running_task."""
         try:
             await asyncio.sleep(100)
         except asyncio.CancelledError:
             raise
 
     def side_effect(coro, name=None):
+        """Mock side_effect."""
         return asyncio.create_task(coro, name=name)
 
     hass.async_create_background_task = MagicMock(side_effect=side_effect)
@@ -1518,6 +1525,7 @@ def test_scan_blueprints_domain_extraction(hass, coordinator):
     }
 
     def open_side_effect(path, *_args, **_kwargs):
+        """Mock open_side_effect."""
         content = contents.get(os.path.basename(str(path)), "")
         m = MagicMock()
         m.read.return_value = content

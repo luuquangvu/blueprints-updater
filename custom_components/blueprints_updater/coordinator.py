@@ -758,6 +758,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         try:
 
             def _save_file(file_path: str, content: str, max_bak: int) -> None:
+                """Local helper for _save_file."""
                 tmp_path = f"{file_path}.tmp"
 
                 with open(tmp_path, "w", encoding="utf-8") as f:
@@ -945,6 +946,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         try:
 
             def _restore_file(file_path: str, ver: int, max_bak: int) -> tuple[bool, str]:
+                """Local helper for _restore_file."""
                 bak_path = f"{file_path}.bak.{ver}"
                 if ver == 1 and not os.path.isfile(bak_path):
                     old_bak = f"{file_path}.bak"
