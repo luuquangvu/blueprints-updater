@@ -136,6 +136,7 @@ def coordinator():
     comp.hass.async_add_executor_job = AsyncMock(side_effect=mock_exec)
     comp.get_cached_git_diff = MagicMock(return_value=None)
     comp.set_cached_git_diff = MagicMock()
+    comp.async_get_git_diff = AsyncMock(return_value=None)
     return comp
 
 
@@ -550,6 +551,7 @@ async def test_entity_release_notes_git_diff(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
+    coordinator.async_get_git_diff.return_value = "-condition: []"
     with patch("builtins.open", mock_open(read_data=local_content)):
         notes = await entity.async_generate_release_notes()
 
@@ -575,17 +577,11 @@ async def test_entity_release_notes_git_diff_missing_remote(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    async def mock_fetch_diff(path):
-        """Mock remote fetch content."""
-        return "blueprint:\n  name: New\n  source_url: https://url.com\n"
-
-    coordinator.async_fetch_diff_content = AsyncMock(side_effect=mock_fetch_diff)
-    local_content = "blueprint:\n  name: Old\n  source_url: https://url.com\n"
-
-    with patch("builtins.open", mock_open(read_data=local_content)):
+    coordinator.async_get_git_diff.return_value = "-  name: Old\n+  name: New"
+    with patch("builtins.open", mock_open(read_data="local")):
         notes = await entity.async_generate_release_notes()
 
-    coordinator.async_fetch_diff_content.assert_called_once_with("/config/blueprints/test.yaml")
+    coordinator.async_get_git_diff.assert_called_once_with("/config/blueprints/test.yaml")
     assert notes is not None
     assert "-  name: Old" in notes
     assert "+  name: New" in notes
@@ -611,12 +607,11 @@ async def test_entity_release_notes_git_diff_source_url_normalization(coordinato
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
+    coordinator.async_get_git_diff.return_value = ""
     with patch("builtins.open", mock_open(read_data=local_content)):
         notes = await entity.async_generate_release_notes()
 
     assert notes is not None
-    assert "-  source_url: https://url.com" not in notes
-    assert "+  source_url: https://url.com" not in notes
     assert "<summary>git_diff_title</summary>" not in notes
     assert "<details>" not in notes
 
@@ -634,7 +629,7 @@ async def test_entity_release_notes_git_diff_cached(coordinator):
     coordinator.data[path] = info
 
     cached_diff = "cached diff payload"
-    coordinator.get_cached_git_diff.return_value = cached_diff
+    coordinator.async_get_git_diff.return_value = cached_diff
 
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
@@ -644,4 +639,4 @@ async def test_entity_release_notes_git_diff_cached(coordinator):
 
     assert notes is not None
     assert f"```diff\n{cached_diff}```" in notes
-    coordinator.async_fetch_diff_content.assert_not_called()
+    coordinator.async_get_git_diff.assert_called_once_with("/config/blueprints/test.yaml")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import difflib
 import hashlib
 import html
 import ipaddress
@@ -1010,7 +1011,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             self.data[path]["_cached_git_diff"] = (local_hash, remote_hash, diff_text)
 
     async def async_fetch_diff_content(self, path: str) -> str | None:
-        """Fetch remote content for diff generation."""
+        """Fetch remote content for diff generation.
+
+        This method mutates the blueprint's `info` dictionary by setting
+        the `remote_content` key. This is an intended optimization to cache
+        the content for subsequent UI renders (e.g., the Installation dialog).
+        """
         info = self.data.get(path)
         if not info or not info.get("updatable"):
             return None
@@ -1024,6 +1030,68 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if remote_content:
             info["remote_content"] = remote_content
         return remote_content
+
+    async def async_get_git_diff(self, path: str) -> str | None:
+        """Get or generate git diff for a blueprint.
+
+        This method orchestrates the entire diff generation process:
+        1. Checks for a valid cached diff.
+        2. Fetches remote content if missing (mutates state).
+        3. Generates the diff in an executor job.
+        4. Updates and returns the cached diff.
+
+        Returns:
+            The git diff text or None if it cannot be generated.
+        """
+        if path not in self.data:
+            return None
+
+        info = self.data[path]
+        local_hash = info.get("local_hash")
+        remote_hash = info.get("remote_hash")
+
+        if (diff_text := self.get_cached_git_diff(path, local_hash, remote_hash)) is not None:
+            return diff_text
+
+        remote_content = info.get("remote_content")
+        if remote_content is None and info.get("updatable"):
+            try:
+                remote_content = await self.async_fetch_diff_content(path)
+            except Exception as err:
+                _LOGGER.warning("Context fetch failed for diff at %s: %s", path, err)
+                return None
+
+        if not remote_content:
+            return None
+
+        def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
+            """Read and diff local vs remote content."""
+            with open(local_path, encoding="utf-8") as f:
+                local_text = f.read()
+
+            remote_text = BlueprintUpdateCoordinator._ensure_source_url(remote_text, source_url)
+
+            return "".join(
+                difflib.unified_diff(
+                    local_text.splitlines(True),
+                    remote_text.splitlines(True),
+                    fromfile="local",
+                    tofile="remote",
+                )
+            )
+
+        try:
+            diff_text = await self.hass.async_add_executor_job(
+                _read_and_diff, path, remote_content, info.get("source_url", "")
+            )
+            self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "")
+            return diff_text
+        except OSError as err:
+            _LOGGER.warning("I/O error generating diff for %s: %s", path, err)
+        except Exception as err:
+            _LOGGER.error("Unexpected error generating diff for %s: %s", path, err, exc_info=True)
+
+        return None
 
     async def _async_update_blueprint_in_place(
         self,

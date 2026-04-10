@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import difflib
 import inspect
 import logging
 from functools import cached_property
@@ -235,70 +234,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 "usage_warning", count=total_usage, domain=domain
             )
 
-        local_hash = info.get("local_hash")
-        remote_hash = info.get("remote_hash")
-        diff_text = self.coordinator.get_cached_git_diff(self._path, local_hash, remote_hash)
-
-        if diff_text is None:
-            remote_content = info.get("remote_content")
-            if remote_content is None and info.get("updatable"):
-                _LOGGER.debug(
-                    "Remote content missing for %s, fetching read-only for diff", self._path
-                )
-                try:
-                    remote_content = await self.coordinator.async_fetch_diff_content(self._path)
-                except OSError as err:
-                    _LOGGER.warning(
-                        "Network error fetching diff content for %s: %s", self._path, err
-                    )
-                except Exception as err:
-                    _LOGGER.warning(
-                        "Unexpected error fetching remote content for %s: %s",
-                        self._path,
-                        err,
-                        exc_info=True,
-                    )
-
-            if remote_content:
-
-                def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
-                    """Read and diff content."""
-                    with open(local_path, encoding="utf-8") as f:
-                        local_text = f.read()
-
-                    remote_text = BlueprintUpdateCoordinator._ensure_source_url(
-                        remote_text, source_url
-                    )
-
-                    return "".join(
-                        difflib.unified_diff(
-                            local_text.splitlines(True),
-                            remote_text.splitlines(True),
-                            fromfile="local",
-                            tofile="remote",
-                        )
-                    )
-
-                try:
-                    diff_text = await self.coordinator.hass.async_add_executor_job(
-                        _read_and_diff, self._path, remote_content, info.get("source_url", "")
-                    )
-                    self.coordinator.set_cached_git_diff(
-                        self._path, local_hash, remote_hash, diff_text or ""
-                    )
-                except OSError as err:
-                    _LOGGER.warning(
-                        "I/O error reading blueprint %s for git diff: %s", self._path, err
-                    )
-                    diff_text = ""
-                except Exception as err:
-                    _LOGGER.error(
-                        "Unexpected error generating git diff for %s: %s",
-                        self._path,
-                        err,
-                        exc_info=True,
-                    )
-                    diff_text = ""
+        diff_text = await self.coordinator.async_get_git_diff(self._path)
 
         if diff_text:
             diff_title = await self.coordinator.async_translate("git_diff_title")

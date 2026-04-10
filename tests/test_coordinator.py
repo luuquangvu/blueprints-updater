@@ -1985,3 +1985,63 @@ async def test_async_update_data_uses_current_options(coordinator):
     ):
         await coordinator._async_update_data()
         mock_scan.assert_called_once_with(ANY, "whitelist", ["test.yaml"])
+
+
+def test_get_cached_git_diff(coordinator):
+    """Test get_cached_git_diff logic."""
+    path = "test.yaml"
+    coordinator.data = {path: {"_cached_git_diff": ("local", "remote", "diff")}}
+    assert coordinator.get_cached_git_diff(path, "local", "remote") == "diff"
+    assert coordinator.get_cached_git_diff(path, "wrong", "remote") is None
+    assert coordinator.get_cached_git_diff("missing", "local", "remote") is None
+
+
+def test_set_cached_git_diff(coordinator):
+    """Test set_cached_git_diff logic."""
+    path = "test.yaml"
+    coordinator.data = {path: {}}
+    coordinator.set_cached_git_diff(path, "l1", "r1", "d1")
+    assert coordinator.data[path]["_cached_git_diff"] == ("l1", "r1", "d1")
+
+
+@pytest.mark.asyncio
+async def test_async_get_git_diff_cache_hit(coordinator):
+    """Test async_get_git_diff returns cached value if hashes match."""
+    path = "test.yaml"
+    coordinator.data = {
+        path: {
+            "local_hash": "h1",
+            "remote_hash": "h2",
+            "_cached_git_diff": ("h1", "h2", "cached_diff"),
+        }
+    }
+    with patch.object(coordinator, "async_fetch_diff_content") as mock_fetch:
+        diff = await coordinator.async_get_git_diff(path)
+        assert diff == "cached_diff"
+        mock_fetch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_get_git_diff_full_flow(coordinator):
+    """Test async_get_git_diff fetches and generates diff on cache miss."""
+    path = "test.yaml"
+    coordinator.data = {
+        path: {
+            "local_hash": "h1",
+            "remote_hash": "h2",
+            "source_url": "https://url.com",
+            "updatable": True,
+        }
+    }
+
+    local_content = "blueprint:\n  name: Old"
+    remote_content = "blueprint:\n  name: New"
+
+    with (
+        patch.object(coordinator, "async_fetch_diff_content", return_value=remote_content),
+        patch("builtins.open", mock_open(read_data=local_content)),
+    ):
+        diff = await coordinator.async_get_git_diff(path)
+        assert diff is not None
+        assert "+  name: New" in diff
+        assert coordinator.data[path]["_cached_git_diff"] == ("h1", "h2", diff)

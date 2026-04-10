@@ -72,6 +72,10 @@ class BlueprintCoordinatorPublic(Protocol):
         """Fetch remote content for diff generation."""
         ...
 
+    async def async_get_git_diff(self, path: str) -> str | None:
+        """Get or generate git diff for a blueprint."""
+        ...
+
     @staticmethod
     def scan_blueprints(
         hass: HomeAssistant,
