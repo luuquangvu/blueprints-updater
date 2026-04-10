@@ -106,7 +106,7 @@
     "auto_update_message": "The following blueprints have been automatically updated:\n\n{blueprints}",
     "update_available_short": "Update available",
     "update_available": "Update available from {source_url}",
-    "auto_update_warning": "Warning: Auto-update may carry backward incompatibility risks if the author introduces breaking changes.",
+    "auto_update_warning": "Warning: Updates may carry backward incompatibility risks if the author introduces breaking changes. It is highly recommended to enable the backup option before installing.",
     "usage_warning": "Warning: This update will affect {count} running {domain}(s).",
     "up_to_date": "Up to date",
     "install_error": "Cannot install blueprint: {error}. The remote file has errors and cannot be safely applied.",
@@ -119,6 +119,7 @@
     "processing_error": "Processing Error: {error}",
     "auto_update_failed": "Auto-update failed: {error}",
     "unsafe_url": "Unsafe URL: {error}",
-    "content_missing": "Blueprint content is missing or could not be fetched"
+    "content_missing": "Blueprint content is missing or could not be fetched",
+    "git_diff_title": "Code Changes (Git Diff)"
   }
 }

@@ -106,7 +106,7 @@
     "auto_update_message": "Los siguientes blueprints se han actualizado automáticamente:\n\n{blueprints}",
     "update_available_short": "Actualización disponible",
     "update_available": "Actualización disponible desde {source_url}",
-    "auto_update_warning": "Advertencia: la actualización automática puede conllevar riesgos de incompatibilidad si el autor introduce cambios importantes.",
+    "auto_update_warning": "Advertencia: Las actualizaciones pueden conllevar riesgos de incompatibilidad hacia atrás si el autor introduce cambios importantes (breaking changes). Se recomienda encarecidamente activar la opción de copia de seguridad antes de instalar.",
     "usage_warning": "Advertencia: esta actualización afectará a {count} {domain} en ejecución.",
     "up_to_date": "Actualizado",
     "install_error": "No se puede instalar el blueprint: {error}. El archivo remoto tiene errores y no se puede aplicar de forma segura.",
@@ -119,6 +119,7 @@
     "processing_error": "Error de procesamiento: {error}",
     "auto_update_failed": "Error en la actualización automática: {error}",
     "unsafe_url": "URL no segura: {error}",
-    "content_missing": "Falta el contenido del plano o no se pudo obtener."
+    "content_missing": "Falta el contenido del plano o no se pudo obtener.",
+    "git_diff_title": "Cambios en el código (Git Diff)"
   }
 }

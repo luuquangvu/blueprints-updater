@@ -106,7 +106,7 @@
     "auto_update_message": "以下蓝图已自动更新：\n\n{blueprints}",
     "update_available_short": "有可用更新",
     "update_available": "可从 {source_url} 获取更新",
-    "auto_update_warning": "警告：如果作者引入重大更改，自动更新可能会带来向后不兼容的风险。",
+    "auto_update_warning": "警告：如果作者引入重大更改（breaking changes），更新可能会带来向后不兼容的风险。强烈建议在安装前启用备份选项。",
     "usage_warning": "警告：此更新将影响 {count} 个正在运行的 {domain}。",
     "up_to_date": "已是最新",
     "install_error": "无法安装蓝图：{error}。远程文件有错误，无法安全应用。",
@@ -119,6 +119,7 @@
     "processing_error": "处理错误：{error}",
     "auto_update_failed": "自动更新失败：{error}",
     "unsafe_url": "不安全的 URL：{error}",
-    "content_missing": "蓝图内容缺失或无法获取"
+    "content_missing": "蓝图内容缺失或无法获取",
+    "git_diff_title": "代码更改 (Git Diff)"
   }
 }

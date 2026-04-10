@@ -106,7 +106,7 @@
     "auto_update_message": "De volgende blueprints zijn automatisch bijgewerkt:\n\n{blueprints}",
     "update_available_short": "Update beschikbaar",
     "update_available": "Update beschikbaar van {source_url}",
-    "auto_update_warning": "Waarschuwing: Automatische updates kunnen risico's voor achterwaartse incompatibiliteit met zich meebrengen als de auteur baanbrekende wijzigingen introduceert.",
+    "auto_update_warning": "Waarschuwing: Updates kunnen risico's op achterwaartse incompatibiliteit met zich meebrengen als de auteur belangrijke wijzigingen (breaking changes) doorvoert. Het wordt ten zeerste aanbevolen om de back-upoptie in te schakelen voordat u gaat installeren.",
     "usage_warning": "Waarschuwing: Deze update heeft invloed op {count} actieve {domain}.",
     "up_to_date": "Bijgewerkt",
     "install_error": "Kan blueprint niet installeren: {error}. Het externe bestand bevat fouten en kan niet veilig worden toegepast.",
@@ -119,6 +119,7 @@
     "processing_error": "Verwerkingsfout: {error}",
     "auto_update_failed": "Automatische update mislukt: {error}",
     "unsafe_url": "Onveilige URL: {error}",
-    "content_missing": "De inhoud van de blauwdruk ontbreekt of kon niet worden opgehaald."
+    "content_missing": "De inhoud van de blauwdruk ontbreekt of kon niet worden opgehaald.",
+    "git_diff_title": "Codewijzigingen (Git Diff)"
   }
 }

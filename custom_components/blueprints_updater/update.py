@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import difflib
 import inspect
 import logging
 from functools import cached_property
@@ -233,6 +234,50 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             notes += "\n\n" + await self.coordinator.async_translate(
                 "usage_warning", count=total_usage, domain=domain
             )
+
+        remote_content = info.get("remote_content")
+        if remote_content is None:
+            _LOGGER.debug("Remote content missing for %s, fetching on-demand for diff", self._path)
+            await self.coordinator.async_fetch_blueprint(self._path, force=True)
+            info = self.coordinator.data.get(self._path, info)
+            remote_content = info.get("remote_content")
+
+        if remote_content:
+            diff_text = info.get("_cached_git_diff")
+            if diff_text is None:
+
+                def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
+                    with open(local_path, encoding="utf-8") as f:
+                        local_text = f.read()
+
+                    remote_text = BlueprintUpdateCoordinator._ensure_source_url(
+                        remote_text, source_url
+                    )
+
+                    return "".join(
+                        difflib.unified_diff(
+                            local_text.splitlines(True),
+                            remote_text.splitlines(True),
+                            fromfile="local",
+                            tofile="remote",
+                        )
+                    )
+
+                try:
+                    diff_text = await self.coordinator.hass.async_add_executor_job(
+                        _read_and_diff, self._path, remote_content, info.get("source_url", "")
+                    )
+                    info["_cached_git_diff"] = diff_text or ""
+                except Exception as err:
+                    _LOGGER.warning("Could not generate git diff for %s: %s", self._path, err)
+                    diff_text = ""
+
+            if diff_text:
+                diff_title = await self.coordinator.async_translate("git_diff_title")
+                notes += (
+                    f"\n\n<details>\n<summary>{diff_title}</summary>\n\n"
+                    f"```diff\n{diff_text}```\n</details>"
+                )
 
         return notes
 

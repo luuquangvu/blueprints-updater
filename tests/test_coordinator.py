@@ -65,28 +65,20 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
 
 
 def test_coordinator_protocol_conformance(coordinator):
-    """Verify that BlueprintUpdateCoordinator conforms to BlueprintCoordinatorProtocol."""
+    """Verify that BlueprintUpdateCoordinator conforms to BlueprintCoordinatorProtocol.
+
+    This test ensures that the coordinator implementation adheres to the defined
+    protocols for public, internal, and combined interfaces using runtime protocol
+    checks.
+    """
     from protocols import (
         BlueprintCoordinatorInternal,
         BlueprintCoordinatorProtocol,
         BlueprintCoordinatorPublic,
     )
 
-    def check_protocol(inst, protocol, name):
-        missing = []
-        for attr in protocol.__annotations__:
-            if not hasattr(inst, attr):
-                missing.append(f"Attribute: {attr}")
-        for attr in dir(protocol):
-            if attr.startswith("_") and not attr.startswith("__") and not hasattr(inst, attr):
-                missing.append(f"Private member: {attr}")
-            elif not attr.startswith("_") and not hasattr(inst, attr):
-                missing.append(f"Method/Member: {attr}")
-        assert not missing, f"{name} is missing members: {missing}"
-
-    check_protocol(coordinator, BlueprintCoordinatorPublic, "BlueprintCoordinatorPublic")
-    check_protocol(coordinator, BlueprintCoordinatorInternal, "BlueprintCoordinatorInternal")
-    check_protocol(coordinator, BlueprintCoordinatorProtocol, "BlueprintCoordinatorProtocol")
+    assert isinstance(coordinator, BlueprintCoordinatorPublic)
+    assert isinstance(coordinator, BlueprintCoordinatorInternal)
     assert isinstance(coordinator, BlueprintCoordinatorProtocol)
 
 

@@ -1,6 +1,6 @@
 """Tests for Blueprints Updater update entities."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -105,6 +105,7 @@ def coordinator():
     comp.config_entry = MagicMock()
     comp.config_entry.options = {"auto_update": True}
     comp.async_install_blueprint = AsyncMock()
+    comp.async_fetch_blueprint = AsyncMock()
     comp.async_refresh = AsyncMock()
     comp.async_translate = AsyncMock(
         side_effect=lambda key, **kwargs: {
@@ -112,8 +113,9 @@ def coordinator():
             "update_available_short": "Update available",
             "update_available": f"Update available from {kwargs.get('source_url')}",
             "auto_update_warning": (
-                "Warning: Auto-update may carry backward incompatibility risks "
-                "if the author introduces breaking changes."
+                "Warning: Updates may carry backward incompatibility risks "
+                "if the author introduces breaking changes. It is highly recommended "
+                "to enable the backup option before installing."
             ),
             "usage_warning": (
                 f"Warning: This update will affect {kwargs.get('count')} "
@@ -126,6 +128,11 @@ def coordinator():
         }.get(key, key)
     )
     comp.hass = MagicMock()
+
+    async def mock_exec(func, *args):
+        return func(*args)
+
+    comp.hass.async_add_executor_job = AsyncMock(side_effect=mock_exec)
     return comp
 
 
@@ -151,8 +158,9 @@ async def test_entity_properties(coordinator):
     assert entity.release_summary == "Update available"
     assert await entity.async_release_notes() == (
         "Update available from https://url.com\n\n"
-        "Warning: Auto-update may carry backward incompatibility risks "
-        "if the author introduces breaking changes."
+        "Warning: Updates may carry backward incompatibility risks "
+        "if the author introduces breaking changes. It is highly recommended "
+        "to enable the backup option before installing."
     )
     assert entity.extra_state_attributes == {}
 
@@ -511,3 +519,95 @@ async def test_entity_availability_behavior(coordinator):
     assert entity.available is False
     coordinator.last_update_success = True
     assert entity.available is True
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_git_diff(coordinator):
+    """Test git diff generation in release notes."""
+    path = "/config/blueprints/automation/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "automation/test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+
+    coordinator.data[path] = info
+    info["remote_content"] = (
+        "blueprint:\n  name: Test\n  source_url: https://url.com\n"
+        "  domain: automation\naction: []\n"
+    )
+    local_content = (
+        "blueprint:\n  name: Test\n  source_url: https://url.com\n"
+        "  domain: automation\ncondition: []\naction: []\n"
+    )
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    with patch("builtins.open", mock_open(read_data=local_content)):
+        notes = await entity.async_generate_release_notes()
+
+    assert notes is not None
+    assert "```diff" in notes
+    assert "-condition: []" in notes
+    assert "```" in notes
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_git_diff_missing_remote(coordinator):
+    """Test git diff generation triggers fetch when remote content is missing."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+    coordinator.data[path] = info
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    async def mock_fetch(fetch_path: str, force: bool = False):
+        coordinator.data[fetch_path]["remote_content"] = (
+            "blueprint:\n  name: New\n  source_url: https://url.com\n"
+        )
+
+    coordinator.async_fetch_blueprint = AsyncMock(side_effect=mock_fetch)
+    local_content = "blueprint:\n  name: Old\n  source_url: https://url.com\n"
+
+    with patch("builtins.open", mock_open(read_data=local_content)):
+        notes = await entity.async_generate_release_notes()
+
+    assert coordinator.async_fetch_blueprint.called
+    assert notes is not None
+    assert "-  name: Old" in notes
+    assert "+  name: New" in notes
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_git_diff_source_url_normalization(coordinator):
+    """Test git diff does not report source_url changes if only difference is metadata."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+
+    remote_content = "blueprint:\n  name: Test\n"
+    local_content = "blueprint:\n  source_url: https://url.com\n  name: Test\n"
+
+    coordinator.data[path] = info
+    info["remote_content"] = remote_content
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    with patch("builtins.open", mock_open(read_data=local_content)):
+        notes = await entity.async_generate_release_notes()
+
+    assert notes is not None
+    assert "-  source_url: https://url.com" not in notes
