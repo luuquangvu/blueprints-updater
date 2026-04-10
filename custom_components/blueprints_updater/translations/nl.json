@@ -119,7 +119,7 @@
     "processing_error": "Verwerkingsfout: {error}",
     "auto_update_failed": "Automatische update mislukt: {error}",
     "unsafe_url": "Onveilige URL: {error}",
-    "content_missing": "De inhoud van de blauwdruk ontbreekt of kon niet worden opgehaald.",
+    "content_missing": "De inhoud van de blueprint ontbreekt of kon niet worden opgehaald.",
     "git_diff_title": "Codewijzigingen (Git Diff)"
   }
 }
