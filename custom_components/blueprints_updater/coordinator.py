@@ -1092,25 +1092,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not remote_content:
             return None
 
-        def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
-            """Read and diff local vs remote content with normalization."""
-            with open(local_path, encoding="utf-8") as f:
-                local_text = f.read()
-
-            remote_text = BlueprintUpdateCoordinator._ensure_source_url(remote_text, source_url)
-
-            return "".join(
-                difflib.unified_diff(
-                    local_text.splitlines(True),
-                    remote_text.splitlines(True),
-                    fromfile="local",
-                    tofile="remote",
-                )
-            )
-
         try:
             diff_text = await self.hass.async_add_executor_job(
-                _read_and_diff, path, remote_content, info.get("source_url", "")
+                self._read_and_diff, path, remote_content, info.get("source_url", "")
             )
             self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "")
             return diff_text
@@ -1592,6 +1576,33 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content
 
     @staticmethod
+    def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
+        """Read and diff local vs remote content with metadata normalization.
+
+        Args:
+            local_path: Local blueprint file path.
+            remote_text: Fetched remote blueprint content.
+            source_url: Fallback URL to ensure in the diff metadata.
+
+        Returns:
+            The unified diff text.
+
+        """
+        with open(local_path, encoding="utf-8") as f:
+            local_text = f.read()
+
+        remote_text = BlueprintUpdateCoordinator._ensure_source_url(remote_text, source_url)
+
+        return "".join(
+            difflib.unified_diff(
+                local_text.splitlines(True),
+                remote_text.splitlines(True),
+                fromfile="local",
+                tofile="remote",
+            )
+        )
+
+    @staticmethod
     def _normalize_domain(domain: Any) -> str:
         """Normalize and validate the blueprint domain, defaulting to 'automation'.
 
@@ -1628,7 +1639,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         return True
 
-    def _get_validated_filter_mode(self, filter_mode: Any) -> str:
+    @staticmethod
+    def _get_validated_filter_mode(filter_mode: Any) -> str:
         """Normalize and validate filter mode.
 
         Args:
