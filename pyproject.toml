@@ -13,6 +13,7 @@ dev = [
   "pyright",
   "pytest",
   "pytest-asyncio",
+  "interrogate",
 ]
 
 [tool.ruff]
@@ -48,3 +49,8 @@ filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.pyright]
 typeCheckingMode = "standard"
+
+[tool.interrogate]
+fail-under = 100
+ignore_nested_functions = true
+exclude = ["tests"]

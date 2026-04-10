@@ -59,6 +59,7 @@ def retry_async(
             raise TypeError(f"All items in exceptions must be subclasses of Exception, got {exc}")
 
     def decorator(func: AsyncFunc[_T]) -> AsyncFunc[_T]:
+        """Decorator for retry_async."""
         try:
             sig = inspect.signature(func)
         except (ValueError, TypeError):
@@ -66,6 +67,7 @@ def retry_async(
 
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> _T:
+            """Wrapper for retry_async."""
             context = "unknown"
             if sig:
                 try:

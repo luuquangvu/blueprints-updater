@@ -234,6 +234,19 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 "usage_warning", count=total_usage, domain=domain
             )
 
+        diff_text = await self.coordinator.async_get_git_diff(self._path)
+
+        if diff_text:
+            fence = "```"
+            while fence in diff_text:
+                fence += "`"
+
+            diff_title = await self.coordinator.async_translate("git_diff_title")
+            notes += (
+                f"\n\n<details>\n<summary>{diff_title}</summary>\n\n"
+                f"{fence}diff\n{diff_text}\n{fence}\n</details>"
+            )
+
         return notes
 
     @cached_property

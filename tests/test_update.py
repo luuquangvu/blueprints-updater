@@ -1,6 +1,6 @@
 """Tests for Blueprints Updater update entities."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -105,6 +105,7 @@ def coordinator():
     comp.config_entry = MagicMock()
     comp.config_entry.options = {"auto_update": True}
     comp.async_install_blueprint = AsyncMock()
+    comp.async_fetch_blueprint = AsyncMock()
     comp.async_refresh = AsyncMock()
     comp.async_translate = AsyncMock(
         side_effect=lambda key, **kwargs: {
@@ -112,8 +113,9 @@ def coordinator():
             "update_available_short": "Update available",
             "update_available": f"Update available from {kwargs.get('source_url')}",
             "auto_update_warning": (
-                "Warning: Auto-update may carry backward incompatibility risks "
-                "if the author introduces breaking changes."
+                "Warning: Updates may carry backward incompatibility risks "
+                "if the author introduces breaking changes. It is highly recommended "
+                "to enable the backup option before installing."
             ),
             "usage_warning": (
                 f"Warning: This update will affect {kwargs.get('count')} "
@@ -126,6 +128,15 @@ def coordinator():
         }.get(key, key)
     )
     comp.hass = MagicMock()
+
+    async def mock_exec(func, *args):
+        """Mock executor task."""
+        return func(*args)
+
+    comp.hass.async_add_executor_job = AsyncMock(side_effect=mock_exec)
+    comp.get_cached_git_diff = MagicMock(return_value=None)
+    comp.set_cached_git_diff = MagicMock()
+    comp.async_get_git_diff = AsyncMock(return_value=None)
     return comp
 
 
@@ -151,8 +162,9 @@ async def test_entity_properties(coordinator):
     assert entity.release_summary == "Update available"
     assert await entity.async_release_notes() == (
         "Update available from https://url.com\n\n"
-        "Warning: Auto-update may carry backward incompatibility risks "
-        "if the author introduces breaking changes."
+        "Warning: Updates may carry backward incompatibility risks "
+        "if the author introduces breaking changes. It is highly recommended "
+        "to enable the backup option before installing."
     )
     assert entity.extra_state_attributes == {}
 
@@ -345,6 +357,7 @@ async def test_entity_release_notes_usage_error_handled(coordinator):
         "name": "Test",
         "rel_path": "automation/test.yaml",
         "updatable": True,
+        "remote_content": "",
     }
     coordinator.data[path] = info
     entity = BlueprintUpdateEntity(coordinator, path, info)
@@ -370,6 +383,7 @@ async def test_entity_release_notes_usage_error_unhandled(coordinator):
         "name": "Test",
         "rel_path": "automation/test.yaml",
         "updatable": True,
+        "remote_content": "",
     }
     coordinator.data[path] = info
     entity = BlueprintUpdateEntity(coordinator, path, info)
@@ -511,3 +525,227 @@ async def test_entity_availability_behavior(coordinator):
     assert entity.available is False
     coordinator.last_update_success = True
     assert entity.available is True
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_git_diff(coordinator):
+    """Test git diff generation in release notes."""
+    path = "/config/blueprints/automation/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "automation/test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+
+    coordinator.data[path] = info
+    info["remote_content"] = (
+        "blueprint:\n  name: Test\n  source_url: https://url.com\n"
+        "  domain: automation\naction: []\n"
+    )
+    local_content = (
+        "blueprint:\n  name: Test\n  source_url: https://url.com\n"
+        "  domain: automation\ncondition: []\naction: []\n"
+    )
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    coordinator.async_get_git_diff.return_value = "-condition: []"
+    with patch("builtins.open", mock_open(read_data=local_content)):
+        notes = await entity.async_generate_release_notes()
+
+    assert notes is not None
+    assert "```diff" in notes
+    assert "-condition: []" in notes
+    assert "```" in notes
+    assert "<summary>git_diff_title</summary>" in notes
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_git_diff_missing_remote(coordinator):
+    """Test git diff generation triggers fetch when remote content is missing."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+    coordinator.data[path] = info
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    coordinator.async_get_git_diff.return_value = "-  name: Old\n+  name: New"
+    with patch("builtins.open", mock_open(read_data="local")):
+        notes = await entity.async_generate_release_notes()
+
+    coordinator.async_get_git_diff.assert_called_once_with("/config/blueprints/test.yaml")
+    assert notes is not None
+    assert "-  name: Old" in notes
+    assert "+  name: New" in notes
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_git_diff_source_url_normalization(coordinator):
+    """Test git diff does not report source_url changes if only difference is metadata."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+
+    remote_content = "blueprint:\n  name: Test\n"
+    local_content = "blueprint:\n  source_url: https://url.com\n  name: Test\n"
+
+    coordinator.data[path] = info
+    info["remote_content"] = remote_content
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    coordinator.async_get_git_diff.return_value = ""
+    with patch("builtins.open", mock_open(read_data=local_content)):
+        notes = await entity.async_generate_release_notes()
+
+    assert notes is not None
+    assert "<summary>git_diff_title</summary>" not in notes
+    assert "<details>" not in notes
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_git_diff_cached(coordinator):
+    """Test git diff returns cached notes directly."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+    coordinator.data[path] = info
+
+    cached_diff = "cached diff payload"
+    coordinator.async_get_git_diff.return_value = cached_diff
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    with patch("builtins.open", mock_open(read_data="local")):
+        notes = await entity.async_generate_release_notes()
+
+    assert notes is not None
+    assert f"```diff\n{cached_diff}\n```" in notes
+    coordinator.async_get_git_diff.assert_called_once_with("/config/blueprints/test.yaml")
+
+
+@pytest.mark.asyncio
+async def test_async_install_bypass_protection(coordinator):
+    """Test that async_install does not use unvalidated content from diff fetch."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+    coordinator.data[path] = info
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    coordinator.async_get_git_diff = BlueprintUpdateCoordinator.async_get_git_diff.__get__(
+        coordinator, BlueprintUpdateCoordinator
+    )
+    coordinator.async_fetch_diff_content = (
+        BlueprintUpdateCoordinator.async_fetch_diff_content.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+    )
+    coordinator._ensure_source_url = BlueprintUpdateCoordinator._ensure_source_url
+    coordinator._normalize_url = BlueprintUpdateCoordinator._normalize_url
+
+    with (
+        patch.object(coordinator, "_is_safe_url", AsyncMock(return_value=True)),
+        patch.object(
+            coordinator,
+            "_async_fetch_content",
+            AsyncMock(return_value=("invalid: yaml:", "etag")),
+        ),
+        patch.object(
+            coordinator, "_validate_blueprint", MagicMock(return_value="invalid_blueprint")
+        ),
+        patch("builtins.open", mock_open(read_data="local")),
+    ):
+        await entity.async_generate_release_notes()
+
+    assert info.get("remote_content") is None
+    with pytest.raises(HomeAssistantError):
+        await entity.async_install(version=None, backup=False)
+    coordinator.async_fetch_blueprint.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_install_unsafe_url_protection(coordinator):
+    """Test that async_install does not use content if URL safety check fails."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://unsafe.com",
+    }
+    coordinator.data[path] = info
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    coordinator.async_get_git_diff = BlueprintUpdateCoordinator.async_get_git_diff.__get__(
+        coordinator, BlueprintUpdateCoordinator
+    )
+    coordinator.async_fetch_diff_content = (
+        BlueprintUpdateCoordinator.async_fetch_diff_content.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+    )
+    coordinator._normalize_url = BlueprintUpdateCoordinator._normalize_url
+
+    with (
+        patch.object(coordinator, "_is_safe_url", AsyncMock(return_value=False)),
+        patch("builtins.open", mock_open(read_data="local")),
+    ):
+        await entity.async_generate_release_notes()
+
+    assert info.get("remote_content") is None
+    assert info.get("last_error") == "unsafe_url"
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_install(version=None, backup=False)
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_git_diff_with_backticks(coordinator):
+    """Test git diff handles embedded backticks with dynamic fencing."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+    coordinator.data[path] = info
+
+    diff_text = "some diff\n```\nbackticks here\n```"
+    coordinator.async_get_git_diff.return_value = diff_text
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    with patch("builtins.open", mock_open(read_data="local")):
+        notes = await entity.async_generate_release_notes()
+
+    assert notes is not None
+    assert "````diff\nsome diff\n```\nbackticks here\n```\n````" in notes

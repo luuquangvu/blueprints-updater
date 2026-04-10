@@ -106,7 +106,7 @@
     "auto_update_message": "Följande blueprints har uppdaterats automatiskt:\n\n{blueprints}",
     "update_available_short": "Uppdatering tillgänglig",
     "update_available": "Uppdatering tillgänglig från {source_url}",
-    "auto_update_warning": "Varning: Automatisk uppdatering kan medföra risker för bakåtkompatibilitet om författaren introducerar banbrytande ändringar.",
+    "auto_update_warning": "Varning: Uppdateringar kan medföra risker för bakåtkompatibilitet om författaren introducerar banbrytande ändringar (breaking changes). Det rekommenderas starkt att aktivera säkerhetskopieringsalternativet före installation.",
     "usage_warning": "Varning: Denna uppdatering kommer att påverka {count} körande {domain}.",
     "up_to_date": "Uppdaterad",
     "install_error": "Kan inte installera blueprint: {error}. Fjärrfilen har fel och kan inte appliceras säkert.",
@@ -119,6 +119,7 @@
     "processing_error": "Bearbetningsfel: {error}",
     "auto_update_failed": "Automatisk uppdatering misslyckades: {error}",
     "unsafe_url": "Osäker URL: {error}",
-    "content_missing": "Innehållet i ritningen saknas eller kunde inte hämtas"
+    "content_missing": "Innehållet i blueprint saknas eller kunde inte hämtas.",
+    "git_diff_title": "Kodändringar (Git Diff)"
   }
 }

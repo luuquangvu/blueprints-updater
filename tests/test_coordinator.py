@@ -14,7 +14,11 @@ import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import yaml as yaml_util
-from protocols import BlueprintCoordinatorProtocol
+from protocols import (
+    BlueprintCoordinatorInternal,
+    BlueprintCoordinatorProtocol,
+    BlueprintCoordinatorPublic,
+)
 
 from custom_components.blueprints_updater.const import (
     FILTER_MODE_ALL,
@@ -53,6 +57,7 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
         coord.data = {}
 
         def _mock_set_data(data):
+            """Mock _mock_set_data."""
             coord.data = data
 
         coord.async_set_updated_data = cast(Any, MagicMock(side_effect=_mock_set_data))
@@ -65,28 +70,14 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
 
 
 def test_coordinator_protocol_conformance(coordinator):
-    """Verify that BlueprintUpdateCoordinator conforms to BlueprintCoordinatorProtocol."""
-    from protocols import (
-        BlueprintCoordinatorInternal,
-        BlueprintCoordinatorProtocol,
-        BlueprintCoordinatorPublic,
-    )
+    """Verify that BlueprintUpdateCoordinator conforms to BlueprintCoordinatorProtocol.
 
-    def check_protocol(inst, protocol, name):
-        missing = []
-        for attr in protocol.__annotations__:
-            if not hasattr(inst, attr):
-                missing.append(f"Attribute: {attr}")
-        for attr in dir(protocol):
-            if attr.startswith("_") and not attr.startswith("__") and not hasattr(inst, attr):
-                missing.append(f"Private member: {attr}")
-            elif not attr.startswith("_") and not hasattr(inst, attr):
-                missing.append(f"Method/Member: {attr}")
-        assert not missing, f"{name} is missing members: {missing}"
-
-    check_protocol(coordinator, BlueprintCoordinatorPublic, "BlueprintCoordinatorPublic")
-    check_protocol(coordinator, BlueprintCoordinatorInternal, "BlueprintCoordinatorInternal")
-    check_protocol(coordinator, BlueprintCoordinatorProtocol, "BlueprintCoordinatorProtocol")
+    This test ensures that the coordinator implementation adheres to the defined
+    protocols for public, internal, and combined interfaces using runtime protocol
+    checks.
+    """
+    assert isinstance(coordinator, BlueprintCoordinatorPublic)
+    assert isinstance(coordinator, BlueprintCoordinatorInternal)
     assert isinstance(coordinator, BlueprintCoordinatorProtocol)
 
 
@@ -288,6 +279,7 @@ def test_scan_blueprints(hass, coordinator):
     no_url_content = "blueprint:\n  name: No URL"
 
     def open_side_effect(path, *_args, **_kwargs):
+        """Mock open_side_effect."""
         path_str = str(path)
         basename = os.path.basename(path_str)
         contents_map = {
@@ -730,6 +722,7 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
     barrier = asyncio.Barrier(MAX_CONCURRENT_REQUESTS)
 
     async def slow_get(*_args, **_kwargs):
+        """Mock slow_get."""
         nonlocal active_requests, max_active_requests
         async with lock:
             active_requests += 1
@@ -1324,9 +1317,11 @@ async def test_background_refresh_deduplication(hass, coordinator):
     )
 
     async def mock_refresh(*_args, **_kwargs):
+        """Mock mock_refresh."""
         await asyncio.sleep(10)
 
     def side_effect(coro, name=None):
+        """Mock side_effect."""
         return asyncio.create_task(coro, name=name)
 
     hass.async_create_background_task = MagicMock(side_effect=side_effect)
@@ -1352,12 +1347,14 @@ async def test_background_refresh_shutdown(hass, coordinator):
     """Test that shutdown cancels the background task."""
 
     async def long_running_task():
+        """Mock long_running_task."""
         try:
             await asyncio.sleep(100)
         except asyncio.CancelledError:
             raise
 
     def side_effect(coro, name=None):
+        """Mock side_effect."""
         return asyncio.create_task(coro, name=name)
 
     hass.async_create_background_task = MagicMock(side_effect=side_effect)
@@ -1528,6 +1525,7 @@ def test_scan_blueprints_domain_extraction(hass, coordinator):
     }
 
     def open_side_effect(path, *_args, **_kwargs):
+        """Mock open_side_effect."""
         content = contents.get(os.path.basename(str(path)), "")
         m = MagicMock()
         m.read.return_value = content
@@ -1987,3 +1985,100 @@ async def test_async_update_data_uses_current_options(coordinator):
     ):
         await coordinator._async_update_data()
         mock_scan.assert_called_once_with(ANY, "whitelist", ["test.yaml"])
+
+
+def test_get_cached_git_diff(coordinator):
+    """Test get_cached_git_diff logic."""
+    path = "test.yaml"
+    coordinator.data = {
+        path: {"_cached_git_diff": {"local": "local", "remote": "remote", "diff": "diff"}}
+    }
+    assert coordinator.get_cached_git_diff(path, "local", "remote") == "diff"
+    assert coordinator.get_cached_git_diff(path, "wrong", "remote") is None
+    assert coordinator.get_cached_git_diff("missing", "local", "remote") is None
+
+
+def test_set_cached_git_diff(coordinator):
+    """Test set_cached_git_diff logic."""
+    path = "test.yaml"
+    coordinator.data = {path: {}}
+    coordinator.set_cached_git_diff(path, "l1", "r1", "d1")
+    assert coordinator.data[path]["_cached_git_diff"] == {
+        "local": "l1",
+        "remote": "r1",
+        "diff": "d1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_async_get_git_diff_cache_hit(coordinator):
+    """Test async_get_git_diff returns cached value if hashes match."""
+    path = "test.yaml"
+    coordinator.data = {
+        path: {
+            "local_hash": "h1",
+            "remote_hash": "h2",
+            "_cached_git_diff": {"local": "h1", "remote": "h2", "diff": "cached_diff"},
+        }
+    }
+    with patch.object(coordinator, "async_fetch_diff_content") as mock_fetch:
+        diff = await coordinator.async_get_git_diff(path)
+        assert diff == "cached_diff"
+        mock_fetch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_get_git_diff_full_flow(coordinator):
+    """Test async_get_git_diff fetches and generates diff on cache miss."""
+    path = "test.yaml"
+    coordinator.data = {
+        path: {
+            "local_hash": "h1",
+            "remote_hash": "h2",
+            "source_url": "https://url.com",
+            "updatable": True,
+        }
+    }
+
+    local_content = "blueprint:\n  name: Old"
+    remote_content = "blueprint:\n  name: New"
+
+    with (
+        patch.object(coordinator, "async_fetch_diff_content", return_value=remote_content),
+        patch("builtins.open", mock_open(read_data=local_content)),
+    ):
+        diff = await coordinator.async_get_git_diff(path)
+        assert diff is not None
+        assert "+  name: New" in diff
+        assert coordinator.data[path]["_cached_git_diff"] == {
+            "local": "h1",
+            "remote": "h2",
+            "diff": diff,
+        }
+
+
+@pytest.mark.asyncio
+async def test_async_get_git_diff_shows_metadata_changes(coordinator):
+    """Test that source_url differences ARE shown in Git diff."""
+    path = "test.yaml"
+    source_url = "https://new.com"
+    coordinator.data = {
+        path: {
+            "local_hash": "h1",
+            "remote_hash": "h2",
+            "source_url": source_url,
+            "updatable": True,
+        }
+    }
+
+    local_content = "blueprint:\n  source_url: https://old.com\n  name: Same"
+    remote_content = "blueprint:\n  source_url: https://new.com\n  name: Same"
+
+    with (
+        patch.object(coordinator, "async_fetch_diff_content", return_value=remote_content),
+        patch("builtins.open", mock_open(read_data=local_content)),
+    ):
+        diff = await coordinator.async_get_git_diff(path)
+        assert diff is not None
+        assert "-  source_url: https://old.com" in diff
+        assert "+  source_url: https://new.com" in diff

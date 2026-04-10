@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import difflib
 import hashlib
 import html
 import ipaddress
@@ -758,6 +759,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         try:
 
             def _save_file(file_path: str, content: str, max_bak: int) -> None:
+                """Local helper for _save_file."""
                 tmp_path = f"{file_path}.tmp"
 
                 with open(tmp_path, "w", encoding="utf-8") as f:
@@ -945,6 +947,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         try:
 
             def _restore_file(file_path: str, ver: int, max_bak: int) -> tuple[bool, str]:
+                """Local helper for _restore_file."""
                 bak_path = f"{file_path}.bak.{ver}"
                 if ver == 1 and not os.path.isfile(bak_path):
                     old_bak = f"{file_path}.bak"
@@ -987,6 +990,120 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "translation_key": "system_error",
                 "translation_kwargs": {"error": str(err)},
             }
+
+    def get_cached_git_diff(
+        self, path: str, local_hash: str | None, remote_hash: str | None
+    ) -> str | None:
+        """Get cached git diff."""
+        info = self.data.get(path, {})
+        cached = info.get("_cached_git_diff")
+        if cached and isinstance(cached, dict):
+            c_local = cached.get("local")
+            c_remote = cached.get("remote")
+            c_diff = cached.get("diff")
+            if local_hash == c_local and remote_hash == c_remote:
+                return c_diff
+        return None
+
+    def set_cached_git_diff(
+        self, path: str, local_hash: str | None, remote_hash: str | None, diff_text: str
+    ) -> None:
+        """Set cached git diff."""
+        if path in self.data:
+            self.data[path]["_cached_git_diff"] = {
+                "local": local_hash,
+                "remote": remote_hash,
+                "diff": diff_text,
+            }
+
+    async def async_fetch_diff_content(self, path: str) -> str | None:
+        """Fetch and validate remote content for diff generation.
+
+        This method mutates the blueprint's `info` dictionary by setting
+        the `remote_content` key ONLY if the URL is safe and the content
+        passes blueprint validation. This prevents unvalidated content
+        from being used in the installation flow.
+        """
+        info = self.data.get(path)
+        if not info or not info.get("updatable"):
+            return None
+
+        source_url = info.get("source_url", "")
+        url = self._normalize_url(source_url)
+        if not url:
+            return None
+
+        if not await self._is_safe_url(url):
+            _LOGGER.warning("Blocking diff fetch from unsafe URL: %s", url)
+            info["last_error"] = "unsafe_url"
+            return None
+
+        session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
+        remote_content, _ = await self._async_fetch_content(session, url, force=True)
+        if not remote_content:
+            return None
+
+        remote_content_with_url = self._ensure_source_url(remote_content, source_url)
+        try:
+            blueprint_dict = yaml_util.parse_yaml(remote_content_with_url)
+            last_error = self._validate_blueprint(blueprint_dict, source_url)
+        except (HomeAssistantError, InvalidBlueprint) as err:
+            last_error = f"yaml_syntax_error|{_sanitize_error_detail(str(err))}"
+
+        if last_error:
+            _LOGGER.warning("Remote content for diff at %s is invalid: %s", path, last_error)
+            info["last_error"] = last_error
+            return None
+
+        info["last_error"] = None
+        info["remote_content"] = remote_content_with_url
+        return remote_content_with_url
+
+    async def async_get_git_diff(self, path: str) -> str | None:
+        """Get or generate git diff for a blueprint.
+
+        This method orchestrates the entire diff generation process:
+        1. Checks for a valid cached diff.
+        2. Fetches remote content if missing (mutates state).
+        3. Generates the diff in an executor job.
+        4. Updates and returns the cached diff.
+
+        Returns:
+            The git diff text or None if it cannot be generated.
+        """
+        if path not in self.data:
+            return None
+
+        info = self.data[path]
+        local_hash = info.get("local_hash")
+        remote_hash = info.get("remote_hash")
+
+        if (diff_text := self.get_cached_git_diff(path, local_hash, remote_hash)) is not None:
+            return diff_text
+
+        remote_content = info.get("remote_content")
+        if remote_content is None and info.get("updatable"):
+            try:
+                remote_content = await self.async_fetch_diff_content(path)
+            except Exception as err:
+                _LOGGER.warning("Context fetch failed for diff at %s: %s", path, err)
+                return None
+
+        if not remote_content:
+            return None
+
+        try:
+            diff_text = await self.hass.async_add_executor_job(
+                self._read_and_diff, path, remote_content, info.get("source_url", "")
+            )
+            self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "")
+            return diff_text
+        except OSError as err:
+            _LOGGER.warning("I/O error generating diff for %s: %s", path, err)
+        except Exception as err:
+            _LOGGER.error("Unexpected error generating diff for %s: %s", path, err, exc_info=True)
+
+        return None
 
     async def _async_update_blueprint_in_place(
         self,
@@ -1459,6 +1576,33 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content
 
     @staticmethod
+    def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
+        """Read and diff local vs remote content with metadata normalization.
+
+        Args:
+            local_path: Local blueprint file path.
+            remote_text: Fetched remote blueprint content.
+            source_url: Fallback URL to ensure in the diff metadata.
+
+        Returns:
+            The unified diff text.
+
+        """
+        with open(local_path, encoding="utf-8") as f:
+            local_text = f.read()
+
+        remote_text = BlueprintUpdateCoordinator._ensure_source_url(remote_text, source_url)
+
+        return "".join(
+            difflib.unified_diff(
+                local_text.splitlines(True),
+                remote_text.splitlines(True),
+                fromfile="local",
+                tofile="remote",
+            )
+        )
+
+    @staticmethod
     def _normalize_domain(domain: Any) -> str:
         """Normalize and validate the blueprint domain, defaulting to 'automation'.
 
@@ -1495,7 +1639,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         return True
 
-    def _get_validated_filter_mode(self, filter_mode: Any) -> str:
+    @staticmethod
+    def _get_validated_filter_mode(filter_mode: Any) -> str:
         """Normalize and validate filter mode.
 
         Args:

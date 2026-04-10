@@ -106,7 +106,7 @@
     "auto_update_message": "Die folgenden Blueprints wurden automatisch aktualisiert:\n\n{blueprints}",
     "update_available_short": "Update verfügbar",
     "update_available": "Update verfügbar von {source_url}",
-    "auto_update_warning": "Warnung: Die automatische Aktualisierung kann Risiken in Bezug auf die Abwärtskompatibilität bergen, wenn der Autor bahnbrechende Änderungen einführt.",
+    "auto_update_warning": "Warnung: Updates können Risiken hinsichtlich der Abwärtskompatibilität bergen, falls der Autor wesentliche Änderungen (breaking changes) einführt. Es wird dringend empfohlen, die Backup-Option vor der Installation zu aktivieren.",
     "usage_warning": "Warnung: Dieses Update betrifft {count} laufende {domain}.",
     "up_to_date": "Auf dem neuesten Stand",
     "install_error": "Blueprint kann nicht installiert werden: {error}. Die Remote-Datei weist Fehler auf und kann nicht sicher angewendet werden.",
@@ -119,6 +119,7 @@
     "processing_error": "Verarbeitungsfehler: {error}",
     "auto_update_failed": "Automatisches Update fehlgeschlagen: {error}",
     "unsafe_url": "Unsichere URL: {error}",
-    "content_missing": "Der Blueprint-Inhalt fehlt oder konnte nicht abgerufen werden."
+    "content_missing": "Der Blueprint-Inhalt fehlt oder konnte nicht abgerufen werden.",
+    "git_diff_title": "Codeänderungen (Git Diff)"
   }
 }

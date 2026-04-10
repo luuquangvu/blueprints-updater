@@ -106,7 +106,7 @@
     "auto_update_message": "Następujące Blueprints zostały automatycznie zaktualizowane:\n\n{blueprints}",
     "update_available_short": "Dostępna aktualizacja",
     "update_available": "Aktualizacja dostępna pod adresem {source_url}",
-    "auto_update_warning": "Ostrzeżenie: Automatyczna aktualizacja może wiązać się z ryzykiem braku kompatybilności wstecznej, jeśli autor wprowadzi przełomowe zmiany.",
+    "auto_update_warning": "Ostrzeżenie: Aktualizacje mogą nieść za sobą ryzyko braku kompatybilności wstecznej, jeśli autor wprowadzi drastyczne zmiany (breaking changes). Zdecydowanie zaleca się włączenie opcji kopii zapasowej przed instalacją.",
     "usage_warning": "Ostrzeżenie: Ta aktualizacja wpłynie na {count} uruchomionych {domain}(ów).",
     "up_to_date": "Aktualne",
     "install_error": "Nie można zainstalować Blueprint: {error}. Plik zdalny zawiera błędy i nie można go bezpiecznie zastosować.",
@@ -119,6 +119,7 @@
     "processing_error": "Błąd przetwarzania: {error}",
     "auto_update_failed": "Automatyczna aktualizacja nie powiodła się: {error}",
     "unsafe_url": "Niebezpieczny adres URL: {error}",
-    "content_missing": "Brakuje zawartości projektu lub nie można jej pobrać"
+    "content_missing": "Brak zawartości Blueprinta lub nie można jej pobrać.",
+    "git_diff_title": "Zmiany w kodzie (Git Diff)"
   }
 }

@@ -106,7 +106,7 @@
     "auto_update_message": "I seguenti blueprint sono stati aggiornati automaticamente:\n\n{blueprints}",
     "update_available_short": "Aggiornamento disponibile",
     "update_available": "Aggiornamento disponibile da {source_url}",
-    "auto_update_warning": "Attenzione: l'aggiornamento automatico può comportare rischi di incompatibilità se l'autore introduce modifiche sostanziali.",
+    "auto_update_warning": "Avviso: Gli aggiornamenti potrebbero comportare rischi di retrocompatibilità se l'autore introduce modifiche radicali (breaking changes). Si consiglia vivamente di abilitare l'opzione di backup prima dell'installazione.",
     "usage_warning": "Attenzione: questo aggiornamento interesserà {count} {domain} in esecuzione.",
     "up_to_date": "Aggiornato",
     "install_error": "Impossibile installare il blueprint: {error}. Il file remoto contiene errori e non può essere applicato in sicurezza.",
@@ -119,6 +119,7 @@
     "processing_error": "Errore di elaborazione: {error}",
     "auto_update_failed": "Aggiornamento automatico fallito: {error}",
     "unsafe_url": "URL non sicuro: {error}",
-    "content_missing": "Il contenuto del progetto è mancante o non è stato possibile recuperarlo."
+    "content_missing": "Il contenuto del blueprint è mancante o non è stato possibile recuperarlo.",
+    "git_diff_title": "Modifiche al codice (Git Diff)"
   }
 }

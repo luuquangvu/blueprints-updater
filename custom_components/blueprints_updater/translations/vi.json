@@ -106,7 +106,7 @@
     "auto_update_message": "Các blueprint sau đã được tự động cập nhật:\n\n{blueprints}",
     "update_available_short": "Có bản cập nhật",
     "update_available": "Có bản cập nhật mới từ {source_url}",
-    "auto_update_warning": "Cảnh báo: Tự động cập nhật có thể mang lại rủi ro không tương thích ngược nếu tác giả có những thay đổi lớn.",
+    "auto_update_warning": "Cảnh báo: Các bản cập nhật có thể mang lại rủi ro không tương thích ngược nếu tác giả đưa vào những thay đổi lớn (breaking changes). Khuyến nghị bạn nên bật tùy chọn sao lưu trước khi cài đặt.",
     "usage_warning": "Cảnh báo: Bản cập nhật này sẽ ảnh hưởng đến {count} {domain} đang chạy.",
     "up_to_date": "Đã là bản mới nhất",
     "install_error": "Không thể cài đặt blueprint: {error}. Tệp từ xa có lỗi và không thể áp dụng an toàn.",
@@ -119,6 +119,7 @@
     "processing_error": "Lỗi xử lý: {error}",
     "auto_update_failed": "Tự động cập nhật thất bại: {error}",
     "unsafe_url": "URL không an toàn: {error}",
-    "content_missing": "Nội dung blueprint bị thiếu hoặc không thể tải xuống"
+    "content_missing": "Nội dung blueprint bị thiếu hoặc không thể tải xuống",
+    "git_diff_title": "Mã nguồn thay đổi (Git Diff)"
   }
 }
