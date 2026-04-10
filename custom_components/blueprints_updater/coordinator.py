@@ -1056,8 +1056,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return None
 
         info["last_error"] = None
-        info["remote_content"] = remote_content
-        return remote_content
+        info["remote_content"] = remote_content_with_url
+        return remote_content_with_url
 
     async def async_get_git_diff(self, path: str) -> str | None:
         """Get or generate git diff for a blueprint.
@@ -1093,7 +1093,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return None
 
         def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
-            """Read and diff local vs remote content."""
+            """Read and diff local vs remote content with normalization."""
             with open(local_path, encoding="utf-8") as f:
                 local_text = f.read()
 

@@ -2055,3 +2055,30 @@ async def test_async_get_git_diff_full_flow(coordinator):
             "remote": "h2",
             "diff": diff,
         }
+
+
+@pytest.mark.asyncio
+async def test_async_get_git_diff_shows_metadata_changes(coordinator):
+    """Test that source_url differences ARE shown in Git diff."""
+    path = "test.yaml"
+    source_url = "https://new.com"
+    coordinator.data = {
+        path: {
+            "local_hash": "h1",
+            "remote_hash": "h2",
+            "source_url": source_url,
+            "updatable": True,
+        }
+    }
+
+    local_content = "blueprint:\n  source_url: https://old.com\n  name: Same"
+    remote_content = "blueprint:\n  source_url: https://new.com\n  name: Same"
+
+    with (
+        patch.object(coordinator, "async_fetch_diff_content", return_value=remote_content),
+        patch("builtins.open", mock_open(read_data=local_content)),
+    ):
+        diff = await coordinator.async_get_git_diff(path)
+        assert diff is not None
+        assert "-  source_url: https://old.com" in diff
+        assert "+  source_url: https://new.com" in diff
