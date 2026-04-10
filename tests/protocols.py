@@ -56,6 +56,22 @@ class BlueprintCoordinatorPublic(Protocol):
         """Restore blueprint from a local backup file."""
         ...
 
+    def get_cached_git_diff(
+        self, path: str, local_hash: str | None, remote_hash: str | None
+    ) -> str | None:
+        """Get cached git diff."""
+        ...
+
+    def set_cached_git_diff(
+        self, path: str, local_hash: str | None, remote_hash: str | None, diff_text: str
+    ) -> None:
+        """Set cached git diff."""
+        ...
+
+    async def async_fetch_diff_content(self, path: str) -> str | None:
+        """Fetch remote content for diff generation."""
+        ...
+
     @staticmethod
     def scan_blueprints(
         hass: HomeAssistant,

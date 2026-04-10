@@ -990,6 +990,41 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "translation_kwargs": {"error": str(err)},
             }
 
+    def get_cached_git_diff(
+        self, path: str, local_hash: str | None, remote_hash: str | None
+    ) -> str | None:
+        """Get cached git diff."""
+        info = self.data.get(path, {})
+        cached = info.get("_cached_git_diff")
+        if cached and isinstance(cached, tuple) and len(cached) == 3:
+            c_local, c_remote, c_diff = cached
+            if local_hash == c_local and remote_hash == c_remote:
+                return c_diff
+        return None
+
+    def set_cached_git_diff(
+        self, path: str, local_hash: str | None, remote_hash: str | None, diff_text: str
+    ) -> None:
+        """Set cached git diff."""
+        if path in self.data:
+            self.data[path]["_cached_git_diff"] = (local_hash, remote_hash, diff_text)
+
+    async def async_fetch_diff_content(self, path: str) -> str | None:
+        """Fetch remote content for diff generation."""
+        info = self.data.get(path)
+        if not info or not info.get("updatable"):
+            return None
+
+        url = self._normalize_url(info.get("source_url", ""))
+        if not url:
+            return None
+
+        session = get_async_client(self.hass)
+        remote_content, _ = await self._async_fetch_content(session, url, force=True)
+        if remote_content:
+            info["remote_content"] = remote_content
+        return remote_content
+
     async def _async_update_blueprint_in_place(
         self,
         session: httpx.AsyncClient,

@@ -21,7 +21,6 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_AUTO_UPDATE, DOMAIN
@@ -236,30 +235,31 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 "usage_warning", count=total_usage, domain=domain
             )
 
-        remote_content = info.get("remote_content")
-        if remote_content is None and info.get("updatable"):
-            _LOGGER.debug("Remote content missing for %s, fetching read-only for diff", self._path)
-            try:
-                session = get_async_client(self.coordinator.hass)
-                url = self.coordinator._normalize_url(info.get("source_url", ""))
-                if url:
-                    remote_content, _ = await self.coordinator._async_fetch_content(
-                        session, url, force=True
-                    )
-            except Exception as err:
-                _LOGGER.warning(
-                    "Could not fetch remote content read-only for %s: %s", self._path, err
+        local_hash = info.get("local_hash")
+        remote_hash = info.get("remote_hash")
+        diff_text = self.coordinator.get_cached_git_diff(self._path, local_hash, remote_hash)
+
+        if diff_text is None:
+            remote_content = info.get("remote_content")
+            if remote_content is None and info.get("updatable"):
+                _LOGGER.debug(
+                    "Remote content missing for %s, fetching read-only for diff", self._path
                 )
+                try:
+                    remote_content = await self.coordinator.async_fetch_diff_content(self._path)
+                except OSError as err:
+                    _LOGGER.warning(
+                        "Network error fetching diff content for %s: %s", self._path, err
+                    )
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Unexpected error fetching remote content for %s: %s",
+                        self._path,
+                        err,
+                        exc_info=True,
+                    )
 
-        if remote_content:
-            diff_text = None
-            cached_entry = info.get("_cached_git_diff")
-            if isinstance(cached_entry, tuple) and len(cached_entry) == 3:
-                c_local, c_remote, c_text = cached_entry
-                if c_local == info.get("local_hash") and c_remote == info.get("remote_hash"):
-                    diff_text = c_text
-
-            if diff_text is None:
+            if remote_content:
 
                 def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
                     """Read and diff content."""
@@ -283,10 +283,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                     diff_text = await self.coordinator.hass.async_add_executor_job(
                         _read_and_diff, self._path, remote_content, info.get("source_url", "")
                     )
-                    info["_cached_git_diff"] = (
-                        info.get("local_hash"),
-                        info.get("remote_hash"),
-                        diff_text or "",
+                    self.coordinator.set_cached_git_diff(
+                        self._path, local_hash, remote_hash, diff_text or ""
                     )
                 except OSError as err:
                     _LOGGER.warning(

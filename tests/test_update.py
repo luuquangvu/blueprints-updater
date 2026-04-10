@@ -1,6 +1,6 @@
 """Tests for Blueprints Updater update entities."""
 
-from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -134,6 +134,8 @@ def coordinator():
         return func(*args)
 
     comp.hass.async_add_executor_job = AsyncMock(side_effect=mock_exec)
+    comp.get_cached_git_diff = MagicMock(return_value=None)
+    comp.set_cached_git_diff = MagicMock()
     return comp
 
 
@@ -573,25 +575,17 @@ async def test_entity_release_notes_git_diff_missing_remote(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    coordinator._normalize_url = MagicMock(return_value="https://url.com")
-
-    async def mock_fetch(session, url, force=False):
+    async def mock_fetch_diff(path):
         """Mock remote fetch content."""
-        return (
-            "blueprint:\n  name: New\n  source_url: https://url.com\n",
-            None,
-        )
+        return "blueprint:\n  name: New\n  source_url: https://url.com\n"
 
-    coordinator._async_fetch_content = AsyncMock(side_effect=mock_fetch)
+    coordinator.async_fetch_diff_content = AsyncMock(side_effect=mock_fetch_diff)
     local_content = "blueprint:\n  name: Old\n  source_url: https://url.com\n"
 
-    with (
-        patch("custom_components.blueprints_updater.update.get_async_client"),
-        patch("builtins.open", mock_open(read_data=local_content)),
-    ):
+    with patch("builtins.open", mock_open(read_data=local_content)):
         notes = await entity.async_generate_release_notes()
 
-    coordinator._async_fetch_content.assert_called_once_with(ANY, "https://url.com", force=True)
+    coordinator.async_fetch_diff_content.assert_called_once_with("/config/blueprints/test.yaml")
     assert notes is not None
     assert "-  name: Old" in notes
     assert "+  name: New" in notes
