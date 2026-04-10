@@ -638,7 +638,7 @@ async def test_entity_release_notes_git_diff_cached(coordinator):
         notes = await entity.async_generate_release_notes()
 
     assert notes is not None
-    assert f"```diff\n{cached_diff}```" in notes
+    assert f"```diff\n{cached_diff}\n```" in notes
     coordinator.async_get_git_diff.assert_called_once_with("/config/blueprints/test.yaml")
 
 
@@ -724,3 +724,28 @@ async def test_async_install_unsafe_url_protection(coordinator):
 
     with pytest.raises(HomeAssistantError):
         await entity.async_install(version=None, backup=False)
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_git_diff_with_backticks(coordinator):
+    """Test git diff handles embedded backticks with dynamic fencing."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+    coordinator.data[path] = info
+
+    diff_text = "some diff\n```\nbackticks here\n```"
+    coordinator.async_get_git_diff.return_value = diff_text
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    with patch("builtins.open", mock_open(read_data="local")):
+        notes = await entity.async_generate_release_notes()
+
+    assert notes is not None
+    assert "````diff\nsome diff\n```\nbackticks here\n```\n````" in notes

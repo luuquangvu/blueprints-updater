@@ -1038,7 +1038,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             info["last_error"] = "unsafe_url"
             return None
 
-        session = get_async_client(self.hass)
+        session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
         remote_content, _ = await self._async_fetch_content(session, url, force=True)
         if not remote_content:
             return None
