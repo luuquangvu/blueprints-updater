@@ -554,6 +554,7 @@ async def test_entity_release_notes_git_diff(coordinator):
     assert "```diff" in notes
     assert "-condition: []" in notes
     assert "```" in notes
+    assert "<summary>git_diff_title</summary>" in notes
 
 
 @pytest.mark.asyncio
@@ -619,3 +620,4 @@ async def test_entity_release_notes_git_diff_source_url_normalization(coordinato
 
     assert notes is not None
     assert "-  source_url: https://url.com" not in notes
+    assert "+  source_url: https://url.com" not in notes
