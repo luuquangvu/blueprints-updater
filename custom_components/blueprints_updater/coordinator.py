@@ -1011,24 +1011,45 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             self.data[path]["_cached_git_diff"] = (local_hash, remote_hash, diff_text)
 
     async def async_fetch_diff_content(self, path: str) -> str | None:
-        """Fetch remote content for diff generation.
+        """Fetch and validate remote content for diff generation.
 
         This method mutates the blueprint's `info` dictionary by setting
-        the `remote_content` key. This is an intended optimization to cache
-        the content for subsequent UI renders (e.g., the Installation dialog).
+        the `remote_content` key ONLY if the URL is safe and the content
+        passes blueprint validation. This prevents unvalidated content
+        from being used in the installation flow.
         """
         info = self.data.get(path)
         if not info or not info.get("updatable"):
             return None
 
-        url = self._normalize_url(info.get("source_url", ""))
+        source_url = info.get("source_url", "")
+        url = self._normalize_url(source_url)
         if not url:
+            return None
+
+        if not await self._is_safe_url(url):
+            _LOGGER.warning("Blocking diff fetch from unsafe URL: %s", url)
+            info["last_error"] = "unsafe_url"
             return None
 
         session = get_async_client(self.hass)
         remote_content, _ = await self._async_fetch_content(session, url, force=True)
-        if remote_content:
-            info["remote_content"] = remote_content
+        if not remote_content:
+            return None
+
+        remote_content_with_url = self._ensure_source_url(remote_content, source_url)
+        try:
+            blueprint_dict = yaml_util.parse_yaml(remote_content_with_url)
+            last_error = self._validate_blueprint(blueprint_dict, source_url)
+        except (HomeAssistantError, InvalidBlueprint) as err:
+            last_error = f"yaml_syntax_error|{_sanitize_error_detail(str(err))}"
+
+        if last_error:
+            _LOGGER.warning("Remote content for diff at %s is invalid: %s", path, last_error)
+            info["last_error"] = last_error
+            return None
+
+        info["remote_content"] = remote_content
         return remote_content
 
     async def async_get_git_diff(self, path: str) -> str | None:

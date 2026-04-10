@@ -640,3 +640,87 @@ async def test_entity_release_notes_git_diff_cached(coordinator):
     assert notes is not None
     assert f"```diff\n{cached_diff}```" in notes
     coordinator.async_get_git_diff.assert_called_once_with("/config/blueprints/test.yaml")
+
+
+@pytest.mark.asyncio
+async def test_async_install_bypass_protection(coordinator):
+    """Test that async_install does not use unvalidated content from diff fetch."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+    coordinator.data[path] = info
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    coordinator.async_get_git_diff = BlueprintUpdateCoordinator.async_get_git_diff.__get__(
+        coordinator, BlueprintUpdateCoordinator
+    )
+    coordinator.async_fetch_diff_content = (
+        BlueprintUpdateCoordinator.async_fetch_diff_content.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+    )
+    coordinator._ensure_source_url = BlueprintUpdateCoordinator._ensure_source_url
+    coordinator._normalize_url = BlueprintUpdateCoordinator._normalize_url
+
+    with (
+        patch.object(coordinator, "_is_safe_url", AsyncMock(return_value=True)),
+        patch.object(
+            coordinator,
+            "_async_fetch_content",
+            AsyncMock(return_value=("invalid: yaml:", "etag")),
+        ),
+        patch.object(
+            coordinator, "_validate_blueprint", MagicMock(return_value="invalid_blueprint")
+        ),
+        patch("builtins.open", mock_open(read_data="local")),
+    ):
+        await entity.async_generate_release_notes()
+
+    assert info.get("remote_content") is None
+    with pytest.raises(HomeAssistantError):
+        await entity.async_install(version=None, backup=False)
+    coordinator.async_fetch_blueprint.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_install_unsafe_url_protection(coordinator):
+    """Test that async_install does not use content if URL safety check fails."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://unsafe.com",
+    }
+    coordinator.data[path] = info
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    coordinator.async_get_git_diff = BlueprintUpdateCoordinator.async_get_git_diff.__get__(
+        coordinator, BlueprintUpdateCoordinator
+    )
+    coordinator.async_fetch_diff_content = (
+        BlueprintUpdateCoordinator.async_fetch_diff_content.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+    )
+    coordinator._normalize_url = BlueprintUpdateCoordinator._normalize_url
+
+    with (
+        patch.object(coordinator, "_is_safe_url", AsyncMock(return_value=False)),
+        patch("builtins.open", mock_open(read_data="local")),
+    ):
+        await entity.async_generate_release_notes()
+
+    assert info.get("remote_content") is None
+    assert info.get("last_error") == "unsafe_url"
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_install(version=None, backup=False)
