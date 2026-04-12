@@ -433,27 +433,22 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 remote_hash = prev.get("remote_hash")
 
                 is_updatable = bool(remote_hash and local_hash != remote_hash)
-                if (
-                    is_updatable
-                    and remote_hash
-                    and (r_content := prev.get("remote_content"))
-                    and isinstance(r_content, str)
-                ):
-                    r_hash = self._hash_content(r_content)
-                    if r_hash == local_hash:
-                        _LOGGER.debug("Ghost update detected for %s; forcing updatable=False", path)
-                        is_updatable = False
-                        info["remote_hash"] = local_hash
-                        info["invalid_remote_hash"] = None
-                        info["last_error"] = None
+                if is_updatable and self._is_ghost_update(local_hash, prev):
+                    _LOGGER.debug("Ghost update detected for %s; forcing updatable=False", path)
+                    is_updatable = False
+                    info["remote_hash"] = local_hash
+                    info["invalid_remote_hash"] = None
+                    info["last_error"] = None
 
                 info.update(
                     {
                         "updatable": is_updatable,
                         "remote_hash": info.get("remote_hash") or remote_hash,
-                        "invalid_remote_hash": prev.get("invalid_remote_hash"),
+                        "invalid_remote_hash": info.get(
+                            "invalid_remote_hash", prev.get("invalid_remote_hash")
+                        ),
                         "remote_content": prev.get("remote_content"),
-                        "last_error": prev.get("last_error"),
+                        "last_error": info.get("last_error", prev.get("last_error")),
                         "etag": prev.get("etag"),
                     }
                 )
@@ -494,6 +489,26 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         _LOGGER.debug("Instant setup complete with %d blueprints", len(results))
         return results
+
+    def _is_ghost_update(self, current_local_hash: str, prev_data: dict[str, Any]) -> bool:
+        """Check if a detected update is actually a 'ghost update'.
+
+        A ghost update occurs when the content is effectively identical
+        to the local version after transport-level normalization, but
+        the previous hashes were out of sync.
+
+        Args:
+            current_local_hash: The hash of the freshly scanned local file.
+            prev_data: Previous metadata dictionary for this path.
+
+        Returns:
+            True if the cached remote content matches the local hash.
+
+        """
+        r_content = prev_data.get("remote_content")
+        if r_content and isinstance(r_content, str):
+            return self._hash_content(r_content) == current_local_hash
+        return False
 
     def _start_background_refresh(self, blueprints: dict[str, Any]) -> None:
         """Start the background remote refresh task if not already running.
@@ -1694,7 +1709,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if RE_BLUEPRINT_KEY.search(content):
             return RE_BLUEPRINT_KEY.sub(
-                lambda m: f"{m.group(1).rstrip()}\n  source_url: {source_url}",
+                rf"\1\n  source_url: {source_url}",
                 content,
                 count=1,
             )
