@@ -2249,3 +2249,32 @@ async def test_cold_start_rehydration(coordinator):
     assert not results[path]["updatable"]
     assert results[path]["remote_hash"] == local_hash
     assert coordinator._first_update_done
+
+
+@pytest.mark.asyncio
+async def test_etag_invalidation_on_mismatch(coordinator):
+    """Test that ETag is invalidated when local and remote hashes mismatch on startup."""
+    path = "/config/blueprints/test.yaml"
+    local_hash = "current_hash"
+    remote_hash = "stale_hash"
+    coordinator.data = {}
+    coordinator._persisted_hashes = {path: remote_hash}
+    coordinator._persisted_etags = {path: "stale_etag"}
+    coordinator._first_update_done = False
+
+    blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": local_hash,
+        }
+    }
+
+    with patch.object(coordinator, "scan_blueprints", return_value=blueprints):
+        results = await coordinator._async_update_data()
+
+    assert results[path]["updatable"]
+    assert results[path]["etag"] is None
+    assert results[path]["remote_hash"] == remote_hash

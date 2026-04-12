@@ -420,7 +420,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not self.data:
             for info in results.values():
                 if info.get("remote_hash"):
-                    info["updatable"] = info["local_hash"] != info["remote_hash"]
+                    is_mismatch = info["local_hash"] != info["remote_hash"]
+                    info["updatable"] = is_mismatch
+                    if is_mismatch:
+                        info["etag"] = None
             return
 
         for path, info in results.items():
@@ -871,9 +874,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if self.data and path in self.data:
                 new_hash = self._hash_content(remote_content)
 
-                if self.data[path].get("remote_hash") == new_hash:
-                    self.data[path]["invalid_remote_hash"] = None
-
                 self.data[path].update(
                     {
                         "updatable": False,
@@ -881,6 +881,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "remote_hash": new_hash,
                         "last_error": None,
                         "remote_content": None,
+                        "invalid_remote_hash": None,
                     }
                 )
 
