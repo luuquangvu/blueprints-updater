@@ -2190,8 +2190,7 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
         }
     }
 
-    normalized = coordinator._normalize_content(raw_remote)
-    expected_hash = hashlib.sha256(normalized.encode()).hexdigest()
+    expected_hash = coordinator._hash_content(raw_remote)
 
     with (
         patch("builtins.open", MagicMock()),

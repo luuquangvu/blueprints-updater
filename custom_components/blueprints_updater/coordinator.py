@@ -393,11 +393,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "source_url": info["source_url"],
                 "local_hash": info["local_hash"],
                 "updatable": False,
-                "remote_hash": None if self.data else self._persisted_hashes.get(path),
+                "remote_hash": None
+                if self._first_update_done
+                else self._persisted_hashes.get(path),
                 "invalid_remote_hash": None,
                 "remote_content": None,
                 "last_error": None,
-                "etag": None if self.data else self._persisted_etags.get(path),
+                "etag": None if self._first_update_done else self._persisted_etags.get(path),
             }
             for path, info in blueprints.items()
         }
@@ -868,8 +870,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 await self.async_reload_services([domain])
 
             if self.data and path in self.data:
-                normalized = self._normalize_content(remote_content)
-                new_hash = hashlib.sha256(normalized.encode()).hexdigest()
+                new_hash = self._hash_content(remote_content)
 
                 if self.data[path].get("remote_hash") == new_hash:
                     self.data[path]["invalid_remote_hash"] = None
@@ -1633,14 +1634,35 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         return content.replace("\r\n", "\n").replace("\r", "\n")
 
+    def _hash_content(self, content: str) -> str:
+        """Centralized helper to compute a SHA256 hash with normalization.
+
+        This ensures that we always apply transport-level normalization
+        before computing the hash, preventing inconsistencies between
+        different parts of the coordinator.
+
+        Args:
+            content: Raw YAML content to hash.
+
+        Returns:
+            The hex digest of the normalized content's hash.
+
+        """
+        normalized = self._normalize_content(content)
+        return hashlib.sha256(normalized.encode()).hexdigest()
+
     @staticmethod
     def _ensure_source_url(content: str, source_url: str) -> str:
         """Ensure a source_url is present in the blueprint metadata.
 
         Parses the YAML to check for ``blueprint.source_url``. If a valid
         source_url already exists (even if formatted differently), the
-        original content is returned. Otherwise, the URL is injected
-        after the ``blueprint:`` key via deterministic text substitution.
+        original content is returned (but still canonicalized). Otherwise,
+        the URL is injected after the ``blueprint:`` key via deterministic
+        text substitution.
+
+        IMPORTANT: This function always performs transport-level canonical
+        normalization (BOM removal and line ending sync) as a side effect.
 
         Args:
             content: Raw YAML blueprint content.
@@ -1648,7 +1670,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         Returns:
             The YAML content with a source_url guaranteed to be present
-            in the blueprint block.
+            in the blueprint block, and always in canonical form.
 
         """
         try:
