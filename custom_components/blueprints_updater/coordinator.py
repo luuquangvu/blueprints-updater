@@ -444,6 +444,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         _LOGGER.debug("Ghost update detected for %s; forcing updatable=False", path)
                         is_updatable = False
                         info["remote_hash"] = local_hash
+                        info["invalid_remote_hash"] = None
+                        info["last_error"] = None
 
                 info.update(
                     {

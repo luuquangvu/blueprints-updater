@@ -2143,11 +2143,10 @@ async def test_ghost_update_prevention(coordinator):
     path = "/config/blueprints/test.yaml"
 
     local_content = "blueprint:\n  name: Test\n"
-    local_hash = hashlib.sha256(local_content.encode()).hexdigest()
+    local_hash = coordinator._hash_content(local_content)
 
     remote_content = "blueprint:\r\n  name: Test\r\n"
-    r_norm = coordinator._normalize_content(remote_content)
-    assert hashlib.sha256(r_norm.encode()).hexdigest() == local_hash
+    assert coordinator._hash_content(remote_content) == local_hash
     coordinator.data = {
         path: {
             "local_hash": local_hash,
@@ -2278,3 +2277,42 @@ async def test_etag_invalidation_on_mismatch(coordinator):
     assert results[path]["updatable"]
     assert results[path]["etag"] is None
     assert results[path]["remote_hash"] == remote_hash
+
+
+@pytest.mark.asyncio
+async def test_persisted_metadata_not_reused_after_first_update(coordinator):
+    """Test that persisted hashes/ETags are only used for the very first update."""
+    path = "/config/blueprints/test.yaml"
+    initial_hash = "initial_hash"
+    coordinator._persisted_hashes = {path: initial_hash}
+    coordinator._persisted_etags = {path: "initial_etag"}
+    coordinator._first_update_done = False
+
+    blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": initial_hash,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        await coordinator._async_update_data()
+    assert coordinator._first_update_done
+
+    coordinator._persisted_hashes[path] = "stale_hash"
+    coordinator._persisted_etags[path] = "stale_etag"
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        results = await coordinator._async_update_data()
+
+    assert results[path]["remote_hash"] == initial_hash
+    assert results[path]["etag"] == "initial_etag"
