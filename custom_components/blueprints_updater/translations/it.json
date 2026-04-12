@@ -120,6 +120,7 @@
     "auto_update_failed": "Aggiornamento automatico fallito: {error}",
     "unsafe_url": "URL non sicuro: {error}",
     "content_missing": "Il contenuto del blueprint è mancante o non è stato possibile recuperarlo.",
-    "git_diff_title": "Modifiche al codice (Git Diff)"
+    "git_diff_title": "Modifiche al codice (Git Diff)",
+    "semantic_sync_notice": "Questo blueprint è semanticamente identico, ma richiede un aggiornamento strutturale per allinearsi al nuovo formato canonico (es. normalizzazione dei fine riga, inserimento di metadati)."
   }
 }

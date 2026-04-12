@@ -165,17 +165,20 @@ def test_ensure_source_url(coordinator):
 
     new_content = coordinator._ensure_source_url("blueprint:\n  name: Test", source_url)
     assert f"source_url: {source_url}" in new_content
+    assert new_content.endswith("\n")
 
     content_with_url = f"blueprint:\n  name: Test\n  source_url: {source_url}"
-    assert coordinator._ensure_source_url(content_with_url, source_url) == content_with_url
+    expected = coordinator._normalize_content(content_with_url)
+    assert coordinator._ensure_source_url(content_with_url, source_url) == expected
 
     content_with_quotes = f"blueprint:\n  name: Test\n  source_url: '{source_url}'"
-    assert coordinator._ensure_source_url(content_with_quotes, source_url) == content_with_quotes
+    expected_quotes = coordinator._normalize_content(content_with_quotes)
+    assert coordinator._ensure_source_url(content_with_quotes, source_url) == expected_quotes
 
     different_url = "https://github.com/user/new-repo/blob/main/test.yaml"
     content_different = f"blueprint:\n  name: Test\n  source_url: {different_url}"
     result = coordinator._ensure_source_url(content_different, source_url)
-    assert result == content_different
+    assert result == coordinator._normalize_content(content_different)
     assert result.count("source_url") == 1
 
     content_outside = (
@@ -205,6 +208,7 @@ def test_ensure_source_url(coordinator):
     content_flow = "blueprint: { name: Test }"
     result_flow = coordinator._ensure_source_url(content_flow, source_url)
     assert f"source_url: {source_url}" in result_flow
+    assert result_flow.endswith("\n")
 
     content_multi = (
         "# Some info: blueprint:\n"
@@ -217,7 +221,55 @@ def test_ensure_source_url(coordinator):
     assert "source_url:" in result_multi.split("description:")[0]
 
     content_none = "not_a_blueprint: true"
-    assert coordinator._ensure_source_url(content_none, source_url) == content_none
+    expected_none = coordinator._normalize_content(content_none)
+    assert coordinator._ensure_source_url(content_none, source_url) == expected_none
+
+
+def test_normalization_canonical_form(coordinator):
+    """Test that normalization handles BOM, newlines, and whitespace correctly."""
+    base_content = "blueprint:\n  name: Test\n  source_url: https://url"
+
+    bom_content = "\ufeff" + base_content
+    assert coordinator._normalize_content(bom_content) == base_content + "\n"
+
+    win_content = base_content.replace("\n", "\r\n")
+    assert coordinator._normalize_content(win_content) == base_content + "\n"
+
+    spaced_content = "blueprint:  \n  name: Test   \n  source_url: https://url"
+    assert coordinator._normalize_content(spaced_content) == base_content + "\n"
+
+    extra_lines = "\n\n" + base_content + "\n"
+    assert coordinator._normalize_content(extra_lines) == base_content + "\n"
+
+
+def test_normalize_content_empty(coordinator):
+    """Test that empty content normalizes to empty string."""
+    assert coordinator._normalize_content("") == ""
+    assert coordinator._normalize_content("\n\n  \n") == ""
+
+
+def test_normalization_idempotency(coordinator):
+    """Test that normalization is idempotent."""
+    content = "blueprint:\n  name: Test   \r\n  source_url: https://url\n\n"
+    first = coordinator._normalize_content(content)
+    second = coordinator._normalize_content(first)
+    assert first == second
+
+    first_hash = hashlib.sha256(first.encode()).hexdigest()
+    second_hash = hashlib.sha256(second.encode()).hexdigest()
+    assert first_hash == second_hash
+
+
+def test_ensure_source_url_stability(coordinator):
+    """Test that injection is stable even with comments and extra spaces."""
+    source_url = "https://url.com"
+    content = "blueprint: # comment  \n  name: Test"
+
+    injected = coordinator._ensure_source_url(content, source_url)
+    assert "source_url: https://url.com" in injected
+    assert "blueprint: # comment" in injected
+    re_injected = coordinator._ensure_source_url(injected, source_url)
+    assert injected == re_injected
 
 
 def test_ensure_source_url_indented_key(coordinator):
@@ -229,7 +281,8 @@ not_blueprint:
   blueprint:
     nested: true
 """
-    assert coordinator._ensure_source_url(content, source_url) == content
+    expected = coordinator._normalize_content(content)
+    assert coordinator._ensure_source_url(content, source_url) == expected
 
 
 @pytest.mark.asyncio
@@ -890,7 +943,7 @@ async def test_async_update_data_auto_update(coordinator):
 
         mock_install.assert_called_once_with(
             "/test.yaml",
-            "blueprint:\n  name: Test\n  source_url: https://url",
+            "blueprint:\n  name: Test\n  source_url: https://url\n",
             reload_services=False,
             backup=True,
         )
@@ -2082,3 +2135,90 @@ async def test_async_get_git_diff_shows_metadata_changes(coordinator):
         assert diff is not None
         assert "-  source_url: https://old.com" in diff
         assert "+  source_url: https://new.com" in diff
+
+
+@pytest.mark.asyncio
+async def test_ghost_update_prevention(coordinator):
+    """Test that _async_update_data detects content identical after normalization."""
+    path = "/config/blueprints/test.yaml"
+
+    local_content = "blueprint:\n  name: Test\n"
+    local_hash = hashlib.sha256(local_content.encode()).hexdigest()
+
+    remote_content = "blueprint:  \r\n  name: Test  \r\n\r\n"
+    r_norm = coordinator._normalize_content(remote_content)
+    assert hashlib.sha256(r_norm.encode()).hexdigest() == local_hash
+
+    old_remote_hash = "outdated_algorithm_hash"
+    coordinator.data = {
+        path: {
+            "local_hash": local_hash,
+            "remote_hash": old_remote_hash,
+            "remote_content": remote_content,
+            "updatable": True,
+        }
+    }
+
+    mock_blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": local_hash,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=mock_blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        results = await coordinator._async_update_data()
+
+    assert not results[path]["updatable"]
+    assert results[path]["remote_hash"] == local_hash
+
+
+@pytest.mark.asyncio
+async def test_async_install_blueprint_state_sync_fix(coordinator):
+    """Test that async_install_blueprint syncs hashes and triggers UI update."""
+    path = "/config/blueprints/test.yaml"
+    raw_remote = "blueprint:\n  name: New\n"
+    coordinator.data = {
+        path: {
+            "local_hash": "old",
+            "remote_hash": "new",
+            "updatable": True,
+        }
+    }
+
+    normalized = coordinator._normalize_content(raw_remote)
+    expected_hash = hashlib.sha256(normalized.encode()).hexdigest()
+
+    with (
+        patch("builtins.open", MagicMock()),
+        patch("custom_components.blueprints_updater.coordinator.os.replace"),
+        patch.object(coordinator, "async_reload_services"),
+        patch.object(coordinator, "_ensure_source_url", side_effect=lambda c, _: c),
+    ):
+        await coordinator.async_install_blueprint(path, raw_remote)
+
+    assert coordinator.data[path]["local_hash"] == expected_hash
+    assert coordinator.data[path]["remote_hash"] == expected_hash
+    assert not coordinator.data[path]["updatable"]
+    coordinator.async_set_updated_data.assert_called_with(coordinator.data)
+
+
+def test_normalize_content_determinism(coordinator):
+    """Test that _normalize_content handles mixed line endings and whitespace."""
+    c1 = "blueprint:\n  name: Test\n"
+    c2 = "blueprint:  \r\n  name: Test  \r\n"
+    c3 = "\ufeffblueprint:\n  name: Test\n"
+
+    norm1 = coordinator._normalize_content(c1)
+    norm2 = coordinator._normalize_content(c2)
+    norm3 = coordinator._normalize_content(c3)
+
+    assert norm1 == "blueprint:\n  name: Test\n"
+    assert norm1 == norm2
+    assert norm1 == norm3

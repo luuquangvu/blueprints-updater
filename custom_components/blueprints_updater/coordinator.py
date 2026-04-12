@@ -326,15 +326,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             return template
 
-    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
-        """Fetch blueprint update data.
-
-        This method performs a fast local scan and returns immediate results
-        to ensure the integration starts instantly. Remote updates are
-        triggered in a background task.
+    def _get_scan_config(self) -> tuple[str, list[str]]:
+        """Extract and validate filtering configuration from the entry.
 
         Returns:
-            A dictionary containing blueprint information and update status.
+            A tuple of (filter_mode, selected_blueprints).
 
         """
         filter_mode = self._get_validated_filter_mode(
@@ -342,25 +338,22 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if self.config_entry
             else FILTER_MODE_ALL
         )
-
         selected_blueprints = self._get_validated_selected_blueprints(
             self.config_entry.options.get(CONF_SELECTED_BLUEPRINTS, []) if self.config_entry else []
         )
+        return filter_mode, selected_blueprints
 
-        _LOGGER.debug(
-            "Starting fast local blueprint scan (filter_mode=%s)",
-            filter_mode,
-        )
+    def _prune_stale_metadata(self, scanned_paths: set[str]) -> None:
+        """Remove metadata for blueprints that no longer exist on disk.
 
-        blueprints = await self.hass.async_add_executor_job(
-            self.scan_blueprints,
-            self.hass,
-            filter_mode,
-            selected_blueprints,
-        )
+        Syncs the in-memory ETag and Hash caches with the list of files
+        found during the latest disk scan.
 
-        scanned_paths = set(blueprints.keys())
-        old_keys_count = len(self._persisted_etags) + len(self._persisted_hashes)
+        Args:
+            scanned_paths: Set of absolute paths found on disk.
+
+        """
+        old_count = len(self._persisted_etags) + len(self._persisted_hashes)
 
         self._persisted_etags = {
             path: etag for path, etag in self._persisted_etags.items() if path in scanned_paths
@@ -369,13 +362,29 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             path: r_hash for path, r_hash in self._persisted_hashes.items() if path in scanned_paths
         }
 
-        if (len(self._persisted_etags) + len(self._persisted_hashes)) < old_keys_count:
+        if (len(self._persisted_etags) + len(self._persisted_hashes)) < old_count:
             _LOGGER.debug("Pruned stale blueprint metadata from memory, triggering save")
             self.hass.async_create_background_task(
                 self._async_save_metadata(), name=f"{DOMAIN}_prune_save"
             )
 
-        results: dict[str, dict[str, Any]] = {
+    def _initialize_results(
+        self, blueprints: dict[str, BlueprintMetadata]
+    ) -> dict[str, dict[str, Any]]:
+        """Create the initial results structure from disk scan.
+
+        Pre-populates basic metadata and local hashes. Remote metadata
+        is only populated from disk persistence if this is the first scan
+        since startup (data is empty).
+
+        Args:
+            blueprints: Metadata mapping from scan_blueprints.
+
+        Returns:
+            A results dictionary indexed by path.
+
+        """
+        return {
             path: {
                 "name": info["name"],
                 "rel_path": info["rel_path"],
@@ -392,23 +401,85 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             for path, info in blueprints.items()
         }
 
-        for info in results.values():
-            if info.get("remote_hash"):
-                info["updatable"] = info["local_hash"] != info["remote_hash"]
+    def _merge_previous_data(self, results: dict[str, dict[str, Any]]) -> None:
+        """Merge previous scan metadata and detect synchronization issues.
 
-        if self.data:
-            for path, info in results.items():
-                if path in self.data and self.data[path]["local_hash"] == info["local_hash"]:
-                    info.update(
-                        {
-                            "updatable": self.data[path]["updatable"],
-                            "remote_hash": self.data[path]["remote_hash"],
-                            "invalid_remote_hash": self.data[path].get("invalid_remote_hash"),
-                            "remote_content": self.data[path]["remote_content"],
-                            "last_error": self.data[path]["last_error"],
-                            "etag": self.data[path].get("etag"),
-                        }
-                    )
+        This method synchronizes current scan results with the existing
+        coordinator data to maintain continuity for ETags and remote content.
+        It also implements "ghost update" detection which suppresses update
+        notifications when contents are effectively identical after
+        canonical normalization.
+
+        Args:
+            results: The newly initialized results dictionary to update.
+
+        """
+        if not self.data:
+            for info in results.values():
+                if info.get("remote_hash"):
+                    info["updatable"] = info["local_hash"] != info["remote_hash"]
+            return
+
+        for path, info in results.items():
+            if path in self.data:
+                prev = self.data[path]
+                local_hash = info["local_hash"]
+                remote_hash = prev.get("remote_hash")
+
+                is_updatable = local_hash != remote_hash
+                if (
+                    is_updatable
+                    and remote_hash
+                    and (r_content := prev.get("remote_content"))
+                    and isinstance(r_content, str)
+                ):
+                    r_norm = self._normalize_content(r_content)
+                    r_hash = hashlib.sha256(r_norm.encode()).hexdigest()
+                    if r_hash == local_hash:
+                        _LOGGER.debug("Ghost update detected for %s; forcing updatable=False", path)
+                        is_updatable = False
+                        info["remote_hash"] = local_hash
+
+                info.update(
+                    {
+                        "updatable": is_updatable,
+                        "remote_hash": info.get("remote_hash") or remote_hash,
+                        "invalid_remote_hash": prev.get("invalid_remote_hash"),
+                        "remote_content": prev.get("remote_content"),
+                        "last_error": prev.get("last_error"),
+                        "etag": prev.get("etag"),
+                    }
+                )
+
+    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
+        """Fetch and synchronize blueprint update data.
+
+        Performs a fast local disk scan to identify blueprints and
+        synchronize them with persisted remote metadata. Results are
+        returned immediately for UI responsiveness, while an exhaustive
+        remote update is triggered in the background.
+
+        Returns:
+            A dictionary containing blueprint information and update status.
+
+        """
+        filter_mode, selected = self._get_scan_config()
+
+        _LOGGER.debug(
+            "Starting fast local blueprint scan (filter_mode=%s)",
+            filter_mode,
+        )
+
+        blueprints = await self.hass.async_add_executor_job(
+            self.scan_blueprints,
+            self.hass,
+            filter_mode,
+            selected,
+        )
+
+        self._prune_stale_metadata(set(blueprints.keys()))
+        results = self._initialize_results(blueprints)
+        self._merge_previous_data(results)
 
         self.data = results
         self._start_background_refresh(blueprints)
@@ -795,17 +866,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 await self.async_reload_services([domain])
 
             if self.data and path in self.data:
-                new_hash = hashlib.sha256(remote_content.encode()).hexdigest()
+                normalized = self._normalize_content(remote_content)
+                new_hash = hashlib.sha256(normalized.encode()).hexdigest()
                 self.data[path].update(
                     {
                         "updatable": False,
                         "local_hash": new_hash,
+                        "remote_hash": new_hash,
                         "last_error": None,
                         "remote_content": None,
                     }
                 )
                 if self.data[path].get("remote_hash") == new_hash:
                     self.data[path]["invalid_remote_hash"] = None
+
+                self.async_set_updated_data(self.data)
 
             _LOGGER.info("Blueprint at %s updated successfully", real_path)
         except Exception as err:
@@ -1096,6 +1171,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             diff_text = await self.hass.async_add_executor_job(
                 self._read_and_diff, path, remote_content, info.get("source_url", "")
             )
+
+            if not diff_text and local_hash != remote_hash:
+                diff_text = await self.async_translate("semantic_sync_notice")
+
             self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "")
             return diff_text
         except OSError as err:
@@ -1286,7 +1365,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         remote_content = self._ensure_source_url(remote_content, source_url)
-        remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
+        normalized_remote = self._normalize_content(remote_content)
+        remote_hash = hashlib.sha256(normalized_remote.encode()).hexdigest()
         local_hash = info["local_hash"]
         updatable = remote_hash != local_hash
 
@@ -1524,14 +1604,41 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return None
 
     @staticmethod
+    def _normalize_content(content: str) -> str:
+        r"""Normalize blueprint content for consistent hashing.
+
+        This method enforces a canonical form to ensure that identical logic
+        produces identical hashes regardless of editor settings or OS.
+        It performs the following transformations:
+        1. Strips UTF-8 Byte Order Mark (BOM).
+        2. Normalizes all line endings to Unix style (\n).
+        3. Removes trailing whitespace from every line.
+        4. Removes all leading and trailing blank lines.
+        5. Ensures the content ends with exactly one trailing newline.
+
+        Args:
+            content: Raw YAML content string.
+
+        Returns:
+            Normalized YAML content.
+
+        """
+        if content.startswith("\ufeff"):
+            content = content[1:]
+
+        content = content.replace("\r\n", "\n").replace("\r", "\n")
+
+        normalized = "\n".join(line.rstrip() for line in content.splitlines()).strip("\n")
+        return f"{normalized}\n" if normalized else ""
+
+    @staticmethod
     def _ensure_source_url(content: str, source_url: str) -> str:
         """Ensure a source_url is present in the blueprint metadata.
 
-        Parses the YAML to check for ``blueprint.source_url`` (matching
-        the same lookup used by ``scan_blueprints``). If a valid
-        source_url already exists, the content is returned unchanged.
-        Otherwise, the fallback URL is injected after the ``blueprint:``
-        key via text substitution.
+        Parses the YAML to check for ``blueprint.source_url``. If a valid
+        source_url already exists (even if formatted differently), the
+        original content is returned. Otherwise, the URL is injected
+        after the ``blueprint:`` key via deterministic text substitution.
 
         Args:
             content: Raw YAML blueprint content.
@@ -1542,6 +1649,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             in the blueprint block.
 
         """
+        content = BlueprintUpdateCoordinator._normalize_content(content)
+        source_url = source_url.strip()
+
         try:
             parsed = yaml_util.parse_yaml(content)
         except HomeAssistantError:
@@ -1558,7 +1668,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if RE_BLUEPRINT_KEY.search(content):
             return RE_BLUEPRINT_KEY.sub(
-                rf"\1\n  source_url: {source_url}",
+                lambda m: f"{m.group(1).rstrip()}\n  source_url: {source_url}",
                 content,
                 count=1,
             )
@@ -1577,26 +1687,30 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
-        """Read and diff local vs remote content with metadata normalization.
+        """Read and diff local vs remote content with normalization.
 
         Args:
-            local_path: Local blueprint file path.
-            remote_text: Fetched remote blueprint content.
-            source_url: Fallback URL to ensure in the diff metadata.
+            local_path: Path to the local blueprint file.
+            remote_text: Raw remote content fetched from Git.
+            source_url: The source URL to ensure is present in the remote.
 
         Returns:
-            The unified diff text.
+            A unified diff string.
 
         """
         with open(local_path, encoding="utf-8") as f:
             local_text = f.read()
 
+        local_text = BlueprintUpdateCoordinator._normalize_content(local_text)
         remote_text = BlueprintUpdateCoordinator._ensure_source_url(remote_text, source_url)
+        remote_text = BlueprintUpdateCoordinator._normalize_content(remote_text)
 
+        local_lines = local_text.splitlines(keepends=True)
+        remote_lines = remote_text.splitlines(keepends=True)
         return "".join(
             difflib.unified_diff(
-                local_text.splitlines(True),
-                remote_text.splitlines(True),
+                local_lines,
+                remote_lines,
                 fromfile="local",
                 tofile="remote",
             )
@@ -1757,11 +1871,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             else os.path.basename(path)
         )
         domain = BlueprintUpdateCoordinator._normalize_domain(bp_info.get("domain"))
+
+        normalized_content = BlueprintUpdateCoordinator._normalize_content(content)
         return {
             "name": name,
             "domain": domain,
             "source_url": source_url.strip(),
-            "local_hash": hashlib.sha256(content.encode()).hexdigest(),
+            "local_hash": hashlib.sha256(normalized_content.encode()).hexdigest(),
         }
 
     @staticmethod
