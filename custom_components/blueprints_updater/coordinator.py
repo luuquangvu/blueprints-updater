@@ -868,6 +868,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if self.data and path in self.data:
                 normalized = self._normalize_content(remote_content)
                 new_hash = hashlib.sha256(normalized.encode()).hexdigest()
+
+                if self.data[path].get("remote_hash") == new_hash:
+                    self.data[path]["invalid_remote_hash"] = None
+
                 self.data[path].update(
                     {
                         "updatable": False,
@@ -877,8 +881,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "remote_content": None,
                     }
                 )
-                if self.data[path].get("remote_hash") == new_hash:
-                    self.data[path]["invalid_remote_hash"] = None
 
                 self.async_set_updated_data(self.data)
 
@@ -1649,9 +1651,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             in the blueprint block.
 
         """
-        content = BlueprintUpdateCoordinator._normalize_content(content)
-        source_url = source_url.strip()
-
         try:
             parsed = yaml_util.parse_yaml(content)
         except HomeAssistantError:
@@ -1664,7 +1663,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             existing = blueprint.get("source_url")
             if isinstance(existing, str) and existing.strip():
-                return content
+                return BlueprintUpdateCoordinator._normalize_content(content)
+
+        content = BlueprintUpdateCoordinator._normalize_content(content)
+        source_url = source_url.strip()
 
         if RE_BLUEPRINT_KEY.search(content):
             return RE_BLUEPRINT_KEY.sub(
@@ -1703,7 +1705,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         local_text = BlueprintUpdateCoordinator._normalize_content(local_text)
         remote_text = BlueprintUpdateCoordinator._ensure_source_url(remote_text, source_url)
-        remote_text = BlueprintUpdateCoordinator._normalize_content(remote_text)
 
         local_lines = local_text.splitlines(keepends=True)
         remote_lines = remote_text.splitlines(keepends=True)

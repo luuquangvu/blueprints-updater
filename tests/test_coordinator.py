@@ -165,7 +165,8 @@ def test_ensure_source_url(coordinator):
 
     new_content = coordinator._ensure_source_url("blueprint:\n  name: Test", source_url)
     assert f"source_url: {source_url}" in new_content
-    assert new_content.endswith("\n")
+
+    assert new_content == f"blueprint:\n  source_url: {source_url}\n  name: Test\n"
 
     content_with_url = f"blueprint:\n  name: Test\n  source_url: {source_url}"
     expected = coordinator._normalize_content(content_with_url)
@@ -931,7 +932,7 @@ async def test_async_update_data_auto_update(coordinator):
         mock_resp.status_code = 200
         mock_resp.headers = {"ETag": "new"}
         mock_resp.raise_for_status = MagicMock()
-        mock_resp.text = "blueprint:\n  name: Test\n  source_url: https://url"
+        mock_resp.text = "blueprint:\n  name: Test\n  source_url: https://url\n"
         mock_session.get = AsyncMock(return_value=mock_resp)
 
         mock_hash.return_value.hexdigest.return_value = "new"
