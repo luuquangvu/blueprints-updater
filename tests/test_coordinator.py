@@ -165,8 +165,7 @@ def test_ensure_source_url(coordinator):
 
     new_content = coordinator._ensure_source_url("blueprint:\n  name: Test", source_url)
     assert f"source_url: {source_url}" in new_content
-
-    assert new_content == f"blueprint:\n  source_url: {source_url}\n  name: Test\n"
+    assert new_content == f"blueprint:\n  source_url: {source_url}\n  name: Test"
 
     content_with_url = f"blueprint:\n  name: Test\n  source_url: {source_url}"
     expected = coordinator._normalize_content(content_with_url)
@@ -231,22 +230,22 @@ def test_normalization_canonical_form(coordinator):
     base_content = "blueprint:\n  name: Test\n  source_url: https://url"
 
     bom_content = "\ufeff" + base_content
-    assert coordinator._normalize_content(bom_content) == base_content + "\n"
+    assert coordinator._normalize_content(bom_content) == base_content
 
     win_content = base_content.replace("\n", "\r\n")
-    assert coordinator._normalize_content(win_content) == base_content + "\n"
+    assert coordinator._normalize_content(win_content) == base_content
 
     spaced_content = "blueprint:  \n  name: Test   \n  source_url: https://url"
-    assert coordinator._normalize_content(spaced_content) == base_content + "\n"
+    assert coordinator._normalize_content(spaced_content) == spaced_content
 
     extra_lines = "\n\n" + base_content + "\n"
-    assert coordinator._normalize_content(extra_lines) == base_content + "\n"
+    assert coordinator._normalize_content(extra_lines) == extra_lines
 
 
 def test_normalize_content_empty(coordinator):
-    """Test that empty content normalizes to empty string."""
+    """Test that empty content is handled correctly."""
     assert coordinator._normalize_content("") == ""
-    assert coordinator._normalize_content("\n\n  \n") == ""
+    assert coordinator._normalize_content("\n\n  \n") == "\n\n  \n"
 
 
 def test_normalization_idempotency(coordinator):
@@ -2146,15 +2145,13 @@ async def test_ghost_update_prevention(coordinator):
     local_content = "blueprint:\n  name: Test\n"
     local_hash = hashlib.sha256(local_content.encode()).hexdigest()
 
-    remote_content = "blueprint:  \r\n  name: Test  \r\n\r\n"
+    remote_content = "blueprint:\r\n  name: Test\r\n"
     r_norm = coordinator._normalize_content(remote_content)
     assert hashlib.sha256(r_norm.encode()).hexdigest() == local_hash
-
-    old_remote_hash = "outdated_algorithm_hash"
     coordinator.data = {
         path: {
             "local_hash": local_hash,
-            "remote_hash": old_remote_hash,
+            "remote_hash": "outdated_algorithm_hash",
             "remote_content": remote_content,
             "updatable": True,
         }
@@ -2184,7 +2181,7 @@ async def test_ghost_update_prevention(coordinator):
 async def test_async_install_blueprint_state_sync_fix(coordinator):
     """Test that async_install_blueprint syncs hashes and triggers UI update."""
     path = "/config/blueprints/test.yaml"
-    raw_remote = "blueprint:\n  name: New\n"
+    raw_remote = "blueprint:\r\n  name: New\r\n"
     coordinator.data = {
         path: {
             "local_hash": "old",
@@ -2221,5 +2218,35 @@ def test_normalize_content_determinism(coordinator):
     norm3 = coordinator._normalize_content(c3)
 
     assert norm1 == "blueprint:\n  name: Test\n"
-    assert norm1 == norm2
+    assert norm1 != norm2
     assert norm1 == norm3
+
+
+@pytest.mark.asyncio
+async def test_cold_start_rehydration(coordinator):
+    """Test that persisted hashes are used on reboot but verified later."""
+    path = "/config/blueprints/test.yaml"
+    local_hash = "current_hash"
+    coordinator.data = {}
+    coordinator._persisted_hashes = {path: local_hash}
+    coordinator._first_update_done = False
+
+    blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": local_hash,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        results = await coordinator._async_update_data()
+
+    assert not results[path]["updatable"]
+    assert results[path]["remote_hash"] == local_hash
+    assert coordinator._first_update_done

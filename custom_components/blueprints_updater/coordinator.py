@@ -166,6 +166,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._persisted_hashes: dict[str, str] = {}
         self._safe_hostname_cache: dict[str, bool] = {}
         self._safe_hostname_lock = asyncio.Lock()
+        self._first_update_done = False
         if self.config_entry:
             self.config_entry.async_on_unload(self._async_cancel_background_task)
 
@@ -482,6 +483,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._merge_previous_data(results)
 
         self.data = results
+        self._first_update_done = True
         self._start_background_refresh(blueprints)
 
         _LOGGER.debug("Instant setup complete with %d blueprints", len(results))
@@ -1609,14 +1611,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     def _normalize_content(content: str) -> str:
         r"""Normalize blueprint content for consistent hashing.
 
-        This method enforces a canonical form to ensure that identical logic
-        produces identical hashes regardless of editor settings or OS.
+        This method performs transport-level normalization to ensure that
+        identical files produce consistent hashes across different operating
+        systems (Windows vs Linux) and transport layers. It avoids modifying
+        content inside the file (such as stripping trailing spaces) to
+        preserve the integrity of YAML block scalars.
+
         It performs the following transformations:
         1. Strips UTF-8 Byte Order Mark (BOM).
         2. Normalizes all line endings to Unix style (\n).
-        3. Removes trailing whitespace from every line.
-        4. Removes all leading and trailing blank lines.
-        5. Ensures the content ends with exactly one trailing newline.
 
         Args:
             content: Raw YAML content string.
@@ -1628,10 +1631,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if content.startswith("\ufeff"):
             content = content[1:]
 
-        content = content.replace("\r\n", "\n").replace("\r", "\n")
-
-        normalized = "\n".join(line.rstrip() for line in content.splitlines()).strip("\n")
-        return f"{normalized}\n" if normalized else ""
+        return content.replace("\r\n", "\n").replace("\r", "\n")
 
     @staticmethod
     def _ensure_source_url(content: str, source_url: str) -> str:
