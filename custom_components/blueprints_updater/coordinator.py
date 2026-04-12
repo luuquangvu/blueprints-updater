@@ -429,15 +429,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 local_hash = info["local_hash"]
                 remote_hash = prev.get("remote_hash")
 
-                is_updatable = local_hash != remote_hash
+                is_updatable = bool(remote_hash and local_hash != remote_hash)
                 if (
                     is_updatable
                     and remote_hash
                     and (r_content := prev.get("remote_content"))
                     and isinstance(r_content, str)
                 ):
-                    r_norm = self._normalize_content(r_content)
-                    r_hash = hashlib.sha256(r_norm.encode()).hexdigest()
+                    r_hash = self._hash_content(r_content)
                     if r_hash == local_hash:
                         _LOGGER.debug("Ghost update detected for %s; forcing updatable=False", path)
                         is_updatable = False
@@ -1370,8 +1369,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         remote_content = self._ensure_source_url(remote_content, source_url)
-        normalized_remote = self._normalize_content(remote_content)
-        remote_hash = hashlib.sha256(normalized_remote.encode()).hexdigest()
+        remote_hash = self._hash_content(remote_content)
         local_hash = info["local_hash"]
         updatable = remote_hash != local_hash
 
@@ -1634,7 +1632,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         return content.replace("\r\n", "\n").replace("\r", "\n")
 
-    def _hash_content(self, content: str) -> str:
+    @staticmethod
+    def _hash_content(content: str) -> str:
         """Centralized helper to compute a SHA256 hash with normalization.
 
         This ensures that we always apply transport-level normalization
@@ -1648,7 +1647,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             The hex digest of the normalized content's hash.
 
         """
-        normalized = self._normalize_content(content)
+        normalized = BlueprintUpdateCoordinator._normalize_content(content)
         return hashlib.sha256(normalized.encode()).hexdigest()
 
     @staticmethod
@@ -1895,12 +1894,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
         domain = BlueprintUpdateCoordinator._normalize_domain(bp_info.get("domain"))
 
-        normalized_content = BlueprintUpdateCoordinator._normalize_content(content)
         return {
             "name": name,
             "domain": domain,
             "source_url": source_url.strip(),
-            "local_hash": hashlib.sha256(normalized_content.encode()).hexdigest(),
+            "local_hash": BlueprintUpdateCoordinator._hash_content(content),
         }
 
     @staticmethod
