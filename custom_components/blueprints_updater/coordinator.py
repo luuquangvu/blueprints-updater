@@ -344,7 +344,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
         return filter_mode, selected_blueprints
 
-    def _prune_stale_metadata(self, scanned_paths: set[str]) -> None:
+    async def _async_prune_stale_metadata(self, scanned_paths: set[str]) -> None:
         """Remove metadata for blueprints that no longer exist on disk.
 
         This method synchronizes in-memory ETag and Hash caches with the
@@ -355,6 +355,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         due to user configuration changes (e.g., filter mode or selection),
         providing a more stable cache and better UX.
 
+        To prevent blocking the event loop, file existence checks are
+        performed in the executor.
+
         Args:
             scanned_paths: Set of absolute paths found on disk during
                 the latest scan.
@@ -362,15 +365,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         old_count = len(self._persisted_etags) + len(self._persisted_hashes)
 
+        all_metadata_paths = set(self._persisted_etags.keys()) | set(self._persisted_hashes.keys())
+        paths_to_verify = all_metadata_paths - scanned_paths
+
+        if paths_to_verify:
+            existing_paths = await self.hass.async_add_executor_job(
+                lambda: {p for p in paths_to_verify if os.path.isfile(p)}
+            )
+        else:
+            existing_paths = set()
+
+        valid_paths = scanned_paths | existing_paths
+
         self._persisted_etags = {
-            path: etag
-            for path, etag in self._persisted_etags.items()
-            if path in scanned_paths or os.path.isfile(path)
+            path: etag for path, etag in self._persisted_etags.items() if path in valid_paths
         }
         self._persisted_hashes = {
-            path: r_hash
-            for path, r_hash in self._persisted_hashes.items()
-            if path in scanned_paths or os.path.isfile(path)
+            path: r_hash for path, r_hash in self._persisted_hashes.items() if path in valid_paths
         }
 
         if (len(self._persisted_etags) + len(self._persisted_hashes)) < old_count:
@@ -384,7 +395,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 self._async_save_metadata(force=True), name=f"{DOMAIN}_prune_save"
             )
 
-    def _initialize_results(
+    async def _async_initialize_results(
         self, blueprints: dict[str, BlueprintMetadata]
     ) -> dict[str, dict[str, Any]]:
         """Create the initial results structure from disk scan.
@@ -400,7 +411,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A results dictionary indexed by path.
 
         """
-        self._prune_stale_metadata(set(blueprints.keys()))
+        await self._async_prune_stale_metadata(set(blueprints.keys()))
         return {
             path: {
                 "name": info["name"],
@@ -515,7 +526,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             selected,
         )
 
-        results = self._initialize_results(blueprints)
+        results = await self._async_initialize_results(blueprints)
         self._merge_previous_data(results)
 
         self.data = results

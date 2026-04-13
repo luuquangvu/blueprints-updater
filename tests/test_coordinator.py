@@ -2434,7 +2434,7 @@ async def test_prune_metadata_persistence(coordinator):
             side_effect=lambda p: p in {path_exist},
         ),
     ):
-        coordinator._prune_stale_metadata({path_exist})
+        await coordinator._async_prune_stale_metadata({path_exist})
 
         if tasks:
             await asyncio.gather(*tasks)
@@ -2457,6 +2457,5 @@ def test_hash_content_determinism(coordinator):
     hash2 = coordinator._hash_content(normalized, already_normalized=True)
 
     assert hash1 == hash2
-    # Verify it actually normalized (removed BOM and CRLF)
     assert "\ufeff" not in normalized
     assert "\r\n" not in normalized
