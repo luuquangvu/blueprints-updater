@@ -9,7 +9,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from homeassistant.core import HomeAssistant
 
-from custom_components.blueprints_updater.coordinator import BlueprintMetadata
+from custom_components.blueprints_updater.coordinator import BlueprintMetadata, GitDiffResult
 
 
 @runtime_checkable
@@ -58,7 +58,7 @@ class BlueprintCoordinatorPublic(Protocol):
 
     def get_cached_git_diff(
         self, path: str, local_hash: str | None, remote_hash: str | None
-    ) -> tuple[str, bool] | None:
+    ) -> GitDiffResult | None:
         """Get cached git diff."""
         ...
 
@@ -77,7 +77,7 @@ class BlueprintCoordinatorPublic(Protocol):
         """Fetch remote content for diff generation."""
         ...
 
-    async def async_get_git_diff(self, path: str) -> tuple[str, bool] | None:
+    async def async_get_git_diff(self, path: str) -> GitDiffResult | None:
         """Get or generate git diff for a blueprint."""
         ...
 

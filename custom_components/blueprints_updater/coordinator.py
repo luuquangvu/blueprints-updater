@@ -15,6 +15,7 @@ import shutil
 import socket
 import textwrap
 import time
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse, urlunparse
@@ -91,9 +92,17 @@ class ParsedBlueprintData(TypedDict):
 
 
 class BlueprintMetadata(ParsedBlueprintData):
-    """Metadata for a single blueprint file, including its relative path."""
+    """Augmented blueprint data from file scanning."""
 
     rel_path: str
+
+
+@dataclass(frozen=True)
+class GitDiffResult:
+    """Structure for git diff generation results."""
+
+    diff_text: str
+    is_semantic_sync: bool
 
 
 class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
@@ -476,27 +485,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if path in self.data:
                 prev = self._handle_source_url_change(path, info, self.data[path])
 
-                is_updatable, next_invalid, next_error = self._apply_ghost_update_detection(
-                    path, info, prev
+                is_updatable, next_invalid, next_error, next_remote = (
+                    self._apply_ghost_update_detection(path, info, prev)
                 )
 
                 info.update(
                     {
                         "updatable": is_updatable,
-                        "remote_hash": info.get("remote_hash") or prev.get("remote_hash"),
+                        "remote_hash": next_remote,
                         "invalid_remote_hash": next_invalid,
                         "remote_content": prev.get("remote_content"),
                         "last_error": next_error,
                         "etag": prev.get("etag"),
                     }
                 )
-
-                if (
-                    not is_updatable
-                    and prev.get("remote_hash") != info["local_hash"]
-                    and self._is_ghost_update(info["local_hash"], prev)
-                ):
-                    info["remote_hash"] = info["local_hash"]
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch and synchronize blueprint update data.
@@ -534,14 +536,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         _LOGGER.debug("Instant setup complete with %d blueprints", len(results))
         return results
 
-    def _is_semantically_equal(self, content: Any, target_hash: Any) -> bool:
+    def _is_semantically_equal(
+        self, content: Any, target_hash: Any, already_normalized: bool = False
+    ) -> bool:
         """Check if content is semantically equal to a target hash.
 
-        Normalization is applied to content before hashing.
+        Normalization is applied to content before hashing if needed.
 
         Args:
             content: Raw content string to verify.
             target_hash: The hash to compare against.
+            already_normalized: If True, skip normalization (optimization).
 
         Returns:
             True if normalized content hash matches target_hash.
@@ -549,7 +554,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         if not content or not isinstance(content, str):
             return False
-        return self._hash_content(content) == target_hash
+        return self._hash_content(content, already_normalized=already_normalized) == target_hash
 
     def _handle_source_url_change(
         self, path: str, info: dict[str, Any], prev: dict[str, Any]
@@ -590,7 +595,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     def _apply_ghost_update_detection(
         self, path: str, info: dict[str, Any], prev_data: dict[str, Any]
-    ) -> tuple[bool, str | None, str | None]:
+    ) -> tuple[bool, str | None, str | None, str | None]:
         """Apply ghost update detection to a blueprint.
 
         If a ghost update is detected, updatable is set to False and the
@@ -602,20 +607,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             prev_data: Previous metadata dictionary.
 
         Returns:
-            A tuple of (is_updatable, next_invalid_remote_hash, next_last_error).
+            A tuple of (is_updatable, next_invalid_remote_hash, next_last_error, next_remote_hash).
 
         """
         local_hash = info["local_hash"]
-        remote_hash = prev_data.get("remote_hash")
+        remote_hash = info.get("remote_hash") or prev_data.get("remote_hash")
         is_updatable = bool(remote_hash and local_hash != remote_hash)
         next_invalid = prev_data.get("invalid_remote_hash")
         next_error = prev_data.get("last_error")
 
         if is_updatable and self._is_ghost_update(local_hash, prev_data):
             _LOGGER.debug("Ghost update detected for %s; forcing updatable=False", path)
-            return False, None, None
+            return False, None, None, local_hash
 
-        return is_updatable, next_invalid, next_error
+        return is_updatable, next_invalid, next_error, remote_hash
 
     def _is_ghost_update(self, current_local_hash: Any, prev_data: dict[str, Any]) -> bool:
         """Check if a detected update is actually a 'ghost update'.
@@ -1245,11 +1250,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     def get_cached_git_diff(
         self, path: str, local_hash: str | None, remote_hash: str | None
-    ) -> tuple[str, bool] | None:
+    ) -> GitDiffResult | None:
         """Get cached git diff.
 
         Returns:
-            A tuple of (diff_text, is_semantic_sync) if cached, else None.
+            GitDiffResult if cached, else None.
         """
         info = self.data.get(path, {})
         cached = info.get("_cached_git_diff")
@@ -1259,7 +1264,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             c_diff = cached.get("diff")
             c_semantic = cached.get("semantic_sync", False)
             if local_hash == c_local and remote_hash == c_remote and isinstance(c_diff, str):
-                return (c_diff, c_semantic)
+                return GitDiffResult(diff_text=c_diff, is_semantic_sync=c_semantic)
         return None
 
     def set_cached_git_diff(
@@ -1330,7 +1335,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         info["remote_content"] = remote_content_with_url
         return remote_content_with_url
 
-    async def async_get_git_diff(self, path: str) -> tuple[str, bool] | None:
+    async def async_get_git_diff(self, path: str) -> GitDiffResult | None:
         """Get or generate git diff for a blueprint.
 
         This method orchestrates the entire diff generation process:
@@ -1340,7 +1345,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         4. Updates and returns the cached diff.
 
         Returns:
-            A tuple of (diff_text, is_semantic_sync) or None if it cannot be generated.
+            GitDiffResult or None if it cannot be generated.
         """
         if path not in self.data:
             return None
@@ -1374,9 +1379,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.error("Unexpected error generating diff for %s: %s", path, err, exc_info=True)
             return None
 
-        is_semantic_sync = not diff_text and self._is_semantically_equal(remote_content, local_hash)
+        is_semantic_sync = not (diff_text or "").strip() and self._is_semantically_equal(
+            remote_content, local_hash, already_normalized=True
+        )
         self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "", is_semantic_sync)
-        return (diff_text or "", is_semantic_sync)
+        return GitDiffResult(diff_text=diff_text or "", is_semantic_sync=is_semantic_sync)
 
     async def _async_update_blueprint_in_place(
         self,

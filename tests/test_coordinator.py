@@ -30,7 +30,10 @@ from custom_components.blueprints_updater.const import (
     MIN_SEND_INTERVAL,
     REQUEST_TIMEOUT,
 )
-from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintUpdateCoordinator,
+    GitDiffResult,
+)
 
 
 @pytest.fixture
@@ -248,6 +251,50 @@ def test_normalization_comprehensive(coordinator, variant, input_content, expect
     hash1 = coordinator._hash_content(input_content)
     hash2 = coordinator._hash_content(normalized, already_normalized=True)
     assert hash1 == hash2, f"Hash mismatch for variant: {variant}"
+
+
+@pytest.mark.asyncio
+async def test_handle_source_url_change_clears_metadata(coordinator):
+    """Test that source URL changes clear remote-derived metadata."""
+    path = "test_blueprint.yaml"
+
+    coordinator.data[path] = {
+        "name": "Test",
+        "rel_path": "test_blueprint.yaml",
+        "domain": "automation",
+        "local_hash": "local_hash",
+        "source_url": "https://old.example.com/blueprint.yaml",
+        "remote_hash": "old_hash",
+        "invalid_remote_hash": "old_invalid_hash",
+        "remote_content": "old_content",
+        "last_error": "old_error",
+        "etag": "old_etag",
+    }
+
+    new_entry = {
+        "name": "Test",
+        "rel_path": "test_blueprint.yaml",
+        "domain": "automation",
+        "local_hash": "local_hash",
+        "source_url": "https://new.example.com/blueprint.yaml",
+    }
+
+    coordinator.scan_blueprints = MagicMock(return_value={path: new_entry})
+    with patch.object(coordinator, "_start_background_refresh"):
+        await coordinator._async_update_data()
+
+    updated = coordinator.data[path]
+
+    assert updated["source_url"] == new_entry["source_url"]
+
+    for key in (
+        "remote_hash",
+        "invalid_remote_hash",
+        "remote_content",
+        "last_error",
+        "etag",
+    ):
+        assert updated.get(key) is None
 
 
 def test_normalization_idempotency(coordinator):
@@ -2045,7 +2092,9 @@ def test_get_cached_git_diff(coordinator):
     coordinator.data = {
         path: {"_cached_git_diff": {"local": "local", "remote": "remote", "diff": "diff"}}
     }
-    assert coordinator.get_cached_git_diff(path, "local", "remote") == ("diff", False)
+    assert coordinator.get_cached_git_diff(path, "local", "remote") == GitDiffResult(
+        diff_text="diff", is_semantic_sync=False
+    )
     assert coordinator.get_cached_git_diff(path, "wrong", "remote") is None
     assert coordinator.get_cached_git_diff("missing", "local", "remote") is None
 
@@ -2089,9 +2138,13 @@ async def test_cached_git_diff_semantic_sync(coordinator):
 
     cached = cast(dict[str, Any], coordinator.data[path]["_cached_git_diff"])
     assert cached["semantic_sync"] is True
-    assert coordinator.get_cached_git_diff(path, local, remote) == (diff_text, True)
+    assert coordinator.get_cached_git_diff(path, local, remote) == GitDiffResult(
+        diff_text=diff_text, is_semantic_sync=True
+    )
     res = await coordinator.async_get_git_diff(path)
-    assert res == (diff_text, True)
+    assert res is not None
+    assert res.is_semantic_sync is True
+    assert res.diff_text == diff_text
 
 
 @pytest.mark.asyncio
@@ -2105,10 +2158,10 @@ async def test_async_get_git_diff_cache_hit(coordinator):
             "_cached_git_diff": {"local": "h1", "remote": "h2", "diff": "cached_diff"},
         }
     }
-    with patch.object(coordinator, "async_fetch_diff_content") as mock_fetch:
-        diff = await coordinator.async_get_git_diff(path)
-        assert diff == ("cached_diff", False)
-        mock_fetch.assert_not_called()
+    expected = GitDiffResult(diff_text="cached diff", is_semantic_sync=False)
+    with patch.object(coordinator, "get_cached_git_diff", return_value=expected):
+        res = await coordinator.async_get_git_diff(path)
+        assert res == expected
 
 
 @pytest.mark.asyncio
@@ -2133,9 +2186,9 @@ async def test_async_get_git_diff_full_flow(coordinator):
     ):
         res = await coordinator.async_get_git_diff(path)
         assert res is not None
-        diff, is_semantic = res
-        assert is_semantic is False
-        assert "+  name: New" in diff
+        assert res.is_semantic_sync is False
+        assert "+  name: New" in res.diff_text
+        diff = res.diff_text
         assert coordinator.data[path]["_cached_git_diff"] == {
             "local": "h1",
             "remote": "h2",
@@ -2167,10 +2220,9 @@ async def test_async_get_git_diff_shows_metadata_changes(coordinator):
     ):
         res = await coordinator.async_get_git_diff(path)
         assert res is not None
-        diff, is_semantic = res
-        assert is_semantic is False
-        assert "-  source_url: https://old.com" in diff
-        assert "+  source_url: https://new.com" in diff
+        assert res.is_semantic_sync is False
+        assert "-  source_url: https://old.com" in res.diff_text
+        assert "+  source_url: https://new.com" in res.diff_text
 
 
 @pytest.mark.asyncio

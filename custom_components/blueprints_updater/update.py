@@ -237,7 +237,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         diff_result = await self.coordinator.async_get_git_diff(self._path)
 
         if diff_result:
-            diff_text, is_semantic_sync = diff_result
+            diff_text = diff_result.diff_text
+            is_semantic_sync = diff_result.is_semantic_sync
 
             if is_semantic_sync:
                 notes += "\n\n" + await self.coordinator.async_translate("semantic_sync_notice")

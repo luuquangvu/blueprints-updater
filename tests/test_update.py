@@ -7,7 +7,10 @@ from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.blueprints_updater.update as update_module
 from custom_components.blueprints_updater.const import DOMAIN
-from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintUpdateCoordinator,
+    GitDiffResult,
+)
 from custom_components.blueprints_updater.update import BlueprintUpdateEntity, async_setup_entry
 
 
@@ -136,7 +139,9 @@ def coordinator():
     comp.hass.async_add_executor_job = AsyncMock(side_effect=mock_exec)
     comp.get_cached_git_diff = MagicMock(return_value=None)
     comp.set_cached_git_diff = MagicMock()
-    comp.async_get_git_diff = AsyncMock(return_value=("", False))
+    comp.async_get_git_diff = AsyncMock(
+        return_value=GitDiffResult(diff_text="", is_semantic_sync=False)
+    )
     return comp
 
 
@@ -551,7 +556,9 @@ async def test_entity_release_notes_git_diff(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    coordinator.async_get_git_diff.return_value = ("-condition: []", False)
+    coordinator.async_get_git_diff.return_value = GitDiffResult(
+        diff_text="-condition: []", is_semantic_sync=False
+    )
     with patch("builtins.open", mock_open(read_data=local_content)):
         notes = await entity.async_generate_release_notes()
 
@@ -577,7 +584,9 @@ async def test_entity_release_notes_git_diff_missing_remote(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    coordinator.async_get_git_diff.return_value = ("-  name: Old\n+  name: New", False)
+    coordinator.async_get_git_diff.return_value = GitDiffResult(
+        diff_text="-  name: Old\n+  name: New", is_semantic_sync=False
+    )
     with patch("builtins.open", mock_open(read_data="local")):
         notes = await entity.async_generate_release_notes()
 
@@ -607,7 +616,9 @@ async def test_entity_release_notes_git_diff_source_url_normalization(coordinato
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    coordinator.async_get_git_diff.return_value = ("", False)
+    coordinator.async_get_git_diff.return_value = GitDiffResult(
+        diff_text="", is_semantic_sync=False
+    )
     with patch("builtins.open", mock_open(read_data=local_content)):
         notes = await entity.async_generate_release_notes()
 
@@ -629,7 +640,9 @@ async def test_entity_release_notes_git_diff_cached(coordinator):
     coordinator.data[path] = info
 
     cached_diff = "cached diff payload"
-    coordinator.async_get_git_diff.return_value = (cached_diff, False)
+    coordinator.async_get_git_diff.return_value = GitDiffResult(
+        diff_text=cached_diff, is_semantic_sync=False
+    )
 
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
@@ -739,7 +752,9 @@ async def test_entity_release_notes_git_diff_with_backticks(coordinator):
     coordinator.data[path] = info
 
     diff_text = "some diff\n```\nbackticks here\n```"
-    coordinator.async_get_git_diff.return_value = (diff_text, False)
+    coordinator.async_get_git_diff.return_value = GitDiffResult(
+        diff_text=diff_text, is_semantic_sync=False
+    )
 
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
@@ -766,7 +781,7 @@ async def test_entity_release_notes_semantic_sync_notice(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    coordinator.async_get_git_diff.return_value = ("", True)
+    coordinator.async_get_git_diff.return_value = GitDiffResult(diff_text="", is_semantic_sync=True)
     expected_notice = "Source content matches after normalization"
     coordinator.async_translate.side_effect = lambda key, **kwargs: (
         expected_notice if key == "semantic_sync_notice" else key
