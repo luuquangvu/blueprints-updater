@@ -2068,6 +2068,29 @@ def test_set_cached_git_diff(coordinator):
     }
 
 
+def test_cached_git_diff_semantic_sync(coordinator):
+    """Test git diff cache with semantic_sync flag."""
+    path = "/config/test_semantic.yaml"
+    local = "local_semantic"
+    remote = "remote_semantic"
+    diff_text = "semantic diff content"
+
+    coordinator.data = {path: {}}
+
+    coordinator.set_cached_git_diff(
+        path,
+        local,
+        remote,
+        diff_text,
+        is_semantic_sync=True,
+    )
+
+    cached = coordinator.data[path]["_cached_git_diff"]
+    assert cached["semantic_sync"] is True
+
+    assert coordinator.get_cached_git_diff(path, local, remote) == (diff_text, True)
+
+
 @pytest.mark.asyncio
 async def test_async_get_git_diff_cache_hit(coordinator):
     """Test async_get_git_diff returns cached value if hashes match."""
