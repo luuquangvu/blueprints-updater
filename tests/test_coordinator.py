@@ -2063,14 +2063,21 @@ def test_set_cached_git_diff(coordinator):
     }
 
 
-def test_cached_git_diff_semantic_sync(coordinator):
+@pytest.mark.asyncio
+async def test_cached_git_diff_semantic_sync(coordinator):
     """Test git diff cache with semantic_sync flag."""
     path = "/config/test_semantic.yaml"
     local = "local_semantic"
     remote = "remote_semantic"
     diff_text = "semantic diff content"
 
-    coordinator.data = {path: {}}
+    coordinator.data = {
+        path: {
+            "local_hash": local,
+            "remote_hash": remote,
+            "source_url": "https://url.com",
+        }
+    }
 
     coordinator.set_cached_git_diff(
         path,
@@ -2080,10 +2087,11 @@ def test_cached_git_diff_semantic_sync(coordinator):
         is_semantic_sync=True,
     )
 
-    cached = coordinator.data[path]["_cached_git_diff"]
+    cached = cast(dict[str, Any], coordinator.data[path]["_cached_git_diff"])
     assert cached["semantic_sync"] is True
-
     assert coordinator.get_cached_git_diff(path, local, remote) == (diff_text, True)
+    res = await coordinator.async_get_git_diff(path)
+    assert res == (diff_text, True)
 
 
 @pytest.mark.asyncio
@@ -2125,7 +2133,8 @@ async def test_async_get_git_diff_full_flow(coordinator):
     ):
         res = await coordinator.async_get_git_diff(path)
         assert res is not None
-        diff, _is_semantic = res
+        diff, is_semantic = res
+        assert is_semantic is False
         assert "+  name: New" in diff
         assert coordinator.data[path]["_cached_git_diff"] == {
             "local": "h1",
@@ -2158,7 +2167,8 @@ async def test_async_get_git_diff_shows_metadata_changes(coordinator):
     ):
         res = await coordinator.async_get_git_diff(path)
         assert res is not None
-        diff, _is_semantic = res
+        diff, is_semantic = res
+        assert is_semantic is False
         assert "-  source_url: https://old.com" in diff
         assert "+  source_url: https://new.com" in diff
 
@@ -2270,9 +2280,10 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
 
     expected_hash = coordinator._hash_content(raw_remote)
 
+    mock_open_obj = mock_open()
     with (
-        patch("builtins.open", MagicMock()),
-        patch("custom_components.blueprints_updater.coordinator.os.replace"),
+        patch("builtins.open", mock_open_obj),
+        patch("custom_components.blueprints_updater.coordinator.os.replace") as mock_replace,
         patch.object(coordinator, "async_reload_services"),
     ):
         await coordinator.async_install_blueprint(path, raw_remote)
@@ -2284,6 +2295,13 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
     assert coordinator.data[path]["invalid_remote_hash"] is None
     assert coordinator.data[path]["remote_content"] is None
     coordinator.async_set_updated_data.assert_called_with(coordinator.data)
+
+    mock_open_obj().write.assert_called()
+    written_data = "".join(call.args[0] for call in mock_open_obj().write.call_args_list)
+    assert "name: New" in written_data
+
+    assert mock_replace.called
+    assert os.path.normpath(mock_replace.call_args[0][1]).endswith(os.path.normpath(path))
 
 
 @pytest.mark.asyncio
