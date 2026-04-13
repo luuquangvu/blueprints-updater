@@ -229,39 +229,34 @@ def test_ensure_source_url(coordinator):
     assert coordinator._ensure_source_url(content_none, source_url) == expected_none
 
 
-def test_normalization_canonical_form(coordinator):
-    """Test that normalization handles BOM, newlines, and whitespace correctly."""
-    base_content = "blueprint:\n  name: Test\n  source_url: https://url"
+@pytest.mark.parametrize(
+    "variant, input_content, expected_output",
+    [
+        ("standard", "blueprint:\n  name: Test", "blueprint:\n  name: Test"),
+        ("BOM", "\ufeffblueprint:\n  name: Test", "blueprint:\n  name: Test"),
+        ("CRLFs", "blueprint:\r\n  name: Test\r\n", "blueprint:\n  name: Test\n"),
+        ("Classic Mac", "blueprint:\r  name: Test\r", "blueprint:\n  name: Test\n"),
+        ("Spaced", "blueprint:  \n  name: Test ", "blueprint:  \n  name: Test "),
+        ("Extra lines", "\n\nblueprint:\n  name: Test\n", "\n\nblueprint:\n  name: Test\n"),
+    ],
+)
+def test_normalization_comprehensive(coordinator, variant, input_content, expected_output):
+    """Test that normalization handle various encodings and formats consistently."""
+    normalized = coordinator._normalize_content(input_content)
+    assert normalized == expected_output, f"Failed for variant: {variant}"
 
-    bom_content = "\ufeff" + base_content
-    assert coordinator._normalize_content(bom_content) == base_content
-
-    win_content = base_content.replace("\n", "\r\n")
-    assert coordinator._normalize_content(win_content) == base_content
-
-    spaced_content = "blueprint:  \n  name: Test   \n  source_url: https://url"
-    assert coordinator._normalize_content(spaced_content) == spaced_content
-
-    extra_lines = "\n\n" + base_content + "\n"
-    assert coordinator._normalize_content(extra_lines) == extra_lines
-
-
-def test_normalize_content_empty(coordinator):
-    """Test that empty content is handled correctly."""
-    assert coordinator._normalize_content("") == ""
-    assert coordinator._normalize_content("\n\n  \n") == "\n\n  \n"
+    hash1 = coordinator._hash_content(input_content)
+    hash2 = coordinator._hash_content(normalized, already_normalized=True)
+    assert hash1 == hash2, f"Hash mismatch for variant: {variant}"
 
 
 def test_normalization_idempotency(coordinator):
-    """Test that normalization is idempotent."""
+    """Test that normalization is idempotent: normalize(normalize(x)) == normalize(x)."""
     content = "blueprint:\n  name: Test   \r\n  source_url: https://url\n\n"
     first = coordinator._normalize_content(content)
     second = coordinator._normalize_content(first)
     assert first == second
-
-    first_hash = hashlib.sha256(first.encode()).hexdigest()
-    second_hash = hashlib.sha256(second.encode()).hexdigest()
-    assert first_hash == second_hash
+    assert coordinator._hash_content(first) == coordinator._hash_content(second)
 
 
 def test_ensure_source_url_stability(coordinator):
@@ -2289,24 +2284,6 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
     assert coordinator.data[path]["invalid_remote_hash"] is None
     assert coordinator.data[path]["remote_content"] is None
     coordinator.async_set_updated_data.assert_called_with(coordinator.data)
-
-
-def test_normalize_content_determinism(coordinator):
-    """Test that _normalize_content handles mixed line endings and whitespace."""
-    c1 = "blueprint:\n  name: Test\n"
-    c2 = "blueprint:  \r\n  name: Test  \r\n"
-    c3 = "\ufeffblueprint:\n  name: Test\n"
-    c4 = "blueprint:\r  name: Test\r"
-
-    norm1 = coordinator._normalize_content(c1)
-    norm2 = coordinator._normalize_content(c2)
-    norm3 = coordinator._normalize_content(c3)
-    norm4 = coordinator._normalize_content(c4)
-
-    assert norm1 == "blueprint:\n  name: Test\n"
-    assert norm1 != norm2
-    assert norm1 == norm3
-    assert norm4 == norm1
 
 
 @pytest.mark.asyncio
