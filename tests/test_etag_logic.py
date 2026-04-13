@@ -186,3 +186,72 @@ async def test_etag_migration_forces_download(
 
     assert coordinator.data[path]["remote_hash"] == remote_hash
     assert coordinator.data[path]["updatable"] is True
+
+
+@pytest.mark.asyncio
+async def test_async_save_metadata_preserves_persisted_entries_for_existing_files(coordinator):
+    """Test that persisted entries for existing files are preserved even if not in current scan."""
+    existing_path = "/config/blueprints/existing.yaml"
+    orphaned_path = "/config/blueprints/orphaned.yaml"
+
+    coordinator._persisted_etags = {
+        existing_path: "etag-existing",
+        orphaned_path: "etag-orphaned",
+    }
+    coordinator._persisted_hashes = {
+        existing_path: "hash-existing",
+        orphaned_path: "hash-orphaned",
+    }
+
+    coordinator.data = {
+        existing_path: {
+            "etag": "etag-new",
+            "remote_hash": "hash-new",
+        }
+    }
+
+    mock_store = MagicMock()
+    mock_store.async_save = AsyncMock()
+    coordinator._store = mock_store
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.os.path.isfile",
+        side_effect=lambda p: p in (existing_path, orphaned_path),
+    ):
+        await coordinator._async_save_metadata()
+
+    mock_store.async_save.assert_called_once()
+    save_args = mock_store.async_save.call_args[0][0]
+    assert save_args["etags"][existing_path] == "etag-new"
+    assert save_args["remote_hashes"][existing_path] == "hash-new"
+    assert save_args["etags"][orphaned_path] == "etag-orphaned"
+    assert save_args["remote_hashes"][orphaned_path] == "hash-orphaned"
+
+
+@pytest.mark.asyncio
+async def test_async_save_metadata_force_true_persists_even_when_unchanged(coordinator):
+    """Test that force=True bypasses equality checks."""
+    path = "/config/blueprints/test.yaml"
+    etag = "etag-123"
+    file_hash = "hash-123"
+
+    coordinator._persisted_etags = {path: etag}
+    coordinator._persisted_hashes = {path: file_hash}
+    coordinator.data = {
+        path: {
+            "etag": etag,
+            "remote_hash": file_hash,
+        }
+    }
+
+    mock_store = MagicMock()
+    mock_store.async_save = AsyncMock()
+    coordinator._store = mock_store
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.os.path.isfile",
+        return_value=True,
+    ):
+        await coordinator._async_save_metadata(force=True)
+
+    mock_store.async_save.assert_awaited_once()
