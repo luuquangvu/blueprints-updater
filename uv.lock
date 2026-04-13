@@ -402,7 +402,7 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "homeassistant", specifier = ">=2026.4.0" },
+    { name = "homeassistant", specifier = ">=2026.4.2" },
     { name = "interrogate" },
     { name = "pyright" },
     { name = "pytest" },

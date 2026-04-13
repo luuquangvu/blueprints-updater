@@ -17,7 +17,7 @@ import textwrap
 import time
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -400,10 +400,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         all_metadata_paths = set(self._persisted_etags.keys()) | set(self._persisted_hashes.keys())
 
         if paths_to_verify := all_metadata_paths - scanned_paths:
-            existing_etags, _ = await self.hass.async_add_executor_job(
-                self._filter_existing_metadata, paths_to_verify, self._persisted_etags, {}
+            existing_etags, existing_hashes = await self.hass.async_add_executor_job(
+                self._filter_existing_metadata,
+                paths_to_verify,
+                self._persisted_etags,
+                self._persisted_hashes,
             )
-            existing_paths = set(existing_etags.keys())
+            existing_paths = set(existing_etags.keys()) | set(existing_hashes.keys())
         else:
             existing_paths = set()
 
@@ -768,18 +771,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not self.setup_complete:
             return
 
-        new_etags = {
-            path: cast(str, info["etag"]) for path, info in self.data.items() if info.get("etag")
-        }
-        new_hashes = {
-            path: cast(str, info["remote_hash"])
-            for path, info in self.data.items()
-            if info.get("remote_hash")
-        }
+        merged_etags: dict[str, str] = {}
+        merged_hashes: dict[str, str] = {}
+        all_metadata_paths = set(self._persisted_etags.keys()) | set(self._persisted_hashes.keys())
+        all_candidate_paths = all_metadata_paths | set(self.data.keys())
 
-        merged_etags = {**self._persisted_etags, **new_etags}
-        merged_hashes = {**self._persisted_hashes, **new_hashes}
-        all_candidate_paths = set(merged_etags.keys()) | set(merged_hashes.keys())
+        for path in all_candidate_paths:
+            if path in self.data:
+                etag = self.data[path].get("etag")
+                r_hash = self.data[path].get("remote_hash")
+            else:
+                etag = self._persisted_etags.get(path)
+                r_hash = self._persisted_hashes.get(path)
+
+            if etag:
+                merged_etags[path] = etag
+            if r_hash:
+                merged_hashes[path] = r_hash
 
         if not skip_filter and all_candidate_paths:
             final_etags, final_hashes = await self.hass.async_add_executor_job(

@@ -232,6 +232,53 @@ def test_ensure_source_url(coordinator):
     assert coordinator._ensure_source_url(content_none, source_url) == expected_none
 
 
+@pytest.mark.asyncio
+async def test_prune_preserves_hashes_only_metadata(coordinator):
+    """Test that blueprints with only a hash (and no ETag) are not pruned if they exist."""
+    path = "/config/blueprints/hash_only.yaml"
+    coordinator._persisted_etags = {}
+    coordinator._persisted_hashes = {path: "some_hash"}
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True
+    ):
+        await coordinator._async_prune_stale_metadata(set())
+
+    assert path in coordinator._persisted_hashes
+    assert coordinator._persisted_hashes[path] == "some_hash"
+
+
+@pytest.mark.asyncio
+async def test_save_metadata_honors_cleared_in_memory_state(coordinator):
+    """Test that clearing an ETag in-memory correctly results in it being removed from save."""
+    path = "/config/blueprints/test.yaml"
+    coordinator._persisted_etags = {path: "old_etag"}
+    coordinator._persisted_hashes = {path: "old_hash"}
+
+    coordinator.data = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "source_url": "https://url.com",
+            "etag": None,
+            "remote_hash": None,
+        }
+    }
+
+    with (
+        patch.object(coordinator._store, "async_save") as mock_save,
+        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+    ):
+        await coordinator._async_save_metadata(force=True, skip_filter=True)
+
+        mock_save.assert_called_once()
+        save_data = mock_save.call_args[0][0]
+        saved_etags = save_data["etags"]
+        saved_hashes = save_data["remote_hashes"]
+        assert path not in saved_etags
+        assert path not in saved_hashes
+
+
 @pytest.mark.parametrize(
     "variant, input_content, expected_output",
     [
