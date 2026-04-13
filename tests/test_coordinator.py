@@ -2212,6 +2212,51 @@ async def test_ghost_update_prevention(coordinator):
     assert results[path]["last_error"] is None
 
 
+@pytest.mark.parametrize(
+    "invalid_content",
+    [
+        None,
+        {"not": "a string"},
+        123,
+        b"bytes content",
+    ],
+)
+@pytest.mark.asyncio
+async def test_ghost_update_negative_cases(coordinator, invalid_content):
+    """Test that _is_ghost_update returns False for invalid remote_content."""
+    path = "/config/blueprints/test.yaml"
+    local_hash = coordinator._hash_content("blueprint:\n  name: Test\n")
+
+    coordinator.data = {
+        path: {
+            "local_hash": local_hash,
+            "remote_hash": "outdated_hash",
+            "remote_content": invalid_content,
+            "updatable": True,
+            "source_url": "https://url",
+        }
+    }
+
+    mock_blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": local_hash,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=mock_blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        results = await coordinator._async_update_data()
+
+    assert results[path]["updatable"] is True
+    assert results[path]["remote_hash"] == "outdated_hash"
+
+
 @pytest.mark.asyncio
 async def test_async_install_blueprint_state_sync_fix(coordinator):
     """Test that async_install_blueprint syncs hashes and triggers UI update."""
