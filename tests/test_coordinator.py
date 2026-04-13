@@ -2358,3 +2358,56 @@ async def test_metadata_preservation_during_scan(coordinator):
     assert results[path]["last_error"] == "failed_previously"
     assert results[path]["etag"] == "some_etag"
     assert results[path]["remote_content"] == "remote_content"
+
+
+@pytest.mark.asyncio
+async def test_prune_metadata_persistence(coordinator):
+    """Test that stale metadata is pruned from memory and persisted to disk."""
+    path_exist = "/config/blueprints/exist.yaml"
+    path_stale = "/config/blueprints/stale.yaml"
+
+    coordinator._persisted_etags = {path_exist: "e1", path_stale: "e2"}
+    coordinator._persisted_hashes = {path_exist: "h1", path_stale: "h2"}
+    coordinator.setup_complete = True
+
+    coordinator.data = {path_exist: {"etag": "e1", "remote_hash": "h1"}}
+
+    tasks = []
+
+    def create_background_task(coro, name=None):
+        task = asyncio.create_task(coro)
+        tasks.append(task)
+        return task
+
+    with (
+        patch.object(
+            coordinator.hass, "async_create_background_task", side_effect=create_background_task
+        ),
+        patch.object(coordinator._store, "async_save", new_callable=AsyncMock) as mock_save,
+    ):
+        coordinator._prune_stale_metadata({path_exist})
+
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    assert path_stale not in coordinator._persisted_etags
+    assert path_stale not in coordinator._persisted_hashes
+    assert path_exist in coordinator._persisted_etags
+    assert mock_save.called, "async_save was not called"
+    saved_data = mock_save.call_args[0][0]
+    assert path_stale not in saved_data["etags"]
+    assert saved_data["etags"][path_exist] == "e1"
+
+
+def test_hash_content_determinism(coordinator):
+    """Test that hashing is deterministic regardless of the already_normalized flag."""
+    content = "\ufeffblueprint:\r\n  name: Test\n"
+    hash1 = coordinator._hash_content(content)
+
+    normalized = coordinator._normalize_content(content)
+    hash2 = coordinator._hash_content(normalized, already_normalized=True)
+
+    assert hash1 == hash2
+    # Verify it actually normalized (removed BOM and CRLF)
+    assert "\ufeff" not in normalized
+    assert "\r\n" not in normalized

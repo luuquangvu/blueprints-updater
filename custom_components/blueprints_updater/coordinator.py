@@ -366,7 +366,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if (len(self._persisted_etags) + len(self._persisted_hashes)) < old_count:
             _LOGGER.debug("Pruned stale blueprint metadata from memory, triggering save")
             self.hass.async_create_background_task(
-                self._async_save_metadata(), name=f"{DOMAIN}_prune_save"
+                self._async_save_metadata(force=True), name=f"{DOMAIN}_prune_save"
             )
 
     def _initialize_results(
@@ -385,6 +385,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A results dictionary indexed by path.
 
         """
+        self._prune_stale_metadata(set(blueprints.keys()))
         return {
             path: {
                 "name": info["name"],
@@ -624,8 +625,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         finally:
             self._background_task = None
 
-    async def _async_save_metadata(self) -> None:
-        """Save current ETags and remote hashes to persistent storage."""
+    async def _async_save_metadata(self, force: bool = False) -> None:
+        """Save current ETags and remote hashes to persistent storage.
+
+        Args:
+            force: If True, bypass equality checks and write to disk.
+
+        """
         if not self.setup_complete:
             return
 
@@ -638,7 +644,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if info.get("remote_hash")
         }
 
-        if etags == self._persisted_etags and hashes == self._persisted_hashes:
+        if not force and etags == self._persisted_etags and hashes == self._persisted_hashes:
             return
 
         _LOGGER.debug("Saving %d ETags and %d remote hashes to storage", len(etags), len(hashes))
@@ -1388,7 +1394,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         remote_content = self._ensure_source_url(remote_content, source_url)
-        remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
+        remote_hash = self._hash_content(remote_content, already_normalized=True)
         local_hash = info["local_hash"]
         updatable = remote_hash != local_hash
 
@@ -1652,7 +1658,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content.replace("\r\n", "\n").replace("\r", "\n")
 
     @staticmethod
-    def _hash_content(content: str) -> str:
+    def _hash_content(content: str, already_normalized: bool = False) -> str:
         """Centralized helper to compute a SHA256 hash with normalization.
 
         This ensures that we always apply transport-level normalization
@@ -1661,12 +1667,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         Args:
             content: Raw YAML content to hash.
+            already_normalized: If True, skip normalization (optimization).
 
         Returns:
             The hex digest of the normalized content's hash.
 
         """
-        normalized = BlueprintUpdateCoordinator._normalize_content(content)
+        if already_normalized:
+            normalized = content
+        else:
+            normalized = BlueprintUpdateCoordinator._normalize_content(content)
         return hashlib.sha256(normalized.encode()).hexdigest()
 
     @staticmethod
