@@ -433,24 +433,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 remote_hash = prev.get("remote_hash")
 
                 is_updatable = bool(remote_hash and local_hash != remote_hash)
+                next_invalid_remote_hash = prev.get("invalid_remote_hash")
+                next_last_error = prev.get("last_error")
+
                 if is_updatable and self._is_ghost_update(local_hash, prev):
                     _LOGGER.debug("Ghost update detected for %s; forcing updatable=False", path)
                     is_updatable = False
                     info["remote_hash"] = local_hash
-                    info["invalid_remote_hash"] = None
-                    info["last_error"] = None
+                    next_invalid_remote_hash = None
+                    next_last_error = None
 
                 info.update(
                     {
                         "updatable": is_updatable,
                         "remote_hash": info.get("remote_hash") or remote_hash,
-                        "invalid_remote_hash": info["invalid_remote_hash"]
-                        if info["invalid_remote_hash"] is not None
-                        else prev.get("invalid_remote_hash"),
+                        "invalid_remote_hash": next_invalid_remote_hash,
                         "remote_content": prev.get("remote_content"),
-                        "last_error": info["last_error"]
-                        if info["last_error"] is not None
-                        else prev.get("last_error"),
+                        "last_error": next_last_error,
                         "etag": prev.get("etag"),
                     }
                 )
