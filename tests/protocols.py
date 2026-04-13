@@ -58,7 +58,7 @@ class BlueprintCoordinatorPublic(Protocol):
 
     def get_cached_git_diff(
         self, path: str, local_hash: str | None, remote_hash: str | None
-    ) -> str | None:
+    ) -> tuple[str, bool] | None:
         """Get cached git diff."""
         ...
 
