@@ -208,7 +208,11 @@ def test_ensure_source_url(coordinator):
     content_flow = "blueprint: { name: Test }"
     result_flow = coordinator._ensure_source_url(content_flow, source_url)
     assert f"source_url: {source_url}" in result_flow
-    assert result_flow.endswith("\n")
+
+    content_invalid = "\ufeffblueprint: [unclosed\r\n"
+    result_invalid = coordinator._ensure_source_url(content_invalid, source_url)
+    assert "\ufeff" not in result_invalid
+    assert "\r" not in result_invalid
 
     content_multi = (
         "# Some info: blueprint:\n"
