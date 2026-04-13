@@ -749,3 +749,27 @@ async def test_entity_release_notes_git_diff_with_backticks(coordinator):
 
     assert notes is not None
     assert "````diff\nsome diff\n```\nbackticks here\n```\n````" in notes
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_semantic_sync_notice(coordinator):
+    """Test that semantic sync notice is included in release notes."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "updatable": True,
+        "source_url": "https://url.com",
+    }
+    coordinator.data[path] = info
+
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    coordinator.async_get_git_diff.return_value = ("", True)
+    with patch("builtins.open", mock_open(read_data="local")):
+        notes = await entity.async_generate_release_notes()
+
+    assert notes is not None
+    assert "semantic_sync_notice" in notes
+    assert "```diff" not in notes

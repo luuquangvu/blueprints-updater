@@ -357,15 +357,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         old_count = len(self._persisted_etags) + len(self._persisted_hashes)
 
         self._persisted_etags = {
-            path: etag for path, etag in self._persisted_etags.items() if path in scanned_paths
+            path: etag
+            for path, etag in self._persisted_etags.items()
+            if path in scanned_paths or os.path.isfile(path)
         }
         self._persisted_hashes = {
-            path: r_hash for path, r_hash in self._persisted_hashes.items() if path in scanned_paths
+            path: r_hash
+            for path, r_hash in self._persisted_hashes.items()
+            if path in scanned_paths or os.path.isfile(path)
         }
 
         if (len(self._persisted_etags) + len(self._persisted_hashes)) < old_count:
             _LOGGER.debug("Pruned stale blueprint metadata from memory, triggering save")
-            self.data = {path: info for path, info in self.data.items() if path in scanned_paths}
+            self.data = {
+                path: info
+                for path, info in self.data.items()
+                if path in scanned_paths or os.path.isfile(path)
+            }
             self.hass.async_create_background_task(
                 self._async_save_metadata(force=True), name=f"{DOMAIN}_prune_save"
             )
@@ -910,6 +918,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
 
                 self.async_set_updated_data(self.data)
+                await self._async_save_metadata(force=True)
 
             _LOGGER.info("Blueprint at %s updated successfully", real_path)
         except Exception as err:
