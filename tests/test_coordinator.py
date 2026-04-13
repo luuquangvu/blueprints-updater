@@ -91,6 +91,7 @@ async def test_async_install_blueprint_reload_fallback(coordinator):
     content = "invalid: yaml"
 
     coordinator.async_reload_services = AsyncMock()
+    coordinator._async_save_metadata = AsyncMock()
 
     with (
         patch("builtins.open", MagicMock()),
@@ -98,8 +99,10 @@ async def test_async_install_blueprint_reload_fallback(coordinator):
     ):
         await coordinator.async_install_blueprint(path, content, reload_services=True)
     coordinator.async_reload_services.assert_called_once_with(["automation"])
+    coordinator._async_save_metadata.assert_not_called()
 
     coordinator.async_reload_services.reset_mock()
+    coordinator._async_save_metadata.reset_mock()
     coordinator.data = {path: {"domain": "script", "name": "Test"}}
     with (
         patch("builtins.open", MagicMock()),
@@ -107,6 +110,7 @@ async def test_async_install_blueprint_reload_fallback(coordinator):
     ):
         await coordinator.async_install_blueprint(path, content, reload_services=True)
     coordinator.async_reload_services.assert_called_once_with(["script"])
+    coordinator._async_save_metadata.assert_awaited_once_with(force=True)
 
 
 def test_normalize_url(coordinator):
@@ -239,13 +243,33 @@ async def test_prune_preserves_hashes_only_metadata(coordinator):
     coordinator._persisted_etags = {}
     coordinator._persisted_hashes = {path: "some_hash"}
 
-    with patch(
-        "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True
+    with (
+        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+        patch.object(coordinator, "_async_save_metadata") as mock_save,
     ):
         await coordinator._async_prune_stale_metadata(set())
 
     assert path in coordinator._persisted_hashes
     assert coordinator._persisted_hashes[path] == "some_hash"
+    mock_save.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_prune_stale_metadata_triggers_save(coordinator):
+    """Test that pruning stale metadata triggers a background save operation."""
+    path = "/config/blueprints/stale.yaml"
+    coordinator._persisted_hashes = {path: "some_hash"}
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
+        ),
+        patch.object(coordinator, "_async_save_metadata") as mock_save,
+    ):
+        await coordinator._async_prune_stale_metadata(set())
+
+    assert path not in coordinator._persisted_hashes
+    mock_save.assert_called_once_with(force=True)
 
 
 @pytest.mark.asyncio
