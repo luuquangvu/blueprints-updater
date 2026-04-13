@@ -120,6 +120,7 @@
     "auto_update_failed": "Auto-update failed: {error}",
     "unsafe_url": "Unsafe URL: {error}",
     "content_missing": "Blueprint content is missing or could not be fetched",
-    "git_diff_title": "Code Changes (Git Diff)"
+    "git_diff_title": "Code Changes (Git Diff)",
+    "semantic_sync_notice": "This blueprint is semantically identical, but requires a structural update to align with the new canonical formatting (e.g. newline normalization, metadata injection)."
   }
 }

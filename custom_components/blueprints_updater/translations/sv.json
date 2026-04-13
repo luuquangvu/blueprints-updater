@@ -120,6 +120,7 @@
     "auto_update_failed": "Automatisk uppdatering misslyckades: {error}",
     "unsafe_url": "Osäker URL: {error}",
     "content_missing": "Innehållet i blueprint saknas eller kunde inte hämtas.",
-    "git_diff_title": "Kodändringar (Git Diff)"
+    "git_diff_title": "Kodändringar (Git Diff)",
+    "semantic_sync_notice": "Denna blueprint är semantiskt identisk, men kräver en strukturell uppdatering för att anpassas till den nya kanoniska formateringen (t.ex. normalisering av radbrytningar, metadata-injektion)."
   }
 }

@@ -30,7 +30,10 @@ from custom_components.blueprints_updater.const import (
     MIN_SEND_INTERVAL,
     REQUEST_TIMEOUT,
 )
-from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintUpdateCoordinator,
+    GitDiffResult,
+)
 
 
 @pytest.fixture
@@ -88,6 +91,7 @@ async def test_async_install_blueprint_reload_fallback(coordinator):
     content = "invalid: yaml"
 
     coordinator.async_reload_services = AsyncMock()
+    coordinator._async_save_metadata = AsyncMock()
 
     with (
         patch("builtins.open", MagicMock()),
@@ -95,8 +99,10 @@ async def test_async_install_blueprint_reload_fallback(coordinator):
     ):
         await coordinator.async_install_blueprint(path, content, reload_services=True)
     coordinator.async_reload_services.assert_called_once_with(["automation"])
+    coordinator._async_save_metadata.assert_not_called()
 
     coordinator.async_reload_services.reset_mock()
+    coordinator._async_save_metadata.reset_mock()
     coordinator.data = {path: {"domain": "script", "name": "Test"}}
     with (
         patch("builtins.open", MagicMock()),
@@ -104,6 +110,7 @@ async def test_async_install_blueprint_reload_fallback(coordinator):
     ):
         await coordinator.async_install_blueprint(path, content, reload_services=True)
     coordinator.async_reload_services.assert_called_once_with(["script"])
+    coordinator._async_save_metadata.assert_awaited_once_with(force=True)
 
 
 def test_normalize_url(coordinator):
@@ -165,17 +172,20 @@ def test_ensure_source_url(coordinator):
 
     new_content = coordinator._ensure_source_url("blueprint:\n  name: Test", source_url)
     assert f"source_url: {source_url}" in new_content
+    assert new_content == f"blueprint:\n  source_url: {source_url}\n  name: Test"
 
     content_with_url = f"blueprint:\n  name: Test\n  source_url: {source_url}"
-    assert coordinator._ensure_source_url(content_with_url, source_url) == content_with_url
+    expected = coordinator._normalize_content(content_with_url)
+    assert coordinator._ensure_source_url(content_with_url, source_url) == expected
 
     content_with_quotes = f"blueprint:\n  name: Test\n  source_url: '{source_url}'"
-    assert coordinator._ensure_source_url(content_with_quotes, source_url) == content_with_quotes
+    expected_quotes = coordinator._normalize_content(content_with_quotes)
+    assert coordinator._ensure_source_url(content_with_quotes, source_url) == expected_quotes
 
     different_url = "https://github.com/user/new-repo/blob/main/test.yaml"
     content_different = f"blueprint:\n  name: Test\n  source_url: {different_url}"
     result = coordinator._ensure_source_url(content_different, source_url)
-    assert result == content_different
+    assert result == coordinator._normalize_content(content_different)
     assert result.count("source_url") == 1
 
     content_outside = (
@@ -206,6 +216,11 @@ def test_ensure_source_url(coordinator):
     result_flow = coordinator._ensure_source_url(content_flow, source_url)
     assert f"source_url: {source_url}" in result_flow
 
+    content_invalid = "\ufeffblueprint: [unclosed\r\n"
+    result_invalid = coordinator._ensure_source_url(content_invalid, source_url)
+    assert "\ufeff" not in result_invalid
+    assert "\r" not in result_invalid
+
     content_multi = (
         "# Some info: blueprint:\n"
         "blueprint:\n"
@@ -217,7 +232,161 @@ def test_ensure_source_url(coordinator):
     assert "source_url:" in result_multi.split("description:")[0]
 
     content_none = "not_a_blueprint: true"
-    assert coordinator._ensure_source_url(content_none, source_url) == content_none
+    expected_none = coordinator._normalize_content(content_none)
+    assert coordinator._ensure_source_url(content_none, source_url) == expected_none
+
+
+@pytest.mark.asyncio
+async def test_prune_preserves_hashes_only_metadata(coordinator):
+    """Test that blueprints with only a hash (and no ETag) are not pruned if they exist."""
+    path = "/config/blueprints/hash_only.yaml"
+    coordinator._persisted_etags = {}
+    coordinator._persisted_hashes = {path: "some_hash"}
+
+    with (
+        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+        patch.object(coordinator, "_async_save_metadata") as mock_save,
+    ):
+        await coordinator._async_prune_stale_metadata(set())
+
+    assert path in coordinator._persisted_hashes
+    assert coordinator._persisted_hashes[path] == "some_hash"
+    mock_save.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_prune_stale_metadata_triggers_save(coordinator):
+    """Test that pruning stale metadata triggers a background save operation."""
+    path = "/config/blueprints/stale.yaml"
+    coordinator._persisted_hashes = {path: "some_hash"}
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
+        ),
+        patch.object(coordinator, "_async_save_metadata") as mock_save,
+    ):
+        await coordinator._async_prune_stale_metadata(set())
+
+    assert path not in coordinator._persisted_hashes
+    mock_save.assert_called_once_with(force=True)
+
+
+@pytest.mark.asyncio
+async def test_save_metadata_honors_cleared_in_memory_state(coordinator):
+    """Test that clearing an ETag in-memory correctly results in it being removed from save."""
+    path = "/config/blueprints/test.yaml"
+    coordinator._persisted_etags = {path: "old_etag"}
+    coordinator._persisted_hashes = {path: "old_hash"}
+
+    coordinator.data = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "source_url": "https://url.com",
+            "etag": None,
+            "remote_hash": None,
+        }
+    }
+
+    with (
+        patch.object(coordinator._store, "async_save") as mock_save,
+        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+    ):
+        await coordinator._async_save_metadata(force=True, skip_filter=True)
+
+        mock_save.assert_called_once()
+        save_data = mock_save.call_args[0][0]
+        saved_etags = save_data["etags"]
+        saved_hashes = save_data["remote_hashes"]
+        assert path not in saved_etags
+        assert path not in saved_hashes
+
+
+@pytest.mark.parametrize(
+    "variant, input_content, expected_output",
+    [
+        ("standard", "blueprint:\n  name: Test", "blueprint:\n  name: Test"),
+        ("BOM", "\ufeffblueprint:\n  name: Test", "blueprint:\n  name: Test"),
+        ("CRLFs", "blueprint:\r\n  name: Test\r\n", "blueprint:\n  name: Test\n"),
+        ("Classic Mac", "blueprint:\r  name: Test\r", "blueprint:\n  name: Test\n"),
+        ("Spaced", "blueprint:  \n  name: Test ", "blueprint:  \n  name: Test "),
+        ("Extra lines", "\n\nblueprint:\n  name: Test\n", "\n\nblueprint:\n  name: Test\n"),
+    ],
+)
+def test_normalization_comprehensive(coordinator, variant, input_content, expected_output):
+    """Test that normalization handle various encodings and formats consistently."""
+    normalized = coordinator._normalize_content(input_content)
+    assert normalized == expected_output, f"Failed for variant: {variant}"
+
+    hash1 = coordinator._hash_content(input_content)
+    hash2 = coordinator._hash_content(normalized, already_normalized=True)
+    assert hash1 == hash2, f"Hash mismatch for variant: {variant}"
+
+
+@pytest.mark.asyncio
+async def test_handle_source_url_change_clears_metadata(coordinator):
+    """Test that source URL changes clear remote-derived metadata."""
+    path = "test_blueprint.yaml"
+
+    coordinator.data[path] = {
+        "name": "Test",
+        "rel_path": "test_blueprint.yaml",
+        "domain": "automation",
+        "local_hash": "local_hash",
+        "source_url": "https://old.example.com/blueprint.yaml",
+        "remote_hash": "old_hash",
+        "invalid_remote_hash": "old_invalid_hash",
+        "remote_content": "old_content",
+        "last_error": "old_error",
+        "etag": "old_etag",
+    }
+
+    new_entry = {
+        "name": "Test",
+        "rel_path": "test_blueprint.yaml",
+        "domain": "automation",
+        "local_hash": "local_hash",
+        "source_url": "https://new.example.com/blueprint.yaml",
+    }
+
+    coordinator.scan_blueprints = MagicMock(return_value={path: new_entry})
+    with patch.object(coordinator, "_start_background_refresh"):
+        await coordinator._async_update_data()
+
+    updated = coordinator.data[path]
+
+    assert updated["source_url"] == new_entry["source_url"]
+
+    for key in (
+        "remote_hash",
+        "invalid_remote_hash",
+        "remote_content",
+        "last_error",
+        "etag",
+    ):
+        assert updated.get(key) is None
+
+
+def test_normalization_idempotency(coordinator):
+    """Test that normalization is idempotent: normalize(normalize(x)) == normalize(x)."""
+    content = "blueprint:\n  name: Test   \r\n  source_url: https://url\n\n"
+    first = coordinator._normalize_content(content)
+    second = coordinator._normalize_content(first)
+    assert first == second
+    assert coordinator._hash_content(first) == coordinator._hash_content(second)
+
+
+def test_ensure_source_url_stability(coordinator):
+    """Test that injection is stable even with comments and extra spaces."""
+    source_url = "https://url.com"
+    content = "blueprint: # comment  \n  name: Test"
+
+    injected = coordinator._ensure_source_url(content, source_url)
+    assert "source_url: https://url.com" in injected
+    assert "blueprint: # comment" in injected
+    re_injected = coordinator._ensure_source_url(injected, source_url)
+    assert injected == re_injected
 
 
 def test_ensure_source_url_indented_key(coordinator):
@@ -229,7 +398,8 @@ not_blueprint:
   blueprint:
     nested: true
 """
-    assert coordinator._ensure_source_url(content, source_url) == content
+    expected = coordinator._normalize_content(content)
+    assert coordinator._ensure_source_url(content, source_url) == expected
 
 
 @pytest.mark.asyncio
@@ -878,7 +1048,7 @@ async def test_async_update_data_auto_update(coordinator):
         mock_resp.status_code = 200
         mock_resp.headers = {"ETag": "new"}
         mock_resp.raise_for_status = MagicMock()
-        mock_resp.text = "blueprint:\n  name: Test\n  source_url: https://url"
+        mock_resp.text = "blueprint:\n  name: Test\n  source_url: https://url\n"
         mock_session.get = AsyncMock(return_value=mock_resp)
 
         mock_hash.return_value.hexdigest.return_value = "new"
@@ -890,7 +1060,7 @@ async def test_async_update_data_auto_update(coordinator):
 
         mock_install.assert_called_once_with(
             "/test.yaml",
-            "blueprint:\n  name: Test\n  source_url: https://url",
+            "blueprint:\n  name: Test\n  source_url: https://url\n",
             reload_services=False,
             backup=True,
         )
@@ -1993,7 +2163,9 @@ def test_get_cached_git_diff(coordinator):
     coordinator.data = {
         path: {"_cached_git_diff": {"local": "local", "remote": "remote", "diff": "diff"}}
     }
-    assert coordinator.get_cached_git_diff(path, "local", "remote") == "diff"
+    assert coordinator.get_cached_git_diff(path, "local", "remote") == GitDiffResult(
+        diff_text="diff", is_semantic_sync=False
+    )
     assert coordinator.get_cached_git_diff(path, "wrong", "remote") is None
     assert coordinator.get_cached_git_diff("missing", "local", "remote") is None
 
@@ -2007,7 +2179,43 @@ def test_set_cached_git_diff(coordinator):
         "local": "l1",
         "remote": "r1",
         "diff": "d1",
+        "semantic_sync": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_cached_git_diff_semantic_sync(coordinator):
+    """Test git diff cache with semantic_sync flag."""
+    path = "/config/test_semantic.yaml"
+    local = "local_semantic"
+    remote = "remote_semantic"
+    diff_text = "semantic diff content"
+
+    coordinator.data = {
+        path: {
+            "local_hash": local,
+            "remote_hash": remote,
+            "source_url": "https://url.com",
+        }
+    }
+
+    coordinator.set_cached_git_diff(
+        path,
+        local,
+        remote,
+        diff_text,
+        is_semantic_sync=True,
+    )
+
+    cached = cast(dict[str, Any], coordinator.data[path]["_cached_git_diff"])
+    assert cached["semantic_sync"] is True
+    assert coordinator.get_cached_git_diff(path, local, remote) == GitDiffResult(
+        diff_text=diff_text, is_semantic_sync=True
+    )
+    res = await coordinator.async_get_git_diff(path)
+    assert res is not None
+    assert res.is_semantic_sync is True
+    assert res.diff_text == diff_text
 
 
 @pytest.mark.asyncio
@@ -2021,10 +2229,10 @@ async def test_async_get_git_diff_cache_hit(coordinator):
             "_cached_git_diff": {"local": "h1", "remote": "h2", "diff": "cached_diff"},
         }
     }
-    with patch.object(coordinator, "async_fetch_diff_content") as mock_fetch:
-        diff = await coordinator.async_get_git_diff(path)
-        assert diff == "cached_diff"
-        mock_fetch.assert_not_called()
+    expected = GitDiffResult(diff_text="cached diff", is_semantic_sync=False)
+    with patch.object(coordinator, "get_cached_git_diff", return_value=expected):
+        res = await coordinator.async_get_git_diff(path)
+        assert res == expected
 
 
 @pytest.mark.asyncio
@@ -2047,13 +2255,16 @@ async def test_async_get_git_diff_full_flow(coordinator):
         patch.object(coordinator, "async_fetch_diff_content", return_value=remote_content),
         patch("builtins.open", mock_open(read_data=local_content)),
     ):
-        diff = await coordinator.async_get_git_diff(path)
-        assert diff is not None
-        assert "+  name: New" in diff
+        res = await coordinator.async_get_git_diff(path)
+        assert res is not None
+        assert res.is_semantic_sync is False
+        assert "+  name: New" in res.diff_text
+        diff = res.diff_text
         assert coordinator.data[path]["_cached_git_diff"] == {
             "local": "h1",
             "remote": "h2",
             "diff": diff,
+            "semantic_sync": False,
         }
 
 
@@ -2078,7 +2289,338 @@ async def test_async_get_git_diff_shows_metadata_changes(coordinator):
         patch.object(coordinator, "async_fetch_diff_content", return_value=remote_content),
         patch("builtins.open", mock_open(read_data=local_content)),
     ):
-        diff = await coordinator.async_get_git_diff(path)
-        assert diff is not None
-        assert "-  source_url: https://old.com" in diff
-        assert "+  source_url: https://new.com" in diff
+        res = await coordinator.async_get_git_diff(path)
+        assert res is not None
+        assert res.is_semantic_sync is False
+        assert "-  source_url: https://old.com" in res.diff_text
+        assert "+  source_url: https://new.com" in res.diff_text
+
+
+@pytest.mark.asyncio
+async def test_ghost_update_prevention(coordinator):
+    """Test that _async_update_data detects content identical after normalization."""
+    path = "/config/blueprints/test.yaml"
+
+    local_content = "blueprint:\n  name: Test\n"
+    local_hash = coordinator._hash_content(local_content)
+
+    remote_content = "\ufeffblueprint:\r\n  name: Test\r\n"
+    assert coordinator._hash_content(remote_content) == local_hash
+    coordinator.data = {
+        path: {
+            "local_hash": local_hash,
+            "remote_hash": "outdated_algorithm_hash",
+            "remote_content": remote_content,
+            "invalid_remote_hash": "some_error_hash",
+            "last_error": "some_error",
+            "updatable": True,
+            "source_url": "https://url",
+        }
+    }
+
+    mock_blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": local_hash,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=mock_blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        results = await coordinator._async_update_data()
+
+    assert not results[path]["updatable"]
+    assert results[path]["remote_hash"] == local_hash
+    assert results[path]["invalid_remote_hash"] is None
+    assert results[path]["last_error"] is None
+
+
+@pytest.mark.parametrize(
+    "invalid_content",
+    [
+        None,
+        {"not": "a string"},
+        123,
+        b"bytes content",
+    ],
+)
+@pytest.mark.asyncio
+async def test_ghost_update_negative_cases(coordinator, invalid_content):
+    """Test that _is_ghost_update returns False for invalid remote_content."""
+    path = "/config/blueprints/test.yaml"
+    local_hash = coordinator._hash_content("blueprint:\n  name: Test\n")
+
+    coordinator.data = {
+        path: {
+            "local_hash": local_hash,
+            "remote_hash": "outdated_hash",
+            "remote_content": invalid_content,
+            "updatable": True,
+            "source_url": "https://url",
+        }
+    }
+
+    mock_blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": local_hash,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=mock_blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        results = await coordinator._async_update_data()
+
+    assert results[path]["updatable"] is True
+    assert results[path]["remote_hash"] == "outdated_hash"
+
+
+@pytest.mark.asyncio
+async def test_async_install_blueprint_state_sync_fix(coordinator):
+    """Test that async_install_blueprint syncs hashes and triggers UI update."""
+    path = "/config/blueprints/test.yaml"
+    raw_remote = "blueprint:\r\n  name: New\r\n"
+    coordinator.data = {
+        path: {
+            "local_hash": "old",
+            "remote_hash": "new",
+            "invalid_remote_hash": "bad",
+            "last_error": "error",
+            "remote_content": "old_remote",
+            "updatable": True,
+        }
+    }
+
+    expected_hash = coordinator._hash_content(raw_remote)
+
+    mock_open_obj = mock_open()
+    with (
+        patch("builtins.open", mock_open_obj),
+        patch("custom_components.blueprints_updater.coordinator.os.replace") as mock_replace,
+        patch.object(coordinator, "async_reload_services"),
+    ):
+        await coordinator.async_install_blueprint(path, raw_remote)
+
+    assert coordinator.data[path]["local_hash"] == expected_hash
+    assert coordinator.data[path]["remote_hash"] == expected_hash
+    assert not coordinator.data[path]["updatable"]
+    assert coordinator.data[path]["last_error"] is None
+    assert coordinator.data[path]["invalid_remote_hash"] is None
+    assert coordinator.data[path]["remote_content"] is None
+    coordinator.async_set_updated_data.assert_called_with(coordinator.data)
+
+    mock_open_obj().write.assert_called()
+    written_data = "".join(call.args[0] for call in mock_open_obj().write.call_args_list)
+    assert "name: New" in written_data
+
+    assert mock_replace.called
+    assert os.path.normpath(mock_replace.call_args[0][1]).endswith(os.path.normpath(path))
+
+
+@pytest.mark.asyncio
+async def test_cold_start_rehydration(coordinator):
+    """Test that persisted hashes are used on reboot but verified later."""
+    path = "/config/blueprints/test.yaml"
+    local_hash = "current_hash"
+    coordinator.data = {}
+    coordinator._persisted_hashes = {path: local_hash}
+    coordinator._first_update_done = False
+
+    blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": local_hash,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        results = await coordinator._async_update_data()
+
+    assert not results[path]["updatable"]
+    assert results[path]["remote_hash"] == local_hash
+    assert coordinator._first_update_done
+
+
+@pytest.mark.asyncio
+async def test_etag_invalidation_on_mismatch(coordinator):
+    """Test that ETag is invalidated when local and remote hashes mismatch on startup."""
+    path = "/config/blueprints/test.yaml"
+    local_hash = "current_hash"
+    remote_hash = "stale_hash"
+    coordinator.data = {}
+    coordinator._persisted_hashes = {path: remote_hash}
+    coordinator._persisted_etags = {path: "stale_etag"}
+    coordinator._first_update_done = False
+
+    blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": local_hash,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        results = await coordinator._async_update_data()
+
+    assert results[path]["updatable"]
+    assert results[path]["etag"] is None
+    assert results[path]["remote_hash"] == remote_hash
+
+
+@pytest.mark.asyncio
+async def test_persisted_metadata_not_reused_after_first_update(coordinator):
+    """Test that persisted hashes/ETags are only used for the very first update."""
+    path = "/config/blueprints/test.yaml"
+    initial_hash = "initial_hash"
+    coordinator._persisted_hashes = {path: initial_hash}
+    coordinator._persisted_etags = {path: "initial_etag"}
+    coordinator._first_update_done = False
+
+    blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": initial_hash,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        first_results = await coordinator._async_update_data()
+    coordinator.data = first_results
+    assert coordinator._first_update_done
+
+    coordinator._persisted_hashes[path] = "stale_hash"
+    coordinator._persisted_etags[path] = "stale_etag"
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        results = await coordinator._async_update_data()
+
+    assert results[path]["remote_hash"] == initial_hash
+    assert results[path]["etag"] == "initial_etag"
+
+
+@pytest.mark.asyncio
+async def test_metadata_preservation_during_scan(coordinator):
+    """Test that existing metadata is preserved during a scan until refreshed."""
+    path = "/config/blueprints/test.yaml"
+    local_hash = "some_hash"
+    coordinator.data = {
+        path: {
+            "local_hash": local_hash,
+            "remote_hash": "remote_hash",
+            "remote_content": "remote_content",
+            "updatable": False,
+            "invalid_remote_hash": "stale_error",
+            "last_error": "failed_previously",
+            "etag": "some_etag",
+        }
+    }
+
+    blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": local_hash,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        results = await coordinator._async_update_data()
+
+    assert results[path]["invalid_remote_hash"] == "stale_error"
+    assert results[path]["last_error"] == "failed_previously"
+    assert results[path]["etag"] == "some_etag"
+    assert results[path]["remote_content"] == "remote_content"
+
+
+@pytest.mark.asyncio
+async def test_prune_metadata_persistence(coordinator):
+    """Test that stale metadata is pruned from memory and persisted to disk."""
+    path_exist = "/config/blueprints/exist.yaml"
+    path_stale = "/config/blueprints/stale.yaml"
+
+    coordinator._persisted_etags = {path_exist: "e1", path_stale: "e2"}
+    coordinator._persisted_hashes = {path_exist: "h1", path_stale: "h2"}
+    coordinator.setup_complete = True
+
+    coordinator.data = {path_exist: {"etag": "e1", "remote_hash": "h1"}}
+
+    tasks = []
+
+    def create_background_task(coro, name=None):
+        task = asyncio.create_task(coro)
+        tasks.append(task)
+        return task
+
+    with (
+        patch.object(
+            coordinator.hass, "async_create_background_task", side_effect=create_background_task
+        ),
+        patch.object(coordinator._store, "async_save", new_callable=AsyncMock) as mock_save,
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.path.isfile",
+            side_effect=lambda p: p in {path_exist},
+        ),
+    ):
+        await coordinator._async_prune_stale_metadata({path_exist})
+
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    assert path_stale not in coordinator._persisted_etags
+    assert path_stale not in coordinator._persisted_hashes
+    assert path_exist in coordinator._persisted_etags
+    assert mock_save.called, "async_save was not called"
+    saved_data = mock_save.call_args[0][0]
+    assert path_stale not in saved_data["etags"]
+    assert saved_data["etags"][path_exist] == "e1"
+    assert path_stale not in saved_data["remote_hashes"]
+    assert saved_data["remote_hashes"][path_exist] == "h1"
+
+
+def test_hash_content_determinism(coordinator):
+    """Test that hashing is deterministic regardless of the already_normalized flag."""
+    content = "\ufeffblueprint:\r\n  name: Test\n"
+    hash1 = coordinator._hash_content(content)
+
+    normalized = coordinator._normalize_content(content)
+    hash2 = coordinator._hash_content(normalized, already_normalized=True)
+
+    assert hash1 == hash2
+    assert "\ufeff" not in normalized
+    assert "\r\n" not in normalized
