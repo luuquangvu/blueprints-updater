@@ -136,7 +136,7 @@ def coordinator():
     comp.hass.async_add_executor_job = AsyncMock(side_effect=mock_exec)
     comp.get_cached_git_diff = MagicMock(return_value=None)
     comp.set_cached_git_diff = MagicMock()
-    comp.async_get_git_diff = AsyncMock(return_value=None)
+    comp.async_get_git_diff = AsyncMock(return_value=("", False))
     return comp
 
 
@@ -551,7 +551,7 @@ async def test_entity_release_notes_git_diff(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    coordinator.async_get_git_diff.return_value = "-condition: []"
+    coordinator.async_get_git_diff.return_value = ("-condition: []", False)
     with patch("builtins.open", mock_open(read_data=local_content)):
         notes = await entity.async_generate_release_notes()
 
@@ -577,7 +577,7 @@ async def test_entity_release_notes_git_diff_missing_remote(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    coordinator.async_get_git_diff.return_value = "-  name: Old\n+  name: New"
+    coordinator.async_get_git_diff.return_value = ("-  name: Old\n+  name: New", False)
     with patch("builtins.open", mock_open(read_data="local")):
         notes = await entity.async_generate_release_notes()
 
@@ -607,7 +607,7 @@ async def test_entity_release_notes_git_diff_source_url_normalization(coordinato
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    coordinator.async_get_git_diff.return_value = ""
+    coordinator.async_get_git_diff.return_value = ("", False)
     with patch("builtins.open", mock_open(read_data=local_content)):
         notes = await entity.async_generate_release_notes()
 
@@ -629,7 +629,7 @@ async def test_entity_release_notes_git_diff_cached(coordinator):
     coordinator.data[path] = info
 
     cached_diff = "cached diff payload"
-    coordinator.async_get_git_diff.return_value = cached_diff
+    coordinator.async_get_git_diff.return_value = (cached_diff, False)
 
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
@@ -739,7 +739,7 @@ async def test_entity_release_notes_git_diff_with_backticks(coordinator):
     coordinator.data[path] = info
 
     diff_text = "some diff\n```\nbackticks here\n```"
-    coordinator.async_get_git_diff.return_value = diff_text
+    coordinator.async_get_git_diff.return_value = (diff_text, False)
 
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass

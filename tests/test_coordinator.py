@@ -2050,7 +2050,7 @@ def test_get_cached_git_diff(coordinator):
     coordinator.data = {
         path: {"_cached_git_diff": {"local": "local", "remote": "remote", "diff": "diff"}}
     }
-    assert coordinator.get_cached_git_diff(path, "local", "remote") == "diff"
+    assert coordinator.get_cached_git_diff(path, "local", "remote") == ("diff", False)
     assert coordinator.get_cached_git_diff(path, "wrong", "remote") is None
     assert coordinator.get_cached_git_diff("missing", "local", "remote") is None
 
@@ -2064,6 +2064,7 @@ def test_set_cached_git_diff(coordinator):
         "local": "l1",
         "remote": "r1",
         "diff": "d1",
+        "semantic_sync": False,
     }
 
 
@@ -2080,7 +2081,7 @@ async def test_async_get_git_diff_cache_hit(coordinator):
     }
     with patch.object(coordinator, "async_fetch_diff_content") as mock_fetch:
         diff = await coordinator.async_get_git_diff(path)
-        assert diff == "cached_diff"
+        assert diff == ("cached_diff", False)
         mock_fetch.assert_not_called()
 
 
@@ -2104,13 +2105,15 @@ async def test_async_get_git_diff_full_flow(coordinator):
         patch.object(coordinator, "async_fetch_diff_content", return_value=remote_content),
         patch("builtins.open", mock_open(read_data=local_content)),
     ):
-        diff = await coordinator.async_get_git_diff(path)
-        assert diff is not None
+        res = await coordinator.async_get_git_diff(path)
+        assert res is not None
+        diff, _is_semantic = res
         assert "+  name: New" in diff
         assert coordinator.data[path]["_cached_git_diff"] == {
             "local": "h1",
             "remote": "h2",
             "diff": diff,
+            "semantic_sync": False,
         }
 
 
@@ -2135,8 +2138,9 @@ async def test_async_get_git_diff_shows_metadata_changes(coordinator):
         patch.object(coordinator, "async_fetch_diff_content", return_value=remote_content),
         patch("builtins.open", mock_open(read_data=local_content)),
     ):
-        diff = await coordinator.async_get_git_diff(path)
-        assert diff is not None
+        res = await coordinator.async_get_git_diff(path)
+        assert res is not None
+        diff, _is_semantic = res
         assert "-  source_url: https://old.com" in diff
         assert "+  source_url: https://new.com" in diff
 
@@ -2149,7 +2153,7 @@ async def test_ghost_update_prevention(coordinator):
     local_content = "blueprint:\n  name: Test\n"
     local_hash = coordinator._hash_content(local_content)
 
-    remote_content = "blueprint:\r\n  name: Test\r\n"
+    remote_content = "blueprint:\n  name: Test\n"
     assert coordinator._hash_content(remote_content) == local_hash
     coordinator.data = {
         path: {

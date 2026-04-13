@@ -509,7 +509,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         r_content = prev_data.get("remote_content")
         if r_content and isinstance(r_content, str):
-            return self._hash_content(r_content) == current_local_hash
+            return self._hash_content(r_content, already_normalized=True) == current_local_hash
         return False
 
     def _start_background_refresh(self, blueprints: dict[str, Any]) -> None:
@@ -1097,27 +1097,46 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     def get_cached_git_diff(
         self, path: str, local_hash: str | None, remote_hash: str | None
-    ) -> str | None:
-        """Get cached git diff."""
+    ) -> tuple[str, bool] | None:
+        """Get cached git diff.
+
+        Returns:
+            A tuple of (diff_text, is_semantic_sync) if cached, else None.
+        """
         info = self.data.get(path, {})
         cached = info.get("_cached_git_diff")
         if cached and isinstance(cached, dict):
             c_local = cached.get("local")
             c_remote = cached.get("remote")
             c_diff = cached.get("diff")
-            if local_hash == c_local and remote_hash == c_remote:
-                return c_diff
+            c_semantic = cached.get("semantic_sync", False)
+            if local_hash == c_local and remote_hash == c_remote and isinstance(c_diff, str):
+                return (c_diff, c_semantic)
         return None
 
     def set_cached_git_diff(
-        self, path: str, local_hash: str | None, remote_hash: str | None, diff_text: str
+        self,
+        path: str,
+        local_hash: str | None,
+        remote_hash: str | None,
+        diff_text: str,
+        is_semantic_sync: bool = False,
     ) -> None:
-        """Set cached git diff."""
+        """Set cached git diff.
+
+        Args:
+            path: Local path of the blueprint.
+            local_hash: Hash of the local file.
+            remote_hash: Hash of the remote content.
+            diff_text: Generated unified diff string.
+            is_semantic_sync: Whether the diff is empty due to semantic sync.
+        """
         if path in self.data:
             self.data[path]["_cached_git_diff"] = {
                 "local": local_hash,
                 "remote": remote_hash,
                 "diff": diff_text,
+                "semantic_sync": is_semantic_sync,
             }
 
     async def async_fetch_diff_content(self, path: str) -> str | None:
@@ -1163,7 +1182,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         info["remote_content"] = remote_content_with_url
         return remote_content_with_url
 
-    async def async_get_git_diff(self, path: str) -> str | None:
+    async def async_get_git_diff(self, path: str) -> tuple[str, bool] | None:
         """Get or generate git diff for a blueprint.
 
         This method orchestrates the entire diff generation process:
@@ -1173,7 +1192,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         4. Updates and returns the cached diff.
 
         Returns:
-            The git diff text or None if it cannot be generated.
+            A tuple of (diff_text, is_semantic_sync) or None if it cannot be generated.
         """
         if path not in self.data:
             return None
@@ -1182,8 +1201,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         local_hash = info.get("local_hash")
         remote_hash = info.get("remote_hash")
 
-        if (diff_text := self.get_cached_git_diff(path, local_hash, remote_hash)) is not None:
-            return diff_text
+        if (result := self.get_cached_git_diff(path, local_hash, remote_hash)) is not None:
+            return result
 
         remote_content = info.get("remote_content")
         if remote_content is None and info.get("updatable"):
@@ -1200,18 +1219,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             diff_text = await self.hass.async_add_executor_job(
                 self._read_and_diff, path, remote_content, info.get("source_url", "")
             )
-
-            if not diff_text and local_hash != remote_hash:
-                diff_text = await self.async_translate("semantic_sync_notice")
-
-            self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "")
-            return diff_text
         except OSError as err:
             _LOGGER.warning("I/O error generating diff for %s: %s", path, err)
+            return None
         except Exception as err:
             _LOGGER.error("Unexpected error generating diff for %s: %s", path, err, exc_info=True)
+            return None
 
-        return None
+        is_semantic_sync = not diff_text and local_hash != remote_hash
+        self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "", is_semantic_sync)
+        return (diff_text or "", is_semantic_sync)
 
     async def _async_update_blueprint_in_place(
         self,
