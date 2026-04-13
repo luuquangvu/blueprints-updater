@@ -347,11 +347,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     def _prune_stale_metadata(self, scanned_paths: set[str]) -> None:
         """Remove metadata for blueprints that no longer exist on disk.
 
-        Syncs the in-memory ETag and Hash caches with the list of files
-        found during the latest disk scan.
+        This method synchronizes in-memory ETag and Hash caches with the
+        latest scan results. We preserve metadata for any path that
+        either returned in the current scan or still exists as a file on
+        the disk. This ensures that metadata for valid blueprints is not
+        purged if they are temporarily filtered out of the scan results
+        due to user configuration changes (e.g., filter mode or selection),
+        providing a more stable cache and better UX.
 
         Args:
-            scanned_paths: Set of absolute paths found on disk.
+            scanned_paths: Set of absolute paths found on disk during
+                the latest scan.
 
         """
         old_count = len(self._persisted_etags) + len(self._persisted_hashes)
