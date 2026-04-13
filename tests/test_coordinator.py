@@ -2429,6 +2429,10 @@ async def test_prune_metadata_persistence(coordinator):
             coordinator.hass, "async_create_background_task", side_effect=create_background_task
         ),
         patch.object(coordinator._store, "async_save", new_callable=AsyncMock) as mock_save,
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.path.isfile",
+            side_effect=lambda p: p in {path_exist},
+        ),
     ):
         coordinator._prune_stale_metadata({path_exist})
 

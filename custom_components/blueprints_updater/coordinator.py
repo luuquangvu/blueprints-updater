@@ -661,6 +661,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     async def _async_save_metadata(self, force: bool = False) -> None:
         """Save current ETags and remote hashes to persistent storage.
 
+        We merge the newly detected ETags and hashes from self.data with
+        our existing persisted maps. This ensures that metadata for
+        blueprints that are currently filtered out but still exist on
+        disk is not lost during the save operation.
+
         Args:
             force: If True, bypass equality checks and write to disk.
 
@@ -668,22 +673,35 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not self.setup_complete:
             return
 
-        etags = {
+        new_etags = {
             path: cast(str, info["etag"]) for path, info in self.data.items() if info.get("etag")
         }
-        hashes = {
+        new_hashes = {
             path: cast(str, info["remote_hash"])
             for path, info in self.data.items()
             if info.get("remote_hash")
         }
 
-        if not force and etags == self._persisted_etags and hashes == self._persisted_hashes:
+        merged_etags = {**self._persisted_etags, **new_etags}
+        merged_hashes = {**self._persisted_hashes, **new_hashes}
+        final_etags = {p: e for p, e in merged_etags.items() if os.path.isfile(p)}
+        final_hashes = {p: h for p, h in merged_hashes.items() if os.path.isfile(p)}
+
+        if (
+            not force
+            and final_etags == self._persisted_etags
+            and final_hashes == self._persisted_hashes
+        ):
             return
 
-        _LOGGER.debug("Saving %d ETags and %d remote hashes to storage", len(etags), len(hashes))
-        self._persisted_etags = etags
-        self._persisted_hashes = hashes
-        await self._store.async_save({"etags": etags, "remote_hashes": hashes})
+        _LOGGER.debug(
+            "Saving %d ETags and %d remote hashes to storage (merged)",
+            len(final_etags),
+            len(final_hashes),
+        )
+        self._persisted_etags = final_etags
+        self._persisted_hashes = final_hashes
+        await self._store.async_save({"etags": final_etags, "remote_hashes": final_hashes})
 
     async def async_shutdown(self) -> None:
         """Shutdown the coordinator and cancel tasks."""

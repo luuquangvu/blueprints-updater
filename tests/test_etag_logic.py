@@ -115,7 +115,10 @@ async def test_persistence_of_remote_hashes(
     mock_store = MagicMock()
     mock_store.async_save = AsyncMock()
     coordinator._store = mock_store
-    await coordinator._async_save_metadata()
+    with patch(
+        "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True
+    ):
+        await coordinator._async_save_metadata()
 
     save_args = mock_store.async_save.call_args[0][0]
     assert save_args["etags"][path] == etag
