@@ -775,7 +775,9 @@ async def test_entity_release_notes_semantic_sync_notice(coordinator):
     with patch("builtins.open", mock_open(read_data="local")):
         notes = await entity.async_generate_release_notes()
 
-    coordinator.async_translate.assert_called_with("semantic_sync_notice")
+    coordinator.async_translate.assert_any_call("semantic_sync_notice")
     assert notes is not None
     assert expected_notice in notes
     assert "```diff" not in notes
+    assert "<details>" not in notes
+    assert "<summary>git_diff_title</summary>" not in notes

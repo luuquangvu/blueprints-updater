@@ -2176,7 +2176,7 @@ async def test_ghost_update_prevention(coordinator):
     local_content = "blueprint:\n  name: Test\n"
     local_hash = coordinator._hash_content(local_content)
 
-    remote_content = "blueprint:\n  name: Test\n"
+    remote_content = "\ufeffblueprint:\r\n  name: Test\r\n"
     assert coordinator._hash_content(remote_content) == local_hash
     coordinator.data = {
         path: {
@@ -2186,6 +2186,7 @@ async def test_ghost_update_prevention(coordinator):
             "invalid_remote_hash": "some_error_hash",
             "last_error": "some_error",
             "updatable": True,
+            "source_url": "https://url",
         }
     }
 
@@ -2233,7 +2234,6 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
         patch("builtins.open", MagicMock()),
         patch("custom_components.blueprints_updater.coordinator.os.replace"),
         patch.object(coordinator, "async_reload_services"),
-        patch.object(coordinator, "_ensure_source_url", side_effect=lambda c, _: c),
     ):
         await coordinator.async_install_blueprint(path, raw_remote)
 

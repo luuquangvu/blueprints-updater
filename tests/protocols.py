@@ -72,7 +72,7 @@ class BlueprintCoordinatorPublic(Protocol):
         """Fetch remote content for diff generation."""
         ...
 
-    async def async_get_git_diff(self, path: str) -> str | None:
+    async def async_get_git_diff(self, path: str) -> tuple[str, bool] | None:
         """Get or generate git diff for a blueprint."""
         ...
 

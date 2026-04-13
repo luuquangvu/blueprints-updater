@@ -441,6 +441,25 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 prev = self.data[path]
                 local_hash = info["local_hash"]
                 remote_hash = prev.get("remote_hash")
+                prev_source_url = prev.get("source_url")
+                curr_source_url = info.get("source_url")
+
+                if prev_source_url and curr_source_url and prev_source_url != curr_source_url:
+                    _LOGGER.info(
+                        "Source URL changed for %s (%s -> %s); clearing remote cache",
+                        path,
+                        prev_source_url,
+                        curr_source_url,
+                    )
+                    prev = {
+                        **prev,
+                        "remote_hash": None,
+                        "invalid_remote_hash": None,
+                        "remote_content": None,
+                        "last_error": None,
+                        "etag": None,
+                    }
+                    remote_hash = None
 
                 is_updatable = bool(remote_hash and local_hash != remote_hash)
                 next_invalid_remote_hash = prev.get("invalid_remote_hash")
@@ -517,7 +536,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         r_content = prev_data.get("remote_content")
         if r_content and isinstance(r_content, str):
-            return self._hash_content(r_content, already_normalized=True) == current_local_hash
+            return self._hash_content(r_content) == current_local_hash
         return False
 
     def _start_background_refresh(self, blueprints: dict[str, Any]) -> None:
