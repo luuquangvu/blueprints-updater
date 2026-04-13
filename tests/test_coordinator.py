@@ -2319,3 +2319,42 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator):
 
     assert results[path]["remote_hash"] == initial_hash
     assert results[path]["etag"] == "initial_etag"
+
+
+@pytest.mark.asyncio
+async def test_metadata_preservation_during_scan(coordinator):
+    """Test that existing metadata is preserved during a scan until refreshed."""
+    path = "/config/blueprints/test.yaml"
+    local_hash = "some_hash"
+    coordinator.data = {
+        path: {
+            "local_hash": local_hash,
+            "remote_hash": "remote_hash",
+            "remote_content": "remote_content",
+            "updatable": False,
+            "invalid_remote_hash": "stale_error",
+            "last_error": "failed_previously",
+            "etag": "some_etag",
+        }
+    }
+
+    blueprints = {
+        path: {
+            "name": "Test",
+            "rel_path": "test.yaml",
+            "domain": "automation",
+            "source_url": "https://url",
+            "local_hash": local_hash,
+        }
+    }
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
+        results = await coordinator._async_update_data()
+
+    assert results[path]["invalid_remote_hash"] == "stale_error"
+    assert results[path]["last_error"] == "failed_previously"
+    assert results[path]["etag"] == "some_etag"
+    assert results[path]["remote_content"] == "remote_content"
