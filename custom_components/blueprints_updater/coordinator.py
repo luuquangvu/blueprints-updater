@@ -375,8 +375,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Create the initial results structure from disk scan.
 
         Pre-populates basic metadata and local hashes. Remote metadata
-        is only populated from disk persistence if this is the first scan
-        since startup (data is empty).
+        is only restored from disk persistence if this is the first scan
+        after startup (triggered by _first_update_done).
 
         Args:
             blueprints: Metadata mapping from scan_blueprints.
@@ -481,7 +481,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             selected,
         )
 
-        self._prune_stale_metadata(set(blueprints.keys()))
         results = self._initialize_results(blueprints)
         self._merge_previous_data(results)
 

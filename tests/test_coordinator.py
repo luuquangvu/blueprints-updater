@@ -2152,6 +2152,8 @@ async def test_ghost_update_prevention(coordinator):
             "local_hash": local_hash,
             "remote_hash": "outdated_algorithm_hash",
             "remote_content": remote_content,
+            "invalid_remote_hash": "some_error_hash",
+            "last_error": "some_error",
             "updatable": True,
         }
     }
@@ -2174,6 +2176,8 @@ async def test_ghost_update_prevention(coordinator):
 
     assert not results[path]["updatable"]
     assert results[path]["remote_hash"] == local_hash
+    assert results[path]["invalid_remote_hash"] is None
+    assert results[path]["last_error"] is None
 
 
 @pytest.mark.asyncio
@@ -2185,6 +2189,9 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
         path: {
             "local_hash": "old",
             "remote_hash": "new",
+            "invalid_remote_hash": "bad",
+            "last_error": "error",
+            "remote_content": "old_remote",
             "updatable": True,
         }
     }
@@ -2202,6 +2209,9 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
     assert coordinator.data[path]["local_hash"] == expected_hash
     assert coordinator.data[path]["remote_hash"] == expected_hash
     assert not coordinator.data[path]["updatable"]
+    assert coordinator.data[path]["last_error"] is None
+    assert coordinator.data[path]["invalid_remote_hash"] is None
+    assert coordinator.data[path]["remote_content"] is None
     coordinator.async_set_updated_data.assert_called_with(coordinator.data)
 
 
