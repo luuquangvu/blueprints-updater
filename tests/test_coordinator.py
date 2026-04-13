@@ -2210,14 +2210,17 @@ def test_normalize_content_determinism(coordinator):
     c1 = "blueprint:\n  name: Test\n"
     c2 = "blueprint:  \r\n  name: Test  \r\n"
     c3 = "\ufeffblueprint:\n  name: Test\n"
+    c4 = "blueprint:\r  name: Test\r"
 
     norm1 = coordinator._normalize_content(c1)
     norm2 = coordinator._normalize_content(c2)
     norm3 = coordinator._normalize_content(c3)
+    norm4 = coordinator._normalize_content(c4)
 
     assert norm1 == "blueprint:\n  name: Test\n"
     assert norm1 != norm2
     assert norm1 == norm3
+    assert norm4 == norm1
 
 
 @pytest.mark.asyncio

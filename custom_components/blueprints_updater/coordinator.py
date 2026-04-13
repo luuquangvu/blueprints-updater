@@ -1387,7 +1387,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         remote_content = self._ensure_source_url(remote_content, source_url)
-        remote_hash = self._hash_content(remote_content)
+        remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
         local_hash = info["local_hash"]
         updatable = remote_hash != local_hash
 
