@@ -2284,7 +2284,10 @@ async def test_etag_invalidation_on_mismatch(coordinator):
         }
     }
 
-    with patch.object(coordinator, "scan_blueprints", return_value=blueprints):
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(coordinator, "_start_background_refresh"),
+    ):
         results = await coordinator._async_update_data()
 
     assert results[path]["updatable"]
@@ -2315,7 +2318,8 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator):
         patch.object(coordinator, "scan_blueprints", return_value=blueprints),
         patch.object(coordinator, "_start_background_refresh"),
     ):
-        await coordinator._async_update_data()
+        first_results = await coordinator._async_update_data()
+    coordinator.data = first_results
     assert coordinator._first_update_done
 
     coordinator._persisted_hashes[path] = "stale_hash"
