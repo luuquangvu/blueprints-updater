@@ -474,50 +474,29 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         for path, info in results.items():
             if path in self.data:
-                prev = self.data[path]
-                local_hash = info["local_hash"]
-                remote_hash = prev.get("remote_hash")
-                prev_source_url = prev.get("source_url")
-                curr_source_url = info.get("source_url")
+                prev = self._handle_source_url_change(path, info, self.data[path])
 
-                if prev_source_url and curr_source_url and prev_source_url != curr_source_url:
-                    _LOGGER.info(
-                        "Source URL changed for %s (%s -> %s); clearing remote cache",
-                        path,
-                        prev_source_url,
-                        curr_source_url,
-                    )
-                    prev = {
-                        **prev,
-                        "remote_hash": None,
-                        "invalid_remote_hash": None,
-                        "remote_content": None,
-                        "last_error": None,
-                        "etag": None,
-                    }
-                    remote_hash = None
-
-                is_updatable = bool(remote_hash and local_hash != remote_hash)
-                next_invalid_remote_hash = prev.get("invalid_remote_hash")
-                next_last_error = prev.get("last_error")
-
-                if is_updatable and self._is_ghost_update(local_hash, prev):
-                    _LOGGER.debug("Ghost update detected for %s; forcing updatable=False", path)
-                    is_updatable = False
-                    info["remote_hash"] = local_hash
-                    next_invalid_remote_hash = None
-                    next_last_error = None
+                is_updatable, next_invalid, next_error = self._apply_ghost_update_detection(
+                    path, info, prev
+                )
 
                 info.update(
                     {
                         "updatable": is_updatable,
-                        "remote_hash": info.get("remote_hash") or remote_hash,
-                        "invalid_remote_hash": next_invalid_remote_hash,
+                        "remote_hash": info.get("remote_hash") or prev.get("remote_hash"),
+                        "invalid_remote_hash": next_invalid,
                         "remote_content": prev.get("remote_content"),
-                        "last_error": next_last_error,
+                        "last_error": next_error,
                         "etag": prev.get("etag"),
                     }
                 )
+
+                if (
+                    not is_updatable
+                    and prev.get("remote_hash") != info["local_hash"]
+                    and self._is_ghost_update(info["local_hash"], prev)
+                ):
+                    info["remote_hash"] = info["local_hash"]
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch and synchronize blueprint update data.
@@ -555,7 +534,90 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         _LOGGER.debug("Instant setup complete with %d blueprints", len(results))
         return results
 
-    def _is_ghost_update(self, current_local_hash: str, prev_data: dict[str, Any]) -> bool:
+    def _is_semantically_equal(self, content: Any, target_hash: Any) -> bool:
+        """Check if content is semantically equal to a target hash.
+
+        Normalization is applied to content before hashing.
+
+        Args:
+            content: Raw content string to verify.
+            target_hash: The hash to compare against.
+
+        Returns:
+            True if normalized content hash matches target_hash.
+
+        """
+        if not content or not isinstance(content, str):
+            return False
+        return self._hash_content(content) == target_hash
+
+    def _handle_source_url_change(
+        self, path: str, info: dict[str, Any], prev: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Handle detected change in blueprint source URL.
+
+        If the URL changed, invalidate all remote-derived metadata to
+        prevent stale state reuse.
+
+        Args:
+            path: Local path of the blueprint.
+            info: Newly scanned blueprint info.
+            prev: Previous metadata dictionary.
+
+        Returns:
+            Updated (possibly invalidated) metadata dictionary.
+
+        """
+        prev_url = prev.get("source_url")
+        curr_url = info.get("source_url")
+
+        if prev_url and curr_url and prev_url != curr_url:
+            _LOGGER.info(
+                "Source URL changed for %s (%s -> %s); clearing remote cache",
+                path,
+                prev_url,
+                curr_url,
+            )
+            return {
+                **prev,
+                "remote_hash": None,
+                "invalid_remote_hash": None,
+                "remote_content": None,
+                "last_error": None,
+                "etag": None,
+            }
+        return prev
+
+    def _apply_ghost_update_detection(
+        self, path: str, info: dict[str, Any], prev_data: dict[str, Any]
+    ) -> tuple[bool, str | None, str | None]:
+        """Apply ghost update detection to a blueprint.
+
+        If a ghost update is detected, updatable is set to False and the
+        remote_hash is synced to the local_hash.
+
+        Args:
+            path: Local path of the blueprint.
+            info: Newly scanned blueprint info.
+            prev_data: Previous metadata dictionary.
+
+        Returns:
+            A tuple of (is_updatable, next_invalid_remote_hash, next_last_error).
+
+        """
+        local_hash = info["local_hash"]
+        remote_hash = prev_data.get("remote_hash")
+        is_updatable = bool(remote_hash and local_hash != remote_hash)
+        next_invalid = prev_data.get("invalid_remote_hash")
+        next_error = prev_data.get("last_error")
+
+        if is_updatable and self._is_ghost_update(local_hash, prev_data):
+            _LOGGER.debug("Ghost update detected for %s; forcing updatable=False", path)
+            return False, None, None
+
+        return is_updatable, next_invalid, next_error
+
+    def _is_ghost_update(self, current_local_hash: Any, prev_data: dict[str, Any]) -> bool:
         """Check if a detected update is actually a 'ghost update'.
 
         A ghost update occurs when the content is effectively identical
@@ -570,10 +632,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             True if the cached remote content matches the local hash.
 
         """
-        r_content = prev_data.get("remote_content")
-        if r_content and isinstance(r_content, str):
-            return self._hash_content(r_content) == current_local_hash
-        return False
+        return self._is_semantically_equal(prev_data.get("remote_content"), current_local_hash)
 
     def _start_background_refresh(self, blueprints: dict[str, Any]) -> None:
         """Start the background remote refresh task if not already running.
@@ -688,7 +747,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         finally:
             self._background_task = None
 
-    async def _async_save_metadata(self, force: bool = False) -> None:
+    async def _async_save_metadata(self, force: bool = False, skip_filter: bool = False) -> None:
         """Save current ETags and remote hashes to persistent storage.
 
         We merge the newly detected ETags and hashes from self.data with
@@ -698,6 +757,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         Args:
             force: If True, bypass equality checks and write to disk.
+            skip_filter: If True, bypass os.path.isfile checks on candidate paths.
 
         """
         if not self.setup_complete:
@@ -716,12 +776,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         merged_hashes = {**self._persisted_hashes, **new_hashes}
         all_candidate_paths = set(merged_etags.keys()) | set(merged_hashes.keys())
 
-        if all_candidate_paths:
+        if not skip_filter and all_candidate_paths:
             final_etags, final_hashes = await self.hass.async_add_executor_job(
                 self._filter_existing_metadata, all_candidate_paths, merged_etags, merged_hashes
             )
         else:
-            final_etags, final_hashes = {}, {}
+            final_etags, final_hashes = merged_etags, merged_hashes
 
         if (
             not force
@@ -1314,7 +1374,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.error("Unexpected error generating diff for %s: %s", path, err, exc_info=True)
             return None
 
-        is_semantic_sync = not diff_text and local_hash != remote_hash
+        is_semantic_sync = not diff_text and self._is_semantically_equal(remote_content, local_hash)
         self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "", is_semantic_sync)
         return (diff_text or "", is_semantic_sync)
 

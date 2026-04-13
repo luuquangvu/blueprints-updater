@@ -2491,6 +2491,8 @@ async def test_prune_metadata_persistence(coordinator):
     saved_data = mock_save.call_args[0][0]
     assert path_stale not in saved_data["etags"]
     assert saved_data["etags"][path_exist] == "e1"
+    assert path_stale not in saved_data["remote_hashes"]
+    assert saved_data["remote_hashes"][path_exist] == "h1"
 
 
 def test_hash_content_determinism(coordinator):
