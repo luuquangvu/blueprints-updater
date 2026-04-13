@@ -63,7 +63,12 @@ class BlueprintCoordinatorPublic(Protocol):
         ...
 
     def set_cached_git_diff(
-        self, path: str, local_hash: str | None, remote_hash: str | None, diff_text: str
+        self,
+        path: str,
+        local_hash: str | None,
+        remote_hash: str | None,
+        diff_text: str,
+        is_semantic_sync: bool = False,
     ) -> None:
         """Set cached git diff."""
         ...

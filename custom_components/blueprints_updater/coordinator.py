@@ -344,6 +344,29 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
         return filter_mode, selected_blueprints
 
+    @staticmethod
+    def _filter_existing_metadata(
+        paths: set[str], etags_map: dict[str, str], hashes_map: dict[str, str]
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Filter metadata maps to only include paths that exist on disk.
+
+        This is a synchronous method intended to be run in an executor.
+
+        Args:
+            paths: Set of paths to verify.
+            etags_map: Map of path to ETag.
+            hashes_map: Map of path to remote hash.
+
+        Returns:
+            A tuple of (filtered_etags, filtered_hashes).
+
+        """
+        valid_set = {p for p in paths if os.path.isfile(p)}
+        return (
+            {p: e for p, e in etags_map.items() if p in valid_set},
+            {p: h for p, h in hashes_map.items() if p in valid_set},
+        )
+
     async def _async_prune_stale_metadata(self, scanned_paths: set[str]) -> None:
         """Remove metadata for blueprints that no longer exist on disk.
 
@@ -366,12 +389,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         old_count = len(self._persisted_etags) + len(self._persisted_hashes)
 
         all_metadata_paths = set(self._persisted_etags.keys()) | set(self._persisted_hashes.keys())
-        paths_to_verify = all_metadata_paths - scanned_paths
 
-        if paths_to_verify:
-            existing_paths = await self.hass.async_add_executor_job(
-                lambda: {p for p in paths_to_verify if os.path.isfile(p)}
+        if paths_to_verify := all_metadata_paths - scanned_paths:
+            existing_etags, _ = await self.hass.async_add_executor_job(
+                self._filter_existing_metadata, paths_to_verify, self._persisted_etags, {}
             )
+            existing_paths = set(existing_etags.keys())
         else:
             existing_paths = set()
 
@@ -691,8 +714,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         merged_etags = {**self._persisted_etags, **new_etags}
         merged_hashes = {**self._persisted_hashes, **new_hashes}
-        final_etags = {p: e for p, e in merged_etags.items() if os.path.isfile(p)}
-        final_hashes = {p: h for p, h in merged_hashes.items() if os.path.isfile(p)}
+        all_candidate_paths = set(merged_etags.keys()) | set(merged_hashes.keys())
+
+        if all_candidate_paths:
+            final_etags, final_hashes = await self.hass.async_add_executor_job(
+                self._filter_existing_metadata, all_candidate_paths, merged_etags, merged_hashes
+            )
+        else:
+            final_etags, final_hashes = {}, {}
 
         if (
             not force
