@@ -16,6 +16,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import yaml as yaml_util
 
 from custom_components.blueprints_updater.const import (
+    CONF_USE_CDN,
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
@@ -2625,3 +2626,44 @@ def test_hash_content_determinism(coordinator):
     assert hash1 == hash2
     assert "\ufeff" not in normalized
     assert "\r\n" not in normalized
+
+
+@pytest.mark.asyncio
+async def test_async_update_blueprint_cdn_gating(coordinator):
+    """Test that cdn_url is only passed to fetcher if enabled in config."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "source_url": "https://github.com/user/repo/blob/main/test.yaml",
+        "domain": "automation",
+        "local_hash": "old_hash",
+    }
+    coordinator.data = {path: info}
+
+    mock_session = MagicMock(spec=httpx.AsyncClient)
+    results_to_notify = []
+    updated_domains = set()
+
+    coordinator.config_entry.options = MappingProxyType({CONF_USE_CDN: True})
+    with patch.object(
+        coordinator, "_async_fetch_with_cdn_fallback", AsyncMock(return_value=("cont", "etag"))
+    ) as mock_fetch:
+        await coordinator._async_update_blueprint_in_place(
+            mock_session, path, info, results_to_notify, updated_domains
+        )
+        _args, _kwargs = mock_fetch.call_args
+        cdn_url_arg = _args[3]
+        assert cdn_url_arg is not None
+        assert "jsdelivr.net" in cdn_url_arg
+
+    coordinator.config_entry.options = MappingProxyType({CONF_USE_CDN: False})
+    with patch.object(
+        coordinator, "_async_fetch_with_cdn_fallback", AsyncMock(return_value=("cont", "etag"))
+    ) as mock_fetch:
+        await coordinator._async_update_blueprint_in_place(
+            mock_session, path, info, results_to_notify, updated_domains
+        )
+        _args, _kwargs = mock_fetch.call_args
+        cdn_url_arg = _args[3]
+        assert cdn_url_arg is None

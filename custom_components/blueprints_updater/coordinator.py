@@ -1327,8 +1327,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return None
 
         session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
-        use_cdn = self.config_entry.options.get(CONF_USE_CDN, DEFAULT_USE_CDN)
-        cdn_url = self._get_cdn_url(url) if use_cdn else None
+        cdn_url = self._get_cdn_url(url) if self.is_cdn_enabled() else None
 
         remote_content, _ = await self._async_fetch_with_cdn_fallback(
             session, path, url, cdn_url, stored_etag=None, stored_remote_hash=None, force=True
@@ -1403,14 +1402,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "", is_semantic_sync)
         return GitDiffResult(diff_text=diff_text or "", is_semantic_sync=is_semantic_sync)
 
-    def is_auto_update_enabled(self, path: str) -> bool:
-        """Return whether auto-update is enabled for a specific blueprint.
+    def is_auto_update_enabled(self) -> bool:
+        """Return whether auto-update is enabled.
 
         Checks configuration options with fallback to internal data (legacy)
         and finally the system default.
-
-        Args:
-            path: Local path of the blueprint.
 
         Returns:
             Boolean indicating auto-update preference.
@@ -1423,6 +1419,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             CONF_AUTO_UPDATE,
             self.config_entry.data.get(CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE),
         )
+
+    def is_cdn_enabled(self) -> bool:
+        """Return whether jsDelivr CDN usage is enabled.
+
+        Returns:
+            Boolean indicating CDN preference.
+
+        """
+        if not self.config_entry:
+            return DEFAULT_USE_CDN
+
+        return self.config_entry.options.get(CONF_USE_CDN, DEFAULT_USE_CDN)
 
     def _update_error_state(
         self, path: str, error_type: str, detail: Any, clear_etag: bool = False
@@ -1521,8 +1529,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return
 
         normalized_url = self._normalize_url(source_url)
-        use_cdn = self.config_entry.options.get(CONF_USE_CDN, DEFAULT_USE_CDN)
-        cdn_url = self._get_cdn_url(normalized_url) if use_cdn else None
+        cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
         stored_etag = self.data.get(path, {}).get("etag")
         stored_remote_hash = self.data.get(path, {}).get("remote_hash")
@@ -1606,7 +1613,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         local_hash = info["local_hash"]
         self.data[path]["updatable"] = local_hash != remote_hash
 
-        if self.data[path]["updatable"] and self.is_auto_update_enabled(path):
+        if self.data[path]["updatable"] and self.is_auto_update_enabled():
             _LOGGER.debug(
                 "Auto-update enabled for '%s', fetching on-demand",
                 info["name"],
@@ -1648,7 +1655,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         except (HomeAssistantError, InvalidBlueprint) as err:
             last_error = f"yaml_syntax_error|{_sanitize_error_detail(str(err))}"
 
-        auto_update = self.is_auto_update_enabled(path)
+        auto_update = self.is_auto_update_enabled()
 
         if updatable and not last_error and auto_update:
             try:

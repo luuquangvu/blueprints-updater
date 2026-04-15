@@ -7,7 +7,6 @@ import httpx
 import pytest
 
 from custom_components.blueprints_updater.const import (
-    CONF_USE_CDN,
     DOMAIN_JSDELIVR,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
@@ -141,24 +140,6 @@ async def test_async_fetch_with_cdn_fallback_failure_fallback(coordinator):
     coordinator._async_fetch_content.assert_called_with(
         session, normalized_url, etag=None, force=False
     )
-
-
-@pytest.mark.asyncio
-async def test_cdn_disabled_by_config(coordinator):
-    """Test logic skips CDN when disabled in options."""
-    session = MagicMock(spec=httpx.AsyncClient)
-    normalized_url = "https://raw.githubusercontent.com/u/r/b/p.yaml"
-
-    coordinator.config_entry.options = {CONF_USE_CDN: False}
-    coordinator._async_fetch_content = AsyncMock(return_value=("orig", "orig_etag"))
-
-    cdn_url = "https://cdn.jsdelivr.net/gh/u/r@b/p.yaml"
-
-    content, _etag = await coordinator._async_fetch_with_cdn_fallback(
-        session, "path", normalized_url, cdn_url, None, None, False
-    )
-
-    assert content == "orig"
 
 
 @pytest.mark.asyncio

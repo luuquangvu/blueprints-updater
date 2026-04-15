@@ -164,7 +164,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         Returns:
             Boolean indicating auto-update preference from config options.
         """
-        return self.coordinator.is_auto_update_enabled(self._path)
+        return self.coordinator.is_auto_update_enabled()
 
     @cached_property
     def installed_version(self) -> str | None:
