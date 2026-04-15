@@ -6,6 +6,7 @@
         "description": "Möchten Sie Blueprints Updater einrichten? Es scannt Ihre lokalen Blueprints und sucht nach Updates.",
         "data": {
           "auto_update": "Automatisches Update aktivieren",
+          "use_cdn": "jsDelivr CDN für GitHub verwenden",
           "update_interval": "Update-Intervall (Stunden)",
           "filter_mode": "Filter-Modus",
           "selected_blueprints": "Blueprints (wahlweise)",
@@ -24,6 +25,7 @@
         "description": "Konfigurieren Sie die Einstellungen und das Verhalten von Blueprints Updater.",
         "data": {
           "auto_update": "Automatisches Update aktivieren",
+          "use_cdn": "jsDelivr CDN für GitHub verwenden",
           "update_interval": "Update-Intervall (Stunden)",
           "filter_mode": "Filter-Modus",
           "selected_blueprints": "Ausgewählte Blueprints",

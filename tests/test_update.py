@@ -678,6 +678,12 @@ async def test_async_install_bypass_protection(coordinator):
             coordinator, BlueprintUpdateCoordinator
         )
     )
+    coordinator._async_fetch_with_cdn_fallback = (
+        BlueprintUpdateCoordinator._async_fetch_with_cdn_fallback.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+    )
+    coordinator._get_cdn_url = BlueprintUpdateCoordinator._get_cdn_url
     coordinator._ensure_source_url = BlueprintUpdateCoordinator._ensure_source_url
     coordinator._normalize_url = BlueprintUpdateCoordinator._normalize_url
 
@@ -686,7 +692,7 @@ async def test_async_install_bypass_protection(coordinator):
         patch.object(
             coordinator,
             "_async_fetch_content",
-            AsyncMock(return_value=("invalid: yaml:", "etag")),
+            AsyncMock(return_value=("not_a_blueprint: true", "etag")),
         ),
         patch.object(
             coordinator, "_validate_blueprint", MagicMock(return_value="invalid_blueprint")
@@ -724,6 +730,12 @@ async def test_async_install_unsafe_url_protection(coordinator):
             coordinator, BlueprintUpdateCoordinator
         )
     )
+    coordinator._async_fetch_with_cdn_fallback = (
+        BlueprintUpdateCoordinator._async_fetch_with_cdn_fallback.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+    )
+    coordinator._get_cdn_url = BlueprintUpdateCoordinator._get_cdn_url
     coordinator._normalize_url = BlueprintUpdateCoordinator._normalize_url
 
     with (

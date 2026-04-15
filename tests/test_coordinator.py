@@ -14,11 +14,6 @@ import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import yaml as yaml_util
-from protocols import (
-    BlueprintCoordinatorInternal,
-    BlueprintCoordinatorProtocol,
-    BlueprintCoordinatorPublic,
-)
 
 from custom_components.blueprints_updater.const import (
     FILTER_MODE_ALL,
@@ -33,6 +28,12 @@ from custom_components.blueprints_updater.const import (
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
     GitDiffResult,
+)
+
+from .protocols import (
+    BlueprintCoordinatorInternal,
+    BlueprintCoordinatorProtocol,
+    BlueprintCoordinatorPublic,
 )
 
 

@@ -6,6 +6,7 @@
         "description": "Хотите настроить Blueprints Updater? Он просканирует ваши локальные чертежи и проверит наличие обновлений.",
         "data": {
           "auto_update": "Включить автообновление",
+          "use_cdn": "Использовать jsDelivr CDN для GitHub",
           "update_interval": "Интервал обновления (часы)",
           "filter_mode": "Режим фильтрации",
           "selected_blueprints": "Чертежи (необязательно)",
@@ -24,6 +25,7 @@
         "description": "Настройте поведение и параметры Blueprints Updater.",
         "data": {
           "auto_update": "Включить автообновление",
+          "use_cdn": "Использовать jsDelivr CDN для GitHub",
           "update_interval": "Интервал обновления (часы)",
           "filter_mode": "Режим фильтрации",
           "selected_blueprints": "Выбранные чертежи",
