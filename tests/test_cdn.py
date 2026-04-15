@@ -58,8 +58,18 @@ def coordinator(hass):
         ),
         (
             "https://raw.githubusercontent.com/user/repo/branch/path//to//file.yaml",
-            f"https://{DOMAIN_JSDELIVR}/gh/user/repo@branch/path//to//file.yaml",
+            f"https://{DOMAIN_JSDELIVR}/gh/user/repo@branch/path/to/file.yaml",
         ),
+        (
+            "https://raw.githubusercontent.com/user/repo/feature/v1/file.yaml",
+            f"https://{DOMAIN_JSDELIVR}/gh/user/repo@feature/v1/file.yaml",
+        ),
+        (
+            "https://github.com/user/repo/blob/release/v1/subdir/file.yaml",
+            f"https://{DOMAIN_JSDELIVR}/gh/user/repo@release/v1/subdir/file.yaml",
+        ),
+        ("https://github.com/user/repo/raw/", None),
+        ("https://raw.githubusercontent.com/u/r/b", None),
         ("https://gist.github.com/user/123/raw", None),
         ("https://example.com/file.yaml", None),
         ("https://raw.githubusercontent.com/short", None),
@@ -105,7 +115,7 @@ async def test_async_fetch_with_cdn_fallback_304(coordinator):
 
     assert content is None
     assert etag == "old_etag"
-    coordinator._async_fetch_content.assert_called_once_with(
+    coordinator._async_fetch_content.assert_awaited_once_with(
         session, cdn_url, etag="old_etag", force=False
     )
 

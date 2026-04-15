@@ -1403,6 +1403,27 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "", is_semantic_sync)
         return GitDiffResult(diff_text=diff_text or "", is_semantic_sync=is_semantic_sync)
 
+    def is_auto_update_enabled(self, path: str) -> bool:
+        """Return whether auto-update is enabled for a specific blueprint.
+
+        Checks configuration options with fallback to internal data (legacy)
+        and finally the system default.
+
+        Args:
+            path: Local path of the blueprint.
+
+        Returns:
+            Boolean indicating auto-update preference.
+
+        """
+        if not self.config_entry:
+            return DEFAULT_AUTO_UPDATE
+
+        return self.config_entry.options.get(
+            CONF_AUTO_UPDATE,
+            self.config_entry.data.get(CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE),
+        )
+
     def _update_error_state(
         self, path: str, error_type: str, detail: Any, clear_etag: bool = False
     ) -> None:
@@ -1585,11 +1606,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         local_hash = info["local_hash"]
         self.data[path]["updatable"] = local_hash != remote_hash
 
-        if (
-            self.data[path]["updatable"]
-            and self.config_entry
-            and self.config_entry.options.get(CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
-        ):
+        if self.data[path]["updatable"] and self.is_auto_update_enabled(path):
             _LOGGER.debug(
                 "Auto-update enabled for '%s', fetching on-demand",
                 info["name"],
@@ -1631,9 +1648,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         except (HomeAssistantError, InvalidBlueprint) as err:
             last_error = f"yaml_syntax_error|{_sanitize_error_detail(str(err))}"
 
-        auto_update = self.config_entry and self.config_entry.options.get(
-            CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE
-        )
+        auto_update = self.is_auto_update_enabled(path)
 
         if updatable and not last_error and auto_update:
             try:
@@ -1848,20 +1863,31 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         parsed = urlparse(url)
-        path_parts = parsed.path.strip("/").split("/")
+        path_parts = [p for p in parsed.path.split("/") if p]
 
         if parsed.netloc == DOMAIN_GITHUB_RAW:
-            if len(path_parts) < 3:
+            if len(path_parts) < 4:
                 return None
             user, repo, branch = path_parts[:3]
             path = "/".join(path_parts[3:])
         elif parsed.netloc == DOMAIN_GITHUB:
-            if len(path_parts) < 4:
+            if len(path_parts) < 5:
                 return None
-            user, repo, kind, branch = path_parts[:4]
-            if kind not in ("blob", "raw"):
+
+            try:
+                anchor_idx = next(
+                    (idx for idx, part in enumerate(path_parts) if part in ("blob", "raw")),
+                    -1,
+                )
+                if anchor_idx < 2:
+                    return None
+
+                user = path_parts[anchor_idx - 2]
+                repo = path_parts[anchor_idx - 1]
+                branch = path_parts[anchor_idx + 1]
+                path = "/".join(path_parts[anchor_idx + 2 :])
+            except (IndexError, ValueError):
                 return None
-            path = "/".join(path_parts[4:])
         else:
             return None
 
