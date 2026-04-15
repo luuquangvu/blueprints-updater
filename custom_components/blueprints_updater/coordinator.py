@@ -1836,7 +1836,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
 
         if (
-            DOMAIN_HA_FORUM in parsed.netloc
+            parsed.netloc == DOMAIN_HA_FORUM
             and "/t/" in parsed.path
             and (match := RE_FORUM_TOPIC_ID.search(parsed.path))
         ):

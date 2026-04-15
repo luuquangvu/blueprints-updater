@@ -167,10 +167,8 @@ def coordinator():
     comp.async_get_git_diff = AsyncMock(
         return_value=GitDiffResult(diff_text="", is_semantic_sync=False)
     )
-    comp.is_auto_update_enabled = MagicMock(
-        side_effect=lambda: comp.config_entry.options.get(
-            "auto_update", comp.config_entry.data.get("auto_update", True)
-        )
+    comp.is_auto_update_enabled = BlueprintUpdateCoordinator.is_auto_update_enabled.__get__(
+        comp, BlueprintUpdateCoordinator
     )
     return comp
 

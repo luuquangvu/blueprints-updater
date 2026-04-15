@@ -9,6 +9,7 @@ from datetime import timedelta
 from types import MappingProxyType
 from typing import Any, cast
 from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
+from urllib.parse import urlparse
 
 import httpx
 import pytest
@@ -17,6 +18,7 @@ from homeassistant.util import yaml as yaml_util
 
 from custom_components.blueprints_updater.const import (
     CONF_USE_CDN,
+    DOMAIN_JSDELIVR,
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
@@ -2655,7 +2657,9 @@ async def test_async_update_blueprint_cdn_gating(coordinator):
         _args, _kwargs = mock_fetch.call_args
         cdn_url_arg = _args[3]
         assert cdn_url_arg is not None
-        assert "jsdelivr.net" in cdn_url_arg
+        parsed = urlparse(cdn_url_arg)
+        assert parsed.netloc == DOMAIN_JSDELIVR
+        assert parsed.scheme == "https"
 
     coordinator.config_entry.options = MappingProxyType({CONF_USE_CDN: False})
     with patch.object(

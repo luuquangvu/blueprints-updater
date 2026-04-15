@@ -137,9 +137,14 @@ async def test_async_fetch_with_cdn_fallback_failure_fallback(coordinator):
     assert content == "fallback_content"
     assert etag == "fallback_etag"
     assert coordinator._async_fetch_content.call_count == 2
-    coordinator._async_fetch_content.assert_called_with(
-        session, normalized_url, etag=None, force=False
-    )
+
+    calls = coordinator._async_fetch_content.call_args_list
+    args0, kwargs0 = calls[0]
+    assert args0[1] == cdn_url
+    assert kwargs0.get("etag") is None
+    args1, kwargs1 = calls[1]
+    assert args1[1] == normalized_url
+    assert kwargs1.get("etag") is None
 
 
 @pytest.mark.asyncio
