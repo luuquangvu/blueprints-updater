@@ -152,7 +152,7 @@ async def test_cdn_disabled_by_config(coordinator):
     coordinator.config_entry.options = {CONF_USE_CDN: False}
     coordinator._async_fetch_content = AsyncMock(return_value=("orig", "orig_etag"))
 
-    cdn_url = None
+    cdn_url = "https://cdn.jsdelivr.net/gh/u/r@b/p.yaml"
 
     content, _etag = await coordinator._async_fetch_with_cdn_fallback(
         session, "path", normalized_url, cdn_url, None, None, False
