@@ -39,10 +39,11 @@ RE_GIST_RAW = re.compile(r"/raw/?$", re.IGNORECASE)
 RE_FORUM_TOPIC_ID = re.compile(r"/t/(?:[^/]+/)?(\d+)")
 RE_FORUM_CODE_BLOCK = re.compile(r"<code[^>]*>(.*?)</code>", re.DOTALL)
 RE_BLUEPRINT_KEY = re.compile(r"^(blueprint:\s*(?:#.*)?)$", re.MULTILINE)
+RE_URL_REDACTION = re.compile(r"https?://\S+")
 
 MAX_CONCURRENT_REQUESTS = 5
 REQUEST_TIMEOUT = 15
-MAX_RETRIES = 4
+MAX_RETRIES = 5
 RETRY_BACKOFF = 8
 MIN_SEND_INTERVAL = 0.5
 MAX_SEND_INTERVAL = 1.5

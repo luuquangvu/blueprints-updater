@@ -11,7 +11,6 @@ import ipaddress
 import logging
 import os
 import random
-import re
 import shutil
 import socket
 import textwrap
@@ -61,6 +60,7 @@ from .const import (
     RE_FORUM_TOPIC_ID,
     RE_GIST_RAW,
     RE_GITHUB_BLOB,
+    RE_URL_REDACTION,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
     SPECIAL_USE_TLDS,
@@ -83,7 +83,7 @@ def _sanitize_error_detail(detail: str, max_length: int = 120) -> str:
         The sanitized and potentially truncated error string.
 
     """
-    cleaned = re.sub(r"https?://\S+", "(redacted URL)", detail)
+    cleaned = RE_URL_REDACTION.sub("(redacted URL)", detail)
     cleaned = cleaned.replace("|", "/")
     return textwrap.shorten(cleaned, width=max_length, placeholder="...")
 
@@ -1468,7 +1468,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             self.data[path].update(update_data)
         else:
-            _LOGGER.debug("Attempted to update error state for missing blueprint path: %s", path)
+            _LOGGER.warning("Attempted to update error state for missing blueprint path: %s", path)
 
     async def _async_fetch_with_cdn_fallback(
         self,
@@ -1499,7 +1499,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if cdn_url:
             try:
-                _LOGGER.debug("Fetching blueprint via CDN: %s", cdn_url)
+                _LOGGER.debug("Fetching blueprint via CDN: (redacted URL)")
                 remote_content, new_etag = await self._async_fetch_content(
                     session, cdn_url, etag=etag, force=force
                 )
@@ -1538,7 +1538,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return
 
         if not await self._is_safe_url(source_url):
-            _LOGGER.warning("Blocking update from untrusted URL: %s", source_url)
+            _LOGGER.warning("Blocking update from untrusted URL: (redacted URL)")
             self._update_error_state(path, "unsafe_url", source_url, clear_etag=True)
             return
 
@@ -1564,7 +1564,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     session, path, info, normalized_url, new_etag
                 )
         except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
-            _LOGGER.warning("Failed to fetch blueprint from %s: %s", source_url, err)
+            _LOGGER.warning(
+                "Failed to fetch blueprint from (redacted URL): %s",
+                _sanitize_error_detail(str(err)),
+            )
             self._update_error_state(path, "fetch_error", err)
             return
 
@@ -1586,7 +1589,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 updated_domains,
             )
         except Exception as err:
-            _LOGGER.error("Error processing blueprint from %s: %s", source_url, err)
+            _LOGGER.error(
+                "Error processing blueprint from (redacted URL): %s",
+                _sanitize_error_detail(str(err)),
+            )
             self._update_error_state(path, "processing_error", err, clear_etag=True)
             return
 
@@ -1760,7 +1766,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if delay > 0:
             await asyncio.sleep(delay)
 
-        _LOGGER.debug("[Pacing] Dispatching request for %s", url)
+        _LOGGER.debug("[Pacing] Dispatching request for (redacted URL)")
 
         current_url = url
         current_headers = headers.copy()
@@ -1782,7 +1788,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 break
 
             if redirect_count >= 20:
-                _LOGGER.error("Too many redirects fetching %s", url)
+                _LOGGER.error("Too many redirects fetching (redacted URL)")
                 raise httpx.HTTPError("Too many redirects")
 
             next_url = response.headers.get("Location")
@@ -1793,7 +1799,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             next_url = str(response.url.join(next_url))
 
             if not await self._is_safe_url(next_url):
-                _LOGGER.warning("Blocking redirect to unsafe URL: %s", next_url)
+                _LOGGER.warning("Blocking redirect to unsafe URL: (redacted URL)")
                 raise httpx.HTTPError(f"Security violation: Redirected to unsafe URL {next_url}")
 
             current_url = next_url
