@@ -47,6 +47,9 @@ def bind_coordinator_cdn_methods(coordinator: MagicMock) -> None:
     coordinator.is_cdn_enabled = BlueprintUpdateCoordinator.is_cdn_enabled.__get__(
         coordinator, BlueprintUpdateCoordinator
     )
+    coordinator._update_error_state = BlueprintUpdateCoordinator._update_error_state.__get__(
+        coordinator, BlueprintUpdateCoordinator
+    )
 
 
 @pytest.mark.asyncio
@@ -747,7 +750,7 @@ async def test_async_install_unsafe_url_protection(coordinator):
         await entity.async_generate_release_notes()
 
     assert info.get("remote_content") is None
-    assert info.get("last_error") == "unsafe_url"
+    assert "unsafe_url|" in str(info.get("last_error") or "")
 
     with pytest.raises(HomeAssistantError):
         await entity.async_install(version=None, backup=False)

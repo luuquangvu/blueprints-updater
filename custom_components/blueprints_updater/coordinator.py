@@ -1324,8 +1324,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return None
 
         if not await self._is_safe_url(normalized_url):
-            _LOGGER.warning("Blocking diff fetch from unsafe URL: %s", normalized_url)
-            info["last_error"] = "unsafe_url"
+            _LOGGER.warning("Blocking diff fetch from unsafe URL: (redacted URL)")
+            self._update_error_state(path, "unsafe_url", source_url)
             return None
 
         session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
@@ -1844,7 +1844,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         parsed = urlparse(url)
         path_parts = parsed.path.strip("/").split("/")
 
-        if parsed.netloc == DOMAIN_GITHUB and RE_GITHUB_BLOB.search(parsed.path):
+        if parsed.hostname == DOMAIN_GITHUB and RE_GITHUB_BLOB.search(parsed.path):
             new_parts = [p for p in path_parts if p != "blob"]
             return urlunparse(
                 (
@@ -1857,7 +1857,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
             )
 
-        if parsed.netloc == DOMAIN_GIST and not RE_GIST_RAW.search(parsed.path):
+        if parsed.hostname == DOMAIN_GIST and not RE_GIST_RAW.search(parsed.path):
             return urlunparse(
                 (
                     parsed.scheme,

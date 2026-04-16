@@ -2671,7 +2671,7 @@ async def test_async_update_blueprint_cdn_gating(coordinator, cdn_config, expect
         if expect_cdn:
             assert cdn_url_arg is not None
             parsed = urlparse(cdn_url_arg)
-            assert parsed.netloc == DOMAIN_JSDELIVR
+            assert parsed.hostname == DOMAIN_JSDELIVR
             assert parsed.scheme == "https"
         else:
             assert cdn_url_arg is None
