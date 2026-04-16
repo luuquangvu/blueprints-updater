@@ -42,7 +42,23 @@ from .protocols import (
 
 @pytest.fixture
 def coordinator(hass) -> BlueprintCoordinatorProtocol:
-    """Fixture for BlueprintUpdateCoordinator."""
+    """
+    Create a preconfigured BlueprintUpdateCoordinator test fixture.
+    
+    Patches the coordinator base init and returns a BlueprintUpdateCoordinator with internal state and helpers mocked for tests:
+    - `entry.options` is an empty mapping and `entry.data` is empty.
+    - `DataUpdateCoordinator.__init__` is patched to avoid real initialization.
+    - `async_set_updated_data` is mocked to update `coord.data`.
+    - `async_update_listeners` is mocked.
+    - `setup_complete` and `last_update_success` are set to True.
+    - `_is_safe_path` and `_is_safe_url` are mocked to allow installs/updates.
+    
+    Parameters:
+        hass: Home Assistant core instance used to construct the coordinator.
+    
+    Returns:
+        A BlueprintCoordinatorProtocol instance with mocked internals suitable for unit tests.
+    """
     entry = MagicMock()
     entry.options = MappingProxyType({})
     entry.data = {}

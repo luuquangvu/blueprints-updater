@@ -73,15 +73,17 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _sanitize_error_detail(detail: str, max_length: int = 120) -> str:
-    """Sanitize error detail to avoid delimiter clashes and overly long messages.
-
-    Args:
-        detail: The raw error message string.
-        max_length: Maximum allowed length for the sanitized string.
-
+    """
+    Sanitize an error-detail string by redacting URLs, replacing delimiter characters, and truncating to a maximum length.
+    
+    Redacts URLs, replaces the pipe character `|` with `/`, and shortens the result to `max_length` characters using an ellipsis when necessary.
+    
+    Parameters:
+        detail (str): The raw error message string to sanitize.
+        max_length (int): Maximum allowed length for the sanitized string.
+    
     Returns:
-        The sanitized and potentially truncated error string.
-
+        str: The sanitized and possibly truncated error string.
     """
     cleaned = RE_URL_REDACTION.sub("(redacted URL)", detail)
     cleaned = cleaned.replace("|", "/")
@@ -1307,12 +1309,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             }
 
     async def async_fetch_diff_content(self, path: str) -> str | None:
-        """Fetch and validate remote content for diff generation.
-
-        This method mutates the blueprint's `info` dictionary by setting
-        the `remote_content` key ONLY if the URL is safe and the content
-        passes blueprint validation. This prevents unvalidated content
-        from being used in the installation flow.
+        """
+        Fetch and validate remote blueprint content for generating a diff.
+        
+        If the blueprint at `path` is eligible and the normalized source URL is safe, fetches remote content, ensures the `source_url` is present in the content, and validates it as a blueprint. On success, stores the normalized remote content in the blueprint's `info["remote_content"]` and clears `info["last_error"]`. On failure (not eligible, unsafe URL, fetch failure, or validation error) updates the blueprint's error state (`info["last_error"]`) or calls the central error updater for unsafe URLs, and returns `None`.
+        
+        Returns:
+            `str` containing the normalized remote content with `source_url` ensured, or `None` if the blueprint is not eligible, the URL is unsafe, fetching fails, or validation fails.
         """
         info = self.data.get(path)
         if not info or not info.get("updatable"):
@@ -1361,16 +1364,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return remote_content_with_url
 
     async def async_get_git_diff(self, path: str) -> GitDiffResult | None:
-        """Get or generate git diff for a blueprint.
-
-        This method orchestrates the entire diff generation process:
-        1. Checks for a valid cached diff.
-        2. Fetches remote content if missing (mutates state).
-        3. Generates the diff in an executor job.
-        4. Updates and returns the cached diff.
-
+        """
+        Retrieve a unified diff between the local and remote blueprint content for the given path.
+        
+        May fetch remote content and update internal cached state; returns `None` if a diff cannot be produced.
+        
         Returns:
-            GitDiffResult or None if it cannot be generated.
+            `GitDiffResult` containing the unified diff text and `is_semantic_sync` flag, or `None` if unavailable.
         """
         if path not in self.data:
             return None
@@ -1415,14 +1415,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return GitDiffResult(diff_text=diff_text or "", is_semantic_sync=is_semantic_sync)
 
     def is_auto_update_enabled(self) -> bool:
-        """Return whether auto-update is enabled.
-
-        Checks configuration options with fallback to internal data (legacy)
-        and finally the system default.
-
+        """
+        Determine whether blueprint auto-update is enabled.
+        
+        Checks the integration option `CONF_AUTO_UPDATE`, falling back to the legacy value in `config_entry.data` and then to `DEFAULT_AUTO_UPDATE` when not present or when `config_entry` is missing.
+        
         Returns:
-            Boolean indicating auto-update preference.
-
+            `true` if auto-update is enabled, `false` otherwise.
         """
         if not self.config_entry:
             return DEFAULT_AUTO_UPDATE
@@ -1433,11 +1432,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
 
     def is_cdn_enabled(self) -> bool:
-        """Return whether jsDelivr CDN usage is enabled.
-
+        """
+        Determine whether jsDelivr CDN should be used for fetching remote blueprints.
+        
         Returns:
-            Boolean indicating CDN preference.
-
+            `true` if CDN usage is enabled, `false` otherwise.
         """
         if not self.config_entry:
             return DEFAULT_USE_CDN
@@ -1450,14 +1449,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     def _update_error_state(
         self, path: str, error_type: str, detail: Any, clear_etag: bool = False
     ) -> None:
-        """Update the blueprint state with a specific error.
-
-        Args:
-            path: Local path of the blueprint.
-            error_type: Category of the error (e.g., 'fetch_error').
-            detail: Detailed error information or exception.
-            clear_etag: If True, clear the stored ETag for this blueprint.
-
+        """
+        Update the stored blueprint entry to reflect a failure and record a sanitized error.
+        
+        If the given path exists in the coordinator's `data`, clears remote-related fields, sets `updatable` to False, resets `invalid_remote_hash`, and sets `last_error` to `"{error_type}|{sanitized_detail}"` where `sanitized_detail` redacts sensitive data and is truncated. Optionally clears the stored `etag`. If the path is not present, logs a warning and makes no state changes.
+        
+        Parameters:
+            path (str): Local filesystem path of the blueprint to update.
+            error_type (str): Short category identifier for the error (for example `"fetch_error"`).
+            detail (Any): Additional error information; will be converted to a string and sanitized.
+            clear_etag (bool): If True, remove the persisted ETag for this blueprint.
         """
         if self.data and path in self.data:
             update_data = {
@@ -1484,20 +1485,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         stored_remote_hash: str | None,
         force: bool,
     ) -> tuple[str | None, str | None]:
-        """Fetch remote content from CDN with fallback to original source.
-
-        Args:
-            session: Async HTTP client session.
-            path: Local path of the blueprint.
-            normalized_url: The normalized raw GitHub URL.
-            cdn_url: The jsDelivr CDN URL, if applicable.
-            stored_etag: Previously stored ETag.
-            stored_remote_hash: Previously stored content hash.
-            force: If True, ignore ETag and force a full download.
-
+        """
+        Attempt to fetch blueprint content from a CDN and fall back to the original source if needed.
+        
+        Tries the provided `cdn_url` first (when present). Uses the provided `stored_etag` only when `stored_remote_hash` is present and `force` is False. If the CDN fetch returns content or a new ETag, that result is returned immediately; otherwise the function fetches from `normalized_url`.
+        
+        Parameters:
+            path (str): Local blueprint path used for logging context.
+            normalized_url (str): Canonicalized original source URL to fall back to.
+            cdn_url (str | None): CDN URL to try before the original source, or None to skip CDN.
+            stored_etag (str | None): Previously stored ETag to send with conditional requests.
+            stored_remote_hash (str | None): Previously stored remote content hash; when absent the ETag is not used.
+            force (bool): When True, ignore stored ETag and force a full download.
+        
         Returns:
-            A tuple of (remote_content, new_etag).
-
+            tuple[str | None, str | None]: `(remote_content, new_etag)` where `remote_content` is the fetched text or `None` for a 304 Not Modified, and `new_etag` is the response ETag (or `None` if not provided).
         """
         etag = stored_etag if (stored_remote_hash and not force) else None
 
@@ -1527,16 +1529,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         updated_domains: set[str],
         force: bool = False,
     ) -> None:
-        """Update a single blueprint directly in self.data.
-
-        Args:
-            session: Async HTTP client session.
-            path: Local path of the blueprint.
-            info: Current blueprint metadata.
-            results_to_notify: List of names for notification.
-            updated_domains: Set of domains affected.
-            force: If True, ignore ETag and force a full download.
-
+        """
+        Update the coordinator's metadata for a single local blueprint by fetching and processing its remote source.
+        
+        Parameters:
+            session (httpx.AsyncClient): HTTP client used for remote requests.
+            path (str): Absolute local filesystem path of the blueprint.
+            info (dict[str, Any]): Current metadata entry for the blueprint (as stored in self.data).
+            results_to_notify (list[str]): Mutable list to append blueprint names that triggered notifications.
+            updated_domains (set[str]): Mutable set to add domains whose services should be reloaded.
+            force (bool): If True, bypass ETag/conditional fetch behavior and force a full download.
+        
+        Behavior:
+            - Validates the blueprint has a `source_url` and that the URL is safe.
+            - Attempts to fetch remote content (optionally via CDN) and handles `304 Not Modified`.
+            - On successful fetch, processes the remote content and updates coordinator state; may auto-install updates.
+            - On failures or invalid content, updates the blueprint's error state and may clear stored ETag.
+        
         """
         if not (source_url := info.get("source_url")):
             return
@@ -1611,18 +1620,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         normalized_url: str,
         new_etag: str | None,
     ) -> tuple[str | None, str | None]:
-        """Handle the 304 Not Modified case for a blueprint.
-
-        Args:
-            session: Async HTTP client session.
-            path: Local path of the blueprint.
-            info: Current blueprint metadata.
-            normalized_url: The URL used to fetch.
-            new_etag: The ETag returned (if any).
-
+        """
+        Process a 304 Not Modified response for a blueprint, update stored metadata, and perform an on-demand fetch when auto-update is enabled.
+        
+        Updates the stored ETag (if provided) and the blueprint's `updatable` flag based on the stored `remote_hash`. If the blueprint is considered updatable and auto-update is enabled, initiates a forced fetch (using CDN when configured) and returns its result.
+        
         Returns:
-            A tuple of (content, etag). Content is None if still not modified.
-
+            tuple(content, etag): `content` is the fetched remote content when a forced fetch occurs, or `None` if no fetch was performed; `etag` is the updated ETag value or `None`.
         """
         _LOGGER.debug("[304] '%s' is up to date on server", info["name"])
         if not (self.data and path in self.data):
@@ -1666,17 +1670,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         results_to_notify: list[str],
         updated_domains: set[str],
     ) -> None:
-        """Process and validate newly fetched blueprint content.
-
-        Args:
-            path: Local path of the blueprint.
-            info: Current blueprint metadata.
-            remote_content: Raw YAML content.
-            new_etag: ETag from response.
-            source_url: Original source URL.
-            results_to_notify: List to track auto-updates for notification.
-            updated_domains: Set to track domains requiring reload.
-
+        """
+        Process and validate newly fetched blueprint content and update coordinator state.
+        
+        Validates and canonicalizes the fetched YAML, computes its content hash, and determines whether the blueprint is updatable. If validation succeeds and auto-update is enabled, installs the blueprint and records the successful auto-update (appends the blueprint name to `results_to_notify` and adds its domain to `updated_domains`). On validation or install failure, records a sanitized `last_error`, preserves the invalid remote hash, clears remote content, and marks the blueprint not updatable. In all cases, updates `self.data[path]` (when present) with `remote_hash`, `invalid_remote_hash`, `remote_content`, `updatable`, `etag`, and `last_error` as appropriate.
+        
+        Parameters:
+            path: Absolute local filesystem path of the blueprint.
+            info: Current in-memory metadata for the blueprint (entry from `self.data` scan).
+            remote_content: Raw YAML text fetched from the remote source.
+            new_etag: ETag returned by the HTTP response, if any.
+            source_url: Canonical source URL expected to be present in the blueprint content.
+            results_to_notify: Mutable list that will receive the blueprint name when an auto-update succeeds.
+            updated_domains: Mutable set that will receive the blueprint's domain when an auto-update succeeds.
         """
         remote_content = self._ensure_source_url(remote_content, source_url)
         remote_hash = self._hash_content(remote_content, already_normalized=True)
@@ -1748,16 +1754,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         etag: str | None = None,
         force: bool = False,
     ) -> tuple[str | None, str | None]:
-        """Fetch content from a URL.
-
-        Returns (content, etag). Content is None on 304 Not Modified.
-
-        Args:
-            session: Async HTTP client.
-            url: URL to fetch.
-            etag: Optional ETag for conditional GET.
-            force: If True, bypass ETag (even if provided) and force download.
-
+        """
+        Fetch the text content at a URL and return it together with the response ETag.
+        
+        Performs conditional requests when `etag` is provided (unless `force` is True), follows a limited number of redirects while enforcing safety checks, and supports special parsing for Home Assistant forum topic JSON responses.
+        
+        Parameters:
+            url (str): The request URL.
+            etag (str | None): Optional ETag for conditional GET; when provided and `force` is False an If-None-Match header is sent.
+            force (bool): When True, do not use the provided `etag` for conditional requests and always download.
+        
+        Returns:
+            tuple[str | None, str | None]: A tuple of (content, etag). `content` is the response text, or `None` when the server returned 304 Not Modified. `etag` is the response ETag if present.
+        
+        Raises:
+            httpx.HTTPError: On HTTP/network errors, too many redirects, unsafe redirect targets, or invalid forum JSON responses.
         """
         headers: dict[str, str] = {}
         if etag and not force:
@@ -1833,14 +1844,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _normalize_url(url: str) -> str:
-        """Convert standard GitHub/Gist/Forum URLs to their raw/API endpoints.
-
-        Args:
-            url: The user-provided source URL.
-
+        """
+        Convert GitHub, Gist, or Home Assistant forum links into direct/raw endpoints where applicable.
+        
+        If the URL points to a GitHub blob, converts it to the raw.githubusercontent.com form; if it points to a Gist, appends `/raw` when needed; if it points to a Home Assistant forum topic, converts it to the topic JSON endpoint. Returns the original URL when no conversion applies.
+        
         Returns:
-            The normalized URL for direct content fetching.
-
+            The normalized URL suitable for direct content fetching, or the original URL if no transformation was performed.
         """
         parsed = urlparse(url)
         path_parts = parsed.path.strip("/").split("/")
@@ -1891,19 +1901,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _get_cdn_url(url: str) -> str | None:
-        """Convert a GitHub URL to a jsDelivr CDN URL.
-
-        This method supports both raw.githubusercontent.com and standard github.com
-        URLs. Any path segments that were already URL-encoded in the source (e.g.,
-        spaces as %20) are preserved to ensure the generated CDN URL remains
-        valid and links to the correct file.
-
-        Args:
-            url: The GitHub source URL (preferably normalized).
-
+        """
+        Generate a jsDelivr CDN URL for supported GitHub source URLs.
+        
+        Supports raw.githubusercontent.com and github.com URLs that use the `blob` or `raw` path form. Preserves any percent-encoded path segments from the input.
+        
+        Parameters:
+            url (str): The GitHub source URL to convert.
+        
         Returns:
-            The jsDelivr CDN URL or None if not applicable.
-
+            str | None: A jsDelivr CDN URL targeting the same file, or `None` if the input URL is not a supported GitHub format.
         """
         parsed = urlparse(url)
         path_parts = [p for p in parsed.path.split("/") if p]
@@ -1947,14 +1954,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _parse_forum_content(json_data: dict[str, Any]) -> str | None:
-        """Extract YAML blueprint from Home Assistant Forum JSON response.
-
-        Args:
-            json_data: The JSON payload from the Discourse API.
-
+        """
+        Extract the first code block containing a Home Assistant blueprint from a Discourse topic JSON payload.
+        
+        Parameters:
+            json_data (dict[str, Any]): JSON returned by the Discourse topic endpoint (for example `/t/{id}.json`), expected to contain `post_stream.posts[0].cooked`.
+        
         Returns:
-            The extracted blueprint YAML string or None if not found.
-
+            str | None: The first code block whose unescaped text contains "blueprint:", trimmed of surrounding whitespace, or `None` if no such block is found.
         """
         with contextlib.suppress(KeyError, IndexError):
             post_stream: dict[str, Any] = json_data.get("post_stream", {})

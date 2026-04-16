@@ -15,7 +15,15 @@ from custom_components.blueprints_updater.update import BlueprintUpdateEntity, a
 
 
 async def await_scheduled_update(entity, coordinator):
-    """Wait for a scheduled update task to complete."""
+    """
+    Await the coordinator-scheduled update task triggered by an entity.
+    
+    Patches the entity's `async_write_ha_state`, invokes `entity._handle_coordinator_update()`, then awaits the coroutine that was scheduled via `coordinator.hass.async_create_task`.
+    
+    Parameters:
+        entity: The entity instance that will handle the coordinator update.
+        coordinator: The coordinator (typically a test MagicMock) whose `hass.async_create_task` was used to schedule the update.
+    """
     with patch.object(entity, "async_write_ha_state"):
         entity._handle_coordinator_update()
         coro = coordinator.hass.async_create_task.call_args[0][0]
@@ -23,10 +31,13 @@ async def await_scheduled_update(entity, coordinator):
 
 
 def bind_coordinator_cdn_methods(coordinator: MagicMock) -> None:
-    """Bind real coordinator CDN/fetch methods to a MagicMock instance.
-
-    This allows testing the internal interaction logic while still using
-    mocks for network calls and validation.
+    """
+    Attach real CDN and fetch-related BlueprintUpdateCoordinator methods onto a MagicMock coordinator for testing.
+    
+    Binds the coordinator's git-diff, diff/content fetch, CDN fallback fetch, URL normalization/normalization helpers, CDN enablement check, and error-state updater so tests can exercise CDN/diff logic while keeping network/validation interactions mocked.
+    
+    Parameters:
+        coordinator (MagicMock): MagicMock instance representing a BlueprintUpdateCoordinator to modify in place.
     """
     coordinator.async_get_git_diff = BlueprintUpdateCoordinator.async_get_git_diff.__get__(
         coordinator, BlueprintUpdateCoordinator
@@ -121,7 +132,14 @@ async def test_update_entities_lifecycle(hass):
 
 @pytest.fixture
 def coordinator():
-    """Fixture for BlueprintUpdateCoordinator in update tests."""
+    """
+    Create and return a MagicMock that emulates a BlueprintUpdateCoordinator for tests.
+    
+    The mock is preconfigured with a sample blueprint entry at "/config/blueprints/test.yaml", a config_entry with options {"auto_update": True}, async methods used by the entity (async_install_blueprint, async_fetch_blueprint, async_refresh, async_get_git_diff), translation behavior via async_translate, cached git-diff helpers, and an executor binding for async_add_executor_job. The mock's is_auto_update_enabled method is bound to the real BlueprintUpdateCoordinator implementation.
+    
+    Returns:
+        MagicMock: A mocked BlueprintUpdateCoordinator with the behaviors described above.
+    """
     comp = MagicMock()
     comp.data = {
         "/config/blueprints/test.yaml": {

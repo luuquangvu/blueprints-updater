@@ -14,7 +14,15 @@ from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoor
 
 @pytest.fixture
 def coordinator(hass):
-    """Fixture for BlueprintUpdateCoordinator."""
+    """
+    Create a BlueprintUpdateCoordinator test fixture with DataUpdateCoordinator initialization bypassed.
+    
+    Parameters:
+        hass: Home Assistant core instance provided by the test harness.
+    
+    Returns:
+        A BlueprintUpdateCoordinator configured for tests with `hass` set, a mocked `config_entry` (with empty `options` and `data`), and an empty `data` dict. The base DataUpdateCoordinator.__init__ is patched to avoid full runtime initialization.
+    """
     entry = MagicMock()
     entry.options = {}
     entry.data = {}

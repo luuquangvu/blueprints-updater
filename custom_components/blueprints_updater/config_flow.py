@@ -75,15 +75,15 @@ def _get_config_schema(
     config: Any,
     blueprint_options: list[dict[str, Any]],
 ) -> vol.Schema:
-    """Return the configuration schema for the flow.
-
-    Args:
-        config: Current or default configuration values (ConfigEntry, dict or None).
-        blueprint_options: Available blueprints to select from.
-
+    """
+    Build the voluptuous configuration schema used by the integration's config and options flows.
+    
+    Parameters:
+        config (ConfigEntry | dict | None): Current configuration source; when a ConfigEntry, defaults are resolved from its `data` and `options`.
+        blueprint_options (list[dict[str, Any]]): Available blueprint selector options (each item must contain `value` and `label`).
+    
     Returns:
-        A voluptuous Schema object.
-
+        vol.Schema: A voluptuous schema describing fields and defaults for the updater options form.
     """
     current_config: dict[str, Any] = {}
     if config is not None:

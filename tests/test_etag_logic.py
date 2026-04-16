@@ -16,7 +16,15 @@ from .protocols import BlueprintCoordinatorProtocol
 
 @pytest.fixture
 def coordinator(hass) -> BlueprintCoordinatorProtocol:
-    """Fixture for BlueprintUpdateCoordinator."""
+    """
+    Create a test fixture that returns a mocked BlueprintUpdateCoordinator configured for unit tests.
+    
+    Parameters:
+        hass: The Home Assistant instance to attach to the coordinator.
+    
+    Returns:
+        A BlueprintUpdateCoordinator-like mock (satisfying BlueprintCoordinatorProtocol) with common attributes and safety checks preconfigured for tests.
+    """
     entry = MagicMock()
     entry.options = {"auto_update": False}
     entry.data = {}

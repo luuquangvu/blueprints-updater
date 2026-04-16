@@ -95,7 +95,23 @@ def create_mock_coordinator(
 
 
 def get_schema_default(schema: vol.Schema, key_name: str) -> Any:
-    """Safely extract default value from a Voluptuous schema for a given key string."""
+    """
+    Retrieve the default value for a named key from a Voluptuous schema.
+    
+    Searches the provided Voluptuous `schema` for an entry whose key name matches `key_name`.
+    If the schema entry has a `default` attribute, returns its value (invoking it if callable).
+    If the key is present but has no `default`, returns `None`.
+    
+    Parameters:
+        schema (vol.Schema): The Voluptuous schema to inspect.
+        key_name (str): The key name to locate within the schema.
+    
+    Returns:
+        Any: The default value for `key_name` (callable defaults are invoked), or `None` if the key has no default.
+    
+    Raises:
+        KeyError: If `key_name` is not found in the schema.
+    """
     for key, _ in schema.schema.items():
         k_any: Any = key
         name = k_any if isinstance(k_any, str) else str(getattr(k_any, "schema", ""))
