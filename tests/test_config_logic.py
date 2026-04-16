@@ -34,12 +34,8 @@ async def test_is_auto_update_enabled_config_logic(hass, data, options, expected
     entry.data = data
     entry.options = options
 
-    with patch(
-        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
-        return_value=None,
-    ):
-        coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
-        assert coordinator.is_auto_update_enabled() is expected
+    coordinator = create_mock_coordinator(hass, entry)
+    assert coordinator.is_auto_update_enabled() is expected
 
 
 @pytest.mark.asyncio
@@ -57,12 +53,8 @@ async def test_is_cdn_enabled_config_logic(hass, options, expected):
     entry.data = {}
     entry.options = options
 
-    with patch(
-        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
-        return_value=None,
-    ):
-        coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
-        assert coordinator.is_cdn_enabled() is expected
+    coordinator = create_mock_coordinator(hass, entry)
+    assert coordinator.is_cdn_enabled() is expected
 
 
 @pytest.mark.asyncio
@@ -79,24 +71,27 @@ async def test_is_cdn_enabled_fallback_logic(hass, data, expected):
     entry.data = data
     entry.options = {}
 
-    with patch(
-        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
-        return_value=None,
-    ):
-        coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
-        assert coordinator.is_cdn_enabled() is expected
+    coordinator = create_mock_coordinator(hass, entry)
+    assert coordinator.is_cdn_enabled() is expected
 
 
 @pytest.mark.asyncio
 async def test_config_helpers_no_entry(hass):
     """Test config helpers handle missing config_entry."""
+    coordinator = create_mock_coordinator(hass, None)
+    assert coordinator.is_auto_update_enabled() is DEFAULT_AUTO_UPDATE
+    assert coordinator.is_cdn_enabled() is DEFAULT_USE_CDN
+
+
+def create_mock_coordinator(
+    hass, entry: Any | None, interval: timedelta = timedelta(hours=24)
+) -> BlueprintUpdateCoordinator:
+    """Helper to create a BlueprintUpdateCoordinator under patch."""
     with patch(
         "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
         return_value=None,
     ):
-        coordinator = BlueprintUpdateCoordinator(hass, cast(Any, None), timedelta(hours=24))
-        assert coordinator.is_auto_update_enabled() is DEFAULT_AUTO_UPDATE
-        assert coordinator.is_cdn_enabled() is DEFAULT_USE_CDN
+        return BlueprintUpdateCoordinator(hass, cast(Any, entry), interval)
 
 
 def get_schema_default(schema: vol.Schema, key_name: str) -> Any:
