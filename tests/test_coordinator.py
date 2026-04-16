@@ -2631,8 +2631,16 @@ def test_hash_content_determinism(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_update_blueprint_cdn_gating(coordinator):
-    """Test that cdn_url is only passed to fetcher if enabled in config."""
+@pytest.mark.parametrize(
+    ("cdn_config", "expect_cdn"),
+    [
+        (True, True),
+        (False, False),
+        (None, True),
+    ],
+)
+async def test_async_update_blueprint_cdn_gating(coordinator, cdn_config, expect_cdn):
+    """Test that cdn_url is only passed to fetcher based on config gating."""
     path = "/config/blueprints/test.yaml"
     info = {
         "name": "Test",
@@ -2643,11 +2651,15 @@ async def test_async_update_blueprint_cdn_gating(coordinator):
     }
     coordinator.data = {path: info}
 
+    if cdn_config is None:
+        coordinator.config_entry.options = MappingProxyType({})
+    else:
+        coordinator.config_entry.options = MappingProxyType({CONF_USE_CDN: cdn_config})
+
     mock_session = MagicMock(spec=httpx.AsyncClient)
     results_to_notify = []
     updated_domains = set()
 
-    coordinator.config_entry.options = MappingProxyType({CONF_USE_CDN: True})
     with patch.object(
         coordinator, "_async_fetch_with_cdn_fallback", AsyncMock(return_value=("cont", "etag"))
     ) as mock_fetch:
@@ -2656,33 +2668,14 @@ async def test_async_update_blueprint_cdn_gating(coordinator):
         )
         _args, _kwargs = mock_fetch.call_args
         cdn_url_arg = _args[3]
-        assert cdn_url_arg is not None
-        parsed = urlparse(cdn_url_arg)
-        assert parsed.netloc == DOMAIN_JSDELIVR
-        assert parsed.scheme == "https"
 
-    coordinator.config_entry.options = MappingProxyType({CONF_USE_CDN: False})
-    with patch.object(
-        coordinator, "_async_fetch_with_cdn_fallback", AsyncMock(return_value=("cont", "etag"))
-    ) as mock_fetch:
-        await coordinator._async_update_blueprint_in_place(
-            mock_session, path, info, results_to_notify, updated_domains
-        )
-        _args, _kwargs = mock_fetch.call_args
-        cdn_url_arg = _args[3]
-        assert cdn_url_arg is None
-
-    coordinator.config_entry.options = MappingProxyType({})
-    with patch.object(
-        coordinator, "_async_fetch_with_cdn_fallback", AsyncMock(return_value=("cont", "etag"))
-    ) as mock_fetch:
-        await coordinator._async_update_blueprint_in_place(
-            mock_session, path, info, results_to_notify, updated_domains
-        )
-        _args, _kwargs = mock_fetch.call_args
-        cdn_url_arg = _args[3]
-        assert cdn_url_arg is not None
-        assert urlparse(cdn_url_arg).netloc == DOMAIN_JSDELIVR
+        if expect_cdn:
+            assert cdn_url_arg is not None
+            parsed = urlparse(cdn_url_arg)
+            assert parsed.netloc == DOMAIN_JSDELIVR
+            assert parsed.scheme == "https"
+        else:
+            assert cdn_url_arg is None
 
 
 def test_update_error_state_clears_state_and_keeps_etag(coordinator):
@@ -2742,83 +2735,49 @@ def test_update_error_state_clears_state_and_etag(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_update_blueprint_unsafe_url_error(coordinator):
-    """Test that _async_update_blueprint_in_place handles unsafe URLs correctly."""
-    path = "unsafe.yaml"
-    info = {"source_url": "https://malicious.com/exploit.yaml", "name": "Unsafe"}
-
-    coordinator._is_safe_url = AsyncMock(return_value=False)
-    coordinator.data[path] = {"remote_hash": "old", "etag": "old-etag"}
-
-    await coordinator._async_update_blueprint_in_place(
-        MagicMock(spec=httpx.AsyncClient), path, info, [], set()
-    )
-
-    entry = coordinator.data[path]
-    assert entry["last_error"].startswith("unsafe_url|")
-    assert entry["etag"] is None
-    assert entry["updatable"] is False
-
-
-@pytest.mark.asyncio
-async def test_async_update_blueprint_fetch_error(coordinator):
-    """Test that _async_update_blueprint_in_place handles fetch errors correctly."""
-    path = "fetch_error.yaml"
-    info = {"source_url": "https://raw.githubusercontent.com/u/r/b/p.yaml", "name": "Fetch"}
-
-    coordinator._async_fetch_with_cdn_fallback = AsyncMock(
-        side_effect=httpx.HTTPError("Network down")
-    )
-    coordinator.data[path] = {"remote_hash": "old", "updatable": True}
-
-    await coordinator._async_update_blueprint_in_place(
-        MagicMock(spec=httpx.AsyncClient), path, info, [], set()
-    )
-
-    entry = coordinator.data[path]
-    assert entry["last_error"].startswith("fetch_error|")
-    assert entry["updatable"] is False
-
-
-@pytest.mark.asyncio
-async def test_async_update_blueprint_empty_content_error(coordinator):
-    """Test that _async_update_blueprint_in_place handles empty content correctly."""
-    path = "empty.yaml"
-    info = {"source_url": "https://raw.githubusercontent.com/u/r/b/p.yaml", "name": "Empty"}
-
-    coordinator._async_fetch_with_cdn_fallback = AsyncMock(return_value=("", "new-etag"))
+@pytest.mark.parametrize(
+    "error_case", ["unsafe_url", "fetch_error", "empty_content", "processing_error"]
+)
+async def test_async_update_blueprint_failure_paths(coordinator, error_case):
+    """Test that _async_update_blueprint_in_place handles failure paths correctly."""
+    path = f"test_{error_case}.yaml"
+    info = {
+        "source_url": "https://raw.githubusercontent.com/u/r/b/p.yaml",
+        "name": f"Error {error_case}",
+    }
     coordinator.data[path] = {
         "remote_hash": "old",
         "etag": "old-etag",
         "invalid_remote_hash": "stale",
     }
 
-    await coordinator._async_update_blueprint_in_place(
-        MagicMock(spec=httpx.AsyncClient), path, info, [], set()
-    )
-
-    entry = coordinator.data[path]
-    assert entry["last_error"].startswith("empty_content|")
-    assert entry["etag"] is None
-    assert entry["invalid_remote_hash"] is None
-
-
-@pytest.mark.asyncio
-async def test_async_update_blueprint_processing_error(coordinator):
-    """Test that _async_update_blueprint_in_place handles processing errors correctly."""
-    path = "processing.yaml"
-    info = {"source_url": "https://raw.githubusercontent.com/u/r/b/p.yaml", "name": "Proc"}
-
-    coordinator._async_fetch_with_cdn_fallback = AsyncMock(
-        return_value=("valid content", "new-etag")
-    )
-    coordinator._process_blueprint_content = AsyncMock(side_effect=ValueError("Invalid structure"))
-    coordinator.data[path] = {"remote_hash": "old"}
+    if error_case == "unsafe_url":
+        info["source_url"] = "https://malicious.com/exploit.yaml"
+        coordinator._is_safe_url = AsyncMock(return_value=False)
+    elif error_case == "fetch_error":
+        coordinator._async_fetch_with_cdn_fallback = AsyncMock(
+            side_effect=httpx.HTTPError("Network down")
+        )
+    elif error_case == "empty_content":
+        coordinator._async_fetch_with_cdn_fallback = AsyncMock(return_value=("", "new-etag"))
+    elif error_case == "processing_error":
+        coordinator._async_fetch_with_cdn_fallback = AsyncMock(
+            return_value=("valid content", "new-etag")
+        )
+        coordinator._process_blueprint_content = AsyncMock(
+            side_effect=ValueError("Invalid structure")
+        )
 
     await coordinator._async_update_blueprint_in_place(
         MagicMock(spec=httpx.AsyncClient), path, info, [], set()
     )
 
     entry = coordinator.data[path]
-    assert entry["last_error"].startswith("processing_error|")
-    assert entry["updatable"] is False
+    assert entry["last_error"].startswith(f"{error_case}|")
+
+    if error_case in ("unsafe_url", "empty_content"):
+        assert entry["etag"] is None
+    if error_case == "empty_content":
+        assert entry["invalid_remote_hash"] is None
+    if error_case != "empty_content":
+        assert entry["updatable"] is False
