@@ -5,7 +5,9 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+import voluptuous as vol
 
+from custom_components.blueprints_updater.config_flow import _get_config_schema
 from custom_components.blueprints_updater.const import (
     CONF_AUTO_UPDATE,
     CONF_USE_CDN,
@@ -73,3 +75,45 @@ async def test_config_helpers_no_entry(hass):
         coordinator = BlueprintUpdateCoordinator(hass, cast(Any, None), timedelta(hours=24))
         assert coordinator.is_auto_update_enabled() is DEFAULT_AUTO_UPDATE
         assert coordinator.is_cdn_enabled() is DEFAULT_USE_CDN
+
+
+def get_schema_default(schema: vol.Schema, key_name: str) -> Any:
+    """Safely extract default value from a Voluptuous schema for a given key string."""
+    for key, _ in schema.schema.items():
+        k_any: Any = key
+        name = k_any if isinstance(k_any, str) else str(getattr(k_any, "schema", ""))
+        if name == key_name:
+            if not hasattr(k_any, "default"):
+                return None
+            attr_name = "default"
+            default = getattr(k_any, attr_name)
+            return default() if callable(default) else default
+    raise KeyError(f"Key {key_name} not found in schema")
+
+
+@pytest.mark.asyncio
+async def test_get_config_schema_entry_precedence(hass):
+    """Test that _get_config_schema uses options over data for defaults."""
+    entry = MagicMock()
+    entry.data = {
+        CONF_AUTO_UPDATE: False,
+        CONF_USE_CDN: False,
+    }
+    entry.options = {
+        CONF_AUTO_UPDATE: True,
+        CONF_USE_CDN: True,
+    }
+
+    schema = _get_config_schema(entry, [])
+
+    assert get_schema_default(schema, CONF_AUTO_UPDATE) is True
+    assert get_schema_default(schema, CONF_USE_CDN) is True
+
+
+@pytest.mark.asyncio
+async def test_get_config_schema_initial_defaults(hass):
+    """Test that _get_config_schema falls back to system defaults for initial config."""
+    schema = _get_config_schema({}, [])
+
+    assert get_schema_default(schema, CONF_AUTO_UPDATE) is DEFAULT_AUTO_UPDATE
+    assert get_schema_default(schema, CONF_USE_CDN) is DEFAULT_USE_CDN

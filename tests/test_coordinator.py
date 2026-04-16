@@ -2671,3 +2671,15 @@ async def test_async_update_blueprint_cdn_gating(coordinator):
         _args, _kwargs = mock_fetch.call_args
         cdn_url_arg = _args[3]
         assert cdn_url_arg is None
+
+    coordinator.config_entry.options = MappingProxyType({})
+    with patch.object(
+        coordinator, "_async_fetch_with_cdn_fallback", AsyncMock(return_value=("cont", "etag"))
+    ) as mock_fetch:
+        await coordinator._async_update_blueprint_in_place(
+            mock_session, path, info, results_to_notify, updated_domains
+        )
+        _args, _kwargs = mock_fetch.call_args
+        cdn_url_arg = _args[3]
+        assert cdn_url_arg is not None
+        assert urlparse(cdn_url_arg).netloc == DOMAIN_JSDELIVR

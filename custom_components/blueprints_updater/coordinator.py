@@ -1327,10 +1327,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return None
 
         session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
-        cdn_url = self._get_cdn_url(url) if self.is_cdn_enabled() else None
+        url = info.get("source_url", "")
+        normalized_url = self._normalize_url(url)
+        cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
         remote_content, _ = await self._async_fetch_with_cdn_fallback(
-            session, path, url, cdn_url, stored_etag=None, stored_remote_hash=None, force=True
+            session,
+            path,
+            normalized_url,
+            cdn_url,
+            stored_etag=None,
+            stored_remote_hash=None,
+            force=True,
         )
 
         if not remote_content:
@@ -1430,7 +1438,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not self.config_entry:
             return DEFAULT_USE_CDN
 
-        return self.config_entry.options.get(CONF_USE_CDN, DEFAULT_USE_CDN)
+        return self.config_entry.options.get(
+            CONF_USE_CDN,
+            self.config_entry.data.get(CONF_USE_CDN, DEFAULT_USE_CDN),
+        )
 
     def _update_error_state(
         self, path: str, error_type: str, detail: Any, clear_etag: bool = False
@@ -1489,7 +1500,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 remote_content, new_etag = await self._async_fetch_content(
                     session, cdn_url, etag=etag, force=force
                 )
-                if remote_content is not None or new_etag is not None:
+                if remote_content or (remote_content is None and new_etag is not None):
                     return remote_content, new_etag
             except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
                 _LOGGER.warning(
@@ -1836,7 +1847,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
 
         if (
-            parsed.netloc == DOMAIN_HA_FORUM
+            parsed.hostname == DOMAIN_HA_FORUM
             and "/t/" in parsed.path
             and (match := RE_FORUM_TOPIC_ID.search(parsed.path))
         ):

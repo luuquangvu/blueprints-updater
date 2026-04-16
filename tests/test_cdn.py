@@ -226,3 +226,45 @@ async def test_async_fetch_with_cdn_fallback_force_ignores_etag_and_hash(coordin
     coordinator._async_fetch_content.assert_awaited_once_with(
         session, cdn_url, etag=None, force=True
     )
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_with_cdn_fallback_silent_failure(coordinator):
+    """Test fallback when CDN returns (None, None) silently."""
+    session = MagicMock(spec=httpx.AsyncClient)
+    normalized_url = "https://raw.githubusercontent.com/u/r/b/p.yaml"
+    cdn_url = "https://cdn.jsdelivr.net/gh/u/r@b/p.yaml"
+
+    coordinator._async_fetch_content = AsyncMock(
+        side_effect=[(None, None), ("orig_content", "orig_etag")]
+    )
+
+    content, etag = await coordinator._async_fetch_with_cdn_fallback(
+        session, "path", normalized_url, cdn_url, None, None, False
+    )
+
+    assert content == "orig_content"
+    assert etag == "orig_etag"
+    assert coordinator._async_fetch_content.call_count == 2
+    args1, _ = coordinator._async_fetch_content.call_args_list[1]
+    assert args1[1] == normalized_url
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_with_cdn_fallback_empty_content(coordinator):
+    """Test fallback when CDN returns empty content "" (even with an ETag)."""
+    session = MagicMock(spec=httpx.AsyncClient)
+    normalized_url = "https://raw.githubusercontent.com/u/r/b/p.yaml"
+    cdn_url = "https://cdn.jsdelivr.net/gh/u/r@b/p.yaml"
+
+    coordinator._async_fetch_content = AsyncMock(
+        side_effect=[("", "cdn_etag"), ("orig_content", "orig_etag")]
+    )
+
+    content, etag = await coordinator._async_fetch_with_cdn_fallback(
+        session, "path", normalized_url, cdn_url, None, None, False
+    )
+
+    assert content == "orig_content"
+    assert etag == "orig_etag"
+    assert coordinator._async_fetch_content.call_count == 2

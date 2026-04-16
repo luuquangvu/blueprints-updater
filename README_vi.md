@@ -63,7 +63,7 @@
     - **Cập nhật tất cả (Update All)**: Theo dõi tất cả blueprint tìm thấy trong thư mục của bạn.
     - **Danh sách trắng (Whitelist)**: Chỉ theo dõi các blueprint bạn chọn cụ thể từ danh sách.
     - **Danh sách đen (Blacklist)**: Theo dõi tất cả các blueprint _ngoại trừ_ những cái bạn chọn.
-6.  **Sử dụng jsDelivr CDN**: (Tùy chọn, mặc định là bật) Bật tính năng này để sử dụng CDN jsDelivr khi tải các blueprint từ GitHub giúp tăng hiệu suất. Nếu CDN không thể truy cập hoặc trả về lỗi, hệ thống sẽ tự động sử dụng link GitHub gốc để đảm bảo việc cập nhật thành công.
+6.  **Sử dụng jsDelivr CDN**: (Tùy chọn, mặc định là bật) Bật tính năng này để sử dụng CDN jsDelivr khi tải các blueprint từ GitHub, giúp tăng hiệu suất. Nếu CDN không thể truy cập hoặc trả về lỗi, hệ thống sẽ tự động sử dụng link GitHub gốc để đảm bảo việc cập nhật thành công.
 7.  Sau khi thêm, tích hợp sẽ quét các blueprint của bạn. Nếu tìm thấy bản cập nhật, chúng sẽ xuất hiện dưới dạng thực thể `update` trong bảng điều khiển của bạn.
 
 ### Sao lưu & Phục hồi (Backup & Restore)
