@@ -1387,7 +1387,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             try:
                 remote_content = await self.async_fetch_diff_content(path)
             except Exception as err:
-                _LOGGER.warning("Context fetch failed for diff at %s: %s", path, err)
+                _LOGGER.warning(
+                    "Context fetch failed for diff at %s: %s",
+                    path,
+                    _sanitize_error_detail(str(err)),
+                )
                 return None
 
         if not remote_content:
@@ -1509,7 +1513,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 _LOGGER.warning(
                     "CDN fetch failed for %s; falling back to original source: %s",
                     path,
-                    err,
+                    _sanitize_error_detail(str(err)),
                 )
 
         return await self._async_fetch_content(session, normalized_url, etag=etag, force=force)
@@ -1543,6 +1547,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return
 
         normalized_url = self._normalize_url(source_url)
+        if not normalized_url:
+            return
+
         cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
         stored_etag = self.data.get(path, {}).get("etag")
