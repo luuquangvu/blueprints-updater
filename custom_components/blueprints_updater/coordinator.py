@@ -1810,7 +1810,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         new_etag = response.headers.get("ETag")
         parsed_url = urlparse(current_url)
-        if DOMAIN_HA_FORUM in parsed_url.netloc:
+        if parsed_url.hostname == DOMAIN_HA_FORUM:
             try:
                 json_data = response.json()
             except ValueError as err:
