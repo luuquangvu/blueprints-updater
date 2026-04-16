@@ -1317,18 +1317,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return None
 
         source_url = info.get("source_url", "")
-        url = self._normalize_url(source_url)
-        if not url:
+        normalized_url = self._normalize_url(source_url)
+        if not normalized_url:
             return None
 
-        if not await self._is_safe_url(url):
-            _LOGGER.warning("Blocking diff fetch from unsafe URL: %s", url)
+        if not await self._is_safe_url(normalized_url):
+            _LOGGER.warning("Blocking diff fetch from unsafe URL: %s", normalized_url)
             info["last_error"] = "unsafe_url"
             return None
 
         session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
-        url = info.get("source_url", "")
-        normalized_url = self._normalize_url(url)
         cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
         remote_content, _ = await self._async_fetch_with_cdn_fallback(

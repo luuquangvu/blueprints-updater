@@ -44,6 +44,9 @@ def bind_coordinator_cdn_methods(coordinator: MagicMock) -> None:
     coordinator._get_cdn_url = BlueprintUpdateCoordinator._get_cdn_url
     coordinator._ensure_source_url = BlueprintUpdateCoordinator._ensure_source_url
     coordinator._normalize_url = BlueprintUpdateCoordinator._normalize_url
+    coordinator.is_cdn_enabled = BlueprintUpdateCoordinator.is_cdn_enabled.__get__(
+        coordinator, BlueprintUpdateCoordinator
+    )
 
 
 @pytest.mark.asyncio
