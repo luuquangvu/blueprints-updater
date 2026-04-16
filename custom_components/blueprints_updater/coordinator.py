@@ -11,6 +11,7 @@ import ipaddress
 import logging
 import os
 import random
+import re
 import shutil
 import socket
 import textwrap
@@ -82,7 +83,8 @@ def _sanitize_error_detail(detail: str, max_length: int = 120) -> str:
         The sanitized and potentially truncated error string.
 
     """
-    cleaned = detail.replace("|", "/")
+    cleaned = re.sub(r"https?://\S+", "(redacted URL)", detail)
+    cleaned = cleaned.replace("|", "/")
     return textwrap.shorten(cleaned, width=max_length, placeholder="...")
 
 
@@ -1626,7 +1628,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "Auto-update enabled for '%s', fetching on-demand",
                 info["name"],
             )
-            return await self._async_fetch_content(session, normalized_url, force=True)
+            cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
+            return await self._async_fetch_with_cdn_fallback(
+                session,
+                path,
+                normalized_url,
+                cdn_url,
+                stored_etag=None,
+                stored_remote_hash=None,
+                force=True,
+            )
 
         return None, new_etag
 

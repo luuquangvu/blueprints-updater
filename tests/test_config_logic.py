@@ -66,6 +66,28 @@ async def test_is_cdn_enabled_config_logic(hass, options, expected):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({CONF_USE_CDN: False}, False),
+        ({CONF_USE_CDN: True}, True),
+    ],
+)
+async def test_is_cdn_enabled_fallback_logic(hass, data, expected):
+    """Test is_cdn_enabled falls back to data when options are missing it."""
+    entry = MagicMock()
+    entry.data = data
+    entry.options = {}
+
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
+        return_value=None,
+    ):
+        coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+        assert coordinator.is_cdn_enabled() is expected
+
+
+@pytest.mark.asyncio
 async def test_config_helpers_no_entry(hass):
     """Test config helpers handle missing config_entry."""
     with patch(
@@ -108,6 +130,22 @@ async def test_get_config_schema_entry_precedence(hass):
 
     assert get_schema_default(schema, CONF_AUTO_UPDATE) is True
     assert get_schema_default(schema, CONF_USE_CDN) is True
+
+
+@pytest.mark.asyncio
+async def test_get_config_schema_fallback_to_data(hass):
+    """Test that _get_config_schema falls back to data when options are missing."""
+    entry = MagicMock()
+    entry.data = {
+        CONF_AUTO_UPDATE: False,
+        CONF_USE_CDN: False,
+    }
+    entry.options = {}
+
+    schema = _get_config_schema(entry, [])
+
+    assert get_schema_default(schema, CONF_AUTO_UPDATE) is False
+    assert get_schema_default(schema, CONF_USE_CDN) is False
 
 
 @pytest.mark.asyncio

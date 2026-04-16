@@ -439,7 +439,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
 
     assert "fetch_error" in coordinator.data[path]["last_error"]
     assert "Invalid JSON response" in coordinator.data[path]["last_error"]
-    assert "123.json" in coordinator.data[path]["last_error"]
+    assert "(redacted URL)" in coordinator.data[path]["last_error"]
     assert coordinator.data[path]["updatable"] is False
 
 

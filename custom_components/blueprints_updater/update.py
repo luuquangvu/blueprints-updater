@@ -159,10 +159,13 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
     @cached_property
     def auto_update(self) -> bool:
-        """Calculate auto-update preference for the blueprint.
+        """Return auto-update preference for the blueprint.
+
+        Resolved via the coordinator helper logic (centralized config preference)
+        rather than direct entity-level option reads.
 
         Returns:
-            Boolean indicating auto-update preference from config options.
+            Boolean indicating auto-update preference.
         """
         return self.coordinator.is_auto_update_enabled()
 
