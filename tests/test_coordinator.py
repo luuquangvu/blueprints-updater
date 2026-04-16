@@ -2683,3 +2683,59 @@ async def test_async_update_blueprint_cdn_gating(coordinator):
         cdn_url_arg = _args[3]
         assert cdn_url_arg is not None
         assert urlparse(cdn_url_arg).netloc == DOMAIN_JSDELIVR
+
+
+def test_update_error_state_clears_state_and_keeps_etag(coordinator):
+    """Test that _update_error_state clears core state but preserves ETag when clear_etag=False."""
+    path = "test_blueprint.yaml"
+    coordinator.data[path] = {
+        "remote_hash": "old-hash",
+        "remote_content": "old-content",
+        "updatable": True,
+        "etag": "etag-123",
+        "invalid_remote_hash": "invalid-hash",
+    }
+
+    coordinator._update_error_state(
+        path,
+        error_type="download_error",
+        detail="Failed to fetch content\nNewlines should be sanitized",
+        clear_etag=False,
+    )
+
+    entry = coordinator.data[path]
+    assert entry["remote_hash"] is None
+    assert entry["remote_content"] is None
+    assert entry["updatable"] is False
+    assert entry["invalid_remote_hash"] is None
+    assert entry["etag"] == "etag-123"
+    assert entry["last_error"].startswith("download_error|")
+    assert "Failed to fetch content" in entry["last_error"]
+    assert "\n" not in entry["last_error"]
+
+
+def test_update_error_state_clears_state_and_etag(coordinator):
+    """Test that _update_error_state clears core state and ETag when clear_etag=True."""
+    path = "test_blueprint.yaml"
+    coordinator.data[path] = {
+        "remote_hash": "old-hash",
+        "remote_content": "old-content",
+        "updatable": True,
+        "etag": "etag-123",
+        "invalid_remote_hash": "invalid-hash",
+    }
+
+    coordinator._update_error_state(
+        path,
+        error_type="parse_error",
+        detail="Invalid YAML found",
+        clear_etag=True,
+    )
+
+    entry = coordinator.data[path]
+    assert entry["remote_hash"] is None
+    assert entry["remote_content"] is None
+    assert entry["updatable"] is False
+    assert entry["etag"] is None
+    assert entry["invalid_remote_hash"] is None
+    assert entry["last_error"] == "parse_error|Invalid YAML found"

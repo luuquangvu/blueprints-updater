@@ -1461,6 +1461,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "remote_content": None,
                 "updatable": False,
                 "last_error": f"{error_type}|{_sanitize_error_detail(str(detail))}",
+                "invalid_remote_hash": None,
             }
             if clear_etag:
                 update_data["etag"] = None
@@ -1570,8 +1571,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if remote_content == "":
             self._update_error_state(path, "empty_content", "", clear_etag=True)
-            if self.data and path in self.data:
-                self.data[path]["invalid_remote_hash"] = None
             return
 
         try:
@@ -1867,14 +1866,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _get_cdn_url(url: str) -> str | None:
-        """Convert a GitHub Raw URL to a jsDelivr CDN URL.
+        """Convert a GitHub URL to a jsDelivr CDN URL.
 
-        This method expects a normalized GitHub URL. Any path segments that were
-        already URL-encoded in the source (e.g., spaces as %20) are preserved to
-        ensure the generated CDN URL remains valid and links to the correct file.
+        This method supports both raw.githubusercontent.com and standard github.com
+        URLs. Any path segments that were already URL-encoded in the source (e.g.,
+        spaces as %20) are preserved to ensure the generated CDN URL remains
+        valid and links to the correct file.
 
         Args:
-            url: The normalized raw GitHub URL.
+            url: The GitHub source URL (preferably normalized).
 
         Returns:
             The jsDelivr CDN URL or None if not applicable.
