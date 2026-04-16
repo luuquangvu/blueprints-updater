@@ -27,6 +27,9 @@ from .const import (
     CONF_MAX_BACKUPS,
     CONF_SELECTED_BLUEPRINTS,
     CONF_UPDATE_INTERVAL,
+    CONF_USE_CDN,
+    DEFAULT_AUTO_UPDATE,
+    DEFAULT_USE_CDN,
     DOMAIN,
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
@@ -82,31 +85,27 @@ def _get_config_schema(
         A voluptuous Schema object.
 
     """
-    auto_update = False
-    filter_mode = FILTER_MODE_ALL
-    selected_blueprints = []
-
+    current_config: dict[str, Any] = {}
     if config is not None:
         if hasattr(config, "options"):
-            auto_update = config.options.get(
-                CONF_AUTO_UPDATE, config.data.get(CONF_AUTO_UPDATE, False)
-            )
-            filter_mode = config.options.get(
-                CONF_FILTER_MODE, config.data.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
-            )
-            selected_blueprints = config.options.get(
-                CONF_SELECTED_BLUEPRINTS, config.data.get(CONF_SELECTED_BLUEPRINTS, [])
-            )
+            current_config = {**config.data, **config.options}
         elif isinstance(config, dict):
-            auto_update = config.get(CONF_AUTO_UPDATE, False)
-            filter_mode = config.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
-            selected_blueprints = config.get(CONF_SELECTED_BLUEPRINTS, [])
+            current_config = config
+
+    auto_update = current_config.get(CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
+    use_cdn = current_config.get(CONF_USE_CDN, DEFAULT_USE_CDN)
+    filter_mode = current_config.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
+    selected_blueprints = current_config.get(CONF_SELECTED_BLUEPRINTS, [])
 
     return vol.Schema(
         {
             vol.Required(
                 CONF_AUTO_UPDATE,
                 default=auto_update,
+            ): cv.boolean,
+            vol.Required(
+                CONF_USE_CDN,
+                default=use_cdn,
             ): cv.boolean,
             vol.Required(
                 CONF_UPDATE_INTERVAL,

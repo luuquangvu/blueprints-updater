@@ -6,6 +6,7 @@
         "description": "Bạn có muốn thiết lập Blueprints Updater? Nó sẽ quét các blueprint cục bộ của bạn và tìm bản cập nhật.",
         "data": {
           "auto_update": "Tự động cập nhật",
+          "use_cdn": "Sử dụng jsDelivr CDN cho GitHub",
           "update_interval": "Khoảng thời gian cập nhật (giờ)",
           "filter_mode": "Chế độ lọc",
           "selected_blueprints": "Blueprints (không bắt buộc)",
@@ -24,6 +25,7 @@
         "description": "Cấu hình các tùy chọn và cài đặt cho Blueprints Updater.",
         "data": {
           "auto_update": "Tự động cập nhật",
+          "use_cdn": "Sử dụng jsDelivr CDN cho GitHub",
           "update_interval": "Khoảng thời gian cập nhật (giờ)",
           "filter_mode": "Chế độ lọc",
           "selected_blueprints": "Blueprints đã chọn",

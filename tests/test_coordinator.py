@@ -9,18 +9,16 @@ from datetime import timedelta
 from types import MappingProxyType
 from typing import Any, cast
 from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
+from urllib.parse import urlparse
 
 import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import yaml as yaml_util
-from protocols import (
-    BlueprintCoordinatorInternal,
-    BlueprintCoordinatorProtocol,
-    BlueprintCoordinatorPublic,
-)
 
 from custom_components.blueprints_updater.const import (
+    CONF_USE_CDN,
+    DOMAIN_JSDELIVR,
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
@@ -33,6 +31,12 @@ from custom_components.blueprints_updater.const import (
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
     GitDiffResult,
+)
+
+from .protocols import (
+    BlueprintCoordinatorInternal,
+    BlueprintCoordinatorProtocol,
+    BlueprintCoordinatorPublic,
 )
 
 
@@ -435,7 +439,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
 
     assert "fetch_error" in coordinator.data[path]["last_error"]
     assert "Invalid JSON response" in coordinator.data[path]["last_error"]
-    assert "123.json" in coordinator.data[path]["last_error"]
+    assert "(redacted URL)" in coordinator.data[path]["last_error"]
     assert coordinator.data[path]["updatable"] is False
 
 
@@ -1805,11 +1809,10 @@ async def test_async_update_blueprint_in_place_unsafe_url(coordinator):
     path = "/config/blueprints/test.yaml"
     info = {"source_url": "http://192.168.1.1/exploit", "domain": "automation"}
 
+    coordinator.data = {path: info}
     with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
         await coordinator._async_update_blueprint_in_place(MagicMock(), path, info, [], set())
-        mock_logger.warning.assert_called_with(
-            "Blocking update from untrusted URL: %s", "http://192.168.1.1/exploit"
-        )
+        mock_logger.warning.assert_called_with("Blocking update from untrusted URL: (redacted URL)")
 
 
 @pytest.mark.asyncio
@@ -2624,3 +2627,160 @@ def test_hash_content_determinism(coordinator):
     assert hash1 == hash2
     assert "\ufeff" not in normalized
     assert "\r\n" not in normalized
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cdn_config", "expect_cdn"),
+    [
+        (True, True),
+        (False, False),
+        (None, True),
+    ],
+)
+async def test_async_update_blueprint_cdn_gating(coordinator, cdn_config, expect_cdn):
+    """Test that cdn_url is only passed to fetcher based on config gating."""
+    path = "/config/blueprints/test.yaml"
+    info = {
+        "name": "Test",
+        "rel_path": "test.yaml",
+        "source_url": "https://github.com/user/repo/blob/main/test.yaml",
+        "domain": "automation",
+        "local_hash": "old_hash",
+    }
+    coordinator.data = {path: info}
+
+    if cdn_config is None:
+        coordinator.config_entry.options = MappingProxyType({})
+    else:
+        coordinator.config_entry.options = MappingProxyType({CONF_USE_CDN: cdn_config})
+
+    mock_session = MagicMock(spec=httpx.AsyncClient)
+    results_to_notify = []
+    updated_domains = set()
+
+    with patch.object(
+        coordinator, "_async_fetch_with_cdn_fallback", AsyncMock(return_value=("cont", "etag"))
+    ) as mock_fetch:
+        await coordinator._async_update_blueprint_in_place(
+            mock_session, path, info, results_to_notify, updated_domains
+        )
+        _args, _kwargs = mock_fetch.call_args
+        cdn_url_arg = _args[3]
+
+        if expect_cdn:
+            assert cdn_url_arg is not None
+            parsed = urlparse(cdn_url_arg)
+            assert parsed.hostname == DOMAIN_JSDELIVR
+            assert parsed.scheme == "https"
+        else:
+            assert cdn_url_arg is None
+
+
+def test_update_error_state_clears_state_and_keeps_etag(coordinator):
+    """Test that _update_error_state clears core state but preserves ETag when clear_etag=False."""
+    path = "test_blueprint.yaml"
+    coordinator.data[path] = {
+        "remote_hash": "old-hash",
+        "remote_content": "old-content",
+        "updatable": True,
+        "etag": "etag-123",
+        "invalid_remote_hash": "invalid-hash",
+    }
+
+    coordinator._update_error_state(
+        path,
+        error_type="download_error",
+        detail="Failed to fetch content\nNewlines should be sanitized",
+        clear_etag=False,
+    )
+
+    entry = coordinator.data[path]
+    assert entry["remote_hash"] is None
+    assert entry["remote_content"] is None
+    assert entry["updatable"] is False
+    assert entry["invalid_remote_hash"] is None
+    assert entry["etag"] == "etag-123"
+    assert entry["last_error"].startswith("download_error|")
+    assert "Failed to fetch content" in entry["last_error"]
+    assert "\n" not in entry["last_error"]
+
+
+def test_update_error_state_clears_state_and_etag(coordinator):
+    """Test that _update_error_state clears core state and ETag when clear_etag=True."""
+    path = "test_blueprint.yaml"
+    coordinator.data[path] = {
+        "remote_hash": "old-hash",
+        "remote_content": "old-content",
+        "updatable": True,
+        "etag": "etag-123",
+        "invalid_remote_hash": "invalid-hash",
+    }
+
+    coordinator._update_error_state(
+        path,
+        error_type="parse_error",
+        detail="Invalid YAML found",
+        clear_etag=True,
+    )
+
+    entry = coordinator.data[path]
+    assert entry["remote_hash"] is None
+    assert entry["remote_content"] is None
+    assert entry["updatable"] is False
+    assert entry["etag"] is None
+    assert entry["invalid_remote_hash"] is None
+    assert entry["last_error"] == "parse_error|Invalid YAML found"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_case", ["unsafe_url", "fetch_error", "empty_content", "processing_error"]
+)
+async def test_async_update_blueprint_failure_paths(coordinator, error_case):
+    """Test that _async_update_blueprint_in_place handles failure paths correctly."""
+    path = f"test_{error_case}.yaml"
+    info = {
+        "source_url": "https://raw.githubusercontent.com/u/r/b/p.yaml",
+        "name": f"Error {error_case}",
+    }
+    coordinator.data[path] = {
+        "remote_hash": "old",
+        "etag": "old-etag",
+        "invalid_remote_hash": "stale",
+    }
+
+    if error_case == "unsafe_url":
+        info["source_url"] = "https://malicious.com/exploit.yaml"
+        coordinator._is_safe_url = AsyncMock(return_value=False)
+    elif error_case == "fetch_error":
+        coordinator._async_fetch_with_cdn_fallback = AsyncMock(
+            side_effect=httpx.HTTPError("Network down")
+        )
+    elif error_case == "empty_content":
+        coordinator._async_fetch_with_cdn_fallback = AsyncMock(return_value=("", "new-etag"))
+    elif error_case == "processing_error":
+        coordinator._async_fetch_with_cdn_fallback = AsyncMock(
+            return_value=("valid content", "new-etag")
+        )
+        coordinator._process_blueprint_content = AsyncMock(
+            side_effect=ValueError("Invalid structure")
+        )
+
+    await coordinator._async_update_blueprint_in_place(
+        MagicMock(spec=httpx.AsyncClient), path, info, [], set()
+    )
+
+    entry = coordinator.data[path]
+    assert entry["last_error"].startswith(f"{error_case}|")
+    assert entry["updatable"] is False
+    assert entry["remote_hash"] is None
+    assert entry["remote_content"] is None
+
+    if error_case == "fetch_error":
+        assert entry["etag"] == "old-etag"
+    else:
+        assert entry["etag"] is None
+
+    if error_case == "empty_content":
+        assert entry["invalid_remote_hash"] is None

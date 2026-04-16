@@ -22,7 +22,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_AUTO_UPDATE, DOMAIN
+from .const import DOMAIN
 from .coordinator import BlueprintUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -159,14 +159,15 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
     @cached_property
     def auto_update(self) -> bool:
-        """Return True if auto update is enabled for this entity.
+        """Return auto-update preference for the blueprint.
+
+        Resolved via the coordinator helper logic (centralized config preference)
+        rather than direct entity-level option reads.
 
         Returns:
-            Boolean indicating auto-update preference from config options.
+            Boolean indicating auto-update preference.
         """
-        if not self.coordinator.config_entry:
-            return False
-        return self.coordinator.config_entry.options.get(CONF_AUTO_UPDATE, False)
+        return self.coordinator.is_auto_update_enabled()
 
     @cached_property
     def installed_version(self) -> str | None:

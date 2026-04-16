@@ -22,6 +22,7 @@
 - **Set It and Forget It**: Automate your entire workflow. Enable auto-updates and let the system handle backups, downloads, and change notifications for you.
 - **Smart Change Detection**: Minimizes system overhead by using SHA256 hashing and ETag headers to pull data only when a genuine change is detected.
 - **Universal Source Compatibility**: Robustly handles blueprints from GitHub, GitHub Gist, and the Home Assistant Community Forum.
+- **High-Performance CDN Support**: Leverages the [jsDelivr](https://www.jsdelivr.com/) CDN for GitHub-hosted blueprints to maximize download speeds and reduce the impact of rate limiting. Features an intelligent fallback mechanism that automatically reverts to the original source in case of CDN unavailability.
 - **Pre-Update Impact Visibility**: See exactly how many Automations or Scripts use the blueprint before you update, ensuring full control over your smart home logic.
 - **Granular Tracking Control**: Fine-tune your experience by tracking all blueprints or targeting specific ones using flexible Whitelists and Blacklists.
 - **Instant, Restart-Free Reloads**: Automatically reloads relevant automation, script, or template domains after an update for immediate results without rebooting.
@@ -62,7 +63,8 @@
     - **Update All**: Tracks all blueprints found in your directory.
     - **Whitelist**: Only tracks blueprints you explicitly select from the list.
     - **Blacklist**: Tracks all blueprints _except_ the ones you select.
-6.  Once added, the integration will scan your blueprints. If updates are found, they will appear as `update` entities in your dashboard.
+6.  **Use jsDelivr CDN**: (Optional, default: Enabled) Optimizes your updates by fetching GitHub-hosted blueprints via the jsDelivr CDN. If the CDN is unreachable or encounters an error, the integration will seamlessly fall back to the original GitHub URL to ensure uninterrupted service.
+7.  Once added, the integration will scan your blueprints. If updates are found, they will appear as `update` entities in your dashboard.
 
 ### Backup & Restore
 

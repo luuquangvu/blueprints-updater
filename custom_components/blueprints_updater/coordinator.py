@@ -39,11 +39,15 @@ from .const import (
     CONF_AUTO_UPDATE,
     CONF_FILTER_MODE,
     CONF_SELECTED_BLUEPRINTS,
+    CONF_USE_CDN,
+    DEFAULT_AUTO_UPDATE,
+    DEFAULT_USE_CDN,
     DOMAIN,
     DOMAIN_GIST,
     DOMAIN_GITHUB,
     DOMAIN_GITHUB_RAW,
     DOMAIN_HA_FORUM,
+    DOMAIN_JSDELIVR,
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
@@ -56,6 +60,7 @@ from .const import (
     RE_FORUM_TOPIC_ID,
     RE_GIST_RAW,
     RE_GITHUB_BLOB,
+    RE_URL_REDACTION,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
     SPECIAL_USE_TLDS,
@@ -78,7 +83,8 @@ def _sanitize_error_detail(detail: str, max_length: int = 120) -> str:
         The sanitized and potentially truncated error string.
 
     """
-    cleaned = detail.replace("|", "/")
+    cleaned = RE_URL_REDACTION.sub("(redacted URL)", detail)
+    cleaned = cleaned.replace("|", "/")
     return textwrap.shorten(cleaned, width=max_length, placeholder="...")
 
 
@@ -1313,17 +1319,28 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return None
 
         source_url = info.get("source_url", "")
-        url = self._normalize_url(source_url)
-        if not url:
+        normalized_url = self._normalize_url(source_url)
+        if not normalized_url:
             return None
 
-        if not await self._is_safe_url(url):
-            _LOGGER.warning("Blocking diff fetch from unsafe URL: %s", url)
-            info["last_error"] = "unsafe_url"
+        if not await self._is_safe_url(normalized_url):
+            _LOGGER.warning("Blocking diff fetch from unsafe URL: (redacted URL)")
+            self._update_error_state(path, "unsafe_url", source_url)
             return None
 
         session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
-        remote_content, _ = await self._async_fetch_content(session, url, force=True)
+        cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
+
+        remote_content, _ = await self._async_fetch_with_cdn_fallback(
+            session,
+            path,
+            normalized_url,
+            cdn_url,
+            stored_etag=None,
+            stored_remote_hash=None,
+            force=True,
+        )
+
         if not remote_content:
             return None
 
@@ -1370,7 +1387,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             try:
                 remote_content = await self.async_fetch_diff_content(path)
             except Exception as err:
-                _LOGGER.warning("Context fetch failed for diff at %s: %s", path, err)
+                _LOGGER.warning(
+                    "Context fetch failed for diff at %s: %s",
+                    path,
+                    _sanitize_error_detail(str(err)),
+                )
                 return None
 
         if not remote_content:
@@ -1392,6 +1413,110 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
         self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "", is_semantic_sync)
         return GitDiffResult(diff_text=diff_text or "", is_semantic_sync=is_semantic_sync)
+
+    def is_auto_update_enabled(self) -> bool:
+        """Return whether auto-update is enabled.
+
+        Checks configuration options with fallback to internal data (legacy)
+        and finally the system default.
+
+        Returns:
+            Boolean indicating auto-update preference.
+
+        """
+        if not self.config_entry:
+            return DEFAULT_AUTO_UPDATE
+
+        return self.config_entry.options.get(
+            CONF_AUTO_UPDATE,
+            self.config_entry.data.get(CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE),
+        )
+
+    def is_cdn_enabled(self) -> bool:
+        """Return whether jsDelivr CDN usage is enabled.
+
+        Returns:
+            Boolean indicating CDN preference.
+
+        """
+        if not self.config_entry:
+            return DEFAULT_USE_CDN
+
+        return self.config_entry.options.get(
+            CONF_USE_CDN,
+            self.config_entry.data.get(CONF_USE_CDN, DEFAULT_USE_CDN),
+        )
+
+    def _update_error_state(
+        self, path: str, error_type: str, detail: Any, clear_etag: bool = False
+    ) -> None:
+        """Update the blueprint state with a specific error.
+
+        Args:
+            path: Local path of the blueprint.
+            error_type: Category of the error (e.g., 'fetch_error').
+            detail: Detailed error information or exception.
+            clear_etag: If True, clear the stored ETag for this blueprint.
+
+        """
+        if self.data and path in self.data:
+            update_data = {
+                "remote_hash": None,
+                "remote_content": None,
+                "updatable": False,
+                "last_error": f"{error_type}|{_sanitize_error_detail(str(detail))}",
+                "invalid_remote_hash": None,
+            }
+            if clear_etag:
+                update_data["etag"] = None
+
+            self.data[path].update(update_data)
+        else:
+            _LOGGER.warning("Attempted to update error state for missing blueprint path: %s", path)
+
+    async def _async_fetch_with_cdn_fallback(
+        self,
+        session: httpx.AsyncClient,
+        path: str,
+        normalized_url: str,
+        cdn_url: str | None,
+        stored_etag: str | None,
+        stored_remote_hash: str | None,
+        force: bool,
+    ) -> tuple[str | None, str | None]:
+        """Fetch remote content from CDN with fallback to original source.
+
+        Args:
+            session: Async HTTP client session.
+            path: Local path of the blueprint.
+            normalized_url: The normalized raw GitHub URL.
+            cdn_url: The jsDelivr CDN URL, if applicable.
+            stored_etag: Previously stored ETag.
+            stored_remote_hash: Previously stored content hash.
+            force: If True, ignore ETag and force a full download.
+
+        Returns:
+            A tuple of (remote_content, new_etag).
+
+        """
+        etag = stored_etag if (stored_remote_hash and not force) else None
+
+        if cdn_url:
+            try:
+                _LOGGER.debug("Fetching blueprint via CDN: (redacted URL)")
+                remote_content, new_etag = await self._async_fetch_content(
+                    session, cdn_url, etag=etag, force=force
+                )
+                if remote_content or (remote_content is None and new_etag is not None):
+                    return remote_content, new_etag
+            except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
+                _LOGGER.warning(
+                    "CDN fetch failed for %s; falling back to original source: %s",
+                    path,
+                    _sanitize_error_detail(str(err)),
+                )
+
+        return await self._async_fetch_content(session, normalized_url, etag=etag, force=force)
 
     async def _async_update_blueprint_in_place(
         self,
@@ -1417,30 +1542,28 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return
 
         if not await self._is_safe_url(source_url):
-            _LOGGER.warning("Blocking update from untrusted URL: %s", source_url)
-            if self.data and path in self.data:
-                self.data[path].update(
-                    {
-                        "remote_hash": None,
-                        "remote_content": None,
-                        "updatable": False,
-                        "last_error": f"unsafe_url|{_sanitize_error_detail(str(source_url))}",
-                        "etag": None,
-                    }
-                )
+            _LOGGER.warning("Blocking update from untrusted URL: (redacted URL)")
+            self._update_error_state(path, "unsafe_url", source_url, clear_etag=True)
             return
 
         normalized_url = self._normalize_url(source_url)
+        if not normalized_url:
+            return
+
+        cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
         stored_etag = self.data.get(path, {}).get("etag")
         stored_remote_hash = self.data.get(path, {}).get("remote_hash")
 
         try:
-            remote_content, new_etag = await self._async_fetch_content(
+            remote_content, new_etag = await self._async_fetch_with_cdn_fallback(
                 session,
+                path,
                 normalized_url,
-                etag=stored_etag if (stored_remote_hash and not force) else None,
-                force=force,
+                cdn_url,
+                stored_etag,
+                stored_remote_hash,
+                force,
             )
 
             if remote_content is None:
@@ -1449,35 +1572,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
         except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
             _LOGGER.warning(
-                "Failed to fetch blueprint from %s: %s",
-                source_url,
-                err,
+                "Failed to fetch blueprint from (redacted URL): %s",
+                _sanitize_error_detail(str(err)),
             )
-            if self.data and path in self.data:
-                self.data[path].update(
-                    {
-                        "last_error": f"fetch_error|{_sanitize_error_detail(str(err))}",
-                        "remote_hash": None,
-                        "remote_content": None,
-                        "updatable": False,
-                    }
-                )
+            self._update_error_state(path, "fetch_error", err)
             return
 
         if remote_content is None:
             return
 
         if remote_content == "":
-            if self.data and path in self.data:
-                self.data[path].update(
-                    {
-                        "last_error": "empty_content|",
-                        "remote_hash": None,
-                        "remote_content": None,
-                        "updatable": False,
-                        "invalid_remote_hash": None,
-                    }
-                )
+            self._update_error_state(path, "empty_content", "", clear_etag=True)
             return
 
         try:
@@ -1491,16 +1596,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 updated_domains,
             )
         except Exception as err:
-            _LOGGER.error("Error processing blueprint from %s: %s", source_url, err)
-            if self.data and path in self.data:
-                self.data[path].update(
-                    {
-                        "last_error": f"processing_error|{_sanitize_error_detail(str(err))}",
-                        "remote_hash": None,
-                        "remote_content": None,
-                        "updatable": False,
-                    }
-                )
+            _LOGGER.error(
+                "Error processing blueprint from (redacted URL): %s",
+                _sanitize_error_detail(str(err)),
+            )
+            self._update_error_state(path, "processing_error", err, clear_etag=True)
             return
 
     async def _handle_not_modified_case(
@@ -1538,16 +1638,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         local_hash = info["local_hash"]
         self.data[path]["updatable"] = local_hash != remote_hash
 
-        if (
-            self.data[path]["updatable"]
-            and self.config_entry
-            and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
-        ):
+        if self.data[path]["updatable"] and self.is_auto_update_enabled():
             _LOGGER.debug(
                 "Auto-update enabled for '%s', fetching on-demand",
                 info["name"],
             )
-            return await self._async_fetch_content(session, normalized_url, force=True)
+            cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
+            return await self._async_fetch_with_cdn_fallback(
+                session,
+                path,
+                normalized_url,
+                cdn_url,
+                stored_etag=None,
+                stored_remote_hash=None,
+                force=True,
+            )
 
         return None, new_etag
 
@@ -1584,7 +1689,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         except (HomeAssistantError, InvalidBlueprint) as err:
             last_error = f"yaml_syntax_error|{_sanitize_error_detail(str(err))}"
 
-        auto_update = self.config_entry and self.config_entry.options.get(CONF_AUTO_UPDATE, False)
+        auto_update = self.is_auto_update_enabled()
 
         if updatable and not last_error and auto_update:
             try:
@@ -1668,7 +1773,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if delay > 0:
             await asyncio.sleep(delay)
 
-        _LOGGER.debug("[Pacing] Dispatching request for %s", url)
+        _LOGGER.debug("[Pacing] Dispatching request for (redacted URL)")
 
         current_url = url
         current_headers = headers.copy()
@@ -1690,7 +1795,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 break
 
             if redirect_count >= 20:
-                _LOGGER.error("Too many redirects fetching %s", url)
+                _LOGGER.error("Too many redirects fetching (redacted URL)")
                 raise httpx.HTTPError("Too many redirects")
 
             next_url = response.headers.get("Location")
@@ -1701,8 +1806,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             next_url = str(response.url.join(next_url))
 
             if not await self._is_safe_url(next_url):
-                _LOGGER.warning("Blocking redirect to unsafe URL: %s", next_url)
-                raise httpx.HTTPError(f"Security violation: Redirected to unsafe URL {next_url}")
+                _LOGGER.warning("Blocking redirect to unsafe URL: (redacted URL)")
+                raise httpx.HTTPError("Security violation: Redirected to unsafe URL (redacted URL)")
 
             current_url = next_url
             current_headers = {}
@@ -1712,12 +1817,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         new_etag = response.headers.get("ETag")
         parsed_url = urlparse(current_url)
-        if DOMAIN_HA_FORUM in parsed_url.netloc:
+        if parsed_url.hostname == DOMAIN_HA_FORUM:
             try:
                 json_data = response.json()
             except ValueError as err:
                 raise httpx.HTTPError(
-                    f"Invalid JSON response from forum URL {current_url}: {err}"
+                    f"Invalid JSON response from forum URL (redacted URL): "
+                    f"{_sanitize_error_detail(str(err))}"
                 ) from err
             content = self._parse_forum_content(json_data)
             return (content or ""), new_etag
@@ -1739,7 +1845,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         parsed = urlparse(url)
         path_parts = parsed.path.strip("/").split("/")
 
-        if parsed.netloc == DOMAIN_GITHUB and RE_GITHUB_BLOB.search(parsed.path):
+        if parsed.hostname == DOMAIN_GITHUB and RE_GITHUB_BLOB.search(parsed.path):
             new_parts = [p for p in path_parts if p != "blob"]
             return urlunparse(
                 (
@@ -1752,7 +1858,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
             )
 
-        if parsed.netloc == DOMAIN_GIST and not RE_GIST_RAW.search(parsed.path):
+        if parsed.hostname == DOMAIN_GIST and not RE_GIST_RAW.search(parsed.path):
             return urlunparse(
                 (
                     parsed.scheme,
@@ -1765,7 +1871,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
 
         if (
-            DOMAIN_HA_FORUM in parsed.netloc
+            parsed.hostname == DOMAIN_HA_FORUM
             and "/t/" in parsed.path
             and (match := RE_FORUM_TOPIC_ID.search(parsed.path))
         ):
@@ -1782,6 +1888,62 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
 
         return url
+
+    @staticmethod
+    def _get_cdn_url(url: str) -> str | None:
+        """Convert a GitHub URL to a jsDelivr CDN URL.
+
+        This method supports both raw.githubusercontent.com and standard github.com
+        URLs. Any path segments that were already URL-encoded in the source (e.g.,
+        spaces as %20) are preserved to ensure the generated CDN URL remains
+        valid and links to the correct file.
+
+        Args:
+            url: The GitHub source URL (preferably normalized).
+
+        Returns:
+            The jsDelivr CDN URL or None if not applicable.
+
+        """
+        parsed = urlparse(url)
+        path_parts = [p for p in parsed.path.split("/") if p]
+
+        if parsed.hostname == DOMAIN_GITHUB_RAW:
+            if len(path_parts) < 4:
+                return None
+            user, repo, branch = path_parts[:3]
+            path = "/".join(path_parts[3:])
+        elif parsed.hostname == DOMAIN_GITHUB:
+            if len(path_parts) < 5:
+                return None
+
+            try:
+                anchor_idx = next(
+                    (idx for idx, part in enumerate(path_parts) if part in ("blob", "raw")),
+                    -1,
+                )
+                if anchor_idx != 2:
+                    return None
+
+                user = path_parts[anchor_idx - 2]
+                repo = path_parts[anchor_idx - 1]
+                branch = path_parts[anchor_idx + 1]
+                path = "/".join(path_parts[anchor_idx + 2 :])
+            except (IndexError, ValueError):
+                return None
+        else:
+            return None
+
+        return urlunparse(
+            (
+                "https",
+                DOMAIN_JSDELIVR,
+                f"/gh/{user}/{repo}@{branch}/{path}",
+                "",
+                "",
+                "",
+            )
+        )
 
     @staticmethod
     def _parse_forum_content(json_data: dict[str, Any]) -> str | None:

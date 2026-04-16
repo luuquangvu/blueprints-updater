@@ -22,6 +22,36 @@ async def await_scheduled_update(entity, coordinator):
         await coro
 
 
+def bind_coordinator_cdn_methods(coordinator: MagicMock) -> None:
+    """Bind real coordinator CDN/fetch methods to a MagicMock instance.
+
+    This allows testing the internal interaction logic while still using
+    mocks for network calls and validation.
+    """
+    coordinator.async_get_git_diff = BlueprintUpdateCoordinator.async_get_git_diff.__get__(
+        coordinator, BlueprintUpdateCoordinator
+    )
+    coordinator.async_fetch_diff_content = (
+        BlueprintUpdateCoordinator.async_fetch_diff_content.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+    )
+    coordinator._async_fetch_with_cdn_fallback = (
+        BlueprintUpdateCoordinator._async_fetch_with_cdn_fallback.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+    )
+    coordinator._get_cdn_url = BlueprintUpdateCoordinator._get_cdn_url
+    coordinator._ensure_source_url = BlueprintUpdateCoordinator._ensure_source_url
+    coordinator._normalize_url = BlueprintUpdateCoordinator._normalize_url
+    coordinator.is_cdn_enabled = BlueprintUpdateCoordinator.is_cdn_enabled.__get__(
+        coordinator, BlueprintUpdateCoordinator
+    )
+    coordinator._update_error_state = BlueprintUpdateCoordinator._update_error_state.__get__(
+        coordinator, BlueprintUpdateCoordinator
+    )
+
+
 @pytest.mark.asyncio
 async def test_update_entities_lifecycle(hass):
     """Test that entities are added and removed correctly."""
@@ -107,6 +137,7 @@ def coordinator():
     }
     comp.config_entry = MagicMock()
     comp.config_entry.options = {"auto_update": True}
+    comp.config_entry.data = {}
     comp.async_install_blueprint = AsyncMock()
     comp.async_fetch_blueprint = AsyncMock()
     comp.async_refresh = AsyncMock()
@@ -141,6 +172,9 @@ def coordinator():
     comp.set_cached_git_diff = MagicMock()
     comp.async_get_git_diff = AsyncMock(
         return_value=GitDiffResult(diff_text="", is_semantic_sync=False)
+    )
+    comp.is_auto_update_enabled = BlueprintUpdateCoordinator.is_auto_update_enabled.__get__(
+        comp, BlueprintUpdateCoordinator
     )
     return comp
 
@@ -670,23 +704,14 @@ async def test_async_install_bypass_protection(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    coordinator.async_get_git_diff = BlueprintUpdateCoordinator.async_get_git_diff.__get__(
-        coordinator, BlueprintUpdateCoordinator
-    )
-    coordinator.async_fetch_diff_content = (
-        BlueprintUpdateCoordinator.async_fetch_diff_content.__get__(
-            coordinator, BlueprintUpdateCoordinator
-        )
-    )
-    coordinator._ensure_source_url = BlueprintUpdateCoordinator._ensure_source_url
-    coordinator._normalize_url = BlueprintUpdateCoordinator._normalize_url
+    bind_coordinator_cdn_methods(coordinator)
 
     with (
         patch.object(coordinator, "_is_safe_url", AsyncMock(return_value=True)),
         patch.object(
             coordinator,
             "_async_fetch_content",
-            AsyncMock(return_value=("invalid: yaml:", "etag")),
+            AsyncMock(return_value=("not_a_blueprint: true", "etag")),
         ),
         patch.object(
             coordinator, "_validate_blueprint", MagicMock(return_value="invalid_blueprint")
@@ -716,15 +741,7 @@ async def test_async_install_unsafe_url_protection(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    coordinator.async_get_git_diff = BlueprintUpdateCoordinator.async_get_git_diff.__get__(
-        coordinator, BlueprintUpdateCoordinator
-    )
-    coordinator.async_fetch_diff_content = (
-        BlueprintUpdateCoordinator.async_fetch_diff_content.__get__(
-            coordinator, BlueprintUpdateCoordinator
-        )
-    )
-    coordinator._normalize_url = BlueprintUpdateCoordinator._normalize_url
+    bind_coordinator_cdn_methods(coordinator)
 
     with (
         patch.object(coordinator, "_is_safe_url", AsyncMock(return_value=False)),
@@ -733,7 +750,7 @@ async def test_async_install_unsafe_url_protection(coordinator):
         await entity.async_generate_release_notes()
 
     assert info.get("remote_content") is None
-    assert info.get("last_error") == "unsafe_url"
+    assert "unsafe_url|" in str(info.get("last_error") or "")
 
     with pytest.raises(HomeAssistantError):
         await entity.async_install(version=None, backup=False)

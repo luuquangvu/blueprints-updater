@@ -8,9 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from homeassistant.core import HomeAssistant
-from protocols import BlueprintCoordinatorProtocol
 
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+
+from .protocols import BlueprintCoordinatorProtocol
 
 
 @pytest.fixture

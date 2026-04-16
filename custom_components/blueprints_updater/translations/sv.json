@@ -6,6 +6,7 @@
         "description": "Vill du konfigurera Blueprints Updater? Den kommer att skanna dina lokala blueprints och leta efter uppdateringar.",
         "data": {
           "auto_update": "Aktivera automatisk uppdatering",
+          "use_cdn": "Använd jsDelivr CDN för GitHub",
           "update_interval": "Uppdateringsintervall (timmar)",
           "filter_mode": "Filterläge",
           "selected_blueprints": "Blueprints (valfritt)",
@@ -24,6 +25,7 @@
         "description": "Konfigurera beteende och inställningar för Blueprints Updater.",
         "data": {
           "auto_update": "Aktivera automatisk uppdatering",
+          "use_cdn": "Använd jsDelivr CDN för GitHub",
           "update_interval": "Uppdateringsintervall (timmar)",
           "filter_mode": "Filterläge",
           "selected_blueprints": "Valda Blueprints",
