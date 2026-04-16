@@ -269,3 +269,38 @@ async def test_async_fetch_with_cdn_fallback_empty_content(coordinator):
     assert content == "orig_content"
     assert etag == "orig_etag"
     assert coordinator._async_fetch_content.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_with_cdn_failure_preserves_conditional_etag(coordinator):
+    """CDN error should fall back to origin while preserving computed conditional etag."""
+    session = MagicMock(spec=httpx.AsyncClient)
+    normalized_url = "https://raw.githubusercontent.com/u/r/b/p.yaml"
+    cdn_url = "https://cdn.jsdelivr.net/gh/u/r@b/p.yaml"
+
+    stored_etag = "W/old-etag"
+    stored_remote_hash = "old-hash"
+
+    coordinator._async_fetch_content = AsyncMock(
+        side_effect=[httpx.HTTPError("CDN Down"), ("fallback_content", "new_etag")]
+    )
+
+    content, etag = await coordinator._async_fetch_with_cdn_fallback(
+        session,
+        "path",
+        normalized_url,
+        cdn_url,
+        stored_etag,
+        stored_remote_hash,
+        False,
+    )
+
+    assert content == "fallback_content"
+    assert etag == "new_etag"
+    calls = coordinator._async_fetch_content.call_args_list
+    args0, kwargs0 = calls[0]
+    args1, kwargs1 = calls[1]
+    assert args0[1] == cdn_url
+    assert kwargs0.get("etag") == stored_etag
+    assert args1[1] == normalized_url
+    assert kwargs1.get("etag") == stored_etag
