@@ -17,6 +17,7 @@ def coordinator(hass):
     """Fixture for BlueprintUpdateCoordinator."""
     entry = MagicMock()
     entry.options = {}
+    entry.data = {}
     with patch(
         "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
         return_value=None,

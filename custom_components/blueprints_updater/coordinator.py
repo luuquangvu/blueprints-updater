@@ -1807,7 +1807,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             if not await self._is_safe_url(next_url):
                 _LOGGER.warning("Blocking redirect to unsafe URL: (redacted URL)")
-                raise httpx.HTTPError(f"Security violation: Redirected to unsafe URL {next_url}")
+                raise httpx.HTTPError("Security violation: Redirected to unsafe URL (redacted URL)")
 
             current_url = next_url
             current_headers = {}
@@ -1822,7 +1822,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 json_data = response.json()
             except ValueError as err:
                 raise httpx.HTTPError(
-                    f"Invalid JSON response from forum URL {current_url}: {err}"
+                    f"Invalid JSON response from forum URL (redacted URL): "
+                    f"{_sanitize_error_detail(str(err))}"
                 ) from err
             content = self._parse_forum_content(json_data)
             return (content or ""), new_etag
