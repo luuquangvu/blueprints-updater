@@ -1467,6 +1467,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 update_data["etag"] = None
 
             self.data[path].update(update_data)
+        else:
+            _LOGGER.debug("Attempted to update error state for missing blueprint path: %s", path)
 
     async def _async_fetch_with_cdn_fallback(
         self,
@@ -1585,7 +1587,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
         except Exception as err:
             _LOGGER.error("Error processing blueprint from %s: %s", source_url, err)
-            self._update_error_state(path, "processing_error", err)
+            self._update_error_state(path, "processing_error", err, clear_etag=True)
             return
 
     async def _handle_not_modified_case(
@@ -1892,12 +1894,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         parsed = urlparse(url)
         path_parts = [p for p in parsed.path.split("/") if p]
 
-        if parsed.netloc == DOMAIN_GITHUB_RAW:
+        if parsed.hostname == DOMAIN_GITHUB_RAW:
             if len(path_parts) < 4:
                 return None
             user, repo, branch = path_parts[:3]
             path = "/".join(path_parts[3:])
-        elif parsed.netloc == DOMAIN_GITHUB:
+        elif parsed.hostname == DOMAIN_GITHUB:
             if len(path_parts) < 5:
                 return None
 

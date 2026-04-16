@@ -2774,10 +2774,14 @@ async def test_async_update_blueprint_failure_paths(coordinator, error_case):
 
     entry = coordinator.data[path]
     assert entry["last_error"].startswith(f"{error_case}|")
+    assert entry["updatable"] is False
+    assert entry["remote_hash"] is None
+    assert entry["remote_content"] is None
 
-    if error_case in ("unsafe_url", "empty_content"):
+    if error_case == "fetch_error":
+        assert entry["etag"] == "old-etag"
+    else:
         assert entry["etag"] is None
+
     if error_case == "empty_content":
         assert entry["invalid_remote_hash"] is None
-    if error_case != "empty_content":
-        assert entry["updatable"] is False
