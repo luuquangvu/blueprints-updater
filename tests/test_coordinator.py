@@ -2739,3 +2739,86 @@ def test_update_error_state_clears_state_and_etag(coordinator):
     assert entry["etag"] is None
     assert entry["invalid_remote_hash"] is None
     assert entry["last_error"] == "parse_error|Invalid YAML found"
+
+
+@pytest.mark.asyncio
+async def test_async_update_blueprint_unsafe_url_error(coordinator):
+    """Test that _async_update_blueprint_in_place handles unsafe URLs correctly."""
+    path = "unsafe.yaml"
+    info = {"source_url": "https://malicious.com/exploit.yaml", "name": "Unsafe"}
+
+    coordinator._is_safe_url = AsyncMock(return_value=False)
+    coordinator.data[path] = {"remote_hash": "old", "etag": "old-etag"}
+
+    await coordinator._async_update_blueprint_in_place(
+        MagicMock(spec=httpx.AsyncClient), path, info, [], set()
+    )
+
+    entry = coordinator.data[path]
+    assert entry["last_error"].startswith("unsafe_url|")
+    assert entry["etag"] is None
+    assert entry["updatable"] is False
+
+
+@pytest.mark.asyncio
+async def test_async_update_blueprint_fetch_error(coordinator):
+    """Test that _async_update_blueprint_in_place handles fetch errors correctly."""
+    path = "fetch_error.yaml"
+    info = {"source_url": "https://raw.githubusercontent.com/u/r/b/p.yaml", "name": "Fetch"}
+
+    coordinator._async_fetch_with_cdn_fallback = AsyncMock(
+        side_effect=httpx.HTTPError("Network down")
+    )
+    coordinator.data[path] = {"remote_hash": "old", "updatable": True}
+
+    await coordinator._async_update_blueprint_in_place(
+        MagicMock(spec=httpx.AsyncClient), path, info, [], set()
+    )
+
+    entry = coordinator.data[path]
+    assert entry["last_error"].startswith("fetch_error|")
+    assert entry["updatable"] is False
+
+
+@pytest.mark.asyncio
+async def test_async_update_blueprint_empty_content_error(coordinator):
+    """Test that _async_update_blueprint_in_place handles empty content correctly."""
+    path = "empty.yaml"
+    info = {"source_url": "https://raw.githubusercontent.com/u/r/b/p.yaml", "name": "Empty"}
+
+    coordinator._async_fetch_with_cdn_fallback = AsyncMock(return_value=("", "new-etag"))
+    coordinator.data[path] = {
+        "remote_hash": "old",
+        "etag": "old-etag",
+        "invalid_remote_hash": "stale",
+    }
+
+    await coordinator._async_update_blueprint_in_place(
+        MagicMock(spec=httpx.AsyncClient), path, info, [], set()
+    )
+
+    entry = coordinator.data[path]
+    assert entry["last_error"].startswith("empty_content|")
+    assert entry["etag"] is None
+    assert entry["invalid_remote_hash"] is None
+
+
+@pytest.mark.asyncio
+async def test_async_update_blueprint_processing_error(coordinator):
+    """Test that _async_update_blueprint_in_place handles processing errors correctly."""
+    path = "processing.yaml"
+    info = {"source_url": "https://raw.githubusercontent.com/u/r/b/p.yaml", "name": "Proc"}
+
+    coordinator._async_fetch_with_cdn_fallback = AsyncMock(
+        return_value=("valid content", "new-etag")
+    )
+    coordinator._process_blueprint_content = AsyncMock(side_effect=ValueError("Invalid structure"))
+    coordinator.data[path] = {"remote_hash": "old"}
+
+    await coordinator._async_update_blueprint_in_place(
+        MagicMock(spec=httpx.AsyncClient), path, info, [], set()
+    )
+
+    entry = coordinator.data[path]
+    assert entry["last_error"].startswith("processing_error|")
+    assert entry["updatable"] is False

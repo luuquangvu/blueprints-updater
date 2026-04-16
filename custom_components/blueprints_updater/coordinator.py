@@ -1897,7 +1897,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     (idx for idx, part in enumerate(path_parts) if part in ("blob", "raw")),
                     -1,
                 )
-                if anchor_idx < 2:
+                if anchor_idx != 2:
                     return None
 
                 user = path_parts[anchor_idx - 2]
