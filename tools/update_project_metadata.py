@@ -8,7 +8,6 @@ It performs safety checks to prevent overwriting dynamic versions.
 import json
 import os
 import sys
-from typing import cast
 
 import tomlkit
 from tomlkit.items import Table
@@ -41,12 +40,8 @@ def update_pyproject(version: str) -> None:
     with open(path, encoding="utf-8") as f:
         doc = tomlkit.parse(f.read())
 
-    if "project" not in doc:
-        print("Error: [project] table not found in pyproject.toml", file=sys.stderr)
-        sys.exit(1)
-
-    project = cast(Table, doc["project"])
-    if not isinstance(project, dict):
+    project = doc.get("project")
+    if not isinstance(project, Table):
         print("Error: [project] must be a table in pyproject.toml", file=sys.stderr)
         sys.exit(1)
 

@@ -44,10 +44,8 @@ jobs:
         id: get_version
         shell: bash
         run: |
-          shopt -s inherit_errexit || {
-              echo "Warning: inherit_errexit not supported, falling back to strict flags" >&2
-              set -euo pipefail
-          }
+          set -euo pipefail
+          shopt -s inherit_errexit 2>/dev/null || echo "Warning: inherit_errexit not supported" >&2
 
           export BUMP_TYPE="${{ github.event.inputs.bump_type }}"
           export IS_PRERELEASE="${{ github.event.inputs.prerelease }}"
