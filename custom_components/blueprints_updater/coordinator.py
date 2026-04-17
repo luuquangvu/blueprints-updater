@@ -143,7 +143,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return f"blueprint_{hashlib.sha256(rel_path.encode()).hexdigest()}"
 
     config_entry: ConfigEntry
-    data: dict[str, dict[str, Any]]
 
     def __init__(
         self,
@@ -427,8 +426,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if (len(self._persisted_etags) + len(self._persisted_hashes)) < old_count:
             _LOGGER.debug("Pruned stale blueprint metadata from memory, triggering save")
-            if self.data is not None:
-                self.data = {path: info for path, info in self.data.items() if path in valid_paths}
+            self.data = {path: info for path, info in self.data.items() if path in valid_paths}
             self.hass.async_create_background_task(
                 self._async_save_metadata(force=True), name=f"{DOMAIN}_prune_save"
             )
@@ -1271,8 +1269,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         Returns:
             GitDiffResult if cached, else None.
         """
-        if self.data is None:
-            return None
         info = self.data.get(path, {})
         cached = info.get("_cached_git_diff")
         if cached and isinstance(cached, dict):
@@ -1294,6 +1290,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> None:
         """Set cached git diff.
 
+        If the coordinator's data is not yet initialized or
+        the path is not in the data, this method does nothing.
+
         Args:
             path: Local path of the blueprint.
             local_hash: Hash of the local file.
@@ -1301,7 +1300,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             diff_text: Generated unified diff string.
             is_semantic_sync: Whether the diff is empty due to semantic sync.
         """
-        if self.data is not None and path in self.data:
+        if path in self.data:
             self.data[path]["_cached_git_diff"] = {
                 "local": local_hash,
                 "remote": remote_hash,
@@ -1317,7 +1316,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         passes blueprint validation. This prevents unvalidated content
         from being used in the installation flow.
         """
-        info = self.data.get(path) if self.data is not None else None
+        info = self.data.get(path)
         if not info or not info.get("updatable"):
             return None
 
@@ -1375,7 +1374,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         Returns:
             GitDiffResult or None if it cannot be generated.
         """
-        if self.data is None or path not in self.data:
+        if path not in self.data:
             return None
 
         info = self.data[path]
@@ -1462,7 +1461,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             clear_etag: If True, clear the stored ETag for this blueprint.
 
         """
-        if self.data and path in self.data:
+        if path in self.data:
             update_data = {
                 "remote_hash": None,
                 "remote_content": None,
@@ -1555,10 +1554,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
-        stored_etag = self.data.get(path, {}).get("etag") if self.data is not None else None
-        stored_remote_hash = (
-            self.data.get(path, {}).get("remote_hash") if self.data is not None else None
-        )
+        stored_etag = self.data.get(path, {}).get("etag")
+        stored_remote_hash = self.data.get(path, {}).get("remote_hash")
 
         try:
             remote_content, new_etag = await self._async_fetch_with_cdn_fallback(
