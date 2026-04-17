@@ -42,71 +42,22 @@ jobs:
 
       - name: Setup version
         id: get_version
+        shell: bash
         env:
           BUMP_TYPE: ${{ github.event.inputs.bump_type }}
           IS_PRERELEASE: ${{ github.event.inputs.prerelease }}
         run: |
-          shopt -s inherit_errexit
+          shopt -s inherit_errexit || true
           git fetch --tags
 
-          # Export necessary data
-          export LATEST_STABLE=$(git tag --merged HEAD --list --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+          # Export necessary data for tools/calculate_version.py
+          export LATEST_STABLE=$(git tag --merged HEAD --list --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
           export LATEST_STABLE="${LATEST_STABLE:-0.0.0}"
-          export CURRENT_ANY=$(git tag --merged HEAD --list --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' | head -n 1 || true)
+          export CURRENT_ANY=$(git tag --merged HEAD --list --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' | head -n 1 || true)
           export CURRENT_ANY="${CURRENT_ANY:-0.0.0}"
           export ALL_TAGS=$(git tag --merged HEAD --list || true)
 
-          NEW_VERSION=$(uv run --with packaging python -c "
-          import os
-          import re
-          import sys
-          from packaging.version import parse
-
-          bump_type = os.environ['BUMP_TYPE']
-          is_prerelease = os.environ['IS_PRERELEASE'].lower() == 'true'
-          latest_stable = os.environ['LATEST_STABLE']
-          current_any = os.environ['CURRENT_ANY']
-          all_tags = os.environ['ALL_TAGS'].split('\n')
-
-          # Calculate target stable base
-          v = [int(x) for x in latest_stable.split('.')]
-          if bump_type == 'major':
-              v[0] += 1
-              v[1] = 0
-              v[2] = 0
-          elif bump_type == 'minor':
-              v[1] += 1
-              v[2] = 0
-          else:  # patch
-              v[2] += 1
-
-          target_stable = f'{v[0]}.{v[1]}.{v[2]}'
-
-          if not is_prerelease:
-              result = target_stable
-          else:
-              # Scan all tags for the max RC number of this target stable
-              rc_pattern = re.compile(r'^' + re.escape(target_stable) + r'-rc\.(\d+)$')
-              rc_numbers = []
-              for tag in all_tags:
-                  match = rc_pattern.match(tag.strip())
-                  if match:
-                      rc_numbers.append(int(match.group(1)))
-              
-              next_rc = max(rc_numbers) + 1 if rc_numbers else 1
-              result = f'{target_stable}-rc.{next_rc}'
-
-          # Final validation
-          if parse(result) <= parse(latest_stable):
-              print(f'Error: Calculated version {result} is not greater than latest stable {latest_stable}', file=sys.stderr)
-              sys.exit(1)
-
-          if is_prerelease and current_any.startswith(target_stable) and parse(result) <= parse(current_any):
-              print(f'Error: Calculated pre-release {result} is not greater than latest version {current_any}', file=sys.stderr)
-              sys.exit(1)
-
-          print(result)
-          ")
+          NEW_VERSION=$(uv run --with packaging python tools/calculate_version.py)
 
           if [[ -z "$NEW_VERSION" ]]; then
               echo "Error: Calculated version is empty"
