@@ -46,45 +46,57 @@ jobs:
           BUMP_TYPE: ${{ github.event.inputs.bump_type }}
           IS_PRERELEASE: ${{ github.event.inputs.prerelease }}
         run: |
+          shopt -s inherit_errexit
           git fetch --tags
-          LATEST_STABLE=$(git tag --merged HEAD --list --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+          
+          # Export necessary data
+          export LATEST_STABLE=$(git tag --merged HEAD --list --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
           export LATEST_STABLE="${LATEST_STABLE:-0.0.0}"
-          CURRENT_ANY=$(git tag --merged HEAD --list --sort=-v:refname | head -n 1 || true)
+          export CURRENT_ANY=$(git tag --merged HEAD --list --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' | head -n 1 || true)
           export CURRENT_ANY="${CURRENT_ANY:-0.0.0}"
+          export ALL_TAGS=$(git tag --merged HEAD --list || true)
 
           NEW_VERSION=$(uv run --with packaging python -c "
-          import re
           import os
+          import re
           import sys
           from packaging.version import parse
 
-          latest_stable = os.environ.get('LATEST_STABLE', '0.0.0')
-          current_any = os.environ.get('CURRENT_ANY', '0.0.0')
-          bump_type = os.environ.get('BUMP_TYPE', 'patch')
-          is_prerelease = os.environ.get('IS_PRERELEASE', 'false').lower() == 'true'
+          bump_type = os.environ['BUMP_TYPE']
+          is_prerelease = os.environ['IS_PRERELEASE'].lower() == 'true'
+          latest_stable = os.environ['LATEST_STABLE']
+          current_any = os.environ['CURRENT_ANY']
+          all_tags = os.environ['ALL_TAGS'].split('\n')
 
-          def get_next_stable(v_str, b_type):
-              v = parse(v_str)
-              major, minor, patch = v.major, v.minor, v.micro
-              if b_type == 'major':
-                  return f'{major + 1}.0.0'
-              elif b_type == 'minor':
-                  return f'{major}.{minor + 1}.0'
-              else:
-                  return f'{major}.{minor}.{patch + 1}'
-
-          target_stable = get_next_stable(latest_stable, bump_type)
+          # Calculate target stable base
+          v = [int(x) for x in latest_stable.split('.')]
+          if bump_type == 'major':
+              v[0] += 1
+              v[1] = 0
+              v[2] = 0
+          elif bump_type == 'minor':
+              v[1] += 1
+              v[2] = 0
+          else:  # patch
+              v[2] += 1
+          
+          target_stable = f'{v[0]}.{v[1]}.{v[2]}'
 
           if not is_prerelease:
               result = target_stable
           else:
-              match = re.match(r'^' + re.escape(target_stable) + r'-rc\.(\d+)$', current_any)
-              if match:
-                  rc_num = int(match.group(1))
-                  result = f'{target_stable}-rc.{rc_num + 1}'
-              else:
-                  result = f'{target_stable}-rc.1'
+              # Scan all tags for the max RC number of this target stable
+              rc_pattern = re.compile(r'^' + re.escape(target_stable) + r'-rc\.(\d+)$')
+              rc_numbers = []
+              for tag in all_tags:
+                  match = rc_pattern.match(tag.strip())
+                  if match:
+                      rc_numbers.append(int(match.group(1)))
+              
+              next_rc = max(rc_numbers) + 1 if rc_numbers else 1
+              result = f'{target_stable}-rc.{next_rc}'
 
+          # Final validation
           if parse(result) <= parse(latest_stable):
               print(f'Error: Calculated version {result} is not greater than latest stable {latest_stable}', file=sys.stderr)
               sys.exit(1)
@@ -95,6 +107,11 @@ jobs:
 
           print(result)
           ")
+
+          if [[ -z "$NEW_VERSION" ]]; then
+              echo "Error: Calculated version is empty"
+              exit 1
+          fi
 
           echo "VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "TAG_NAME=$NEW_VERSION" >> $GITHUB_OUTPUT
