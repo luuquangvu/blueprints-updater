@@ -48,7 +48,7 @@ jobs:
         run: |
           shopt -s inherit_errexit
           git fetch --tags
-          
+
           # Export necessary data
           export LATEST_STABLE=$(git tag --merged HEAD --list --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
           export LATEST_STABLE="${LATEST_STABLE:-0.0.0}"
@@ -79,7 +79,7 @@ jobs:
               v[2] = 0
           else:  # patch
               v[2] += 1
-          
+
           target_stable = f'{v[0]}.{v[1]}.{v[2]}'
 
           if not is_prerelease:
