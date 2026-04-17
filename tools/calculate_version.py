@@ -21,7 +21,7 @@ def main() -> None:
 
     The function orchestrates the full calculation pipeline:
     1. Parses environment variables for bump strategies and base versions.
-    2. Validates input formats (X.Y.Z).
+    2. Validates input formats using packaging.version.
     3. Increments specific version segments or RC counters.
     4. Performs regression checks against stable and latest reachable tags.
 
@@ -31,6 +31,7 @@ def main() -> None:
         LATEST_STABLE: Baseline stable version string (e.g., 'v1.0.2').
         CURRENT_ANY: Latest reachable tag for regression checks.
         ALL_TAGS: Newline-separated tags for exhaustive pre-release scanning.
+        TAG_PREFIX: Optional override for the version prefix (e.g., 'v').
 
     Output:
         Prints the calculated version string to standard output.
@@ -43,13 +44,16 @@ def main() -> None:
     all_tags_raw = os.environ.get("ALL_TAGS", "")
     all_tags = [t.strip() for t in all_tags_raw.split("\n") if t.strip()]
 
-    prefix = "v" if latest_stable_str.startswith("v") else ""
+    baseline = latest_stable_str.removeprefix("v")
+    detected_prefix = "v" if latest_stable_str.startswith("v") else ""
+    prefix = os.environ.get("TAG_PREFIX", detected_prefix)
 
-    latest_stable_numeric = latest_stable_str.lstrip("v")
-    parts = latest_stable_numeric.split(".")
-    if len(parts) != 3:
+    try:
+        parsed = parse(baseline)
+        v = [parsed.major, parsed.minor, parsed.micro]
+    except Exception as e:
         print(
-            f"Error: Invalid version format '{latest_stable_str}', expected X.Y.Z",
+            f"Error: Could not parse version '{latest_stable_str}': {e}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -61,7 +65,6 @@ def main() -> None:
         )
         sys.exit(1)
 
-    v = [int(parts[0]), int(parts[1]), int(parts[2])]
     if bump_type == "major":
         v[0] += 1
         v[1] = 0
@@ -75,7 +78,7 @@ def main() -> None:
     target_stable = f"{v[0]}.{v[1]}.{v[2]}"
 
     if not is_prerelease:
-        result = f"{prefix}{target_stable}"
+        result_str = f"{prefix}{target_stable}"
     else:
         rc_pattern = re.compile(f"^v?{re.escape(target_stable)}" + r"-rc\.(\d+)$")
         rc_numbers = []
@@ -84,11 +87,15 @@ def main() -> None:
                 rc_numbers.append(int(match[1]))
 
         next_rc = max(rc_numbers) + 1 if rc_numbers else 1
-        result = f"{prefix}{target_stable}-rc.{next_rc}"
+        result_str = f"{prefix}{target_stable}-rc.{next_rc}"
 
-    if parse(result) <= parse(latest_stable_str):
+    norm_result = parse(result_str.removeprefix("v"))
+    norm_latest = parse(latest_stable_str.removeprefix("v"))
+    norm_current = parse(current_any_str.removeprefix("v"))
+
+    if norm_result <= norm_latest:
         print(
-            f"Error: Calculated version {result} is not greater than "
+            f"Error: Calculated version {result_str} is not greater than "
             f"latest stable {latest_stable_str}",
             file=sys.stderr,
         )
@@ -96,17 +103,17 @@ def main() -> None:
 
     if (
         is_prerelease
-        and current_any_str.lstrip("v").startswith(target_stable)
-        and parse(result) <= parse(current_any_str)
+        and current_any_str.removeprefix("v").startswith(target_stable)
+        and norm_result <= norm_current
     ):
         print(
-            f"Error: Calculated pre-release {result} is not greater than "
+            f"Error: Calculated pre-release {result_str} is not greater than "
             f"latest version {current_any_str}",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    print(result)
+    print(result_str)
 
 
 if __name__ == "__main__":
