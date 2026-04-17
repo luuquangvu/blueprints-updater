@@ -57,7 +57,10 @@ jobs:
           export CURRENT_ANY="${CURRENT_ANY:-0.0.0}"
           export ALL_TAGS=$(git tag --merged HEAD --list || true)
 
-          NEW_VERSION=$(uv run --with packaging python tools/calculate_version.py)
+          NEW_VERSION=$(uv run --with packaging python tools/calculate_version.py) || {
+              echo "Error: Version calculation failed"
+              exit 1
+          }
 
           if [[ -z "$NEW_VERSION" ]]; then
               echo "Error: Calculated version is empty"

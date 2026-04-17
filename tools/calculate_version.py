@@ -53,6 +53,13 @@ def main() -> None:
         )
         sys.exit(1)
 
+    if bump_type not in ("major", "minor", "patch"):
+        print(
+            f"Error: Invalid bump_type '{bump_type}', expected major, minor, or patch",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     v = [int(parts[0]), int(parts[1]), int(parts[2])]
     if bump_type == "major":
         v[0] += 1
