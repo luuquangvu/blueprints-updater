@@ -3,10 +3,14 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version to release (e.g., 1.0.2)"
+      bump_type:
+        description: "Select version bump type"
         required: true
-        type: string
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
       prerelease:
         description: "Mark as pre-release"
         required: false
@@ -38,40 +42,63 @@ jobs:
 
       - name: Setup version
         id: get_version
+        env:
+          BUMP_TYPE: ${{ github.event.inputs.bump_type }}
+          IS_PRERELEASE: ${{ github.event.inputs.prerelease }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "TAG_NAME=$VERSION" >> $GITHUB_OUTPUT
+          git fetch --tags
+          LATEST_STABLE=$(git tag --merged HEAD --list --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+          export LATEST_STABLE="${LATEST_STABLE:-0.0.0}"
+          CURRENT_ANY=$(git tag --merged HEAD --list --sort=-v:refname | head -n 1 || true)
+          export CURRENT_ANY="${CURRENT_ANY:-0.0.0}"
 
-      - name: Validate version
-        run: |
-          NEW_VERSION="${{ steps.get_version.outputs.VERSION }}"
-          TAG_NAME="${{ steps.get_version.outputs.TAG_NAME }}"
-
-          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
-            echo "Error: Tag $TAG_NAME already exists."
-            exit 1
-          fi
-
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
-          LATEST_VERSION="$LATEST_TAG"
-
-          uv run --with packaging python -c "
-          from packaging.version import parse, InvalidVersion
+          NEW_VERSION=$(uv run --with packaging python -c "
+          import re
+          import os
           import sys
+          from packaging.version import parse
 
-          try:
-              v_new = parse('$NEW_VERSION')
-              v_old = parse('$LATEST_VERSION')
-          except InvalidVersion as e:
-              print(f'Error: Invalid version format -> {e}')
+          latest_stable = os.environ.get('LATEST_STABLE', '0.0.0')
+          current_any = os.environ.get('CURRENT_ANY', '0.0.0')
+          bump_type = os.environ.get('BUMP_TYPE', 'patch')
+          is_prerelease = os.environ.get('IS_PRERELEASE', 'false').lower() == 'true'
+
+          def get_next_stable(v_str, b_type):
+              v = parse(v_str)
+              major, minor, patch = v.major, v.minor, v.micro
+              if b_type == 'major':
+                  return f'{major + 1}.0.0'
+              elif b_type == 'minor':
+                  return f'{major}.{minor + 1}.0'
+              else:
+                  return f'{major}.{minor}.{patch + 1}'
+
+          target_stable = get_next_stable(latest_stable, bump_type)
+
+          if not is_prerelease:
+              result = target_stable
+          else:
+              match = re.match(r'^' + re.escape(target_stable) + r'-rc\.(\d+)$', current_any)
+              if match:
+                  rc_num = int(match.group(1))
+                  result = f'{target_stable}-rc.{rc_num + 1}'
+              else:
+                  result = f'{target_stable}-rc.1'
+
+          if parse(result) <= parse(latest_stable):
+              print(f'Error: Calculated version {result} is not greater than latest stable {latest_stable}', file=sys.stderr)
               sys.exit(1)
 
-          if not (v_new > v_old):
-              print(f'Error: New version ({v_new}) must be strictly greater than the latest released version ({v_old}).')
+          if is_prerelease and current_any.startswith(target_stable) and parse(result) <= parse(current_any):
+              print(f'Error: Calculated pre-release {result} is not greater than latest version {current_any}', file=sys.stderr)
               sys.exit(1)
-          "
-          echo "Version validation passed."
+
+          print(result)
+          ")
+
+          echo "VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "Calculated version: $NEW_VERSION"
 
       - name: Update manifest.json
         run: |
@@ -82,7 +109,16 @@ jobs:
       - name: Update pyproject.toml
         run: |
           VERSION="${{ steps.get_version.outputs.VERSION }}"
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          uv run --with tomlkit python -c "
+          import tomlkit
+          import sys
+          with open('pyproject.toml', 'r', encoding='utf-8') as f:
+              doc = tomlkit.parse(f.read())
+          if 'project' in doc:
+              doc['project']['version'] = sys.argv[1]
+          with open('pyproject.toml', 'w', encoding='utf-8') as f:
+              f.write(tomlkit.dumps(doc))
+          " "$VERSION"
 
       - name: Format files
         run: npx prettier --write custom_components/blueprints_updater/manifest.json pyproject.toml
