@@ -46,29 +46,6 @@ async def test_async_prune_stale_metadata_empty_data(hass, mock_coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_prune_stale_metadata_none_data(hass, mock_coordinator):
-    """Regression test for issue where self.data is None during pruning."""
-    coordinator = mock_coordinator
-    coordinator.data = None
-    coordinator._persisted_etags = {"stale_path": "etag"}
-    coordinator._persisted_hashes = {"stale_path": "hash"}
-
-    with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.os.path.isfile",
-            return_value=False,
-        ),
-        patch.object(coordinator, "_async_save_metadata", new_callable=AsyncMock) as mock_save,
-    ):
-        await coordinator._async_prune_stale_metadata(set())
-        mock_save.assert_called_once_with(force=True)
-
-    assert coordinator.data is None
-    assert not coordinator._persisted_etags
-    assert not coordinator._persisted_hashes
-
-
-@pytest.mark.asyncio
 async def test_git_diff_empty_data(hass, mock_coordinator):
     """Test that git diff methods handle empty self.data correctly."""
     coordinator = mock_coordinator

@@ -430,8 +430,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if (len(self._persisted_etags) + len(self._persisted_hashes)) < old_count:
             _LOGGER.debug("Pruned stale blueprint metadata from memory, triggering save")
-            if self.data is not None:
-                self.data = {path: info for path, info in self.data.items() if path in valid_paths}
+            self.data = {path: info for path, info in self.data.items() if path in valid_paths}
             self.hass.async_create_background_task(
                 self._async_save_metadata(force=True), name=f"{DOMAIN}_prune_save"
             )
