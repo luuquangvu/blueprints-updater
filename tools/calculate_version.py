@@ -15,9 +15,16 @@ import sys
 
 from packaging.version import parse
 
+DEFAULT_VERSION = "0.0.0"
+DEFAULT_PREFIX = "v"
+
 
 def normalize_version(version_str: str, prefix: str) -> str:
     """Strip prefixes and return a clean version string for parsing.
+
+    The function enforces consistency: if a version string does not start
+    with the expected prefix (or 'v' as a fallback), it raises an error
+    to prevent style contamination.
 
     Args:
         version_str: The version string to normalize.
@@ -25,9 +32,23 @@ def normalize_version(version_str: str, prefix: str) -> str:
 
     Returns:
         A normalized Semantic Version string.
+
+    Raises:
+        ValueError: If the version string has an unexpected prefix.
     """
-    normalized = version_str.removeprefix(prefix)
-    return normalized.removeprefix("v")
+    if not version_str or version_str == DEFAULT_VERSION:
+        return DEFAULT_VERSION
+
+    if prefix and version_str.startswith(prefix):
+        normalized = version_str.removeprefix(prefix)
+    elif version_str.startswith("v"):
+        normalized = version_str.removeprefix("v")
+    elif prefix:
+        raise ValueError(f"Version '{version_str}' does not match prefix '{prefix}' or 'v'")
+
+    else:
+        normalized = version_str
+    return normalized
 
 
 def _calculate_next_rc(prefix: str, target_stable: str, all_tags: list[str]) -> str:
@@ -47,9 +68,6 @@ def _calculate_next_rc(prefix: str, target_stable: str, all_tags: list[str]) -> 
 
     Returns:
         The calculated pre-release string (e.g., 'v1.2.3-rc.1').
-
-    Raises:
-        RuntimeError: If inconsistent tag prefixes are detected when TAG_PREFIX is empty.
     """
     if not prefix:
         v_regex = "v"
@@ -62,11 +80,9 @@ def _calculate_next_rc(prefix: str, target_stable: str, all_tags: list[str]) -> 
         bare_regex = None
 
     patterns: list[tuple[re.Pattern[str], str]] = [
-        (
-            re.compile(rf"^{v_regex}{re.escape(target_stable)}-rc\.(\d+)$"),
-            prefix,
-        )
+        (re.compile(rf"^{v_regex}{re.escape(target_stable)}-rc\.(\d+)$"), prefix)
     ]
+
     if bare_regex is not None:
         patterns.append((re.compile(rf"^{bare_regex}{re.escape(target_stable)}-rc\.(\d+)$"), ""))
 
@@ -109,9 +125,9 @@ def main() -> None:
     Environment Inputs:
         BUMP_TYPE: Version segment to increment ('major', 'minor', 'patch').
         IS_PRERELEASE: Boolean string ('true' or 'false') for RC suffixes.
-        LATEST_STABLE: Baseline stable version string (e.g., 'v1.0.2').
+        LATEST_STABLE: Baseline stable version string.
         CURRENT_ANY: Latest reachable tag for regression checks.
-        ALL_TAGS: Newline-separated tags for exhaustive pre-release scanning.
+        ALL_TAGS: Newline-separated tags for exhaustive prerelease scanning.
         TAG_PREFIX: Optional override for the version prefix (e.g., 'v').
 
     Output:
@@ -130,23 +146,24 @@ def main() -> None:
         sys.exit(1)
     is_prerelease = is_prerelease_raw == "true"
 
-    latest_stable_str = os.environ["LATEST_STABLE"]
-    current_any_str = os.environ["CURRENT_ANY"]
+    latest_stable_str = os.environ.get("LATEST_STABLE", DEFAULT_VERSION)
+    current_any_str = os.environ.get("CURRENT_ANY", DEFAULT_VERSION)
     all_tags_raw = os.environ.get("ALL_TAGS", "")
     all_tags = [t.strip() for t in all_tags_raw.split("\n") if t.strip()]
 
-    detected_prefix = "v" if latest_stable_str.startswith("v") else ""
-    prefix = os.environ.get("TAG_PREFIX", detected_prefix)
+    configured_prefix = os.environ.get("TAG_PREFIX")
+    if configured_prefix is not None:
+        prefix = configured_prefix
+    else:
+        prefix = "v" if latest_stable_str.startswith("v") else ""
 
     try:
         stable_baseline_str = normalize_version(latest_stable_str, prefix)
-        current_baseline_str = normalize_version(current_any_str, prefix)
-
         parsed_stable = parse(stable_baseline_str)
         v = [parsed_stable.major, parsed_stable.minor, parsed_stable.micro]
     except Exception as e:
         print(
-            f"Error: Could not parse baseline versions: {e}",
+            f"Error: Could not parse baseline stable version '{latest_stable_str}': {e}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -175,9 +192,13 @@ def main() -> None:
     else:
         result_str = _calculate_next_rc(prefix, target_stable, all_tags)
 
-    norm_result = parse(normalize_version(result_str, prefix))
-    norm_latest = parse(normalize_version(latest_stable_str, prefix))
-    norm_current = parse(normalize_version(current_any_str, prefix))
+    try:
+        norm_result = parse(normalize_version(result_str, prefix))
+        norm_latest = parse(normalize_version(latest_stable_str, prefix))
+        norm_current = parse(normalize_version(current_any_str, prefix))
+    except Exception as e:
+        print(f"Error: Verification parsing failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if norm_result <= norm_latest:
         print(

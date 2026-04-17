@@ -20,6 +20,10 @@ def update_manifest(version: str) -> None:
         version: The new version string to apply.
     """
     path = "custom_components/blueprints_updater/manifest.json"
+    if not os.path.isfile(path):
+        print(f"Error: manifest.json not found at {path}", file=sys.stderr)
+        sys.exit(1)
+
     with open(path, encoding="utf-8") as f:
         manifest = json.load(f)
 
@@ -33,16 +37,30 @@ def update_manifest(version: str) -> None:
 def update_pyproject(version: str) -> None:
     """Update the pyproject.toml file.
 
+    This function defensively navigates the TOML schema to ensure that
+    [project] exists and that the version is not declared as dynamic.
+
     Args:
         version: The new version string to apply.
     """
     path = "pyproject.toml"
+    if not os.path.isfile(path):
+        print(f"Error: pyproject.toml not found at {path}", file=sys.stderr)
+        sys.exit(1)
+
     with open(path, encoding="utf-8") as f:
         doc = tomlkit.parse(f.read())
 
     project = doc.get("project")
+    if project is None:
+        print("Error: [project] table not found in pyproject.toml", file=sys.stderr)
+        sys.exit(1)
+
     if not isinstance(project, Table):
-        print("Error: [project] must be a table in pyproject.toml", file=sys.stderr)
+        print(
+            f"Error: [project] in pyproject.toml is a {type(project).__name__}, expected a table",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     dynamic = project.get("dynamic", [])
@@ -59,7 +77,8 @@ def update_pyproject(version: str) -> None:
         dynamic_fields = set(dynamic)
     else:
         print(
-            "Error: [project.dynamic] must be a string or a list of strings in pyproject.toml",
+            f"Error: [project.dynamic] is a {type(dynamic).__name__}, "
+            "expected a string or a list of strings",
             file=sys.stderr,
         )
         sys.exit(1)
