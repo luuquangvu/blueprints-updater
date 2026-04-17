@@ -105,3 +105,25 @@ def test_update_error_state_with_existing_path(mock_coordinator) -> None:
     assert isinstance(info["last_error"], str)
     assert "fetch_error|detail" in info["last_error"]
     assert info["etag"] is None
+
+
+def test_update_error_state_preserve_etag(mock_coordinator) -> None:
+    """_update_error_state should preserve ETag when clear_etag is False."""
+    path = "existing/path"
+    etag = "some_etag"
+    mock_coordinator.data = {
+        path: {
+            "name": "Test",
+            "remote_hash": "old_hash",
+            "updatable": True,
+            "last_error": None,
+            "etag": etag,
+        }
+    }
+
+    mock_coordinator._update_error_state(path, "fetch_error", "detail", clear_etag=False)
+
+    info = mock_coordinator.data[path]
+    assert info["remote_hash"] is None
+    assert info["updatable"] is False
+    assert info["etag"] == etag
