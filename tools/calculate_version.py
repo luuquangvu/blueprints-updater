@@ -51,20 +51,24 @@ def normalize_version(version_str: str, prefix: str) -> str:
     return normalized
 
 
-def _calculate_next_rc(prefix: str, target_stable: str, all_tags: list[str]) -> str:
+def _calculate_next_rc(
+    prefix: str, target_stable: str, all_tags: list[str], is_auto_detected: bool
+) -> str:
     """Calculate the next RC tag for a given stable target with prefix strictness.
 
     The function is strict about mismatches between the configured `prefix`
     and discovered tags:
     - If `prefix == "v"`, only 'v'-prefixed RC tags are considered.
-    - If `prefix == ""`, both bare and 'v'-prefixed tags are allowed, but
-      mixing styles triggers an error to enforce repository consistency.
+    - If `prefix == ""`, both bare and 'v'-prefixed tags are allowed.
+    - In auto-detection mode (is_auto_detected=True), mixing styles triggers
+      an error to enforce repository consistency.
     - If any other `prefix` is used, only tags with that prefix are considered.
 
     Args:
         prefix: The configured TAG_PREFIX.
         target_stable: The base Semantic Version (e.g., '1.2.3').
         all_tags: List of existing tags to scan for RC patterns.
+        is_auto_detected: Whether the prefix style was automatically detected.
 
     Returns:
         The calculated pre-release string (e.g., 'v1.2.3-rc.1').
@@ -97,7 +101,7 @@ def _calculate_next_rc(prefix: str, target_stable: str, all_tags: list[str]) -> 
                 detected_prefixes.add(det_prefix)
                 break
 
-    if not prefix and len(detected_prefixes) > 1:
+    if is_auto_detected and not prefix and len(detected_prefixes) > 1:
         print(
             f"Error: Inconsistent RC tag prefixes detected for {target_stable!r}: "
             "found both 'v' and unprefixed tags. Please standardize your tag format.",
@@ -190,7 +194,7 @@ def main() -> None:
     if not is_prerelease:
         result_str = f"{prefix}{target_stable}"
     else:
-        result_str = _calculate_next_rc(prefix, target_stable, all_tags)
+        result_str = _calculate_next_rc(prefix, target_stable, all_tags, configured_prefix is None)
 
     try:
         norm_result = parse(normalize_version(result_str, prefix))
