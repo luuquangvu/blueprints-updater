@@ -143,18 +143,7 @@ def main() -> None:
         current_baseline_str = normalize_version(current_any_str, prefix)
 
         parsed_stable = parse(stable_baseline_str)
-        parsed_current = parse(current_baseline_str)
-
-        current_stable_part = (
-            f"{parsed_current.major}.{parsed_current.minor}.{parsed_current.micro}"
-        )
-        if parse(current_stable_part) > parsed_stable:
-            baseline_str = current_stable_part
-        else:
-            baseline_str = stable_baseline_str
-
-        parsed_baseline = parse(baseline_str)
-        v = [parsed_baseline.major, parsed_baseline.minor, parsed_baseline.micro]
+        v = [parsed_stable.major, parsed_stable.minor, parsed_stable.micro]
     except Exception as e:
         print(
             f"Error: Could not parse baseline versions: {e}",
