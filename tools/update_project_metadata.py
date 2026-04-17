@@ -46,7 +46,9 @@ def update_pyproject(version: str) -> None:
         sys.exit(1)
 
     dynamic = project.get("dynamic", [])
-    if isinstance(dynamic, list) and "version" in dynamic:
+    dynamic_fields = {dynamic} if isinstance(dynamic, str) else set(dynamic)
+
+    if "version" in dynamic_fields:
         print(
             "Error: 'version' is declared as dynamic in pyproject.toml. Cannot update manually.",
             file=sys.stderr,
