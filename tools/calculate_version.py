@@ -1,8 +1,12 @@
-"""Version calculation logic for the release workflow.
+"""Version calculation utility for Semantic Versioning 2.0.0 releases.
 
-This script calculates the next version based on the selected bump type
-(major, minor, patch) and pre-release flag, ensuring Semantic Versioning 2.0.0
-compliance and branch-aware regression checking.
+This module provides a standalone CLI tool to compute the next valid version
+based on repository history and user-selected bump strategies. It enforces
+branch-aware regression checks and handles pre-release (RC) increments by
+scanning all reachable tags across both 'v'-prefixed and numeric-only formats.
+
+This utility is specifically designed for use within GitHub Actions release
+workflows to ensure consistent versioning across project branches.
 """
 
 import os
@@ -13,7 +17,25 @@ from packaging.version import parse
 
 
 def main() -> None:
-    """Calculate the next version based on environment variables."""
+    """Compute and print the next version using environment configuration.
+
+    The function orchestrates the full calculation pipeline:
+    1. Parses environment variables for bump strategies and base versions.
+    2. Validates input formats (X.Y.Z).
+    3. Increments specific version segments or RC counters.
+    4. Performs regression checks against stable and latest reachable tags.
+
+    Environment Inputs:
+        BUMP_TYPE: Version segment to increment ('major', 'minor', 'patch').
+        IS_PRERELEASE: Boolean string ('true' or 'false') for RC suffixes.
+        LATEST_STABLE: Baseline stable version string (e.g., 'v1.0.2').
+        CURRENT_ANY: Latest reachable tag for regression checks.
+        ALL_TAGS: Newline-separated tags for exhaustive pre-release scanning.
+
+    Output:
+        Prints the calculated version string to standard output.
+        Exits with status 1 on validation failure or malformed input.
+    """
     bump_type = os.environ["BUMP_TYPE"]
     is_prerelease = os.environ["IS_PRERELEASE"].lower() == "true"
     latest_stable_str = os.environ["LATEST_STABLE"]
@@ -23,7 +45,15 @@ def main() -> None:
     prefix = "v" if latest_stable_str.startswith("v") else ""
 
     latest_stable_numeric = latest_stable_str.lstrip("v")
-    v = [int(x) for x in latest_stable_numeric.split(".")]
+    parts = latest_stable_numeric.split(".")
+    if len(parts) != 3:
+        print(
+            f"Error: Invalid version format '{latest_stable_str}', expected X.Y.Z",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    v = [int(parts[0]), int(parts[1]), int(parts[2])]
     if bump_type == "major":
         v[0] += 1
         v[1] = 0
