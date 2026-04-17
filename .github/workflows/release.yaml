@@ -67,6 +67,7 @@ jobs:
 
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
           echo "VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Update versions
         run: |

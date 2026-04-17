@@ -133,13 +133,13 @@ def main() -> None:
 
 
 def _calculate_next_rc(prefix: str, target_stable: str, all_tags: list[str]) -> str:
-    p_regex = f"({re.escape(prefix)}|v)?" if prefix != "v" else "v?"
+    p_regex = f"(?:{re.escape(prefix)}|v)?" if prefix != "v" else "v?"
     rc_pattern = re.compile(rf"^{p_regex}{re.escape(target_stable)}-rc\.(\d+)$")
 
     rc_numbers = []
     for tag in all_tags:
         if match := rc_pattern.match(tag.strip()):
-            rc_numbers.append(int(match[1]))
+            rc_numbers.append(int(match.group(1)))
 
     next_rc = max(rc_numbers) + 1 if rc_numbers else 1
     return f"{prefix}{target_stable}-rc.{next_rc}"
