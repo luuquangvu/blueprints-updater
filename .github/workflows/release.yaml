@@ -49,11 +49,11 @@ jobs:
 
           export BUMP_TYPE="${{ github.event.inputs.bump_type }}"
           export IS_PRERELEASE="${{ github.event.inputs.prerelease || 'false' }}"
-          LATEST_STABLE=$(git tag --merged HEAD --list --sort=-v:refname | grep -E '^(v?[0-9]+\.[0-9]+\.[0-9]+)$' | head -n 1)
+          LATEST_STABLE=$(git tag --list --sort=-v:refname | grep -E '^(v?[0-9]+\.[0-9]+\.[0-9]+)$' | head -n 1)
           export LATEST_STABLE="${LATEST_STABLE:-0.0.0}"
-          CURRENT_ANY=$(git tag --merged HEAD --list --sort=-v:refname | grep -E '^(v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?)$' | head -n 1)
+          CURRENT_ANY=$(git tag --list --sort=-v:refname | grep -E '^(v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?)$' | head -n 1)
           export CURRENT_ANY="${CURRENT_ANY:-0.0.0}"
-          export ALL_TAGS=$(git tag --merged HEAD --list || true)
+          export ALL_TAGS=$(git tag --list || true)
 
           NEW_VERSION=$(uv run --with packaging python tools/calculate_version.py) || {
               echo "Error: Version calculation failed"
