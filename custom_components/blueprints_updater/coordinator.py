@@ -157,9 +157,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             entry: Integration configuration entry.
             update_interval: Scan interval.
 
-        Note: self.data is explicitly initialized to an empty dictionary
-        immediately after super().__init__(). This is intentional to ensure
-        it is never None, as the base class constructor sets it to None.
+        Note: After initialization, self.data is always a dictionary and is
+        never None, ensuring callers can rely on dictionary semantics.
 
         """
         self.hass = hass
