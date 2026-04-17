@@ -30,12 +30,79 @@ def normalize_version(version_str: str, prefix: str) -> str:
     return normalized.removeprefix("v")
 
 
+def _calculate_next_rc(prefix: str, target_stable: str, all_tags: list[str]) -> str:
+    """Calculate the next RC tag for a given stable target with prefix strictness.
+
+    The function is strict about mismatches between the configured `prefix`
+    and discovered tags:
+    - If `prefix == "v"`, only 'v'-prefixed RC tags are considered.
+    - If `prefix == ""`, both bare and 'v'-prefixed tags are allowed, but
+      mixing styles triggers an error to enforce repository consistency.
+    - If any other `prefix` is used, only tags with that prefix are considered.
+
+    Args:
+        prefix: The configured TAG_PREFIX.
+        target_stable: The base Semantic Version (e.g., '1.2.3').
+        all_tags: List of existing tags to scan for RC patterns.
+
+    Returns:
+        The calculated pre-release string (e.g., 'v1.2.3-rc.1').
+
+    Raises:
+        RuntimeError: If inconsistent tag prefixes are detected when TAG_PREFIX is empty.
+    """
+    if not prefix:
+        v_regex = "v"
+        bare_regex = ""
+    elif prefix == "v":
+        v_regex = "v"
+        bare_regex = None
+    else:
+        v_regex = re.escape(prefix)
+        bare_regex = None
+
+    patterns: list[tuple[re.Pattern[str], str]] = [
+        (
+            re.compile(rf"^{v_regex}{re.escape(target_stable)}-rc\.(\d+)$"),
+            prefix,
+        )
+    ]
+    if bare_regex is not None:
+        patterns.append((re.compile(rf"^{bare_regex}{re.escape(target_stable)}-rc\.(\d+)$"), ""))
+
+    rc_numbers: list[int] = []
+    detected_prefixes: set[str] = set()
+
+    for raw_tag in all_tags:
+        tag = raw_tag.strip()
+        for pattern, det_prefix in patterns:
+            if match := pattern.match(tag):
+                rc_numbers.append(int(match[1]))
+                detected_prefixes.add(det_prefix)
+                break
+
+    if not prefix and len(detected_prefixes) > 1:
+        print(
+            f"Error: Inconsistent RC tag prefixes detected for {target_stable!r}: "
+            "found both 'v' and unprefixed tags. Please standardize your tag format.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    effective_prefix = prefix
+    if not effective_prefix and detected_prefixes == {"v"}:
+        effective_prefix = "v"
+
+    next_rc = max(rc_numbers) + 1 if rc_numbers else 1
+    return f"{effective_prefix}{target_stable}-rc.{next_rc}"
+
+
 def main() -> None:
     """Compute and print the next version using environment configuration.
 
     The function orchestrates the full calculation pipeline:
     1. Parses environment variables for bump strategies and base versions.
-    2. Validates input formats using packaging.version.
+    2. Validates input formats and detects active version lines.
     3. Increments specific version segments or RC counters.
     4. Performs regression checks against stable and latest reachable tags.
 
@@ -72,12 +139,25 @@ def main() -> None:
     prefix = os.environ.get("TAG_PREFIX", detected_prefix)
 
     try:
-        baseline = normalize_version(latest_stable_str, prefix)
-        parsed = parse(baseline)
-        v = [parsed.major, parsed.minor, parsed.micro]
+        stable_baseline_str = normalize_version(latest_stable_str, prefix)
+        current_baseline_str = normalize_version(current_any_str, prefix)
+
+        parsed_stable = parse(stable_baseline_str)
+        parsed_current = parse(current_baseline_str)
+
+        current_stable_part = (
+            f"{parsed_current.major}.{parsed_current.minor}.{parsed_current.micro}"
+        )
+        if parse(current_stable_part) > parsed_stable:
+            baseline_str = current_stable_part
+        else:
+            baseline_str = stable_baseline_str
+
+        parsed_baseline = parse(baseline_str)
+        v = [parsed_baseline.major, parsed_baseline.minor, parsed_baseline.micro]
     except Exception as e:
         print(
-            f"Error: Could not parse version '{latest_stable_str}': {e}",
+            f"Error: Could not parse baseline versions: {e}",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -105,6 +185,7 @@ def main() -> None:
         result_str = f"{prefix}{target_stable}"
     else:
         result_str = _calculate_next_rc(prefix, target_stable, all_tags)
+
     norm_result = parse(normalize_version(result_str, prefix))
     norm_latest = parse(normalize_version(latest_stable_str, prefix))
     norm_current = parse(normalize_version(current_any_str, prefix))
@@ -130,19 +211,6 @@ def main() -> None:
         sys.exit(1)
 
     print(result_str)
-
-
-def _calculate_next_rc(prefix: str, target_stable: str, all_tags: list[str]) -> str:
-    p_regex = f"(?:{re.escape(prefix)}|v)?" if prefix != "v" else "v?"
-    rc_pattern = re.compile(rf"^{p_regex}{re.escape(target_stable)}-rc\.(\d+)$")
-
-    rc_numbers = []
-    for tag in all_tags:
-        if match := rc_pattern.match(tag.strip()):
-            rc_numbers.append(int(match.group(1)))
-
-    next_rc = max(rc_numbers) + 1 if rc_numbers else 1
-    return f"{prefix}{target_stable}-rc.{next_rc}"
 
 
 if __name__ == "__main__":

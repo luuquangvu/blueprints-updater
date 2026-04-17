@@ -46,7 +46,23 @@ def update_pyproject(version: str) -> None:
         sys.exit(1)
 
     dynamic = project.get("dynamic", [])
-    dynamic_fields = {dynamic} if isinstance(dynamic, str) else set(dynamic)
+
+    if isinstance(dynamic, str):
+        dynamic_fields = {dynamic}
+    elif isinstance(dynamic, list):
+        if not all(isinstance(item, str) for item in dynamic):
+            print(
+                "Error: [project.dynamic] must be a string or a list of strings in pyproject.toml",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        dynamic_fields = set(dynamic)
+    else:
+        print(
+            "Error: [project.dynamic] must be a string or a list of strings in pyproject.toml",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if "version" in dynamic_fields:
         print(
