@@ -143,7 +143,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return f"blueprint_{hashlib.sha256(rel_path.encode()).hexdigest()}"
 
     config_entry: ConfigEntry
-    data: dict[str, dict[str, Any]]
 
     def __init__(
         self,
@@ -158,10 +157,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             entry: Integration configuration entry.
             update_interval: Scan interval.
 
+        Note: After initialization, self.data is always a dictionary and is
+        never None, ensuring callers can rely on dictionary semantics.
+
         """
         self.hass = hass
         self.config_entry = entry
-        self.data: dict[str, dict[str, Any]] = {}
         self.setup_complete = False
         super().__init__(
             hass,
@@ -169,6 +170,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             name=DOMAIN,
             update_interval=update_interval,
         )
+        self.data: dict[str, dict[str, Any]] = {}
         self._translations: dict[tuple[str, str], dict[str, str]] = {}
         self.hass.data.setdefault(DOMAIN, {}).setdefault("translation_cache", {})
         self._translation_lock = asyncio.Lock()
@@ -1291,6 +1293,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> None:
         """Set cached git diff.
 
+        If the coordinator's data is not yet initialized or
+        the path is not in the data, this method does nothing.
+
         Args:
             path: Local path of the blueprint.
             local_hash: Hash of the local file.
@@ -1459,7 +1464,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             clear_etag: If True, clear the stored ETag for this blueprint.
 
         """
-        if self.data and path in self.data:
+        if path in self.data:
             update_data = {
                 "remote_hash": None,
                 "remote_content": None,
