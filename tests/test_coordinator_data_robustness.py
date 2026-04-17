@@ -1,4 +1,4 @@
-"""Tests for issue where self.data is being accessed safely."""
+"""Tests for the coordinator's data initialization contract and robustness."""
 
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
