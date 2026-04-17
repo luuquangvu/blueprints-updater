@@ -131,8 +131,9 @@ jobs:
           import sys
           with open('pyproject.toml', 'r', encoding='utf-8') as f:
               doc = tomlkit.parse(f.read())
-          if 'project' in doc:
-              doc['project']['version'] = sys.argv[1]
+          if 'project' not in doc:
+            raise SystemExit('Expected a [project] table in pyproject.toml to set version')
+          doc['project']['version'] = sys.argv[1]
           with open('pyproject.toml', 'w', encoding='utf-8') as f:
               f.write(tomlkit.dumps(doc))
           " "$VERSION"
