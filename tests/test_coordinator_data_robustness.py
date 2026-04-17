@@ -11,12 +11,22 @@ from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoor
 @pytest.fixture
 def mock_coordinator(hass):
     """Fixture for BlueprintUpdateCoordinator with minimal mocking."""
+
+    def mock_init(self, hass, logger, name, update_interval=None) -> None:
+        """Mock side effect to simulate base class setup without failing checks."""
+        self.hass = hass
+        self.logger = logger
+        self.name = name
+        self.update_interval = update_interval
+        self.data = None
+
     entry = MagicMock()
     entry.options = {}
     entry.data = {}
     with patch(
         "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
-        return_value=None,
+        autospec=True,
+        side_effect=mock_init,
     ):
         return BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
 
@@ -40,7 +50,6 @@ async def test_async_prune_stale_metadata_empty_data(hass, mock_coordinator):
         mock_save.assert_called_once_with(force=True)
 
     assert not coordinator.data
-    assert not coordinator._persisted_etags
     assert not coordinator._persisted_etags
     assert not coordinator._persisted_hashes
 
