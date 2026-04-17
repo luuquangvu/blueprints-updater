@@ -34,11 +34,36 @@ async def test_async_prune_stale_metadata_empty_data(hass, mock_coordinator):
         patch(
             "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
         ),
-        patch.object(coordinator, "_async_save_metadata", new_callable=AsyncMock),
+        patch.object(coordinator, "_async_save_metadata", new_callable=AsyncMock) as mock_save,
     ):
         await coordinator._async_prune_stale_metadata(set())
+        mock_save.assert_called_once_with(force=True)
 
     assert not coordinator.data
+    assert not coordinator._persisted_etags
+    assert not coordinator._persisted_etags
+    assert not coordinator._persisted_hashes
+
+
+@pytest.mark.asyncio
+async def test_async_prune_stale_metadata_none_data(hass, mock_coordinator):
+    """Regression test for issue where self.data is None during pruning."""
+    coordinator = mock_coordinator
+    coordinator.data = None
+    coordinator._persisted_etags = {"stale_path": "etag"}
+    coordinator._persisted_hashes = {"stale_path": "hash"}
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.path.isfile",
+            return_value=False,
+        ),
+        patch.object(coordinator, "_async_save_metadata", new_callable=AsyncMock) as mock_save,
+    ):
+        await coordinator._async_prune_stale_metadata(set())
+        mock_save.assert_called_once_with(force=True)
+
+    assert coordinator.data is None
     assert not coordinator._persisted_etags
     assert not coordinator._persisted_hashes
 
@@ -54,3 +79,33 @@ async def test_git_diff_empty_data(hass, mock_coordinator):
 
     coordinator.set_cached_git_diff("any_path", "lh", "rh", "diff")
     assert "any_path" not in coordinator.data
+
+
+def test_update_error_state_with_missing_path(mock_coordinator) -> None:
+    """_update_error_state should be a no-op when the path is not present in data."""
+    mock_coordinator.data = {}
+
+    mock_coordinator._update_error_state("nonexistent/path", "test_error", "detail")
+    assert not mock_coordinator.data
+
+
+def test_update_error_state_with_existing_path(mock_coordinator) -> None:
+    """_update_error_state should update/reset error state when the path exists."""
+    path = "existing/path"
+    mock_coordinator.data = {
+        path: {
+            "name": "Test",
+            "remote_hash": "old_hash",
+            "updatable": True,
+            "last_error": None,
+        }
+    }
+
+    mock_coordinator._update_error_state(path, "fetch_error", "detail", clear_etag=True)
+
+    info = mock_coordinator.data[path]
+    assert info["remote_hash"] is None
+    assert info["updatable"] is False
+    assert isinstance(info["last_error"], str)
+    assert "fetch_error|detail" in info["last_error"]
+    assert info["etag"] is None
