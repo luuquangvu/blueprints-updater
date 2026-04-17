@@ -38,7 +38,15 @@ def main() -> None:
         Exits with status 1 on validation failure or malformed input.
     """
     bump_type = os.environ["BUMP_TYPE"]
-    is_prerelease = os.environ["IS_PRERELEASE"].lower() == "true"
+    is_prerelease_raw = os.environ["IS_PRERELEASE"].strip().lower()
+    if is_prerelease_raw not in ("true", "false"):
+        print(
+            f"Error: Invalid IS_PRERELEASE value '{os.environ['IS_PRERELEASE']}', "
+            "expected 'true' or 'false'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    is_prerelease = is_prerelease_raw == "true"
     latest_stable_str = os.environ["LATEST_STABLE"]
     current_any_str = os.environ["CURRENT_ANY"]
     all_tags_raw = os.environ.get("ALL_TAGS", "")
