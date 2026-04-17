@@ -40,7 +40,8 @@ def main() -> None:
     is_prerelease = os.environ["IS_PRERELEASE"].lower() == "true"
     latest_stable_str = os.environ["LATEST_STABLE"]
     current_any_str = os.environ["CURRENT_ANY"]
-    all_tags = os.environ["ALL_TAGS"].split("\n")
+    all_tags_raw = os.environ.get("ALL_TAGS", "")
+    all_tags = [t.strip() for t in all_tags_raw.split("\n") if t.strip()]
 
     prefix = "v" if latest_stable_str.startswith("v") else ""
 
