@@ -32,6 +32,12 @@ def mock_coordinator(hass):
 
 
 @pytest.mark.asyncio
+async def test_coordinator_data_initialized_to_empty_dict(hass, mock_coordinator):
+    """Confirm BlueprintUpdateCoordinator sets self.data to {} after initialization."""
+    assert mock_coordinator.data == {}
+
+
+@pytest.mark.asyncio
 async def test_async_prune_stale_metadata_empty_data(hass, mock_coordinator):
     """Test that _async_prune_stale_metadata works correctly with empty self.data."""
     coordinator = mock_coordinator
@@ -82,8 +88,10 @@ def test_update_error_state_with_existing_path(mock_coordinator) -> None:
         path: {
             "name": "Test",
             "remote_hash": "old_hash",
+            "remote_content": "old_content",
             "updatable": True,
             "last_error": None,
+            "invalid_remote_hash": "some_bad_hash",
         }
     }
 
@@ -91,6 +99,8 @@ def test_update_error_state_with_existing_path(mock_coordinator) -> None:
 
     info = mock_coordinator.data[path]
     assert info["remote_hash"] is None
+    assert info["remote_content"] is None
+    assert info["invalid_remote_hash"] is None
     assert info["updatable"] is False
     assert isinstance(info["last_error"], str)
     assert "fetch_error|detail" in info["last_error"]
