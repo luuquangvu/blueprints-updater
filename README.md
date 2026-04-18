@@ -126,6 +126,55 @@ blueprint:
 
 ---
 
+## Pyscript Updater (companion integration)
+
+This repo also ships **Pyscript Updater** — a standalone Home Assistant integration living in `custom_components/pyscript_updater`, designed to sync Pyscript files from GitHub without shell_command hacks.
+
+### Features
+
+- Manifest-driven: reads `_sources.txt` under your pyscript directory (one `url|dest[|recursive]` per line).
+- Supports GitHub blob URLs, raw URLs and `tree/` folders (optional recursive).
+- SHA256 + ETag change detection to save bandwidth.
+- Creates an `update` entity per tracked file — one-click install.
+- Rotating `.bak.N` backups with a restore service.
+- Optional auto-reload of the `pyscript` integration after a successful install.
+- GitHub Token support for private repos or higher rate limits.
+
+### Installation (manual)
+
+1. Copy `custom_components/pyscript_updater/` into your Home Assistant `config/custom_components/`.
+2. Restart Home Assistant.
+3. **Settings → Devices & Services → Add Integration → Pyscript Updater**.
+
+### Manifest `_sources.txt`
+
+```
+# Format: url|dest  or  url|dest/|recursive
+https://github.com/user/repo/blob/main/my_script.py|my_script.py
+https://github.com/user/repo/tree/main/my_module|my_module/|recursive
+https://raw.githubusercontent.com/user/repo/main/helper.py|helpers/helper.py
+```
+
+### Services
+
+| Service | Description |
+|---------|-------------|
+| `pyscript_updater.reload` | Re-read the manifest and poll GitHub immediately |
+| `pyscript_updater.update_all` | Install every available update (`backup` option) |
+| `pyscript_updater.restore_pyscript` | Restore a file from `.bak.N` |
+
+### Configuration options
+
+- **Pyscript directory** — defaults to `/config/pyscript`
+- **Manifest file** — defaults to `_sources.txt`
+- **Enable Auto-Update** — write files automatically when a new version is detected
+- **Reload pyscript after updates** — call `pyscript.reload` post-install
+- **Update Interval (hours)** — poll cadence (1–720)
+- **Max Backup Versions** — number of rotating backups to keep (1–10)
+- **GitHub Token** — for private repos or higher rate limits
+
+---
+
 ## Code Quality & Security
 
 To ensure long-term reliability and stability, this project utilizes a modern stack of automated development and security tools:

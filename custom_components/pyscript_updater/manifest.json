@@ -1,0 +1,13 @@
+{
+  "domain": "pyscript_updater",
+  "name": "Pyscript Updater",
+  "codeowners": ["@TriTue2011"],
+  "config_flow": true,
+  "documentation": "https://github.com/TriTue2011/blueprints-updater",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/TriTue2011/blueprints-updater/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "1.0.0"
+}

@@ -1,0 +1,33 @@
+reload:
+  name: Reload pyscript sources
+  description: Re-reads the manifest file and checks GitHub for updates immediately.
+update_all:
+  name: Update all pyscript files
+  description: Downloads and installs every available pyscript update.
+  fields:
+    backup:
+      name: Create backup
+      description: Create numbered backup files before overwriting.
+      required: false
+      default: true
+      selector:
+        boolean:
+restore_pyscript:
+  name: Restore pyscript file
+  description: Restore a pyscript file from a numbered backup (.bak.1, .bak.2, ...).
+  fields:
+    entity_id:
+      name: Pyscript entity
+      description: The update entity of the pyscript file to restore.
+      required: true
+      selector:
+        entity:
+          integration: pyscript_updater
+          domain: update
+    version:
+      name: Backup version
+      description: Which backup version to restore (1 = newest, 2 = older, ...).
+      required: false
+      default: 1
+      selector:
+        number:

@@ -126,77 +126,56 @@ blueprint:
 
 ---
 
-## Tính năng bổ sung: Tự động cập nhật Pyscript từ GitHub
+## Pyscript Updater (Integration riêng)
 
-Bộ công cụ pyscript sync cho phép đồng bộ file/folder từ GitHub về `/config/pyscript` thông qua một blueprint HA và shell script đi kèm.
+Kho này cung cấp thêm **Pyscript Updater** — một integration Home Assistant độc lập nằm trong `custom_components/pyscript_updater`, chuyên đồng bộ file/folder Pyscript từ GitHub thay vì dùng shell_command.
 
-### Các file trong thư mục `pyscript/`
+### Tính năng
 
-| File | Mô tả |
-|------|-------|
-| `pyscript_sync_from_urls.sh` | Script chính thực hiện tải file từ GitHub |
-| `pyscript_sync.conf` | File cấu hình (copy vào `/config/scripts/`) |
-| `blueprint_pyscript_update_manager.yaml` | Blueprint HA quản lý lịch chạy & thông báo |
+- Đọc manifest `_sources.txt` trong thư mục pyscript (mỗi dòng: `url|dest[|recursive]`).
+- Hỗ trợ link file blob GitHub, raw URL, và folder `tree/` (có thể bật `recursive`).
+- Phát hiện thay đổi qua SHA256 + ETag để tiết kiệm băng thông.
+- Tạo entity `update` cho mỗi file được theo dõi — cập nhật bằng 1 click.
+- Sao lưu xoay vòng `.bak.N` và hỗ trợ khôi phục qua service.
+- Tuỳ chọn tự động reload `pyscript` sau khi cập nhật.
+- Hỗ trợ GitHub Token (cho private repo hoặc giới hạn rate).
 
-### Hướng dẫn cài đặt
+### Cài đặt
 
-#### 1. Sao chép script và config vào HA
+**Thủ công:**
 
-```bash
-# Tạo thư mục nếu chưa có
-mkdir -p /config/scripts
+1. Sao chép thư mục `custom_components/pyscript_updater/` vào `config/custom_components/` của Home Assistant.
+2. Khởi động lại Home Assistant.
+3. **Settings → Devices & Services → Add Integration** và tìm **Pyscript Updater**.
 
-# Copy script
-cp pyscript/pyscript_sync_from_urls.sh /config/scripts/
-chmod +x /config/scripts/pyscript_sync_from_urls.sh
+### Manifest `_sources.txt`
 
-# Copy và chỉnh sửa config
-cp pyscript/pyscript_sync.conf /config/scripts/
-```
-
-#### 2. Tạo file manifest `/config/pyscript/_sources.txt`
+Đặt file `_sources.txt` (hoặc tên khác bạn cấu hình) trong thư mục pyscript:
 
 ```
 # Format: url|dest  hoặc  url|dest/|recursive
 https://github.com/user/repo/blob/main/my_script.py|my_script.py
-https://github.com/user/repo/tree/main/my_folder|my_folder/|recursive
+https://github.com/user/repo/tree/main/my_module|my_module/|recursive
+https://raw.githubusercontent.com/user/repo/main/helper.py|helpers/helper.py
 ```
 
-#### 3. Thêm shell_command vào `configuration.yaml`
+### Services
 
-```yaml
-shell_command:
-  pyscript_update: >
-    bash /config/scripts/pyscript_sync_from_urls.sh
-    {{ '--update'   if arguments | default('') == 'update' else '' }}
-    {{ '--debug'    if debug | default(false) else '' }}
-    {{ '--token ' + gh_token if gh_token | default('') != '' else '' }}
-    {{ '--no-reload' if no_reload | default(false) else '' }}
-```
+| Service | Mô tả |
+|---------|-------|
+| `pyscript_updater.reload` | Đọc lại manifest, kiểm tra GitHub ngay lập tức |
+| `pyscript_updater.update_all` | Cập nhật toàn bộ file có bản mới (tuỳ chọn `backup`) |
+| `pyscript_updater.restore_pyscript` | Khôi phục file từ backup `.bak.N` |
 
-#### 4. Import Blueprint
+### Tuỳ chọn cấu hình
 
-[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FTriTue2011%2Fblueprints-updater%2Fblob%2Fmain%2Fpyscript%2Fblueprint_pyscript_update_manager.yaml)
-
-Hoặc thủ công: **Settings > Automations > Blueprints > Import Blueprint** và dán URL:
-```
-https://github.com/TriTue2011/blueprints-updater/blob/main/pyscript/blueprint_pyscript_update_manager.yaml
-```
-
-### Tùy chọn cấu hình Blueprint
-
-| Tùy chọn | Mô tả |
-|----------|-------|
-| **Chế độ gọi** | `conf` (theo file .conf), `check` (chỉ kiểm tra), `update` (ép ghi file) |
-| **Bật lịch tự động** | Chạy định kỳ theo giờ cài đặt |
-| **Giờ chạy (0-23)** | Giờ chạy tự động hàng ngày |
-| **Reload sau cập nhật** | Tự động gọi `pyscript.reload` khi có file thay đổi |
-| **Thông báo Mobile** | Gửi thông báo qua mobile app khi có cập nhật/lỗi |
-| **Thông báo Zalo** | Gửi báo cáo qua Zalo Bot (cần tích hợp `zalo_bot`) |
-
-### Kích hoạt thủ công
-
-Bắn event `pyscript_update_trigger` từ Developer Tools > Events để chạy ngay lập tức mà không cần chờ lịch.
+- **Pyscript directory** — mặc định `/config/pyscript`
+- **Manifest file** — mặc định `_sources.txt`
+- **Enable Auto-Update** — bật để tự động ghi file khi có bản mới
+- **Reload pyscript after updates** — gọi `pyscript.reload` sau khi cập nhật
+- **Update Interval (hours)** — chu kỳ kiểm tra (1–720)
+- **Max Backup Versions** — số bản backup giữ lại (1–10)
+- **GitHub Token** — cho private repo hoặc tăng rate limit
 
 ---
 

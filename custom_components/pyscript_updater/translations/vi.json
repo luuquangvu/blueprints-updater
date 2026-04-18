@@ -1,0 +1,107 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Thiết lập Pyscript Updater",
+        "description": "Đồng bộ file pyscript từ GitHub. Tạo một file manifest trong thư mục pyscript với mỗi dòng `url|dest[|recursive]`.",
+        "data": {
+          "pyscript_dir": "Thư mục pyscript",
+          "manifest_file": "File manifest (tương đối với pyscript dir hoặc tuyệt đối)",
+          "auto_update": "Bật tự động cập nhật",
+          "reload_after_update": "Reload pyscript sau khi cập nhật",
+          "update_interval": "Khoảng thời gian kiểm tra (giờ)",
+          "max_backups": "Số bản sao lưu tối đa",
+          "github_token": "GitHub Token (tuỳ chọn)"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Chỉ cho phép một instance của Pyscript Updater."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Cài đặt Pyscript Updater",
+        "description": "Cấu hình đường dẫn, khoảng kiểm tra và chế độ tự động.",
+        "data": {
+          "pyscript_dir": "Thư mục pyscript",
+          "manifest_file": "File manifest",
+          "auto_update": "Bật tự động cập nhật",
+          "reload_after_update": "Reload pyscript sau khi cập nhật",
+          "update_interval": "Khoảng thời gian kiểm tra (giờ)",
+          "max_backups": "Số bản sao lưu tối đa",
+          "github_token": "GitHub Token"
+        }
+      }
+    }
+  },
+  "entity": {
+    "update": {
+      "pyscript_file": {
+        "name": "{name}"
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Reload nguồn pyscript",
+      "description": "Đọc lại manifest và kiểm tra GitHub ngay lập tức."
+    },
+    "update_all": {
+      "name": "Cập nhật tất cả pyscript",
+      "description": "Tải và cài đặt mọi bản cập nhật pyscript đang có.",
+      "fields": {
+        "backup": {
+          "name": "Tạo sao lưu",
+          "description": "Tạo file sao lưu có đánh số trước khi ghi đè."
+        }
+      }
+    },
+    "restore_pyscript": {
+      "name": "Khôi phục file pyscript",
+      "description": "Khôi phục file pyscript từ bản sao lưu đánh số (.bak.1, .bak.2, ...).",
+      "fields": {
+        "entity_id": {
+          "name": "Pyscript entity",
+          "description": "Entity update của file pyscript cần khôi phục."
+        },
+        "version": {
+          "name": "Bản sao lưu",
+          "description": "Số bản sao lưu cần khôi phục (1 = mới nhất)."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "missing_entity_id": {
+      "message": "Thiếu tham số entity_id."
+    },
+    "invalid_entity": {
+      "message": "Entity pyscript update không hợp lệ."
+    },
+    "not_found": {
+      "message": "Không tìm thấy file pyscript."
+    },
+    "missing_backup": {
+      "message": "Thiếu file sao lưu. Có thể chưa tạo backup trong lần cập nhật trước."
+    },
+    "invalid_version": {
+      "message": "Phiên bản sao lưu không hợp lệ. Phải nằm trong khoảng 1 đến số backup tối đa."
+    },
+    "restore_success": {
+      "message": "Khôi phục file pyscript thành công."
+    },
+    "system_error": {
+      "message": "Lỗi hệ thống khi khôi phục: {error}"
+    }
+  },
+  "common": {
+    "update_available_short": "Có bản cập nhật",
+    "up_to_date": "Đã cập nhật",
+    "install_error": "Không thể cài đặt file pyscript: {error}.",
+    "fetch_error": "Lỗi tải: {error}",
+    "processing_error": "Lỗi xử lý: {error}",
+    "content_missing": "Không có nội dung từ nguồn"
+  }
+}
