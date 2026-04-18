@@ -1,0 +1,356 @@
+# blueprint_pyscript_update_manager.yaml
+# Import: Settings > Automations > Blueprints > Import Blueprint
+# Yeu cau: Home Assistant >= 2024.10.0
+blueprint:
+  name: Tu dong update Pyscript
+  author: TriTue2011
+  source_url: https://github.com/TriTue2011/blueprints-updater/blob/main/pyscript/blueprint_pyscript_update_manager.yaml
+  homeassistant:
+    min_version: 2024.10.0
+  description: >
+    Dong bo file / folder tu GitHub ve /config/pyscript.
+    Cau hinh chinh doc tu /config/scripts/pyscript_sync.conf.
+    Blueprint chi quan ly lich chay va thong bao.
+  domain: automation
+
+  input:
+    update_mode:
+      name: Che do goi
+      description: >
+        Conf: dung nguyen cau hinh trong .conf.
+        Kiem tra: ep check, khong ghi file.
+        Cap nhat: ep ghi file du .conf dat auto_update=false.
+      selector:
+        select:
+          options:
+            - label: "Dung .conf (ton trong cau hinh file)"
+              value: "conf"
+            - label: "Ep kiem tra (khong ghi file)"
+              value: "check"
+            - label: "Ep cap nhat (ghi file)"
+              value: "update"
+      default: "conf"
+
+    schedule_enabled:
+      name: Bat lich tu dong
+      selector:
+        boolean: {}
+      default: false
+
+    schedule_hour:
+      name: Gio chay tu dong (0-23)
+      selector:
+        number:
+          min: 0
+          max: 23
+          mode: slider
+      default: 3
+
+    reload_after_update:
+      name: Tu dong reload pyscript sau khi cap nhat
+      selector:
+        boolean: {}
+      default: true
+
+    # Thong bao Mobile
+    notification_section:
+      name: Thong bao Mobile
+      icon: mdi:bell
+      collapsed: true
+      input:
+        notify_enabled:
+          name: Bat thong bao mobile
+          selector:
+            boolean: {}
+          default: false
+
+        notify_device:
+          name: Thiet bi nhan thong bao
+          default: []
+          selector:
+            device:
+              multiple: true
+              filter:
+                - integration: mobile_app
+
+        notification_channel:
+          name: Notification Channel (Android)
+          default: "Pyscript Updates"
+          selector:
+            text: {}
+
+        notification_color:
+          name: Notification Color
+          default: "#03a9f4"
+          selector:
+            select:
+              options:
+                - label: "Blue  - #03a9f4"
+                  value: "#03a9f4"
+                - label: "Green - #4caf50"
+                  value: "#4caf50"
+                - label: "Orange- #ff9800"
+                  value: "#ff9800"
+              custom_value: true
+
+        notification_icon:
+          name: Notification Icon
+          default: "mdi:update"
+          selector:
+            icon: {}
+
+    # Zalo
+    zalo_settings:
+      name: Zalo Notification
+      icon: mdi:message-image-outline
+      collapsed: true
+      input:
+        include_zalo_notify:
+          name: Bat thong bao Zalo
+          default: false
+          selector:
+            boolean: {}
+
+        zalo_group_id:
+          name: Zalo Group ID / User ID
+          default: ""
+          selector:
+            text: {}
+
+        zalo_phone:
+          name: Zalo Account (so dien thoai)
+          default: "+84000000000"
+          selector:
+            text: {}
+
+        zalo_types:
+          name: Loai Zalo
+          default: "0"
+          selector:
+            select:
+              options:
+                - label: "Ca nhan (User)"
+                  value: "0"
+                - label: "Nhom (Group)"
+                  value: "1"
+
+        zalo_ttl:
+          name: TTL (ms, 0 = khong het han)
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 86400000
+              step: 1000
+              unit_of_measurement: ms
+
+# trigger_variables bat buoc de dung !input trong enabled:
+trigger_variables:
+  _schedule_enabled: !input schedule_enabled
+
+trigger:
+  - platform: time_pattern
+    hours: !input schedule_hour
+    id: scheduled
+    enabled: "{{ _schedule_enabled }}"
+
+  - platform: event
+    event_type: pyscript_update_trigger
+    id: manual
+
+condition: []
+
+# Mirror tat ca !input -> variables
+# Bat buoc voi nested input sections (zalo_settings, notification_section)
+variables:
+  update_mode: !input update_mode
+  reload_after_update: !input reload_after_update
+
+  notify_enabled: !input notify_enabled
+  notify_devices: !input notify_device
+  notification_channel: !input notification_channel
+  notification_color: !input notification_color
+  notification_icon: !input notification_icon
+
+  include_zalo_notify: !input include_zalo_notify
+  zalo_group_id: !input zalo_group_id
+  zalo_phone: !input zalo_phone
+  zalo_types: !input zalo_types
+  zalo_ttl: !input zalo_ttl
+
+  # Chuyen device_id -> ten service notify
+  device_name_map: >
+    {% set ns = namespace(names=[]) %}
+    {% for device_id in notify_devices %}
+      {% set name = device_attr(device_id, "name") | slugify %}
+      {% set ns.names = ns.names + ["mobile_app_" + name] %}
+    {% endfor %}
+    {{ ns.names }}
+
+  # Xac dinh arguments truyen vao shell_command
+  # conf  -> khong truyen gi, doc nguyen tu .conf
+  # check -> truyen rong, ep khong ghi
+  # update-> truyen 'update', ep ghi file
+  _arguments: >
+    {% if update_mode == 'update' %}update
+    {% else %}{% endif %}
+
+action:
+  - variables:
+      start_ts: "{{ as_timestamp(now()) }}"
+
+  # Goi shell_command — config chinh doc tu .conf
+  - action: shell_command.pyscript_update
+    data:
+      arguments: "{{ _arguments | trim }}"
+    response_variable: cmd_result
+
+  # Guard: dung neu shell command that bai hoan toan
+  - if:
+      - condition: template
+        value_template: "{{ cmd_result.returncode != 0 }}"
+    then:
+      - action: logbook.log
+        data:
+          name: Pyscript Update ERROR
+          message: >
+            Shell command that bai (rc={{ cmd_result.returncode }}).
+            stderr: {{ cmd_result.stderr | truncate(300) }}
+      - stop: "Shell command failed"
+        error: true
+
+  # Parse stdout
+  - variables:
+      raw_output: "{{ cmd_result.stdout }}"
+
+      # Danh sach file da duoc cap nhat
+      updated_list: >
+        {% set ns = namespace(files=[], current='') %}
+        {% for line in raw_output.split('\n') %}
+          {% set s = line.strip() %}
+          {% if s.startswith('> ')
+             and not s.startswith('> pyscript')
+             and not s.startswith('> dir')
+             and not s.startswith('> manifest')
+             and not s.startswith('> update')
+             and not s.startswith('> reload')
+             and not s.startswith('> token')
+             and not s.startswith('> config') %}
+            {% set ns.current = s[2:] %}
+          {% endif %}
+          {% if '-! updated' in s and ns.current != '' %}
+            {% set ns.files = ns.files + [ns.current] %}
+            {% set ns.current = '' %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.files }}
+
+      # Lay so lieu tu dong "Summary: total=X, changed=Y, failed=Z"
+      summary_line: >
+        {% set found = namespace(v='') %}
+        {% for l in raw_output.split('\n') %}
+          {% if l.startswith('Summary:') %}{% set found.v = l %}{% endif %}
+        {% endfor %}
+        {{ found.v }}
+
+      total_files: >
+        {% set m = summary_line | regex_findall('total=(\d+)') %}
+        {{ m[0] if m else '0' }}
+      update_count: "{{ updated_list | length }}"
+      failed_count: >
+        {% set m = summary_line | regex_findall('failed=(\d+)') %}
+        {{ m[0] if m else '0' }}
+      uptodate_count: "{{ raw_output.split('\n') | select('search', '-> up-to-date') | list | length }}"
+      nosource_count: "{{ raw_output.split('\n') | select('search', 'no source') | list | length }}"
+
+      duration: "{{ (as_timestamp(now()) - start_ts) | float | round(2) }}"
+      update_time: "{{ now().strftime('%H:%M %d/%m/%Y') }}"
+
+  # Reload khi co cap nhat
+  - if:
+      - condition: template
+        value_template: >
+          {{ update_count | int > 0 and reload_after_update }}
+    then:
+      - action: pyscript.reload
+
+  # Ghi logbook
+  - action: logbook.log
+    data:
+      name: Pyscript Update
+      message: >
+        [{{ update_mode }}]
+        total={{ total_files }}, updated={{ update_count }},
+        failed={{ failed_count }}, time={{ duration }}s
+
+  # Mobile notify (ca khi co loi download)
+  - if:
+      - condition: template
+        value_template: >
+          {{ notify_enabled
+             and (update_count | int > 0 or failed_count | int > 0) }}
+    then:
+      - repeat:
+          for_each: "{{ device_name_map }}"
+          sequence:
+            - action: "notify.{{ repeat.item }}"
+              data:
+                title: >
+                  {% if failed_count | int > 0 %}
+                  Pyscript: {{ failed_count }} loi
+                  {% elif update_count | int > 0 %}
+                  Pyscript: {{ update_count }} cap nhat
+                  {% else %}
+                  Pyscript: khong co gi moi
+                  {% endif %}
+                message: >
+                  Mode: {{ update_mode }}
+                  Total: {{ total_files }} | Updated: {{ update_count }} | Failed: {{ failed_count }}
+                  {% if update_count | int > 0 %}
+
+                  Files cap nhat:
+                  {% for f in updated_list %}- {{ f }}
+                  {% endfor %}{% endif %}
+                  {{ duration }}s | {{ update_time }}
+                data:
+                  channel: "{{ notification_channel }}"
+                  color: "{{ notification_color }}"
+                  notification_icon: "{{ notification_icon }}"
+
+  # Zalo notify
+  - if:
+      - condition: template
+        value_template: "{{ include_zalo_notify }}"
+    then:
+      - action: zalo_bot.send_message
+        data:
+          type: !input zalo_types
+          ttl: !input zalo_ttl
+          thread_id: !input zalo_group_id
+          account_selection: !input zalo_phone
+          message: >
+            PYSCRIPT UPDATE REPORT
+
+            Summary
+            Mode     : {{ update_mode }}
+            Total    : {{ total_files }}
+            Updated  : {{ update_count }}
+            Up-to-date: {{ uptodate_count }}
+            Failed   : {{ failed_count }}
+            No source: {{ nosource_count }}
+            {% if update_count | int > 0 %}
+
+            Updated Files:
+            {% for f in updated_list %}
+            - {{ f }}
+            {% endfor %}
+            {% endif %}
+
+            Duration: {{ duration }}s
+            {{ update_time }}
+
+# single: khong chay song song
+# silent: neu dang chay thi bo qua trigger moi
+mode: single
+
+max_exceeded: silent
