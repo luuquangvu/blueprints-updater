@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  validation:
     runs-on: ubuntu-latest
 
     steps:

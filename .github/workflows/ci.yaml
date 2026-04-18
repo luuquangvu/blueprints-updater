@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 jobs:
-  python-checks:
+  ci:
     runs-on: ubuntu-latest
 
     steps:
