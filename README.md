@@ -1,11 +1,11 @@
 # Blueprints Updater for Home Assistant
 
-[![GitHub Release](https://img.shields.io/github/v/release/luuquangvu/blueprints-updater?style=flat&logo=github&label=GitHub+Release&color=purple)](https://github.com/luuquangvu/blueprints-updater/releases)
+[![Release](https://img.shields.io/github/v/release/luuquangvu/blueprints-updater?style=flat&logo=github&label=Release&color=purple)](https://github.com/luuquangvu/blueprints-updater/releases)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg?style=flat&logo=homeassistantcommunitystore&label=HACS)](https://github.com/hacs/integration)
 [![Home Assistant](https://img.shields.io/badge/homeassistant-%3E%3D%202024.12.0-03a9f4?style=flat&logo=homeassistant&label=Home+Assistant)](https://www.home-assistant.io)
 
-[![CI](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/python_check.yaml?style=flat&logo=github&label=CI)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/python_check.yaml)
-[![Validation](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/validate.yaml?style=flat&logo=github&label=Validation)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/validate.yaml)
+[![CI](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/ci.yaml?style=flat&logo=github&label=CI)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/ci.yaml)
+[![Validation](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/validation.yaml?style=flat&logo=github&label=Validation)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/validation.yaml)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/github-code-scanning/codeql?style=flat&logo=github&label=CodeQL)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql)
 [![Prettier](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/prettier.yaml?style=flat&logo=prettier&label=Prettier)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/prettier.yaml)
 

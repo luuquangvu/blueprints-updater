@@ -30,8 +30,7 @@ def update_manifest(version: str) -> None:
     manifest["version"] = version
 
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
-        f.write("\n")
+        f.write(json.dumps(manifest, indent=2) + "\n")
 
 
 def update_pyproject(version: str) -> None:

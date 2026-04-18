@@ -1,4 +1,4 @@
-name: Formatting Check
+name: Prettier
 
 on:
   push:
