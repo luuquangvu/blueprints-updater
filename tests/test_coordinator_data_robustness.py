@@ -12,7 +12,9 @@ from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoor
 def mock_coordinator(hass):
     """Fixture for BlueprintUpdateCoordinator with minimal mocking."""
 
-    def mock_init(self, hass, logger, name, update_interval=None) -> None:
+    def mock_init(
+        self, hass, logger, name=None, update_interval=None, config_entry=None, **kwargs
+    ) -> None:
         """Mock side effect to simulate base class setup without failing checks."""
         self.hass = hass
         self.logger = logger

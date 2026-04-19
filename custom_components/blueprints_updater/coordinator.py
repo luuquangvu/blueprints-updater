@@ -180,6 +180,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=DOMAIN,
             update_interval=update_interval,
         )
@@ -1310,7 +1311,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         Returns:
             A dictionary mapping input names to their properties (mandatory, selector).
-
         """
         try:
             data = yaml_util.parse_yaml(content)
@@ -1320,23 +1320,32 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 or not isinstance(data["blueprint"], dict)
             ):
                 return {}, None
-            inputs = data["blueprint"].get("input", {})
+            inputs = data["blueprint"].get("input")
             if not isinstance(inputs, dict):
                 return {}, None
 
-            schema = {}
-            for key, val in inputs.items():
-                if not isinstance(val, dict):
-                    schema[key] = {"mandatory": True, "selector": None}
-                    continue
+            schema: dict[str, Any] = {}
 
-                is_mandatory = "default" not in val
-                selector = (
-                    next(iter(val.get("selector", {})), None)
-                    if isinstance(val.get("selector"), dict)
-                    else None
-                )
-                schema[key] = {"mandatory": is_mandatory, "selector": selector}
+            def _process_inputs(input_dict: dict[str, Any]) -> None:
+                """Flatten inputs, recursing into sections (HA 2024.6+)."""
+                for key, val in input_dict.items():
+                    if not isinstance(val, dict):
+                        schema[key] = {"mandatory": True, "selector": None}
+                        continue
+
+                    nested_inputs = val.get("input")
+                    if isinstance(nested_inputs, dict):
+                        _process_inputs(nested_inputs)
+                        continue
+                    is_mandatory = "default" not in val
+                    selector = (
+                        next(iter(val.get("selector", {})), None)
+                        if isinstance(val.get("selector"), dict)
+                        else None
+                    )
+                    schema[key] = {"mandatory": is_mandatory, "selector": selector}
+
+            _process_inputs(inputs)
             return schema, None
         except (HomeAssistantError, KeyError, TypeError) as err:
             _LOGGER.warning("Failed to extract inputs schema from blueprint: %s", err)
@@ -1403,7 +1412,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return [
             {"type": "new_mandatory", "args": {"input": key}}
             for key, props in new_schema.items()
-            if props["mandatory"] and key not in old_schema
+            if props["mandatory"] and (key not in old_schema or not old_schema[key]["mandatory"])
         ]
 
     @staticmethod
