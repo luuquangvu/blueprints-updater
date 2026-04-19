@@ -2139,7 +2139,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.warning(
                 "Missing relative path for blueprint at %s, skipping risk detection", path
             )
-            return [{"type": "system_error", "args": {"error": "missing_path"}}]
+            return [{"type": "system_error", "args": {"error": "missing_path", "path": path}}]
 
         if not last_error and self.data and path in self.data:
             local_file = self.hass.config.path("blueprints", rel_path)
@@ -2157,8 +2157,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 risks.extend(compatibility_risks)
 
             except Exception as err:
-                _LOGGER.warning("Failed to check breaking changes for %s: %s", path, err)
-                risks.append({"type": "system_error", "args": {"error": str(err)}})
+                _LOGGER.warning(
+                    "Failed to check breaking changes for %s (%s): %s", path, rel_path, err
+                )
+                risks.append(
+                    {
+                        "type": "system_error",
+                        "args": {
+                            "error": str(err),
+                            "path": path,
+                            "rel_path": rel_path,
+                        },
+                    }
+                )
         return self._dedupe_risks(risks)
 
     async def _handle_auto_update_step(
