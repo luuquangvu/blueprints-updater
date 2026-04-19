@@ -125,7 +125,7 @@
     "git_diff_title": "Code Changes (Git Diff)",
     "semantic_sync_notice": "This blueprint is semantically identical, but requires a structural update to align with the new canonical formatting (e.g. newline normalization, metadata injection).",
     "breaking_risks_title": "UPDATE RISK REPORT",
-    "auto_update_blocked_by_breaking_change": "Auto-update blocked due to detected breaking changes.",
+    "auto_update_blocked_by_breaking_change": "Auto-update blocked for {name} due to detected breaking changes",
     "risk_new_mandatory": "New mandatory input {input} added.",
     "risk_missing_input": "Entity {entity} is missing mandatory input {input} required by new version.",
     "risk_removed_input": "Input {input} removed, but currently used by {count} entities.",
@@ -134,6 +134,7 @@
     "risk_unknown": "Unknown risk: {error}",
     "risk_legacy": "{message}",
     "risk_compatibility": "Compatibility Error for {entity}: {error}",
-    "risk_system_error": "System error: {error}"
+    "risk_system_error": "System error: {error}",
+    "breaking_risks_report": "Auto-update for {name} was blocked as a precaution. Detected risks:\n{risks}\n\nPlease review and install manually if correct."
   }
 }

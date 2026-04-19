@@ -125,7 +125,7 @@
     "git_diff_title": "Alterações de Código (Git Diff)",
     "semantic_sync_notice": "Este blueprint é semanticamente idêntico, mas requer uma atualização estrutural para se alinhar com a nova formatação canónica (ex: normalização de quebras de linha, injeção de metadados).",
     "breaking_risks_title": "RELATÓRIO DE RISCO DE ATUALIZAÇÃO",
-    "auto_update_blocked_by_breaking_change": "Atualização automática bloqueada devido a alterações irreversíveis detetadas",
+    "auto_update_blocked_by_breaking_change": "Atualização automática bloqueada para {name} devido a alterações críticas detetadas",
     "risk_new_mandatory": "Nova entrada obrigatória {input} adicionada.",
     "risk_missing_input": "Falta à entidade {entity} a entrada obrigatória {input} exigida pela nova versão.",
     "risk_removed_input": "Entrada {input} removida, mas atualmente utilizada por {count} entidades.",
@@ -134,6 +134,7 @@
     "risk_unknown": "Erro desconhecido: {error}",
     "risk_legacy": "{message}",
     "risk_compatibility": "Erro de compatibilidade para {entity}: {error}",
-    "risk_system_error": "Erro do sistema: {error}"
+    "risk_system_error": "Erro do sistema: {error}",
+    "breaking_risks_report": "A atualização automática para {name} foi bloqueada por precaução. Riscos detetados:\n{risks}\n\nPor favor, reveja e instale manualmente se estiver correto."
   }
 }

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
 import html
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -193,21 +193,20 @@ class HAForumProvider(SourceProvider):
         if not response_json:
             return None
 
-        with contextlib.suppress(KeyError, IndexError):
-            post_stream = response_json.get("post_stream", {})
-            posts = post_stream.get("posts", [])
-            if not posts:
-                return None
+        post_stream = response_json.get("post_stream", {})
+        posts = post_stream.get("posts", [])
+        if not posts:
+            return None
 
-            post_content = posts[0].get("cooked")
-            if not isinstance(post_content, str):
-                return None
+        post_content = posts[0].get("cooked")
+        if not isinstance(post_content, str):
+            return None
 
-            code_blocks: list[str] = RE_FORUM_CODE_BLOCK.findall(post_content)
-            for block in code_blocks:
-                unquoted_block = str(html.unescape(block).strip())
-                if "blueprint:" in unquoted_block:
-                    return unquoted_block
+        code_blocks: list[str] = RE_FORUM_CODE_BLOCK.findall(post_content)
+        for block in code_blocks:
+            unquoted_block = html.unescape(block).strip()
+            if "blueprint:" in unquoted_block:
+                return unquoted_block
         return None
 
 
@@ -221,6 +220,10 @@ class ProviderRegistry:
             GistProvider(),
             HAForumProvider(),
         ]
+
+    def __iter__(self) -> Iterator[SourceProvider]:
+        """Iterate over registered providers."""
+        return iter(self._providers)
 
     def get_provider(self, url: str) -> SourceProvider | None:
         """Get the appropriate provider for the given URL."""

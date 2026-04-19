@@ -125,7 +125,7 @@
     "git_diff_title": "Kodändringar (Git Diff)",
     "semantic_sync_notice": "Denna blueprint är semantiskt identisk, men kräver en strukturell uppdatering för att anpassas till den nya kanoniska formateringen (t.ex. normalisering av radbrytningar, metadata-injektion).",
     "breaking_risks_title": "RISKRAPPORT FÖR UPPDATERING",
-    "auto_update_blocked_by_breaking_change": "Automatisk uppdatering blockerad på grund av upptäckta breaking changes",
+    "auto_update_blocked_by_breaking_change": "Automatisk uppdatering blockerad för {name} på grund av upptäckta stora förändringar",
     "risk_new_mandatory": "Ny obligatorisk inmatning {input} har lagts till.",
     "risk_missing_input": "Entiteten {entity} saknar obligatorisk inmatning {input} som krävs av den nya versionen.",
     "risk_removed_input": "Inmatning {input} har tagits bort, men används för närvarande av {count} entiteter.",
@@ -134,6 +134,7 @@
     "risk_unknown": "Okänt fel: {error}",
     "risk_legacy": "{message}",
     "risk_compatibility": "Kompatibilitetsfel för {entity}: {error}",
-    "risk_system_error": "System error: {error}"
+    "risk_system_error": "Systemfel: {error}",
+    "breaking_risks_report": "Automatisk uppdatering för {name} blockerades som en försiktighetsåtgärd. Upptäckta risker:\n{risks}\n\nGranska och installera manuellt om det är korrekt."
   }
 }

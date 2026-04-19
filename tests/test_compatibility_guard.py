@@ -84,7 +84,6 @@ async def test_detect_risks_for_update_compatibility_error(coordinator, hass):
         risks = await coordinator._detect_risks_for_update(path, info, remote_content, last_error)
 
     matched = [r for r in risks if r["type"] == "compatibility_risk"]
-    print(f"DEBUG: Found compatibility errors: {matched}")
     assert matched
     assert "Entity not found: binary_sensor.non_existent" in matched[0]["args"]["error"]
 
@@ -171,3 +170,37 @@ async def test_detect_risks_for_update_script_compatibility_error(coordinator, h
     assert matched
     assert "script.notify_me" in matched[0]["args"]["entity"]
     assert "Entity not found: mobile_app.non_existent" in matched[0]["args"]["error"]
+
+
+def test_dedupe_risks(coordinator):
+    """Test the _dedupe_risks helper logic."""
+    risks = [
+        "Legacy risk string",
+        "Legacy risk string",
+        {"type": "new_mandatory", "args": {"input": "input1"}},
+        {"type": "new_mandatory", "args": {"input": "input1"}},
+        {"type": "new_mandatory", "args": {"input": "input2"}},
+        {"type": "missing_input", "args": {"input": "input1", "entity": "e1"}},
+        {"malformed": "risk"},
+    ]
+
+    deduped = coordinator._dedupe_risks(risks)
+
+    assert len(deduped) == 4
+    assert any(
+        r["type"] == "legacy_risk" and r["args"]["message"] == "Legacy risk string" for r in deduped
+    )
+    assert any(r["type"] == "new_mandatory" and r["args"]["input"] == "input1" for r in deduped)
+    assert any(r["type"] == "new_mandatory" and r["args"]["input"] == "input2" for r in deduped)
+    assert any(
+        r["type"] == "missing_input"
+        and r["args"]["entity"] == "e1"
+        and r["args"]["input"] == "input1"
+        for r in deduped
+    )
+
+    def count_matches(rtype, rargs):
+        return sum(r["type"] == rtype and r["args"] == rargs for r in deduped)
+
+    assert count_matches("new_mandatory", {"input": "input1"}) == 1
+    assert count_matches("legacy_risk", {"message": "Legacy risk string"}) == 1

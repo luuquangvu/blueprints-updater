@@ -125,7 +125,7 @@
     "git_diff_title": "Codeänderungen (Git Diff)",
     "semantic_sync_notice": "Dieser Blueprint ist inhaltlich unverändert, erfordert jedoch eine strukturelle Aktualisierung zur Anpassung an die neue kanonische Formatierung (z. B. Normalisierung der Zeilenenden, Metadaten-Injektion).",
     "breaking_risks_title": "AKTUALISIERUNGSRISIKO-BERICHT",
-    "auto_update_blocked_by_breaking_change": "Automatisches Update wegen erkannter schwerwiegender Änderungen blockiert",
+    "auto_update_blocked_by_breaking_change": "Automatisches Update für {name} wegen erkannter schwerwiegender Änderungen blockiert",
     "risk_new_mandatory": "Neue obligatorische Eingabe {input} hinzugefügt.",
     "risk_missing_input": "Der Entität {entity} fehlt die für die neue Version erforderliche obligatorische Eingabe {input}.",
     "risk_removed_input": "Eingabe {input} entfernt, wird aber derzeit von {count} Entitäten verwendet.",
@@ -133,7 +133,8 @@
     "risk_validation_failed_blueprint": "Neuer Blueprint-Inhalt ist ungültig: {error}",
     "risk_unknown": "Unbekannter Fehler: {error}",
     "risk_legacy": "{message}",
-    "risk_compatibility": "Kompatibilitätsfehler: {error}",
-    "risk_system_error": "Systemfehler: {error}"
+    "risk_compatibility": "Kompatibilitätsfehler für {entity}: {error}",
+    "risk_system_error": "Systemfehler: {error}",
+    "breaking_risks_report": "Das automatische Update für {name} wurde vorsorglich blockiert. Erkannte Risiken:\n{risks}\n\nBitte überprüfen Sie diese und installieren Sie sie manuell, falls sie korrekt sind."
   }
 }

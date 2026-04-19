@@ -39,14 +39,31 @@ async def test_async_translate_error_handling(coordinator):
 @pytest.mark.asyncio
 async def test_extract_inputs_schema_malformed(coordinator):
     """Test _extract_inputs_schema with malformed YAML."""
-    assert coordinator._extract_inputs_schema("not a yaml dict") == {}
+    schema, error = coordinator._extract_inputs_schema("not a yaml dict")
+    assert schema == {}
+    assert error is None
 
-    assert coordinator._extract_inputs_schema("automation: test") == {}
+    schema, error = coordinator._extract_inputs_schema("automation: test")
+    assert schema == {}
+    assert error is None
 
-    assert coordinator._extract_inputs_schema("blueprint: { input: [] }") == {}
+    schema, error = coordinator._extract_inputs_schema("blueprint: { input: [] }")
+    assert schema == {}
+    assert error is None
 
-    schema = coordinator._extract_inputs_schema("blueprint: { input: { test: true } }")
+    schema, error = coordinator._extract_inputs_schema("blueprint: { input: { test: true } }")
     assert schema["test"]["mandatory"] is True
+    assert error is None
+
+
+def test_extract_inputs_schema_exception(coordinator):
+    """Test _extract_inputs_schema with forced exception."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    with patch("homeassistant.util.yaml.parse_yaml", side_effect=HomeAssistantError("forced")):
+        schema, error = coordinator._extract_inputs_schema("any")
+        assert schema == {}
+        assert error == "forced"
 
 
 @pytest.mark.asyncio

@@ -64,7 +64,7 @@ def test_ha_forum_provider_parse_content_edge_cases():
 
 def test_registry_iteration():
     """Test iterating through the registry."""
-    providers = list(registry._providers)
+    providers = list(registry)
     assert len(providers) >= 3
     assert any(isinstance(p, GitHubProvider) for p in providers)
     assert any(isinstance(p, HAForumProvider) for p in providers)

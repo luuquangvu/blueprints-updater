@@ -67,6 +67,7 @@ from .const import (
     RE_URL_REDACTION,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
+    RISK_TYPE_TRANSLATIONS,
     SPECIAL_USE_TLDS,
     STORAGE_KEY_DATA,
     STORAGE_VERSION,
@@ -195,6 +196,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._persisted_hashes: dict[str, str] = {}
         self._safe_hostname_cache: dict[str, bool] = {}
         self._safe_hostname_lock = asyncio.Lock()
+        self._blueprint_validate_lock = asyncio.Lock()
         self._first_update_done = False
         if self.config_entry:
             self.config_entry.async_on_unload(self._async_cancel_background_task)
@@ -1300,7 +1302,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return None
 
     @staticmethod
-    def _extract_inputs_schema(content: str) -> dict[str, Any]:
+    def _extract_inputs_schema(content: str) -> tuple[dict[str, Any], str | None]:
         """Extract input schema from blueprint YAML content.
 
         Args:
@@ -1317,10 +1319,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 or "blueprint" not in data
                 or not isinstance(data["blueprint"], dict)
             ):
-                return {}
+                return {}, None
             inputs = data["blueprint"].get("input", {})
             if not isinstance(inputs, dict):
-                return {}
+                return {}, None
 
             schema = {}
             for key, val in inputs.items():
@@ -1335,10 +1337,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     else None
                 )
                 schema[key] = {"mandatory": is_mandatory, "selector": selector}
-            return schema
+            return schema, None
         except (HomeAssistantError, KeyError, TypeError) as err:
             _LOGGER.warning("Failed to extract inputs schema from blueprint: %s", err)
-            return {"_error": str(err)}
+            return {}, str(err)
 
     def _get_entities_configs(self, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Get input configurations for blueprint-based entities.
@@ -1519,19 +1521,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             rel_path: Relative path of the blueprint (e.g. automation/motion.yaml).
 
         Returns:
-            A list of human-readable strings describing the detected risks.
+            A list of structured risks describing the detected changes and potential issues.
 
         """
-        old_schema = self._extract_inputs_schema(old_content)
-        if "_error" in old_schema:
-            return [
-                {"type": "validation_failed_blueprint", "args": {"error": old_schema["_error"]}}
-            ]
-        new_schema = self._extract_inputs_schema(new_content)
-        if "_error" in new_schema:
-            return [
-                {"type": "validation_failed_blueprint", "args": {"error": new_schema["_error"]}}
-            ]
+        old_schema, old_error = self._extract_inputs_schema(old_content)
+        if old_error:
+            return [{"type": "validation_failed_blueprint", "args": {"error": old_error}}]
+        new_schema, new_error = self._extract_inputs_schema(new_content)
+        if new_error:
+            return [{"type": "validation_failed_blueprint", "args": {"error": new_error}}]
         entity_ids = self._get_entities_using_blueprint_list(rel_path)
         configs = self._get_entities_configs(entity_ids)
 
@@ -1598,33 +1596,63 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not blueprints_hub:
             return []
 
-        original_bp = await blueprints_hub.async_get_blueprint(rel_path)
-        await blueprints_hub.async_add_blueprint(blueprint_obj, rel_path)
+        async with self._blueprint_validate_lock:
+            original_bp = await blueprints_hub.async_get_blueprint(rel_path)
+            await blueprints_hub.async_add_blueprint(blueprint_obj, rel_path)
 
-        try:
-            for entity_id, config in configs.items():
+            try:
+                for entity_id, config in configs.items():
+                    try:
+                        if domain == "automation":
+                            await async_validate_automation_config(self.hass, entity_id, config)
+                        else:
+                            await async_validate_script_config(self.hass, entity_id, config)
+                    except HomeAssistantError as err:
+                        risks.append(
+                            {
+                                "type": "compatibility_risk",
+                                "args": {
+                                    "entity": entity_id,
+                                    "error": _sanitize_error_detail(str(err)),
+                                },
+                            }
+                        )
+            finally:
                 try:
-                    if domain == "automation":
-                        await async_validate_automation_config(self.hass, entity_id, config)
+                    if original_bp:
+                        await blueprints_hub.async_add_blueprint(original_bp, rel_path)
                     else:
-                        await async_validate_script_config(self.hass, entity_id, config)
-                except HomeAssistantError as err:
-                    risks.append(
-                        {
-                            "type": "compatibility_risk",
-                            "args": {
-                                "entity": entity_id,
-                                "error": _sanitize_error_detail(str(err)),
-                            },
-                        }
+                        await blueprints_hub.async_remove_blueprint(rel_path)
+                except Exception as err:
+                    _LOGGER.error(
+                        "Failed to restore original blueprint during validation of %s: %s",
+                        rel_path,
+                        err,
                     )
-        finally:
-            if original_bp:
-                await blueprints_hub.async_add_blueprint(original_bp, rel_path)
-            else:
-                await blueprints_hub.async_remove_blueprint(rel_path)
 
         return risks
+
+    async def _get_risk_summary(self, risks: list[StructuredRisk]) -> str:
+        """Create a localized newline-separated string of risks.
+
+        Args:
+            risks: List of structured risks to summarize.
+
+        Returns:
+            A formatted string with bullet points for each risk.
+
+        """
+        lines = []
+        for risk in risks:
+            rtype = risk.get("type", "unknown")
+            rargs = dict(risk.get("args", {}))
+            if rtype not in RISK_TYPE_TRANSLATIONS:
+                rargs["error"] = rargs.get("error", str(risk))
+
+            translation_key = RISK_TYPE_TRANSLATIONS.get(rtype, "risk_unknown")
+            msg = await self.async_translate(translation_key, **rargs)
+            lines.append(f"- {msg}")
+        return "\n".join(lines)
 
     def _get_entities_using_blueprint(self, rel_path: str) -> list[str]:
         """Get entity IDs of automations and scripts using the given blueprint.
@@ -2157,10 +2185,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 info["name"],
                 len(risks),
             )
-            title = f"Auto-update blocked: {info['name']}"
-            message = (
-                f"Detected {len(risks)} potential breaking changes for blueprint "
-                f"'{info['name']}'. Check and update manually."
+            title = await self.async_translate(
+                "auto_update_blocked_by_breaking_change", name=info["name"]
+            )
+            risk_summary = await self._get_risk_summary(risks)
+            message = await self.async_translate(
+                "breaking_risks_report", name=info["name"], risks=risk_summary
             )
             await self._async_send_auto_update_notification(
                 title,
@@ -2312,6 +2342,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if etag and not force:
             headers["If-None-Match"] = etag
 
+        await self._apply_request_pacing()
+
+        _LOGGER.debug("[Pacing] Dispatching request for (redacted URL)")
+
+        response = await self._execute_with_redirect_guard(session, url, headers, etag)
+        new_etag = response.headers.get("ETag")
+        content = await self._parse_provider_response(response, url)
+        return content, new_etag
+
+    async def _apply_request_pacing(self) -> None:
+        """Enforce a random pacing delay between outbound HTTP requests.
+
+        Acquires the pacing lock to calculate a safe send time based on the
+        last request timestamp, then releases the lock before sleeping. This
+        keeps concurrent coroutines from sleeping inside the lock.
+
+        """
         async with self._pacing_lock:
             now = time.monotonic()
             interval = random.uniform(MIN_SEND_INTERVAL, MAX_SEND_INTERVAL)
@@ -2322,12 +2369,33 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if delay > 0:
             await asyncio.sleep(delay)
 
-        _LOGGER.debug("[Pacing] Dispatching request for (redacted URL)")
+    async def _execute_with_redirect_guard(
+        self,
+        session: httpx.AsyncClient,
+        url: str,
+        headers: dict[str, str],
+        etag: str | None,
+    ) -> httpx.Response:
+        """Perform the HTTP GET with manual redirect following and safety checks.
 
+        Follows up to 20 redirects, validating each new location against the
+        safe-hostname allowlist. Raises httpx.HTTPError on too many redirects or
+        security violations.
+
+        Args:
+            session: Async HTTP client.
+            url: Original request URL.
+            headers: Request headers (e.g. If-None-Match).
+            etag: Cached ETag to pass through on 304 responses.
+
+        Returns:
+            The final httpx.Response.
+
+        """
         current_url = url
         current_headers = headers.copy()
-
         response: httpx.Response | None = None
+
         for redirect_count in range(21):
             response = await session.get(
                 current_url,
@@ -2337,11 +2405,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
 
             if response.status_code == 304:
-                return None, response.headers.get("ETag") or etag
+                return response
 
             if not response.is_redirect:
                 response.raise_for_status()
-                break
+                return response
 
             if redirect_count >= 20:
                 _LOGGER.error("Too many redirects fetching (redacted URL)")
@@ -2350,10 +2418,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             next_url = response.headers.get("Location")
             if not next_url:
                 response.raise_for_status()
-                break
+                return response
 
             next_url = str(response.url.join(next_url))
-
             if not await self._is_safe_url(next_url):
                 _LOGGER.warning("Blocking redirect to unsafe URL: (redacted URL)")
                 raise httpx.HTTPError("Security violation: Redirected to unsafe URL (redacted URL)")
@@ -2361,30 +2428,53 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             current_url = next_url
             current_headers = {}
 
-        if response is None:
-            raise httpx.HTTPError("Request failed without response")
+        raise httpx.HTTPError("Request failed without response")
 
-        new_etag = response.headers.get("ETag")
-        if provider := registry.get_provider(url):
-            json_data = None
-            content_type = response.headers.get("Content-Type", "")
-            normalized_ct = content_type.lower().split(";", 1)[0].strip()
-            is_json = normalized_ct == "application/json" or normalized_ct.endswith("+json")
-            if is_json:
-                try:
-                    json_data = response.json()
-                except ValueError as err:
-                    _LOGGER.warning(
-                        "Failed to parse JSON content for provider at %s (Content-Type: %s): %s",
-                        url,
-                        content_type,
-                        err,
-                    )
-            content = provider.parse_content(response.text, json_data)
-            return (content or ""), new_etag
+    async def _parse_provider_response(
+        self,
+        response: httpx.Response,
+        url: str,
+    ) -> str | None:
+        """Extract blueprint content from the HTTP response using the matching provider.
 
-        content = response.text
-        return content, new_etag
+        If a provider is registered for the URL, parses its content (handling
+        JSON decoding for API endpoints). Falls back to raw response text for
+        plain-text sources. Returns None for 304 Not Modified responses.
+
+        Args:
+            response: The httpx.Response from the server.
+            url: The original URL used to locate the correct provider.
+
+        Returns:
+            Blueprint content string, or None for a 304 Not Modified response.
+
+        """
+        if response.status_code == 304:
+            return None
+
+        provider = registry.get_provider(url)
+        if provider is None:
+            return response.text
+
+        content_type = response.headers.get("Content-Type", "")
+        normalized_ct = content_type.lower().split(";", 1)[0].strip()
+        is_json = normalized_ct == "application/json" or normalized_ct.endswith("+json")
+        json_data = None
+        if is_json:
+            try:
+                json_data = response.json()
+            except ValueError as err:
+                raise HomeAssistantError(
+                    f"Invalid JSON response from provider at {url} "
+                    f"(Content-Type: {content_type}): {err}"
+                ) from err
+
+        content = provider.parse_content(response.text, json_data)
+        if content is None and is_json:
+            raise HomeAssistantError(
+                f"Failed to extract blueprint content from JSON response at {url}"
+            )
+        return content or ""
 
     @staticmethod
     def _normalize_url(url: str) -> str:

@@ -125,7 +125,7 @@
     "git_diff_title": "Codewijzigingen (Git Diff)",
     "semantic_sync_notice": "Deze blueprint is semantisch identiek, maar vereist een structurele update om in de pas te lopen met de nieuwe canonieke formattering (bijv. normalisatie van regeleinden, injectie van metadata).",
     "breaking_risks_title": "UPDATE RISICO RAPPORT",
-    "auto_update_blocked_by_breaking_change": "Automatische update geblokkeerd vanwege gedetecteerde breaking changes",
+    "auto_update_blocked_by_breaking_change": "Automatische update geblokkeerd voor {name} vanwege gedetecteerde ingrijpende wijzigingen",
     "risk_new_mandatory": "Nieuwe verplichte invoer {input} toegevoegd.",
     "risk_missing_input": "Entiteit {entity} mist verplichte invoer {input} vereist door nieuwe versie.",
     "risk_removed_input": "Invoer {input} verwijderd, maar momenteel in gebruik door {count} entiteiten.",
@@ -134,6 +134,7 @@
     "risk_unknown": "Onbekende fout: {error}",
     "risk_legacy": "{message}",
     "risk_compatibility": "Compatibiliteitsfout voor {entity}: {error}",
-    "risk_system_error": "System error: {error}"
+    "risk_system_error": "Systeemfout: {error}",
+    "breaking_risks_report": "Automatische update voor {name} is uit voorzorg geblokkeerd. Gedetecteerde risico's:\n{risks}\n\nControleer dit en installeer handmatig als het correct is."
   }
 }

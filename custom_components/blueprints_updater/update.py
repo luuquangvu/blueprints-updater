@@ -45,73 +45,81 @@ async def async_setup_entry(
 
     current_entities: dict[str, BlueprintUpdateEntity] = {}
 
-    @callback
-    def async_update_entities() -> None:
-        """Add new blueprint entities or remove deleted ones from Home Assistant."""
-        entity_registry = er.async_get(hass)
+    def async_update_entities_wrapper() -> None:
+        """Wrapper for async_update_entities to be used as callback."""
+        async_update_entities(hass, entry, coordinator, current_entities, async_add_entities)
 
-        entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
-        new_id_to_path: dict[str, str] = {}
-        legacy_id_to_new_id: dict[str, str] = {}
-        for info in coordinator.data.values():
-            rel_path = info["rel_path"]
-            new_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, rel_path)
-            legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id(rel_path)
-            new_id_to_path[new_id] = rel_path
-            legacy_id_to_new_id[legacy_id] = new_id
+    async_update_entities_wrapper()
 
-        for entity_entry in entries:
-            if entity_entry.domain != "update":
-                continue
+    entry.async_on_unload(coordinator.async_add_listener(async_update_entities_wrapper))
 
-            unique_id = entity_entry.unique_id
-            if unique_id in new_id_to_path:
-                continue
 
-            if new_id := legacy_id_to_new_id.get(unique_id):
-                _LOGGER.info(
-                    "Migrating legacy unique_id for %s: %s -> %s",
-                    entity_entry.entity_id,
-                    unique_id,
-                    new_id,
-                )
-                entity_registry.async_update_entity(entity_entry.entity_id, new_unique_id=new_id)
-                continue
+@callback
+def async_update_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: BlueprintUpdateCoordinator,
+    current_entities: dict[str, BlueprintUpdateEntity],
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Add new blueprint entities or remove deleted ones from Home Assistant."""
+    entity_registry = er.async_get(hass)
 
-            _LOGGER.debug("Removing orphaned registry entry for entity: %s", entity_entry.entity_id)
-            entity_registry.async_remove(entity_entry.entity_id)
-            hass.states.async_remove(entity_entry.entity_id)
+    entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+    new_id_to_path: dict[str, str] = {}
+    legacy_id_to_new_id: dict[str, str] = {}
+    for info in coordinator.data.values():
+        rel_path = info["rel_path"]
+        new_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, rel_path)
+        legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id(rel_path)
+        new_id_to_path[new_id] = rel_path
+        legacy_id_to_new_id[legacy_id] = new_id
 
-        new_entities = []
-        for path, info in coordinator.data.items():
-            if path not in current_entities:
-                entity = BlueprintUpdateEntity(coordinator, path, info)
-                current_entities[path] = entity
-                new_entities.append(entity)
+    for entity_entry in entries:
+        if entity_entry.domain != "update":
+            continue
 
-        if new_entities:
-            _LOGGER.debug("Adding %d new blueprint update entities", len(new_entities))
-            async_add_entities(new_entities)
+        unique_id = entity_entry.unique_id
+        if unique_id in new_id_to_path:
+            continue
 
-        removed_paths = []
-        for path in current_entities:
-            if path not in coordinator.data:
-                removed_paths.append(path)
+        if new_id := legacy_id_to_new_id.get(unique_id):
+            _LOGGER.info(
+                "Migrating legacy unique_id for %s: %s -> %s",
+                entity_entry.entity_id,
+                unique_id,
+                new_id,
+            )
+            entity_registry.async_update_entity(entity_entry.entity_id, new_unique_id=new_id)
+            continue
 
-        if removed_paths:
-            for path in removed_paths:
-                _LOGGER.debug("Removing blueprint update entity for deleted file: %s", path)
-                entity = current_entities.pop(path)
-                if entity.entity_id:
-                    if entity_registry.async_get(entity.entity_id):
-                        entity_registry.async_remove(entity.entity_id)
-                    hass.states.async_remove(entity.entity_id)
-                else:
-                    hass.async_create_task(entity.async_remove(force_remove=True))
+        _LOGGER.debug("Removing orphaned registry entry for entity: %s", entity_entry.entity_id)
+        entity_registry.async_remove(entity_entry.entity_id)
+        hass.states.async_remove(entity_entry.entity_id)
 
-    async_update_entities()
+    new_entities = []
+    for path, info in coordinator.data.items():
+        if path not in current_entities:
+            entity = BlueprintUpdateEntity(coordinator, path, info)
+            current_entities[path] = entity
+            new_entities.append(entity)
 
-    entry.async_on_unload(coordinator.async_add_listener(async_update_entities))
+    if new_entities:
+        _LOGGER.debug("Adding %d new blueprint update entities", len(new_entities))
+        async_add_entities(new_entities)
+
+    removed_paths = []
+    removed_paths.extend(path for path in current_entities if path not in coordinator.data)
+    if removed_paths:
+        for path in removed_paths:
+            _LOGGER.debug("Removing blueprint update entity for deleted file: %s", path)
+            entity = current_entities.pop(path)
+            if entity.entity_id:
+                if entity_registry.async_get(entity.entity_id):
+                    entity_registry.async_remove(entity.entity_id)
+                hass.states.async_remove(entity.entity_id)
+            else:
+                hass.async_create_task(entity.async_remove(force_remove=True))
 
 
 class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], UpdateEntity):
@@ -238,8 +246,11 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             risks_title = await self.coordinator.async_translate("breaking_risks_title")
             notes += f"\n\n{risks_title}\n"
             for risk in breaking_risks:
-                rtype = risk["type"]
-                rargs = risk["args"]
+                rtype = risk.get("type", "unknown")
+                rargs = dict(risk.get("args", {}))
+                if rtype not in RISK_TYPE_TRANSLATIONS:
+                    rargs["error"] = rargs.get("error", str(risk))
+
                 translation_key = RISK_TYPE_TRANSLATIONS.get(rtype, "risk_unknown")
                 msg = await self.coordinator.async_translate(translation_key, **rargs)
                 notes += f"- {msg}\n"

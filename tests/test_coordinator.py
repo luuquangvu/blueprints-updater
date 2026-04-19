@@ -412,7 +412,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
         mock_session, path, info, results_to_notify, updated_domains
     )
 
-    assert coordinator.data[path]["last_error"] in ["fetch_error|", "empty_content|"]
+    assert coordinator.data[path]["last_error"].startswith("fetch_error|")
     assert coordinator.data[path]["updatable"] is False
 
 

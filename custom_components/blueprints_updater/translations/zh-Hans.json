@@ -125,7 +125,7 @@
     "git_diff_title": "代码更改 (Git Diff)",
     "semantic_sync_notice": "此蓝图在语义上是完全相同的，但需要进行结构更新以符合新的规范格式（例如：换行符标准化、元数据注入）。",
     "breaking_risks_title": "更新风险报告",
-    "auto_update_blocked_by_breaking_change": "自动更新因检测到重大更改而被阻止",
+    "auto_update_blocked_by_breaking_change": "由于检测到重大更改，{name} 的自动更新已阻止",
     "risk_new_mandatory": "添加了新的必填输入 {input}。",
     "risk_missing_input": "实体 {entity} 缺少新版本要求的必填输入 {input}。",
     "risk_removed_input": "输入 {input} 已移除，但当前正被 {count} 个实体使用。",
@@ -134,6 +134,7 @@
     "risk_unknown": "未知错误：{error}",
     "risk_legacy": "{message}",
     "risk_compatibility": "{entity} 的兼容性错误：{error}",
-    "risk_system_error": "System error: {error}"
+    "risk_system_error": "系统错误：{error}",
+    "breaking_risks_report": "为了预防起见，{name} 的自动更新已阻止。检测到的风险：\n{risks}\n\n如果正确，请检查并手动安装。"
   }
 }

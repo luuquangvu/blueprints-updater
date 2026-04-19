@@ -125,7 +125,7 @@
     "git_diff_title": "Zmiany w kodzie (Git Diff)",
     "semantic_sync_notice": "Ten blueprint jest semantycznie identyczny, ale wymaga aktualizacji strukturalnej w celu dostosowania do nowego formatu kanonicznego (np. normalizacja znaków końca linii, wstrzykiwanie metadanych).",
     "breaking_risks_title": "RAPORT RYZYKA AKTUALIZACJI",
-    "auto_update_blocked_by_breaking_change": "Automatyczna aktualizacja zablokowana z powodu wykrytych krytycznych zmian",
+    "auto_update_blocked_by_breaking_change": "Automatyczna aktualizacja zablokowana dla {name} z powodu wykrytych istotnych zmian",
     "risk_new_mandatory": "Dodano nowe wymagane pole {input}.",
     "risk_missing_input": "Encja {entity} nie posiada wymaganego pola {input}, które jest wymagane przez nową wersję.",
     "risk_removed_input": "Pole {input} zostało usunięte, ale jest obecnie używane przez {count} encji.",
@@ -133,7 +133,8 @@
     "risk_validation_failed_blueprint": "Nowa treść blueprintu jest nieprawidłowa: {error}",
     "risk_unknown": "Nieznany błąd: {error}",
     "risk_legacy": "{message}",
-    "risk_compatibility": "Błąd kompatybilności: {error}",
-    "risk_system_error": "Błąd systemu: {error}"
+    "risk_compatibility": "Błąd kompatybilności dla {entity}: {error}",
+    "risk_system_error": "Błąd systemu: {error}",
+    "breaking_risks_report": "Automatyczna aktualizacja dla {name} została zablokowana zapobiegawczo. Wykryte zagrożenia:\n{risks}\n\nProszę sprawdź i zainstaluj ręcznie, jeśli są poprawne."
   }
 }

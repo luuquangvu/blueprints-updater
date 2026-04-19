@@ -1,6 +1,5 @@
 """Tests for increasing coverage of Update Entities."""
 
-import asyncio
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -80,25 +79,34 @@ async def test_update_entity_release_notes_risks(mock_coordinator):
 
 
 @pytest.mark.asyncio
-async def test_update_entity_remove_path(mock_coordinator):
+async def test_update_entity_remove_path(mock_coordinator, hass):
     """Test the entity removal path."""
+    from custom_components.blueprints_updater.update import async_update_entities
+
     path = "automation/test.yaml"
     info = {"name": "Test", "rel_path": path}
 
     entity = BlueprintUpdateEntity(mock_coordinator, path, info)
-    entity.hass = mock_coordinator.hass
+    entity.hass = hass
+    entity.entity_id = cast(Any, None)
 
-    with patch.object(entity, "async_remove", new_callable=AsyncMock) as mock_remove:
-        from homeassistant.core import callback
+    current_entities = {path: entity}
+    mock_add = MagicMock()
+    mock_entry = MagicMock()
+    mock_entry.entry_id = "test_entry"
 
-        @callback
-        def trigger_remove():
-            coro = entity.async_remove(force_remove=True)
-            return asyncio.create_task(coro)
-
-        task = trigger_remove()
-        await task
-        mock_remove.assert_called_once_with(force_remove=True)
+    with (
+        patch.object(hass, "async_create_task") as mock_create_task,
+        patch(
+            "custom_components.blueprints_updater.update.er.async_entries_for_config_entry",
+            return_value=[],
+        ),
+    ):
+        mock_coordinator.data = {}
+        async_update_entities(hass, mock_entry, mock_coordinator, current_entities, mock_add)
+        mock_create_task.assert_called_once()
+        coro = mock_create_task.call_args[0][0]
+        coro.close()
 
 
 def test_clear_cached_properties(mock_coordinator):

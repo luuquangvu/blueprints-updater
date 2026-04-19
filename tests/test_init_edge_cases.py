@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.const import EVENT_CORE_CONFIG_UPDATE
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
@@ -22,7 +23,6 @@ async def async_raise_gen_err(*args, **kwargs) -> None:
     raise RuntimeError("e")
 
 
-@pytest.mark.asyncio
 async def _async_none(*args, **kwargs) -> None:
     """Mock async function returning None."""
     pass
@@ -159,7 +159,8 @@ async def test_coordinator_additional_coverage_v5(hass: HomeAssistant) -> None:
         mock_client.return_value.get = AsyncMock(side_effect=_async_get)
         with patch(f"{prov_path}.ProviderRegistry.get_provider") as mock_get:
             mock_get.return_value = MagicMock()
-            await coordinator._async_fetch_content(mock_client.return_value, "mock_url")
+            with pytest.raises(HomeAssistantError, match="Invalid JSON response"):
+                await coordinator._async_fetch_content(mock_client.return_value, "mock_url")
 
     with patch.object(coordinator, "async_request_refresh", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.side_effect = async_raise_gen_err

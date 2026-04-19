@@ -117,3 +117,57 @@ blueprint:
     assert any(
         risk["type"] == "removed_input" and risk["args"]["input"] == "old_input" for risk in risks
     )
+
+
+def test_detect_breaking_changes_missing_input(coordinator):
+    """Test detecting missing input values for newly mandatory inputs on existing entities."""
+    old_content = """
+blueprint:
+  name: Old
+  domain: automation
+  input:
+    motion_sensor:
+      name: Sensor
+      selector:
+        entity:
+          domain: binary_sensor
+      default: binary_sensor.motion
+"""
+    new_content = """
+blueprint:
+  name: New
+  domain: automation
+  input:
+    motion_sensor:
+      name: Sensor
+      selector:
+        entity:
+          domain: binary_sensor
+"""
+    rel_path = "automation/test.yaml"
+    entities = ["automation.test"]
+    configs = {
+        "automation.test": {
+            "use_blueprint": {
+                "path": rel_path,
+                "input": {
+                    # Intentionally omit "motion_sensor" to trigger missing_input
+                },
+            },
+        }
+    }
+
+    from unittest.mock import patch
+
+    with (
+        patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
+        patch.object(coordinator, "_get_entities_configs", return_value=configs),
+    ):
+        risks = coordinator._detect_breaking_changes(old_content, new_content, rel_path)
+
+    assert any(
+        risk["type"] == "missing_input"
+        and risk["args"]["entity"] == "automation.test"
+        and risk["args"]["input"] == "motion_sensor"
+        for risk in risks
+    )

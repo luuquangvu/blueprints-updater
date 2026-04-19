@@ -125,7 +125,7 @@
     "git_diff_title": "Mã nguồn thay đổi (Git Diff)",
     "semantic_sync_notice": "Bản blueprint này giống hệt về mặt logic, nhưng cần cập nhật cấu trúc để đồng bộ với định dạng chuẩn mới (ví dụ: chuẩn hóa xuống dòng, bổ sung metadata).",
     "breaking_risks_title": "BÁO CÁO RỦI RO CẬP NHẬT",
-    "auto_update_blocked_by_breaking_change": "Tự động cập nhật bị chặn do phát hiện thay đổi cấu trúc lớn (breaking changes)",
+    "auto_update_blocked_by_breaking_change": "Tự động cập nhật cho {name} bị chặn do phát hiện thay đổi lớn",
     "risk_new_mandatory": "Tham số bắt buộc mới {input} vừa được thêm vào.",
     "risk_missing_input": "Thực thể {entity} đang thiếu tham số bắt buộc {input} mà phiên bản mới yêu cầu.",
     "risk_removed_input": "Tham số {input} đã bị xóa, nhưng hiện đang được sử dụng bởi {count} thực thể.",
@@ -134,6 +134,7 @@
     "risk_unknown": "Rủi ro không xác định: {error}",
     "risk_legacy": "{message}",
     "risk_compatibility": "Lỗi tương thích cho {entity}: {error}",
-    "risk_system_error": "Lỗi hệ thống: {error}"
+    "risk_system_error": "Lỗi hệ thống: {error}",
+    "breaking_risks_report": "Tự động cập nhật cho {name} đã bị chặn để đảm bảo an toàn. Các rủi ro phát hiện được:\n{risks}\n\nVui lòng xem xét và cài đặt thủ công nếu thấy đúng."
   }
 }
