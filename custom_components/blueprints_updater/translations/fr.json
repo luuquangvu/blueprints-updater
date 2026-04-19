@@ -108,7 +108,7 @@
     "auto_update_message": "Les blueprints suivants ont été mis à jour automatiquement :\n\n{blueprints}",
     "update_available_short": "Mise à jour disponible",
     "update_available": "Mise à jour disponible depuis {source_url}",
-    "auto_update_warning": "Avertissement : Les mises à jour peuvent comporter des risques d'incompatibilité avec les versions antérieures si l'auteur introduit des changements majeurs (breaking changes). Il est fortement recommandé d'activer l'option de sauvegarde avant l'installation.",
+    "update_safety_message": "Conseil : Il est recommandé d'activer l'option de sauvegarde avant d'installer des mises à jour.",
     "usage_warning": "Attention : Cette mise à jour affectera {count} {domain} en cours d'exécution.",
     "up_to_date": "À jour",
     "install_error": "Impossible d'installer le blueprint : {error}. Le fichier distant contient des erreurs et ne peut pas être appliqué en toute sécurité.",
@@ -123,6 +123,17 @@
     "unsafe_url": "URL non sécurisée : {error}",
     "content_missing": "Le contenu du blueprint est manquant ou n'a pas pu être récupéré.",
     "git_diff_title": "Modifications du code (Git Diff)",
-    "semantic_sync_notice": "Ce blueprint est sémantiquement identique, mais nécessite une mise à jour structurelle pour s'aligner sur le nouveau format canonique (ex: normalisation des sauts de ligne, injection de métadonnées)."
+    "semantic_sync_notice": "Ce blueprint est sémantiquement identique, mais nécessite une mise à jour structurelle pour s'aligner sur le nouveau format canonique (ex: normalisation des sauts de ligne, injection de métadonnées).",
+    "breaking_risks_title": "RAPPORT DE RISQUE DE MISE À JOUR",
+    "auto_update_blocked_by_breaking_change": "Mise à jour automatique bloquée en raison de changements majeurs détectés",
+    "risk_new_mandatory": "Nouvelle entrée obligatoire '{input}' ajoutée.",
+    "risk_missing_input": "L'entité '{entity}' n'a pas l'entrée obligatoire '{input}' requise par la nouvelle version.",
+    "risk_removed_input": "L'entrée '{input}' a été supprimée, mais est actuellement utilisée par {count} entités.",
+    "risk_selector_mismatch": "Type de sélecteur modifié pour '{input}' : de '{old_type}' à '{new_type}' (affecte {count} entités).",
+    "risk_validation_failed_blueprint": "Le nouveau contenu du blueprint est invalide : {error}",
+    "risk_unknown": "Erreur inconnue : {error}",
+    "risk_legacy": "{message}",
+    "risk_compatibility": "Erreur de compatibilité pour '{entity}' : {error}",
+    "risk_system_error": "Erreur système : {error}"
   }
 }

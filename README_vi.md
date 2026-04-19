@@ -18,7 +18,7 @@
 ## Tính năng chính
 
 - **Tích hợp sâu như tính năng hệ thống**: Hoạt động mượt mà và đồng bộ như các bản cập nhật chính thức. Bạn có thể dễ dàng quản lý và cập nhật hàng loạt blueprint ngay trên dashboard.
-- **An toàn tuyệt đối, tự động sao lưu**: Mỗi bản cập nhật đều được kiểm tra kỹ về cú pháp YAML và khả năng tương thích trước khi áp dụng. Hệ thống sao lưu xoay vòng giúp bạn yên tâm khôi phục bất cứ lúc nào.
+- **Lớp bảo vệ Nâng cao (Advanced Compatibility Guard)**: Chủ động bảo vệ hệ thống khỏi các thay đổi gây lỗi (breaking changes). Tiện ích thực hiện kiểm tra chéo chuyên sâu giữa blueprint mới và toàn bộ automation/script hiện có trước khi cập nhật, giúp nhận diện và cảnh báo sớm các "Lỗi tương thích" (compatibility errors).
 - **Tự động hóa hoàn toàn**: Khi bật chế độ tự động cập nhật, hệ thống sẽ thay bạn thực hiện mọi thao tác từ sao lưu, tải bản mới đến gửi thông báo chi tiết khi hoàn tất.
 - **Tối ưu hiệu suất và băng thông**: Sử dụng mã băm SHA256 và ETag để chỉ tải về khi thực sự có thay đổi từ nguồn, giảm thiểu tải cho hệ thống.
 - **Hỗ trợ Blueprint đa nền tảng**: Tương thích hoàn hảo với các tệp nguồn từ GitHub, GitHub Gist và Diễn đàn cộng đồng Home Assistant.
@@ -87,6 +87,17 @@ Nếu bạn phát hiện ra rằng bản blueprint mới cập nhật làm hỏn
 5. Nhấn **Thực hiện hành động (Perform Action)**.
 
 Tiện ích sẽ tự động tìm tệp sao lưu tương ứng, khôi phục lại nội dung YAML gốc, và tự động tải lại (reload) các automations và scripts để áp dụng các thay đổi ngay lập tức.
+
+### Lớp bảo vệ Nâng cao (Advanced Compatibility Guard)
+
+**Advanced Compatibility Guard** là một lớp bảo mật chuyên nghiệp được thiết kế để bảo vệ logic ngôi nhà thông minh của bạn khỏi các thay đổi gây lỗi (breaking changes) trong các bản cập nhật blueprint.
+
+Khi phát hiện bản cập nhật, tích hợp sẽ thực hiện phân tích tác động chuyên sâu:
+
+1.  **Xác thực Schema**: Kiểm tra nội dung blueprint mới thông qua bộ máy xác thực nội bộ của Home Assistant.
+2.  **Kiểm tra Chéo (Cross-Validation)**: Tạm thời đưa bản cập nhật vào hệ thống để kiểm tra khả năng tương thích của mọi automation và script đang sử dụng blueprint đó.
+3.  **Phát hiện Rủi ro**: Nếu phiên bản mới làm hỏng một thực thể trong hệ thống (ví dụ: do thiếu input bắt buộc hoặc cấu trúc không tương thích), hệ thống sẽ đánh dấu bản cập nhật bằng trạng thái **"Lỗi tương thích (compatibility error)"**.
+4.  **Ngăn chặn Sự cố Ngầm**: Việc báo cáo các rủi ro này trước khi bản cập nhật được hoàn tất giúp bạn không bao giờ vô tình làm hỏng các tự động hóa quan trọng trong nhà.
 
 ### Làm mới danh sách Blueprint
 

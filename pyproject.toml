@@ -13,6 +13,7 @@ dev = [
   "pyright",
   "pytest",
   "pytest-asyncio",
+  "pytest-cov",
   "interrogate",
   "packaging",
   "tomlkit",
@@ -48,6 +49,7 @@ indent-style = "space"
 asyncio_mode = "auto"
 pythonpath = ["."]
 filterwarnings = ["ignore::DeprecationWarning"]
+addopts = ["--cov=custom_components.blueprints_updater", "--cov-fail-under=90"]
 
 [tool.pyright]
 typeCheckingMode = "standard"
@@ -55,4 +57,4 @@ typeCheckingMode = "standard"
 [tool.interrogate]
 fail-under = 100
 ignore_nested_functions = true
-exclude = ["tests"]
+exclude = ["tests", "scratch"]

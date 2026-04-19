@@ -108,7 +108,7 @@
     "auto_update_message": "Los siguientes blueprints se han actualizado automáticamente:\n\n{blueprints}",
     "update_available_short": "Actualización disponible",
     "update_available": "Actualización disponible desde {source_url}",
-    "auto_update_warning": "Advertencia: Las actualizaciones pueden conllevar riesgos de incompatibilidad hacia atrás si el autor introduce cambios importantes (breaking changes). Se recomienda encarecidamente activar la opción de copia de seguridad antes de instalar.",
+    "update_safety_message": "Consejo: Se recomienda activar la opción de copia de seguridad antes de instalar actualizaciones.",
     "usage_warning": "Advertencia: esta actualización afectará a {count} {domain} en ejecución.",
     "up_to_date": "Actualizado",
     "install_error": "No se puede instalar el blueprint: {error}. El archivo remoto tiene errores y no se puede aplicar de forma segura.",
@@ -123,6 +123,17 @@
     "unsafe_url": "URL no segura: {error}",
     "content_missing": "El contenido del blueprint falta o no se pudo obtener.",
     "git_diff_title": "Cambios en el código (Git Diff)",
-    "semantic_sync_notice": "Este blueprint es semánticamente idéntico, pero requiere una actualización estructural para alinearse con el nuevo formato canónico (p. ej., normalización de saltos de línea, inyección de metadatos)."
+    "semantic_sync_notice": "Este blueprint es semánticamente idéntico, pero requiere una actualización estructural para alinearse con el nuevo formato canónico (p. ej., normalización de saltos de línea, inyección de metadatos).",
+    "breaking_risks_title": "INFORME DE RIESGOS DE ACTUALIZACIÓN",
+    "auto_update_blocked_by_breaking_change": "Actualización automática bloqueada debido a cambios importantes detectados",
+    "risk_new_mandatory": "Nueva entrada obligatoria '{input}' añadida.",
+    "risk_missing_input": "A la entidad '{entity}' le falta la entrada obligatoria '{input}' requerida por la nueva versión.",
+    "risk_removed_input": "Entrada '{input}' eliminada, pero actualmente está siendo utilizada por {count} entidades.",
+    "risk_selector_mismatch": "El tipo de selector cambió para '{input}': de '{old_type}' a '{new_type}' (afecta a {count} entidades).",
+    "risk_validation_failed_blueprint": "El nuevo contenido del blueprint no es válido: {error}",
+    "risk_unknown": "Error desconocido: {error}",
+    "risk_legacy": "{message}",
+    "risk_compatibility": "Error de compatibilidad para '{entity}': {error}",
+    "risk_system_error": "Error del sistema: {error}"
   }
 }

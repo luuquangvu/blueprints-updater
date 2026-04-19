@@ -22,8 +22,8 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .coordinator import BlueprintUpdateCoordinator
+from .const import DOMAIN, RISK_TYPE_TRANSLATIONS
+from .coordinator import BlueprintUpdateCoordinator, StructuredRisk
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -208,8 +208,6 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         notes = await self.coordinator.async_translate(
             "update_available", source_url=info.get("source_url", "<unknown>")
         )
-        notes += "\n\n" + await self.coordinator.async_translate("auto_update_warning")
-
         rel_path = info.get("rel_path", "")
         parts = rel_path.split("/", 1)
         domain = parts[0]
@@ -234,6 +232,19 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             notes += "\n\n" + await self.coordinator.async_translate(
                 "usage_warning", count=total_usage, domain=domain
             )
+
+        breaking_risks: list[StructuredRisk] = info.get("breaking_risks", [])
+        if breaking_risks:
+            risks_title = await self.coordinator.async_translate("breaking_risks_title")
+            notes += f"\n\n{risks_title}\n"
+            for risk in breaking_risks:
+                rtype = risk["type"]
+                rargs = risk["args"]
+                translation_key = RISK_TYPE_TRANSLATIONS.get(rtype, "risk_unknown")
+                msg = await self.coordinator.async_translate(translation_key, **rargs)
+                notes += f"- {msg}\n"
+
+        notes += "\n\n" + await self.coordinator.async_translate("update_safety_message")
 
         diff_result = await self.coordinator.async_get_git_diff(self._path)
 
@@ -285,6 +296,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             info = self.coordinator.data[self._path]
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
+            if risks := info.get("breaking_risks"):
+                attrs["breaking_risks"] = risks
         return attrs
 
     _cached_property_names_by_class: ClassVar[dict[type, list[str]]] = {}

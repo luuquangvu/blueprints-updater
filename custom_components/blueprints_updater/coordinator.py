@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import difflib
 import hashlib
-import html
 import ipaddress
 import logging
 import os
@@ -15,15 +14,28 @@ import shutil
 import socket
 import textwrap
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, TypedDict
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
 import httpx
+import orjson
+from homeassistant.components.automation import automations_with_blueprint
+from homeassistant.components.automation.config import (
+    AUTOMATION_BLUEPRINT_SCHEMA,
+)
+from homeassistant.components.automation.config import (
+    async_validate_config_item as async_validate_automation_config,
+)
 from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.components.blueprint.models import Blueprint
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
+from homeassistant.components.script import scripts_with_blueprint
+from homeassistant.components.script.config import (
+    async_validate_config_item as async_validate_script_config,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -31,6 +43,7 @@ from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import slugify
 from homeassistant.util import yaml as yaml_util
 from homeassistant.util.ssl import SSL_ALPN_HTTP11_HTTP2
 
@@ -43,11 +56,6 @@ from .const import (
     DEFAULT_AUTO_UPDATE,
     DEFAULT_USE_CDN,
     DOMAIN,
-    DOMAIN_GIST,
-    DOMAIN_GITHUB,
-    DOMAIN_GITHUB_RAW,
-    DOMAIN_HA_FORUM,
-    DOMAIN_JSDELIVR,
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
@@ -56,10 +64,6 @@ from .const import (
     MAX_SEND_INTERVAL,
     MIN_SEND_INTERVAL,
     RE_BLUEPRINT_KEY,
-    RE_FORUM_CODE_BLOCK,
-    RE_FORUM_TOPIC_ID,
-    RE_GIST_RAW,
-    RE_GITHUB_BLOB,
     RE_URL_REDACTION,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
@@ -67,6 +71,7 @@ from .const import (
     STORAGE_KEY_DATA,
     STORAGE_VERSION,
 )
+from .providers import registry
 from .utils import get_max_backups, retry_async
 
 _LOGGER = logging.getLogger(__name__)
@@ -86,6 +91,13 @@ def _sanitize_error_detail(detail: str, max_length: int = 120) -> str:
     cleaned = RE_URL_REDACTION.sub("(redacted URL)", detail)
     cleaned = cleaned.replace("|", "/")
     return textwrap.shorten(cleaned, width=max_length, placeholder="...")
+
+
+class StructuredRisk(TypedDict):
+    """Structured breaking change risk."""
+
+    type: str
+    args: dict[str, Any]
 
 
 class ParsedBlueprintData(TypedDict):
@@ -567,13 +579,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return False
         return self._hash_content(content, already_normalized=already_normalized) == target_hash
 
+    @staticmethod
     def _handle_source_url_change(
-        self, path: str, info: dict[str, Any], prev: dict[str, Any]
+        path: str, info: dict[str, Any], prev: dict[str, Any]
     ) -> dict[str, Any]:
         """Handle detected change in blueprint source URL.
 
-        If the URL changed, invalidate all remote-derived metadata to
-        prevent stale state reuse.
+        If the URL changed, invalidate all remote-derived metadata to prevent stale state reuse.
 
         Args:
             path: Local path of the blueprint.
@@ -877,7 +889,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             An error string key if validation fails, or None if valid.
 
         """
-        if not isinstance(data, dict) or "blueprint" not in data:
+        if (
+            not isinstance(data, dict)
+            or "blueprint" not in data
+            or not isinstance(data["blueprint"], dict)
+        ):
             _LOGGER.warning(
                 "Remote content from %s is not a valid blueprint (missing 'blueprint' key)",
                 source_url,
@@ -1282,6 +1298,345 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if local_hash == c_local and remote_hash == c_remote and isinstance(c_diff, str):
                 return GitDiffResult(diff_text=c_diff, is_semantic_sync=c_semantic)
         return None
+
+    @staticmethod
+    def _extract_inputs_schema(content: str) -> dict[str, Any]:
+        """Extract input schema from blueprint YAML content.
+
+        Args:
+            content: Raw YAML content of the blueprint.
+
+        Returns:
+            A dictionary mapping input names to their properties (mandatory, selector).
+
+        """
+        try:
+            data = yaml_util.parse_yaml(content)
+            if (
+                not isinstance(data, dict)
+                or "blueprint" not in data
+                or not isinstance(data["blueprint"], dict)
+            ):
+                return {}
+            inputs = data["blueprint"].get("input", {})
+            if not isinstance(inputs, dict):
+                return {}
+
+            schema = {}
+            for key, val in inputs.items():
+                if not isinstance(val, dict):
+                    schema[key] = {"mandatory": True, "selector": None}
+                    continue
+
+                is_mandatory = "default" not in val
+                selector = (
+                    next(iter(val.get("selector", {})), None)
+                    if isinstance(val.get("selector"), dict)
+                    else None
+                )
+                schema[key] = {"mandatory": is_mandatory, "selector": selector}
+            return schema
+        except (HomeAssistantError, KeyError, TypeError) as err:
+            _LOGGER.warning("Failed to extract inputs schema from blueprint: %s", err)
+            return {"_error": str(err)}
+
+    def _get_entities_configs(self, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Get input configurations for blueprint-based entities.
+
+        Args:
+            entity_ids: List of entity IDs to fetch configs for.
+
+        Returns:
+            A dictionary mapping entity IDs to their configured input values.
+
+        """
+        configs = {}
+        for domain in ("automation", "script"):
+            if domain in self.hass.data:
+                component = self.hass.data[domain]
+                get_entity = getattr(component, "get_entity", None)
+                entities_attr = getattr(component, "entities", [])
+
+                for entity_id in entity_ids:
+                    if entity_id.startswith(f"{domain}."):
+                        if callable(get_entity):
+                            entity = get_entity(entity_id)
+                        else:
+                            entity = next(
+                                (
+                                    e
+                                    for e in entities_attr
+                                    if getattr(e, "entity_id", None) == entity_id
+                                ),
+                                None,
+                            )
+                        if entity:
+                            raw_config = getattr(entity, "raw_config", None)
+                            cfg = raw_config if isinstance(raw_config, dict) else None
+                            if cfg is None:
+                                entity_config = getattr(entity, "config", None)
+                                if isinstance(entity_config, dict):
+                                    cfg = entity_config
+                            if isinstance(cfg, dict) and "use_blueprint" in cfg:
+                                configs[entity_id] = cfg
+
+        return configs
+
+    @staticmethod
+    def _get_affected_entities(configs: dict[str, dict[str, Any]], key: str) -> list[str]:
+        """Find entities using a specific input key."""
+        return [
+            eid
+            for eid, full_cfg in configs.items()
+            if isinstance(full_cfg.get("use_blueprint"), dict)
+            and isinstance(full_cfg["use_blueprint"].get("input"), dict)
+            and key in full_cfg["use_blueprint"]["input"]
+        ]
+
+    @staticmethod
+    def _detect_new_mandatory_inputs(
+        old_schema: dict[str, Any], new_schema: dict[str, Any]
+    ) -> list[StructuredRisk]:
+        """Detect new mandatory inputs in the schema."""
+        return [
+            {"type": "new_mandatory", "args": {"input": key}}
+            for key, props in new_schema.items()
+            if props["mandatory"] and key not in old_schema
+        ]
+
+    @staticmethod
+    def _detect_missing_inputs(
+        new_schema: dict[str, Any], configs: dict[str, dict[str, Any]]
+    ) -> list[StructuredRisk]:
+        """Detect missing mandatory inputs for existing entities."""
+        risks = []
+        for entity_id, full_config in configs.items():
+            use_bp = full_config.get("use_blueprint")
+            if not isinstance(use_bp, dict):
+                continue
+
+            raw_input = use_bp.get("input")
+            if not isinstance(raw_input, dict):
+                continue
+
+            inputs: dict[str, Any] = raw_input
+            risks.extend(
+                {
+                    "type": "missing_input",
+                    "args": {"entity": entity_id, "input": key},
+                }
+                for key, props in new_schema.items()
+                if props["mandatory"] and key not in inputs
+            )
+        return risks
+
+    def _detect_selector_mismatches(
+        self,
+        old_schema: dict[str, Any],
+        new_schema: dict[str, Any],
+        configs: dict[str, dict[str, Any]],
+    ) -> list[StructuredRisk]:
+        """Detect changes in selectors for existing inputs."""
+        risks = []
+        for key in old_schema:
+            if key in new_schema:
+                old_selector = old_schema[key].get("selector")
+                new_selector = new_schema[key].get("selector")
+                if old_selector != new_selector and (
+                    affected := self._get_affected_entities(configs, key)
+                ):
+                    risks.append(
+                        {
+                            "type": "selector_mismatch",
+                            "args": {
+                                "input": key,
+                                "old_type": old_selector or "none",
+                                "new_type": new_selector or "none",
+                                "count": len(affected),
+                            },
+                        }
+                    )
+        return risks
+
+    def _detect_removed_inputs(
+        self,
+        old_schema: dict[str, Any],
+        new_schema: dict[str, Any],
+        configs: dict[str, dict[str, Any]],
+    ) -> list[StructuredRisk]:
+        """Detect inputs that were removed but are still used."""
+        risks = []
+        for key in old_schema:
+            if key not in new_schema and (affected := self._get_affected_entities(configs, key)):
+                risks.append(
+                    {"type": "removed_input", "args": {"input": key, "count": len(affected)}}
+                )
+        return risks
+
+    def _dedupe_risks(self, risks: Iterable[StructuredRisk | str]) -> list[StructuredRisk]:
+        """De-duplicate risks and convert legacy string risks to structured format.
+
+        This ensures that identical risks (by type and arguments) are only
+        reported once, even if they originate from different detection passes.
+
+        Args:
+            risks: An iterable of structured risks or bare error strings.
+
+        Returns:
+            A list of unique structured risks.
+
+        """
+        seen = set()
+        unique_risks = []
+        for risk in risks:
+            if isinstance(risk, str):
+                if risk not in seen:
+                    seen.add(risk)
+                    unique_risks.append({"type": "legacy_risk", "args": {"message": risk}})
+                continue
+
+            if not isinstance(risk, dict) or "type" not in risk or "args" not in risk:
+                _LOGGER.debug("Skipping malformed risk: %s", risk)
+                continue
+
+            key = (
+                risk["type"],
+                orjson.dumps(risk["args"], option=orjson.OPT_SORT_KEYS).decode("utf-8"),
+            )
+            if key not in seen:
+                seen.add(key)
+                unique_risks.append(risk)
+        return unique_risks
+
+    def _detect_breaking_changes(
+        self, old_content: str, new_content: str, rel_path: str
+    ) -> list[StructuredRisk]:
+        """Detect potential breaking changes between two versions of a blueprint.
+
+        Args:
+            old_content: Current local YAML content.
+            new_content: Remote YAML content from update.
+            rel_path: Relative path of the blueprint (e.g. automation/motion.yaml).
+
+        Returns:
+            A list of human-readable strings describing the detected risks.
+
+        """
+        old_schema = self._extract_inputs_schema(old_content)
+        if "_error" in old_schema:
+            return [
+                {"type": "validation_failed_blueprint", "args": {"error": old_schema["_error"]}}
+            ]
+        new_schema = self._extract_inputs_schema(new_content)
+        if "_error" in new_schema:
+            return [
+                {"type": "validation_failed_blueprint", "args": {"error": new_schema["_error"]}}
+            ]
+        entity_ids = self._get_entities_using_blueprint_list(rel_path)
+        configs = self._get_entities_configs(entity_ids)
+
+        risks = []
+        risks.extend(self._detect_new_mandatory_inputs(old_schema, new_schema))
+        risks.extend(self._detect_missing_inputs(new_schema, configs))
+        risks.extend(self._detect_selector_mismatches(old_schema, new_schema, configs))
+        risks.extend(self._detect_removed_inputs(old_schema, new_schema, configs))
+
+        return self._dedupe_risks(risks)
+
+    def _get_entities_using_blueprint_list(self, rel_path: str) -> list[str]:
+        """Internal helper to get entities using a specific blueprint.
+
+        Args:
+            rel_path: Relative path of the blueprint.
+
+        Returns:
+            List of entity IDs.
+
+        """
+        result = []
+        result.extend(automations_with_blueprint(self.hass, rel_path))
+        result.extend(scripts_with_blueprint(self.hass, rel_path))
+        return result
+
+    async def _async_validate_blueprint_consumers(
+        self,
+        rel_path: str,
+        blueprint_content: str,
+        configs: dict[str, dict[str, Any]],
+    ) -> list[StructuredRisk]:
+        """Validate all consumers of a blueprint against specific content.
+
+        This uses Home Assistant's native validation engine by temporarily
+        injecting the content into the blueprint cache.
+        """
+        risks = []
+        try:
+            blueprint_dict = yaml_util.parse_yaml(blueprint_content)
+            if not isinstance(blueprint_dict, dict):
+                return [
+                    {
+                        "type": "validation_failed_blueprint",
+                        "args": {"error": f"{rel_path}: Not a dictionary"},
+                    }
+                ]
+
+            domain = rel_path.split("/")[0]
+            schema = AUTOMATION_BLUEPRINT_SCHEMA if domain == "automation" else BLUEPRINT_SCHEMA
+
+            blueprint_obj = Blueprint(
+                blueprint_dict, expected_domain=domain, path=rel_path, schema=schema
+            )
+        except HomeAssistantError as err:
+            return [
+                {
+                    "type": "validation_failed_blueprint",
+                    "args": {"error": _sanitize_error_detail(str(err))},
+                }
+            ]
+
+        blueprints_hub = self.hass.data.get("blueprint", {}).get(domain)
+        if not blueprints_hub:
+            return []
+
+        original_bp = await blueprints_hub.async_get_blueprint(rel_path)
+        await blueprints_hub.async_add_blueprint(blueprint_obj, rel_path)
+
+        try:
+            for entity_id, config in configs.items():
+                try:
+                    if domain == "automation":
+                        await async_validate_automation_config(self.hass, entity_id, config)
+                    else:
+                        await async_validate_script_config(self.hass, entity_id, config)
+                except HomeAssistantError as err:
+                    risks.append(
+                        {
+                            "type": "compatibility_risk",
+                            "args": {
+                                "entity": entity_id,
+                                "error": _sanitize_error_detail(str(err)),
+                            },
+                        }
+                    )
+        finally:
+            if original_bp:
+                await blueprints_hub.async_add_blueprint(original_bp, rel_path)
+            else:
+                await blueprints_hub.async_remove_blueprint(rel_path)
+
+        return risks
+
+    def _get_entities_using_blueprint(self, rel_path: str) -> list[str]:
+        """Get entity IDs of automations and scripts using the given blueprint.
+
+        Args:
+            rel_path: Relative path of the blueprint.
+
+        Returns:
+            A list of entity ID strings.
+
+        """
+        return self._get_entities_using_blueprint_list(rel_path)
 
     def set_cached_git_diff(
         self,
@@ -1694,52 +2049,241 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         except (HomeAssistantError, InvalidBlueprint) as err:
             last_error = f"yaml_syntax_error|{_sanitize_error_detail(str(err))}"
 
-        auto_update = self.is_auto_update_enabled()
-
-        if updatable and not last_error and auto_update:
-            try:
-                await self.async_install_blueprint(
-                    path, remote_content, reload_services=False, backup=True
-                )
-                if self.data and path in self.data:
-                    self.data[path].update(
-                        {
-                            "remote_hash": remote_hash,
-                            "remote_content": None,
-                            "updatable": False,
-                            "local_hash": remote_hash,
-                            "last_error": None,
-                            "etag": new_etag,
-                        }
-                    )
-                results_to_notify.append(info["name"])
-                updated_domains.add(info.get("domain", "automation"))
-                return
-            except Exception as err:
-                _LOGGER.error("Auto-update failed for %s: %s", path, err)
-                last_error = f"auto_update_failed|{_sanitize_error_detail(str(err))}"
-
+        risks = await self._detect_risks_for_update(path, info, remote_content, last_error)
         if self.data and path in self.data:
-            if last_error:
-                update_data = {
-                    "last_error": last_error,
-                    "etag": new_etag,
-                    "invalid_remote_hash": remote_hash,
-                    "remote_hash": None,
-                    "remote_content": None,
-                    "updatable": False,
-                }
-            else:
-                update_data = {
-                    "last_error": last_error,
-                    "etag": new_etag,
-                    "invalid_remote_hash": None,
-                    "remote_hash": remote_hash,
-                    "remote_content": remote_content if updatable else None,
-                    "updatable": updatable,
-                }
+            self.data[path]["breaking_risks"] = risks
 
-            self.data[path].update(update_data)
+        if (
+            updatable
+            and not last_error
+            and self.is_auto_update_enabled()
+            and await self._handle_auto_update_step(
+                path,
+                info,
+                remote_content,
+                remote_hash,
+                new_etag,
+                risks,
+                results_to_notify,
+                updated_domains,
+            )
+        ):
+            return
+
+        self._update_coordinator_status_data(
+            path, updatable, last_error, remote_hash, remote_content, new_etag
+        )
+
+    async def _detect_risks_for_update(
+        self,
+        path: str,
+        info: dict[str, Any],
+        remote_content: str,
+        last_error: str | None,
+    ) -> list[StructuredRisk]:
+        """Detect potential breaking changes for a blueprint update.
+
+        Args:
+            path: Local path of the blueprint.
+            info: Current blueprint metadata.
+            remote_content: New remote content.
+            last_error: Any validation error already found.
+
+        Returns:
+            List of localized risk strings.
+
+        """
+        risks = []
+        rel_path = info.get("rel_path")
+        if not rel_path:
+            _LOGGER.warning(
+                "Missing relative path for blueprint at %s, skipping risk detection", path
+            )
+            return [{"type": "system_error", "args": {"error": "missing_path"}}]
+
+        if not last_error and self.data and path in self.data:
+            local_file = self.hass.config.path("blueprints", rel_path)
+            try:
+                if os.path.isfile(local_file):
+                    with open(local_file, encoding="utf-8") as f:
+                        old_content = f.read()
+                    risks = self._detect_breaking_changes(old_content, remote_content, rel_path)
+
+                entity_ids = self._get_entities_using_blueprint_list(rel_path)
+                configs = self._get_entities_configs(entity_ids)
+                compatibility_risks = await self._async_validate_blueprint_consumers(
+                    rel_path, remote_content, configs
+                )
+                risks.extend(compatibility_risks)
+
+            except Exception as err:
+                _LOGGER.warning("Failed to check breaking changes for %s: %s", path, err)
+        return self._dedupe_risks(risks)
+
+    async def _handle_auto_update_step(
+        self,
+        path: str,
+        info: dict[str, Any],
+        remote_content: str,
+        remote_hash: str,
+        new_etag: str | None,
+        risks: list[StructuredRisk],
+        results_to_notify: list[str],
+        updated_domains: set[str],
+    ) -> bool:
+        """Execute auto-update flow if safe.
+
+        Args:
+            path: Local path of the blueprint.
+            info: Current blueprint metadata.
+            remote_content: Content to install.
+            remote_hash: Hash of remote content.
+            new_etag: New response ETag.
+            risks: Detected risks.
+            results_to_notify: Accumulator for notifications.
+            updated_domains: Accumulator for service reloads.
+
+        Returns:
+            True if processing for this blueprint should stop.
+
+        """
+        rel_path = info.get("rel_path")
+        in_use_entities = self._get_entities_using_blueprint(rel_path) if rel_path else []
+        is_breaking = len(risks) > 0 and len(in_use_entities) > 0
+
+        if is_breaking:
+            _LOGGER.warning(
+                "Auto-update blocked for '%s' due to %d detected breaking changes.",
+                info["name"],
+                len(risks),
+            )
+            title = f"Auto-update blocked: {info['name']}"
+            message = (
+                f"Detected {len(risks)} potential breaking changes for blueprint "
+                f"'{info['name']}'. Check and update manually."
+            )
+            await self._async_send_auto_update_notification(
+                title,
+                message,
+                blueprint_id=slugify(path),
+                source_unique_id=slugify(rel_path) if rel_path else None,
+            )
+            if self.data and path in self.data:
+                self.data[path].update(
+                    {
+                        "updatable": True,
+                        "remote_hash": remote_hash,
+                        "remote_content": remote_content,
+                        "last_error": "auto_update_blocked_by_breaking_change",
+                        "etag": new_etag,
+                    }
+                )
+            return True
+
+        try:
+            await self.async_install_blueprint(
+                path, remote_content, reload_services=False, backup=True
+            )
+            if self.data and path in self.data:
+                self.data[path].update(
+                    {
+                        "remote_hash": remote_hash,
+                        "remote_content": None,
+                        "updatable": False,
+                        "local_hash": remote_hash,
+                        "last_error": None,
+                        "etag": new_etag,
+                    }
+                )
+            results_to_notify.append(info["name"])
+            updated_domains.add(info.get("domain", "automation"))
+            return True
+        except Exception as err:
+            _LOGGER.error("Auto-update failed for %s: %s", path, err)
+            return False
+
+    def _update_coordinator_status_data(
+        self,
+        path: str,
+        updatable: bool,
+        last_error: str | None,
+        remote_hash: str,
+        remote_content: str,
+        new_etag: str | None,
+    ) -> None:
+        """Update internal data state for a blueprint.
+
+        Args:
+            path: Local path.
+            updatable: If an update is available.
+            last_error: Latest error string or None.
+            remote_hash: Hash of remote content.
+            remote_content: Content if updatable.
+            new_etag: Associated ETag.
+
+        """
+        if not (self.data and path in self.data):
+            return
+
+        if last_error:
+            update_data = {
+                "last_error": last_error,
+                "etag": new_etag,
+                "invalid_remote_hash": remote_hash,
+                "remote_hash": None,
+                "remote_content": None,
+                "updatable": False,
+            }
+        else:
+            update_data = {
+                "last_error": last_error,
+                "etag": new_etag,
+                "invalid_remote_hash": None,
+                "remote_hash": remote_hash,
+                "remote_content": remote_content if updatable else None,
+                "updatable": updatable,
+            }
+
+        self.data[path].update(update_data)
+
+    async def _async_send_auto_update_notification(
+        self,
+        title: str,
+        message: str,
+        blueprint_id: str | None = None,
+        source_unique_id: str | None = None,
+    ) -> None:
+        """Send a persistent notification to the Home Assistant UI.
+
+        Args:
+            title: Title of the notification.
+            message: Content of the notification.
+            blueprint_id: Optional unique identifier for the blueprint.
+            source_unique_id: Stable, unique identifier for the blueprint source.
+
+        """
+        if not source_unique_id:
+            base_id = (
+                f"{DOMAIN}_auto_update_block_{blueprint_id}"
+                if blueprint_id
+                else f"{DOMAIN}_auto_update_block"
+            )
+        else:
+            suffix = f"_{blueprint_id}" if blueprint_id else ""
+            base_id = f"{DOMAIN}_auto_update_block_{source_unique_id}{suffix}"
+
+        try:
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": title,
+                    "message": message,
+                    "notification_id": base_id,
+                },
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to send auto update notification: %s", err)
 
     @retry_async(
         max_retries=MAX_RETRIES,
@@ -1821,16 +2365,22 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             raise httpx.HTTPError("Request failed without response")
 
         new_etag = response.headers.get("ETag")
-        parsed_url = urlparse(current_url)
-        if parsed_url.hostname == DOMAIN_HA_FORUM:
-            try:
-                json_data = response.json()
-            except ValueError as err:
-                raise httpx.HTTPError(
-                    f"Invalid JSON response from forum URL (redacted URL): "
-                    f"{_sanitize_error_detail(str(err))}"
-                ) from err
-            content = self._parse_forum_content(json_data)
+        if provider := registry.get_provider(url):
+            json_data = None
+            content_type = response.headers.get("Content-Type", "")
+            normalized_ct = content_type.lower().split(";", 1)[0].strip()
+            is_json = normalized_ct == "application/json" or normalized_ct.endswith("+json")
+            if is_json:
+                try:
+                    json_data = response.json()
+                except ValueError as err:
+                    _LOGGER.warning(
+                        "Failed to parse JSON content for provider at %s (Content-Type: %s): %s",
+                        url,
+                        content_type,
+                        err,
+                    )
+            content = provider.parse_content(response.text, json_data)
             return (content or ""), new_etag
 
         content = response.text
@@ -1847,61 +2397,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             The normalized URL for direct content fetching.
 
         """
-        parsed = urlparse(url)
-        path_parts = parsed.path.strip("/").split("/")
-
-        if parsed.hostname == DOMAIN_GITHUB and RE_GITHUB_BLOB.search(parsed.path):
-            new_parts = [p for p in path_parts if p != "blob"]
-            return urlunparse(
-                (
-                    parsed.scheme,
-                    DOMAIN_GITHUB_RAW,
-                    "/".join(new_parts),
-                    parsed.params,
-                    parsed.query,
-                    parsed.fragment,
-                )
-            )
-
-        if parsed.hostname == DOMAIN_GIST and not RE_GIST_RAW.search(parsed.path):
-            return urlunparse(
-                (
-                    parsed.scheme,
-                    parsed.netloc,
-                    f"{parsed.path.rstrip('/')}/raw",
-                    parsed.params,
-                    parsed.query,
-                    parsed.fragment,
-                )
-            )
-
-        if (
-            parsed.hostname == DOMAIN_HA_FORUM
-            and "/t/" in parsed.path
-            and (match := RE_FORUM_TOPIC_ID.search(parsed.path))
-        ):
-            topic_id = match.group(1)
-            return urlunparse(
-                (
-                    parsed.scheme,
-                    parsed.netloc,
-                    f"/t/{topic_id}.json",
-                    parsed.params,
-                    "",
-                    parsed.fragment,
-                )
-            )
-
+        if provider := registry.get_provider(url):
+            return provider.normalize_url(url)
         return url
 
     @staticmethod
     def _get_cdn_url(url: str) -> str | None:
         """Convert a GitHub URL to a jsDelivr CDN URL.
-
-        This method supports both raw.githubusercontent.com and standard github.com
-        URLs. Any path segments that were already URL-encoded in the source (e.g.,
-        spaces as %20) are preserved to ensure the generated CDN URL remains
-        valid and links to the correct file.
 
         Args:
             url: The GitHub source URL (preferably normalized).
@@ -1910,72 +2412,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             The jsDelivr CDN URL or None if not applicable.
 
         """
-        parsed = urlparse(url)
-        path_parts = [p for p in parsed.path.split("/") if p]
-
-        if parsed.hostname == DOMAIN_GITHUB_RAW:
-            if len(path_parts) < 4:
-                return None
-            user, repo, branch = path_parts[:3]
-            path = "/".join(path_parts[3:])
-        elif parsed.hostname == DOMAIN_GITHUB:
-            if len(path_parts) < 5:
-                return None
-
-            try:
-                anchor_idx = next(
-                    (idx for idx, part in enumerate(path_parts) if part in ("blob", "raw")),
-                    -1,
-                )
-                if anchor_idx != 2:
-                    return None
-
-                user = path_parts[anchor_idx - 2]
-                repo = path_parts[anchor_idx - 1]
-                branch = path_parts[anchor_idx + 1]
-                path = "/".join(path_parts[anchor_idx + 2 :])
-            except (IndexError, ValueError):
-                return None
-        else:
-            return None
-
-        return urlunparse(
-            (
-                "https",
-                DOMAIN_JSDELIVR,
-                f"/gh/{user}/{repo}@{branch}/{path}",
-                "",
-                "",
-                "",
-            )
-        )
-
-    @staticmethod
-    def _parse_forum_content(json_data: dict[str, Any]) -> str | None:
-        """Extract YAML blueprint from Home Assistant Forum JSON response.
-
-        Args:
-            json_data: The JSON payload from the Discourse API.
-
-        Returns:
-            The extracted blueprint YAML string or None if not found.
-
-        """
-        with contextlib.suppress(KeyError, IndexError):
-            post_stream: dict[str, Any] = json_data.get("post_stream", {})
-            posts: list[dict[str, Any]] = post_stream.get("posts", [])
-            if not posts:
-                return None
-
-            post_content = posts[0].get("cooked")
-            if not isinstance(post_content, str):
-                return None
-
-            code_blocks: list[str] = RE_FORUM_CODE_BLOCK.findall(post_content)
-            for block in code_blocks:
-                unquoted_block: str = str(html.unescape(block).strip())
-                if "blueprint:" in unquoted_block:
-                    return unquoted_block
+        if provider := registry.get_provider(url):
+            return provider.get_cdn_url(url)
         return None
 
     @staticmethod

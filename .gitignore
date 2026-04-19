@@ -5,3 +5,5 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 node_modules/
+.coverage
+.coverage.*

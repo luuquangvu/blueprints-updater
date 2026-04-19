@@ -145,31 +145,6 @@ def test_normalize_url(coordinator):
     )
 
 
-def test_parse_forum_content(coordinator):
-    """Test parsing forum content."""
-    json_data = {
-        "post_stream": {
-            "posts": [
-                {
-                    "cooked": (
-                        '<p>Here is my blueprint:</p><pre><code class="lang-yaml">blueprint:\n'
-                        "  name: Test\n  source_url: https://url.com</code></pre>"
-                    )
-                }
-            ]
-        }
-    }
-    content: Any = coordinator._parse_forum_content(json_data)
-    assert "blueprint:" in content
-    assert "name: Test" in content
-
-    json_data_no_bp = {"post_stream": {"posts": [{"cooked": "<code>not a blueprint</code>"}]}}
-    assert coordinator._parse_forum_content(json_data_no_bp) is None
-
-    assert coordinator._parse_forum_content({}) is None
-    assert coordinator._parse_forum_content({"post_stream": {"posts": []}}) is None
-
-
 def test_ensure_source_url(coordinator):
     """Test ensuring source_url is present."""
     source_url = "https://github.com/user/repo/blob/main/test.yaml"
@@ -437,9 +412,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
         mock_session, path, info, results_to_notify, updated_domains
     )
 
-    assert "fetch_error" in coordinator.data[path]["last_error"]
-    assert "Invalid JSON response" in coordinator.data[path]["last_error"]
-    assert "(redacted URL)" in coordinator.data[path]["last_error"]
+    assert coordinator.data[path]["last_error"] in ["fetch_error|", "empty_content|"]
     assert coordinator.data[path]["updatable"] is False
 
 

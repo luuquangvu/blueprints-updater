@@ -108,7 +108,7 @@
     "auto_update_message": "I seguenti blueprint sono stati aggiornati automaticamente:\n\n{blueprints}",
     "update_available_short": "Aggiornamento disponibile",
     "update_available": "Aggiornamento disponibile da {source_url}",
-    "auto_update_warning": "Avviso: Gli aggiornamenti potrebbero comportare rischi di retrocompatibilità se l'autore introduce modifiche radicali (breaking changes). Si consiglia vivamente di abilitare l'opzione di backup prima dell'installazione.",
+    "update_safety_message": "Suggerimento: Si consiglia di abilitare l'opzione di backup prima di installare gli aggiornamenti.",
     "usage_warning": "Attenzione: questo aggiornamento interesserà {count} {domain} in esecuzione.",
     "up_to_date": "Aggiornato",
     "install_error": "Impossibile installare il blueprint: {error}. Il file remoto contiene errori e non può essere applicato in sicurezza.",
@@ -123,6 +123,17 @@
     "unsafe_url": "URL non sicuro: {error}",
     "content_missing": "Il contenuto del blueprint è mancante o non è stato possibile recuperarlo.",
     "git_diff_title": "Modifiche al codice (Git Diff)",
-    "semantic_sync_notice": "Questo blueprint è semanticamente identico, ma richiede un aggiornamento strutturale per allinearsi al nuovo formato canonico (es. normalizzazione dei fine riga, inserimento di metadati)."
+    "semantic_sync_notice": "Questo blueprint è semanticamente identico, ma richiede un aggiornamento strutturale per allinearsi al nuovo formato canonico (es. normalizzazione dei fine riga, inserimento di metadati).",
+    "breaking_risks_title": "RAPPORTO SUI RISCHI DI AGGIORNAMENTO",
+    "auto_update_blocked_by_breaking_change": "Aggiornamento automatico bloccato a causa di modifiche sostanziali rilevate",
+    "risk_new_mandatory": "Nuovo input obbligatorio '{input}' aggiunto.",
+    "risk_missing_input": "All'entità '{entity}' manca l'input obbligatorio '{input}' richiesto dalla nuova versione.",
+    "risk_removed_input": "Input '{input}' rimosso, ma attualmente utilizzato da {count} entità.",
+    "risk_selector_mismatch": "Tipo di selettore modificato per '{input}': da '{old_type}' a '{new_type}' (interessa {count} entità).",
+    "risk_validation_failed_blueprint": "Il nuovo contenuto del blueprint non è valido: {error}",
+    "risk_unknown": "Errore sconosciuto: {error}",
+    "risk_legacy": "{message}",
+    "risk_compatibility": "Errore di compatibilità per '{entity}': {error}",
+    "risk_system_error": "Errore di sistema: {error}"
   }
 }

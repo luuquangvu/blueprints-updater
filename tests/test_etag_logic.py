@@ -18,6 +18,7 @@ from .protocols import BlueprintCoordinatorProtocol
 def coordinator(hass) -> BlueprintCoordinatorProtocol:
     """Fixture for BlueprintUpdateCoordinator."""
     entry = MagicMock()
+    entry.entry_id = "test_entry"
     entry.options = {"auto_update": False}
     entry.data = {}
 
@@ -35,7 +36,7 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
         )
         coord.hass = hass
         coord.data = {}
-        coord.async_set_updated_data = cast(Any, MagicMock())
+        coord.async_set_updated_data = cast(Any, MagicMock(return_value=None))
         coord.setup_complete = True
         coord._is_safe_path = cast(Any, MagicMock(return_value=True))
         coord._is_safe_url = cast(Any, AsyncMock(return_value=True))
@@ -46,10 +47,7 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
 async def test_304_response_preserves_updatable_status(
     hass: HomeAssistant, coordinator: BlueprintCoordinatorProtocol
 ):
-    """Test that a 304 response doesn't flip 'Update available' back to 'Up to date'.
-
-    This occurs if the local file hasn't been updated.
-    """
+    """Test that a 304 response doesn't flip 'Update available' back to 'Up to date'."""
     path = "/config/blueprints/test.yaml"
     local_content = "blueprint:\n  name: Old"
     remote_content = "blueprint:\n  name: New"
@@ -81,10 +79,11 @@ async def test_304_response_preserves_updatable_status(
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 304
     mock_response.headers = {"ETag": "etag_v2"}
-    mock_response.raise_for_status = MagicMock()
+    mock_response.raise_for_status = MagicMock(return_value=None)
 
     mock_session = MagicMock(spec=httpx.AsyncClient)
     mock_session.get = AsyncMock(return_value=mock_response)
+    mock_session.send = AsyncMock(return_value=mock_response)
 
     results_to_notify: list[str] = []
     updated_domains: set[str] = set()
@@ -114,7 +113,7 @@ async def test_persistence_of_remote_hashes(
     }
 
     mock_store = MagicMock()
-    mock_store.async_save = AsyncMock()
+    mock_store.async_save = AsyncMock(return_value=None)
     coordinator._store = mock_store
     with patch(
         "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True
@@ -138,12 +137,9 @@ async def test_persistence_of_remote_hashes(
 
 @pytest.mark.asyncio
 async def test_etag_migration_forces_download(
-    hass: HomeAssistant, coordinator: BlueprintUpdateCoordinator
+    hass: HomeAssistant, coordinator: BlueprintCoordinatorProtocol
 ):
-    """Test that if remote_hash is missing from persisted data.
-
-    The ETag is ignored to force a full download and populate the hash.
-    """
+    """Test that if remote_hash is missing from persisted data, the ETag is ignored."""
     path = "/config/blueprints/test.yaml"
     remote_content = "blueprint:\n  name: fresh\n  domain: automation"
     remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
@@ -169,10 +165,11 @@ async def test_etag_migration_forces_download(
     mock_response.status_code = 200
     mock_response.headers = {"ETag": "new_etag"}
     mock_response.text = remote_content
-    mock_response.raise_for_status = MagicMock()
+    mock_response.raise_for_status = MagicMock(return_value=None)
 
     mock_session = MagicMock(spec=httpx.AsyncClient)
     mock_session.get = AsyncMock(return_value=mock_response)
+    mock_session.send = AsyncMock(return_value=mock_response)
 
     results_to_notify: list[str] = []
     updated_domains: set[str] = set()
@@ -212,7 +209,7 @@ async def test_async_save_metadata_preserves_persisted_entries_for_existing_file
     }
 
     mock_store = MagicMock()
-    mock_store.async_save = AsyncMock()
+    mock_store.async_save = AsyncMock(return_value=None)
     coordinator._store = mock_store
 
     with patch(
@@ -221,7 +218,7 @@ async def test_async_save_metadata_preserves_persisted_entries_for_existing_file
     ):
         await coordinator._async_save_metadata()
 
-    mock_store.async_save.assert_called_once()
+    mock_store.async_save.assert_awaited_once()
     save_args = mock_store.async_save.call_args[0][0]
     assert save_args["etags"][existing_path] == "etag-new"
     assert save_args["remote_hashes"][existing_path] == "hash-new"
@@ -246,7 +243,7 @@ async def test_async_save_metadata_force_true_persists_even_when_unchanged(coord
     }
 
     mock_store = MagicMock()
-    mock_store.async_save = AsyncMock()
+    mock_store.async_save = AsyncMock(return_value=None)
     coordinator._store = mock_store
 
     with patch(

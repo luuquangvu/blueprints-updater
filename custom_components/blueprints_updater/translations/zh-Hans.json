@@ -108,7 +108,7 @@
     "auto_update_message": "以下蓝图已自动更新：\n\n{blueprints}",
     "update_available_short": "有可用更新",
     "update_available": "可从 {source_url} 获取更新",
-    "auto_update_warning": "警告：如果作者引入重大更改（breaking changes），更新可能会带来向后不兼容的风险。强烈建议在安装前启用备份选项。",
+    "update_safety_message": "安全提示：建议在安装更新前启用备份选项，以确保您在需要时恢复内容。",
     "usage_warning": "警告：此更新将影响 {count} 个正在运行的 {domain}。",
     "up_to_date": "已是最新",
     "install_error": "无法安装蓝图：{error}。远程文件有错误，无法安全应用。",
@@ -123,6 +123,17 @@
     "unsafe_url": "不安全的 URL：{error}",
     "content_missing": "蓝图内容缺失或无法获取",
     "git_diff_title": "代码更改 (Git Diff)",
-    "semantic_sync_notice": "此蓝图在语义上是完全相同的，但需要进行结构更新以符合新的规范格式（例如：换行符标准化、元数据注入）。"
+    "semantic_sync_notice": "此蓝图在语义上是完全相同的，但需要进行结构更新以符合新的规范格式（例如：换行符标准化、元数据注入）。",
+    "breaking_risks_title": "更新风险报告",
+    "auto_update_blocked_by_breaking_change": "自动更新因检测到重大更改而被阻止",
+    "risk_new_mandatory": "添加了新的必填输入 '{input}'。",
+    "risk_missing_input": "实体 '{entity}' 缺少新版本要求的必填输入 '{input}'。",
+    "risk_removed_input": "输入 '{input}' 已移除，但当前正被 {count} 个实体使用。",
+    "risk_selector_mismatch": "'{input}' 的选择器类型已更改：从 '{old_type}' 更改为 '{new_type}'（影响 {count} 个实体）。",
+    "risk_validation_failed_blueprint": "新的蓝图内容无效：{error}",
+    "risk_unknown": "未知错误：{error}",
+    "risk_legacy": "{message}",
+    "risk_compatibility": "'{entity}' 的兼容性错误：{error}",
+    "risk_system_error": "System error: {error}"
   }
 }

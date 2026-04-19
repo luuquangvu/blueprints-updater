@@ -108,7 +108,7 @@
     "auto_update_message": "The following blueprints have been automatically updated:\n\n{blueprints}",
     "update_available_short": "Update available",
     "update_available": "Update available from {source_url}",
-    "auto_update_warning": "Warning: Updates may carry backward incompatibility risks if the author introduces breaking changes. It is highly recommended to enable the backup option before installing.",
+    "update_safety_message": "Safety Tip: It is recommended to enable the backup option before installing updates to ensure you can revert if needed.",
     "usage_warning": "Warning: This update will affect {count} running {domain}(s).",
     "up_to_date": "Up to date",
     "install_error": "Cannot install blueprint: {error}. The remote file has errors and cannot be safely applied.",
@@ -123,6 +123,17 @@
     "unsafe_url": "Unsafe URL: {error}",
     "content_missing": "Blueprint content is missing or could not be fetched",
     "git_diff_title": "Code Changes (Git Diff)",
-    "semantic_sync_notice": "This blueprint is semantically identical, but requires a structural update to align with the new canonical formatting (e.g. newline normalization, metadata injection)."
+    "semantic_sync_notice": "This blueprint is semantically identical, but requires a structural update to align with the new canonical formatting (e.g. newline normalization, metadata injection).",
+    "breaking_risks_title": "UPDATE RISK REPORT",
+    "auto_update_blocked_by_breaking_change": "Auto-update blocked due to detected breaking changes.",
+    "risk_new_mandatory": "New mandatory input '{input}' added.",
+    "risk_missing_input": "Entity '{entity}' is missing mandatory input '{input}' required by new version.",
+    "risk_removed_input": "Input '{input}' removed, but currently used by {count} entities.",
+    "risk_selector_mismatch": "Selector type changed for '{input}': from '{old_type}' to '{new_type}' (affects {count} entities).",
+    "risk_validation_failed_blueprint": "New blueprint content is invalid: {error}",
+    "risk_unknown": "Unknown risk: {error}",
+    "risk_legacy": "{message}",
+    "risk_compatibility": "Compatibility Error for '{entity}': {error}",
+    "risk_system_error": "System error: {error}"
   }
 }

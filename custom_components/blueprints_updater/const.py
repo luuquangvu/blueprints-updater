@@ -57,3 +57,14 @@ SPECIAL_USE_TLDS = {
     "internal",
     "onion",
 }
+
+RISK_TYPE_TRANSLATIONS = {
+    "legacy_risk": "risk_legacy",
+    "new_mandatory": "risk_new_mandatory",
+    "missing_input": "risk_missing_input",
+    "removed_input": "risk_removed_input",
+    "selector_mismatch": "risk_selector_mismatch",
+    "compatibility_risk": "risk_compatibility",
+    "validation_failed_blueprint": "risk_validation_failed_blueprint",
+    "system_error": "risk_system_error",
+}

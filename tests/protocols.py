@@ -183,11 +183,6 @@ class BlueprintCoordinatorInternal(Protocol):
         ...
 
     @staticmethod
-    def _parse_forum_content(json_data: dict[str, Any]) -> str | None:
-        """Parse blueprint content from forum JSON responses."""
-        ...
-
-    @staticmethod
     def _ensure_source_url(content: str, source_url: str) -> str:
         """Inject or normalize source_url in blueprint metadata."""
         ...

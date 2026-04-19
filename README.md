@@ -18,7 +18,7 @@
 ## Features
 
 - **Seamless Native Integration**: Blends perfectly into the Home Assistant ecosystem, looking and feeling like a core feature. Manage everything directly from your dashboard with single-click or bulk updates.
-- **Safeguarded by Auto-Backups**: Every update is pre-validated for YAML syntax and version compatibility. Rotating backups provide a guaranteed safety net, letting you revert any change instantly.
+- **Advanced Compatibility Guard**: Protect your smart home from breaking changes with a proactive safeguard. The system performs deep cross-validation of all dependent automations and scripts against the new blueprint content before applying updates, identifying risks specifically as "compatibility errors" to prevent silent failures.
 - **Set It and Forget It**: Automate your entire workflow. Enable auto-updates and let the system handle backups, downloads, and change notifications for you.
 - **Smart Change Detection**: Minimizes system overhead by using SHA256 hashing and ETag headers to pull data only when a genuine change is detected.
 - **Universal Source Compatibility**: Robustly handles blueprints from GitHub, GitHub Gist, and the Home Assistant Community Forum.
@@ -87,6 +87,17 @@ If you find that a newly updated blueprint breaks your automations or has an inc
 5. Click **Perform Action**.
 
 The integration will look for the specified numbered backup file, restore the original YAML content, and automatically reload your automations and scripts to apply the change immediately.
+
+### Advanced Compatibility Guard (Safety Safeguard)
+
+The **Advanced Compatibility Guard** is a professional-grade safety layer designed to protect your smart home logic from breaking changes in blueprint updates.
+
+When an update is detected, the integration performs a deep impact analysis:
+
+1.  **Schema Validation**: Verifies the new blueprint content against Home Assistant's internal validation engine.
+2.  **Cross-Validation**: Temporarily injects the update to validate every automation and script currently using that blueprint.
+3.  **Risk Detection**: If the new version would cause an entity to fail (e.g., due to a removed input or incompatible schema), it flags the update with a specific **"compatibility error"** status.
+4.  **Silent Break Prevention**: Reporting these risks before the update is finalized ensures you never unknowingly break your critical smart home automations.
 
 ### Refreshing the Blueprint List
 

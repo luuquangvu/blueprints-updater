@@ -108,7 +108,7 @@
     "auto_update_message": "Następujące Blueprints zostały automatycznie zaktualizowane:\n\n{blueprints}",
     "update_available_short": "Dostępna aktualizacja",
     "update_available": "Aktualizacja dostępna pod adresem {source_url}",
-    "auto_update_warning": "Ostrzeżenie: Aktualizacje mogą nieść za sobą ryzyko braku kompatybilności wstecznej, jeśli autor wprowadzi drastyczne zmiany (breaking changes). Zdecydowanie zaleca się włączenie opcji kopii zapasowej przed instalacją.",
+    "update_safety_message": "Wskazówka: Zaleca się włączenie opcji kopii zapasowej przed instalacją aktualizacji.",
     "usage_warning": "Ostrzeżenie: Ta aktualizacja wpłynie na {count} uruchomionych {domain}(ów).",
     "up_to_date": "Aktualne",
     "install_error": "Nie można zainstalować Blueprint: {error}. Plik zdalny zawiera błędy i nie można go bezpiecznie zastosować.",
@@ -123,6 +123,17 @@
     "unsafe_url": "Niebezpieczny adres URL: {error}",
     "content_missing": "Brak zawartości Blueprinta lub nie można jej pobrać.",
     "git_diff_title": "Zmiany w kodzie (Git Diff)",
-    "semantic_sync_notice": "Ten blueprint jest semantycznie identyczny, ale wymaga aktualizacji strukturalnej w celu dostosowania do nowego formatu kanonicznego (np. normalizacja znaków końca linii, wstrzykiwanie metadanych)."
+    "semantic_sync_notice": "Ten blueprint jest semantycznie identyczny, ale wymaga aktualizacji strukturalnej w celu dostosowania do nowego formatu kanonicznego (np. normalizacja znaków końca linii, wstrzykiwanie metadanych).",
+    "breaking_risks_title": "RAPORT RYZYKA AKTUALIZACJI",
+    "auto_update_blocked_by_breaking_change": "Automatyczna aktualizacja zablokowana z powodu wykrytych krytycznych zmian",
+    "risk_new_mandatory": "Dodano nowe wymagane pole '{input}'.",
+    "risk_missing_input": "Encja '{entity}' nie posiada wymaganego pola '{input}', które jest wymagane przez nową wersję.",
+    "risk_removed_input": "Pole '{input}' zostało usunięte, ale jest obecnie używane przez {count} encji.",
+    "risk_selector_mismatch": "Typ selektora zmienił się dla '{input}': z '{old_type}' na '{new_type}' (dotyczy {count} encji).",
+    "risk_validation_failed_blueprint": "Nowa treść blueprintu jest nieprawidłowa: {error}",
+    "risk_unknown": "Nieznany błąd: {error}",
+    "risk_legacy": "{message}",
+    "risk_compatibility": "Błąd kompatybilności: {error}",
+    "risk_system_error": "Błąd systemu: {error}"
   }
 }
