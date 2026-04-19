@@ -98,20 +98,11 @@ class GitHubProvider(SourceProvider):
             if len(path_parts) < 5:
                 return None
 
-            try:
-                anchor_idx = next(
-                    (idx for idx, part in enumerate(path_parts) if part in ("blob", "raw")),
-                    -1,
-                )
-                if anchor_idx != 2:
-                    return None
-
-                user = path_parts[anchor_idx - 2]
-                repo = path_parts[anchor_idx - 1]
-                branch = path_parts[anchor_idx + 1]
-                path = "/".join(path_parts[anchor_idx + 2 :])
-            except (IndexError, ValueError):
+            if path_parts[2].lower() not in ("blob", "raw"):
                 return None
+            user, repo = path_parts[:2]
+            branch = path_parts[3]
+            path = "/".join(path_parts[4:])
         else:
             return None
 

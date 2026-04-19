@@ -523,6 +523,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "remote_content": prev.get("remote_content"),
                         "last_error": next_error,
                         "etag": prev.get("etag"),
+                        "update_blocking_reason": prev.get("update_blocking_reason")
+                        if is_updatable
+                        else None,
+                        "breaking_risks": prev.get("breaking_risks", []) if is_updatable else [],
                     }
                 )
 
@@ -1093,6 +1097,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "last_error": None,
                         "remote_content": None,
                         "invalid_remote_hash": None,
+                        "breaking_risks": [],
+                        "update_blocking_reason": None,
                     }
                 )
 
@@ -1561,12 +1567,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         parts = rel_path.split("/", 1)
+        domain = parts[0] if len(parts) > 1 else None
         bp_id = parts[-1] if len(parts) > 1 else rel_path
 
-        result = []
-        result.extend(automations_with_blueprint(self.hass, bp_id))
-        result.extend(scripts_with_blueprint(self.hass, bp_id))
-        return result
+        result: list[str] = []
+        if domain in (None, "automation"):
+            result.extend(automations_with_blueprint(self.hass, bp_id))
+        if domain in (None, "script"):
+            result.extend(scripts_with_blueprint(self.hass, bp_id))
+        return list(dict.fromkeys(result))
 
     async def _async_validate_blueprint_consumers(
         self,
@@ -1866,6 +1875,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "updatable": False,
                 "last_error": f"{error_type}|{_sanitize_error_detail(str(detail))}",
                 "invalid_remote_hash": None,
+                "update_blocking_reason": None,
+                "breaking_risks": [],
             }
             if clear_etag:
                 update_data["etag"] = None
@@ -2157,14 +2168,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 risks.extend(compatibility_risks)
 
             except Exception as err:
+                safe_error = _sanitize_error_detail(str(err))
                 _LOGGER.warning(
-                    "Failed to check breaking changes for %s (%s): %s", path, rel_path, err
+                    "Failed to check breaking changes for %s (%s): %s", path, rel_path, safe_error
                 )
                 risks.append(
                     {
                         "type": "system_error",
                         "args": {
-                            "error": str(err),
+                            "error": safe_error,
                             "path": path,
                             "rel_path": rel_path,
                         },
@@ -2201,7 +2213,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         rel_path = info.get("rel_path")
         in_use_entities = self._get_entities_using_blueprint(rel_path) if rel_path else []
-        is_breaking = len(risks) > 0 and len(in_use_entities) > 0
+        guard_failed = any(risk.get("type") == "system_error" for risk in risks)
+        is_breaking = bool(risks) and (guard_failed or bool(in_use_entities))
 
         if is_breaking:
             _LOGGER.warning(
@@ -2228,6 +2241,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "updatable": True,
                         "remote_hash": remote_hash,
                         "remote_content": remote_content,
+                        "last_error": None,
+                        "invalid_remote_hash": None,
                         "update_blocking_reason": "auto_update_blocked_by_breaking_change",
                         "etag": new_etag,
                     }
@@ -2246,6 +2261,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "updatable": False,
                         "local_hash": remote_hash,
                         "last_error": None,
+                        "breaking_risks": [],
+                        "update_blocking_reason": None,
                         "etag": new_etag,
                     }
                 )
@@ -2287,6 +2304,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "remote_hash": None,
                 "remote_content": None,
                 "updatable": False,
+                "update_blocking_reason": None,
+                "breaking_risks": [],
             }
         else:
             update_data = {
@@ -2296,6 +2315,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "remote_hash": remote_hash,
                 "remote_content": remote_content if updatable else None,
                 "updatable": updatable,
+                "update_blocking_reason": None,
+                "breaking_risks": [],
             }
 
         self.data[path].update(update_data)
