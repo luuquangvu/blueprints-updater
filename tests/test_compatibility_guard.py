@@ -100,7 +100,7 @@ async def test_auto_update_proceeds_when_risks_and_no_consumers(
 
 
 @pytest.mark.asyncio
-async def test_get_risk_summary_formatting_and_translation_fallback(coordinator, monkeypatch):
+async def test_async_summarize_risks_formatting_and_translation_fallback(coordinator, monkeypatch):
     """Ensure async_summarize_risks formats bullets and falls back to risk_unknown."""
     translated_keys = []
 

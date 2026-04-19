@@ -180,7 +180,7 @@ class HAForumProvider(SourceProvider):
         self, response_text: str, response_json: dict[str, Any] | None = None
     ) -> str | None:
         """Extract YAML blueprint from Forum JSON response."""
-        if not response_json:
+        if not isinstance(response_json, dict):
             return None
 
         post_stream = response_json.get("post_stream")
