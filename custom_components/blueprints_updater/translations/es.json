@@ -126,14 +126,14 @@
     "semantic_sync_notice": "Este blueprint es semánticamente idéntico, pero requiere una actualización estructural para alinearse con el nuevo formato canónico (p. ej., normalización de saltos de línea, inyección de metadatos).",
     "breaking_risks_title": "INFORME DE RIESGOS DE ACTUALIZACIÓN",
     "auto_update_blocked_by_breaking_change": "Actualización automática bloqueada debido a cambios importantes detectados",
-    "risk_new_mandatory": "Nueva entrada obligatoria '{input}' añadida.",
-    "risk_missing_input": "A la entidad '{entity}' le falta la entrada obligatoria '{input}' requerida por la nueva versión.",
-    "risk_removed_input": "Entrada '{input}' eliminada, pero actualmente está siendo utilizada por {count} entidades.",
-    "risk_selector_mismatch": "El tipo de selector cambió para '{input}': de '{old_type}' a '{new_type}' (afecta a {count} entidades).",
+    "risk_new_mandatory": "Nueva entrada obligatoria {input} añadida.",
+    "risk_missing_input": "A la entidad {entity} le falta la entrada obligatoria {input} requerida por la nueva versión.",
+    "risk_removed_input": "Entrada {input} eliminada, pero actualmente está siendo utilizada por {count} entidades.",
+    "risk_selector_mismatch": "El tipo de selector cambió para {input}: de {old_type} a {new_type} (afecta a {count} entidades).",
     "risk_validation_failed_blueprint": "El nuevo contenido del blueprint no es válido: {error}",
     "risk_unknown": "Error desconocido: {error}",
     "risk_legacy": "{message}",
-    "risk_compatibility": "Error de compatibilidad para '{entity}': {error}",
+    "risk_compatibility": "Error de compatibilidad para {entity}: {error}",
     "risk_system_error": "Error del sistema: {error}"
   }
 }

@@ -126,14 +126,14 @@
     "semantic_sync_notice": "Deze blueprint is semantisch identiek, maar vereist een structurele update om in de pas te lopen met de nieuwe canonieke formattering (bijv. normalisatie van regeleinden, injectie van metadata).",
     "breaking_risks_title": "UPDATE RISICO RAPPORT",
     "auto_update_blocked_by_breaking_change": "Automatische update geblokkeerd vanwege gedetecteerde breaking changes",
-    "risk_new_mandatory": "Nieuwe verplichte invoer '{input}' toegevoegd.",
-    "risk_missing_input": "Entiteit '{entity}' mist verplichte invoer '{input}' vereist door nieuwe versie.",
-    "risk_removed_input": "Invoer '{input}' verwijderd, maar momenteel in gebruik door {count} entiteiten.",
-    "risk_selector_mismatch": "Selector-type gewijzigd voor '{input}': van '{old_type}' naar '{new_type}' (beïnvloedt {count} entiteiten).",
+    "risk_new_mandatory": "Nieuwe verplichte invoer {input} toegevoegd.",
+    "risk_missing_input": "Entiteit {entity} mist verplichte invoer {input} vereist door nieuwe versie.",
+    "risk_removed_input": "Invoer {input} verwijderd, maar momenteel in gebruik door {count} entiteiten.",
+    "risk_selector_mismatch": "Selector-type gewijzigd voor {input}: van {old_type} naar {new_type} (beïnvloedt {count} entiteiten).",
     "risk_validation_failed_blueprint": "Nieuwe blueprint inhoud is ongeldig: {error}",
     "risk_unknown": "Onbekende fout: {error}",
     "risk_legacy": "{message}",
-    "risk_compatibility": "Compatibiliteitsfout voor '{entity}': {error}",
+    "risk_compatibility": "Compatibiliteitsfout voor {entity}: {error}",
     "risk_system_error": "System error: {error}"
   }
 }
