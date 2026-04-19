@@ -1551,9 +1551,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             List of entity IDs.
 
         """
+        parts = rel_path.split("/", 1)
+        bp_id = parts[-1] if len(parts) > 1 else rel_path
+
         result = []
-        result.extend(automations_with_blueprint(self.hass, rel_path))
-        result.extend(scripts_with_blueprint(self.hass, rel_path))
+        result.extend(automations_with_blueprint(self.hass, bp_id))
+        result.extend(scripts_with_blueprint(self.hass, bp_id))
         return result
 
     async def _async_validate_blueprint_consumers(
@@ -2146,6 +2149,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             except Exception as err:
                 _LOGGER.warning("Failed to check breaking changes for %s: %s", path, err)
+                risks.append({"type": "system_error", "args": {"error": str(err)}})
         return self._dedupe_risks(risks)
 
     async def _handle_auto_update_step(
@@ -2204,7 +2208,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "updatable": True,
                         "remote_hash": remote_hash,
                         "remote_content": remote_content,
-                        "last_error": "auto_update_blocked_by_breaking_change",
+                        "update_blocking_reason": "auto_update_blocked_by_breaking_change",
                         "etag": new_etag,
                     }
                 )

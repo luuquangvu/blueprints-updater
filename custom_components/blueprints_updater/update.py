@@ -155,6 +155,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         self._attr_release_url = info.get("source_url")
         self._attr_release_summary = None
         self._localized_error: str | None = None
+        self._localized_blocking_reason: str | None = None
 
     @property
     def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -307,6 +308,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             info = self.coordinator.data[self._path]
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
+            if blocking := info.get("update_blocking_reason"):
+                attrs["update_blocking_reason"] = self._localized_blocking_reason or blocking
             if risks := info.get("breaking_risks"):
                 attrs["breaking_risks"] = risks
         return attrs
@@ -361,6 +364,10 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 )
             else:
                 self._localized_error = await self.coordinator.async_translate(error)
+
+        self._localized_blocking_reason = None
+        if blocking := info.get("update_blocking_reason"):
+            self._localized_blocking_reason = await self.coordinator.async_translate(blocking)
 
         if self.hass and self.entity_id:
             self.async_write_ha_state()

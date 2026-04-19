@@ -88,7 +88,7 @@ If you find that a newly updated blueprint breaks your automations or has an inc
 
 The integration will look for the specified numbered backup file, restore the original YAML content, and automatically reload your automations and scripts to apply the change immediately.
 
-### Advanced Compatibility Guard (Safety Safeguard)
+### Advanced Compatibility Guard
 
 The **Advanced Compatibility Guard** is a professional-grade safety layer designed to protect your smart home logic from breaking changes in blueprint updates.
 

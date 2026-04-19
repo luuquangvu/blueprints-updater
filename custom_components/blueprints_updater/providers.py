@@ -71,7 +71,13 @@ class GitHubProvider(SourceProvider):
             return url
 
         path_parts = parsed.path.strip("/").split("/")
-        new_parts = [p for p in path_parts if p != "blob"]
+        new_parts = []
+        blob_removed = False
+        for i, part in enumerate(path_parts):
+            if part == "blob" and i == 2 and not blob_removed:
+                blob_removed = True
+                continue
+            new_parts.append(part)
 
         return urlunparse(
             (
