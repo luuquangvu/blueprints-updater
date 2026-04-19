@@ -1367,37 +1367,53 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A dictionary mapping entity IDs to their configured input values.
 
         """
-        configs = {}
+        configs: dict[str, dict[str, Any]] = {}
         for domain in ("automation", "script"):
-            if domain in self.hass.data:
-                component = self.hass.data[domain]
-                get_entity = getattr(component, "get_entity", None)
-                entities_attr = getattr(component, "entities", [])
+            if domain not in self.hass.data:
+                continue
 
-                for entity_id in entity_ids:
-                    if entity_id.startswith(f"{domain}."):
-                        if callable(get_entity):
-                            entity = get_entity(entity_id)
-                        else:
-                            entity = next(
-                                (
-                                    e
-                                    for e in entities_attr
-                                    if getattr(e, "entity_id", None) == entity_id
-                                ),
-                                None,
-                            )
-                        if entity:
-                            raw_config = getattr(entity, "raw_config", None)
-                            cfg = raw_config if isinstance(raw_config, dict) else None
-                            if cfg is None:
-                                entity_config = getattr(entity, "config", None)
-                                if isinstance(entity_config, dict):
-                                    cfg = entity_config
-                            if isinstance(cfg, dict) and "use_blueprint" in cfg:
-                                configs[entity_id] = cfg
+            domain_ids = {eid for eid in entity_ids if eid.startswith(f"{domain}.")}
+            if not domain_ids:
+                continue
+
+            component = self.hass.data[domain]
+            get_entity = getattr(component, "get_entity", None)
+
+            if callable(get_entity):
+                for entity_id in domain_ids:
+                    if entity := get_entity(entity_id):
+                        self._populate_config_from_entity(entity, entity_id, configs)
+            else:
+                entities_attr = getattr(component, "entities", [])
+                entity_map = {
+                    getattr(e, "entity_id", None): e
+                    for e in entities_attr
+                    if getattr(e, "entity_id", None)
+                }
+                for entity_id in domain_ids:
+                    if entity := entity_map.get(entity_id):
+                        self._populate_config_from_entity(entity, entity_id, configs)
 
         return configs
+
+    @staticmethod
+    def _populate_config_from_entity(
+        entity: Any, entity_id: str, configs: dict[str, dict[str, Any]]
+    ) -> None:
+        """Extract and validate blueprint configuration from a HA entity.
+
+        Checks both raw_config (preferred) and normalized config attributes to
+        recover the original blueprint input schema.
+
+        """
+        raw_config = getattr(entity, "raw_config", None)
+        cfg = raw_config if isinstance(raw_config, dict) else None
+        if cfg is None:
+            entity_config = getattr(entity, "config", None)
+            if isinstance(entity_config, dict):
+                cfg = entity_config
+        if isinstance(cfg, dict) and "use_blueprint" in cfg:
+            configs[entity_id] = cfg
 
     @staticmethod
     def _get_affected_entities(configs: dict[str, dict[str, Any]], key: str) -> list[str]:
@@ -1653,8 +1669,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         return risks
 
-    async def _get_risk_summary(self, risks: list[StructuredRisk]) -> str:
+    async def async_summarize_risks(self, risks: list[StructuredRisk]) -> str:
         """Create a localized newline-separated string of risks.
+
+        This shared helper provides a consistent formatting and translation
+        path for risks displayed in both UI release notes and persistent
+        notifications.
 
         Args:
             risks: List of structured risks to summarize.
@@ -1674,6 +1694,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             msg = await self.async_translate(translation_key, type=rtype, **rargs)
             lines.append(f"- {msg}")
         return "\n".join(lines)
+
+    async def _get_risk_summary(self, risks: list[StructuredRisk]) -> str:
+        """Internal legacy shim for risk summarization.
+
+        Deprecated in favor of async_summarize_risks.
+        """
+        return await self.async_summarize_risks(risks)
 
     def _get_entities_using_blueprint(self, rel_path: str) -> list[str]:
         """Get entity IDs of automations and scripts using the given blueprint.
@@ -2392,7 +2419,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         _LOGGER.debug("[Pacing] Dispatching request for (redacted URL)")
 
         response = await self._execute_with_redirect_guard(session, url, headers, etag)
-        new_etag = response.headers.get("ETag")
+        new_etag = response.headers.get("ETag") or etag
         content = await self._parse_provider_response(response, url)
         return content, new_etag
 
@@ -2510,14 +2537,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 json_data = response.json()
             except ValueError as err:
                 raise HomeAssistantError(
-                    f"Invalid JSON response from provider at {url} "
+                    f"Invalid JSON response from provider at (redacted URL) "
                     f"(Content-Type: {content_type}): {err}"
                 ) from err
 
         content = provider.parse_content(response.text, json_data)
         if content is None and is_json:
             raise HomeAssistantError(
-                f"Failed to extract blueprint content from JSON response at {url}"
+                "Failed to extract blueprint content from JSON response at (redacted URL)"
             )
         return content or ""
 

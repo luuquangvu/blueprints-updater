@@ -137,10 +137,12 @@ async def test_extra_state_attributes(mock_coordinator):
         "breaking_risks": ["risk1"],
     }
     mock_coordinator.data = {path: info}
+    info["update_blocking_reason"] = "auto_update_blocked_by_breaking_change"
     entity = BlueprintUpdateEntity(mock_coordinator, path, info)
-
     entity._localized_error = "Translated Error"
+    entity._localized_blocking_reason = "Translated Block"
 
     attrs = entity.extra_state_attributes
     assert attrs["last_error"] == "Translated Error"
     assert attrs["breaking_risks"] == ["risk1"]
+    assert attrs["update_blocking_reason"] == "Translated Block"

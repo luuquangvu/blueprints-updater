@@ -22,7 +22,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, RISK_TYPE_TRANSLATIONS
+from .const import DOMAIN
 from .coordinator import BlueprintUpdateCoordinator, StructuredRisk
 
 _LOGGER = logging.getLogger(__name__)
@@ -245,16 +245,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         breaking_risks: list[StructuredRisk] = info.get("breaking_risks", [])
         if breaking_risks:
             risks_title = await self.coordinator.async_translate("breaking_risks_title")
-            notes += f"\n\n{risks_title}\n"
-            for risk in breaking_risks:
-                rtype = risk.get("type", "unknown")
-                rargs = dict(risk.get("args", {}))
-                if rtype not in RISK_TYPE_TRANSLATIONS:
-                    rargs["error"] = rargs.get("error", str(risk))
-
-                translation_key = RISK_TYPE_TRANSLATIONS.get(rtype, "risk_unknown")
-                msg = await self.coordinator.async_translate(translation_key, type=rtype, **rargs)
-                notes += f"- {msg}\n"
+            risk_summary = await self.coordinator.async_summarize_risks(breaking_risks)
+            notes += f"\n\n{risks_title}\n{risk_summary}\n"
 
         notes += "\n\n" + await self.coordinator.async_translate("update_safety_message")
 

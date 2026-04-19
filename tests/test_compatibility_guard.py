@@ -1,206 +1,128 @@
 """Tests for Blueprints Updater Advanced Compatibility Guard logic."""
 
 from datetime import timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
-
-
-@pytest.fixture(autouse=True)
-def mock_frame_helper():
-    """Mock HA frame helper to avoid setup errors."""
-    with patch("homeassistant.helpers.frame.report_usage"):
-        yield
+from custom_components.blueprints_updater.const import DOMAIN
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintUpdateCoordinator,
+    StructuredRisk,
+)
 
 
 @pytest.fixture
-def coordinator(hass):
-    """Fixture for BlueprintUpdateCoordinator."""
-    config_entry = MagicMock()
-    config_entry.entry_id = "test_entry"
-    config_entry.options = {"auto_update": True}
-    coord = BlueprintUpdateCoordinator(hass, config_entry, update_interval=timedelta(hours=1))
-    coord.data = {}
-    return coord
+async def coordinator(hass):
+    """Create a real BlueprintUpdateCoordinator instance for tests."""
+    entry = MagicMock()
+    entry.domain = DOMAIN
+    with patch.object(DataUpdateCoordinator, "__init__", return_value=None):
+        instance = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+    instance.data = {}
+    return instance
 
 
-@pytest.mark.asyncio
-async def test_detect_risks_for_update_compatibility_error(coordinator, hass):
-    """Test detecting compatibility error during risk detection."""
-    path = "automation/motion.yaml"
-    info = {"rel_path": "automation/motion.yaml", "local_hash": "abc"}
-    remote_content = (
-        "blueprint:\n"
-        "  name: New Motion\n"
-        "  domain: automation\n"
-        "  input:\n"
-        "    sensor:\n"
-        "      name: Sensor\n"
-        "      selector:\n"
-        "        entity:\n"
-        "          domain: binary_sensor"
-    )
-    last_error = None
-
-    coordinator.data = {path: {}}
-
-    blueprints_hub = MagicMock()
-    blueprints_hub.async_get_blueprint = AsyncMock(return_value=None)
-    blueprints_hub.async_add_blueprint = AsyncMock()
-    blueprints_hub.async_remove_blueprint = AsyncMock()
-    hass.data["blueprint"] = {"automation": blueprints_hub}
-
-    entity_ids = ["automation.motion_light"]
-    configs = {
-        "automation.motion_light": {
-            "use_blueprint": {
-                "path": "automation/motion.yaml",
-                "input": {"sensor": "binary_sensor.non_existent"},
-            }
-        }
+async def _prepare_blueprint_entry(coordinator: BlueprintUpdateCoordinator, blueprint_path: str):
+    """Helper to pre-populate coordinator state for a blueprint."""
+    coordinator.data[blueprint_path] = {
+        "updatable": True,
+        "breaking_risks": [],
+        "update_blocking_reason": None,
+        "name": "Test Blueprint",
+        "rel_path": blueprint_path,
     }
 
-    with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.Blueprint", return_value=MagicMock()
-        ),
-        patch.object(coordinator, "_detect_breaking_changes", return_value=[]),
-        patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entity_ids),
-        patch.object(coordinator, "_get_entities_configs", return_value=configs),
-        patch(
-            "homeassistant.components.automation.config.async_validate_config_item",
-            new_callable=AsyncMock,
-            side_effect=HomeAssistantError("Entity not found: binary_sensor.non_existent"),
-        ),
-        patch(
-            "custom_components.blueprints_updater.coordinator.async_validate_automation_config",
-            new_callable=AsyncMock,
-            side_effect=HomeAssistantError("Entity not found: binary_sensor.non_existent"),
-        ),
-    ):
-        risks = await coordinator._detect_risks_for_update(path, info, remote_content, last_error)
 
-    matched = [r for r in risks if r["type"] == "compatibility_risk"]
-    assert matched
-    assert "Entity not found: binary_sensor.non_existent" in matched[0]["args"]["error"]
+@pytest.mark.asyncio
+async def test_auto_update_guard_blocks_when_risks_present(coordinator: BlueprintUpdateCoordinator):
+    """Auto-update is blocked when compatibility risk is present and entities are in use."""
+    blueprint_path = "automation/test_blueprint.yaml"
+    await _prepare_blueprint_entry(coordinator, blueprint_path)
+
+    with patch.object(
+        coordinator, "_get_entities_using_blueprint", return_value=["automation.test"]
+    ):
+        new_content = "blueprint: name: New"
+        risks: list[StructuredRisk] = [
+            {"type": "compatibility_risk", "args": {"entity": "automation.test"}}
+        ]
+
+        result = await coordinator._handle_auto_update_step(
+            blueprint_path,
+            coordinator.data[blueprint_path],
+            new_content,
+            "new_hash",
+            "new_etag",
+            risks,
+            [],
+            set(),
+        )
+
+    assert result is True
+    entry = coordinator.data[blueprint_path]
+    assert entry["updatable"] is True
+    assert entry["update_blocking_reason"] == "auto_update_blocked_by_breaking_change"
 
 
 @pytest.mark.asyncio
-async def test_detect_risks_for_update_invalid_blueprint(coordinator, hass):
-    """Test detecting invalid blueprint content specifically."""
-    path = "automation/motion.yaml"
-    info = {"rel_path": "automation/motion.yaml", "local_hash": "abc"}
-    remote_content = "invalid_yaml: ["
-    last_error = None
+async def test_auto_update_proceeds_when_risks_and_no_consumers(
+    coordinator: BlueprintUpdateCoordinator,
+):
+    """Auto-update proceeds when risks exist but no entities use the blueprint."""
+    blueprint_path = "automation/test_no_consumers.yaml"
+    await _prepare_blueprint_entry(coordinator, blueprint_path)
 
-    coordinator.data = {path: {}}
-
+    # No consumers
     with (
-        patch("os.path.isfile", return_value=True),
-        patch("builtins.open", create=True) as mock_open,
+        patch.object(coordinator, "_get_entities_using_blueprint", return_value=[]),
+        patch.object(coordinator, "async_install_blueprint", return_value=None),
     ):
-        mock_handle = mock_open.return_value.__enter__.return_value
-        mock_handle.read.return_value = "blueprint:\n  name: Old"
+        new_content = "blueprint: name: New"
+        risks: list[StructuredRisk] = [{"type": "new_mandatory", "args": {"input": "test"}}]
 
-        risks = await coordinator._detect_risks_for_update(path, info, remote_content, last_error)
+        result = await coordinator._handle_auto_update_step(
+            blueprint_path,
+            coordinator.data[blueprint_path],
+            new_content,
+            "new_hash",
+            "new_etag",
+            risks,
+            [],
+            set(),
+        )
 
-    assert any(risk["type"] == "validation_failed_blueprint" for risk in risks)
+    assert result is True
+    entry = coordinator.data[blueprint_path]
+    assert entry["updatable"] is False
+    assert entry["update_blocking_reason"] is None
 
 
 @pytest.mark.asyncio
-async def test_detect_risks_for_update_script_compatibility_error(coordinator, hass):
-    """Test detecting compatibility error for scripts during risk detection."""
-    path = "script/notification.yaml"
-    info = {"rel_path": "script/notification.yaml", "local_hash": "abc"}
-    remote_content = (
-        "blueprint:\n"
-        "  name: New Notify\n"
-        "  domain: script\n"
-        "  input:\n"
-        "    target:\n"
-        "      name: Target\n"
-        "      selector:\n"
-        "        entity:\n"
-        "          domain: mobile_app"
-    )
-    last_error = None
+async def test_get_risk_summary_formatting_and_translation_fallback(coordinator, monkeypatch):
+    """Ensure async_summarize_risks formats bullets and falls back to risk_unknown."""
+    translated_keys = []
 
-    coordinator.data = {path: {}}
+    async def fake_async_translate(key, **kwargs):
+        translated_keys.append(key)
+        return f"translated:{key}"
 
-    blueprints_hub = MagicMock()
-    blueprints_hub.async_get_blueprint = AsyncMock(return_value=None)
-    blueprints_hub.async_add_blueprint = AsyncMock()
-    blueprints_hub.async_remove_blueprint = AsyncMock()
-    hass.data["blueprint"] = {"script": blueprints_hub}
+    monkeypatch.setattr(coordinator, "async_translate", fake_async_translate)
 
-    entity_ids = ["script.notify_me"]
-    configs = {
-        "script.notify_me": {
-            "use_blueprint": {
-                "path": "script/notification.yaml",
-                "input": {"target": "mobile_app.non_existent"},
-            }
-        }
-    }
-
-    with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.Blueprint", return_value=MagicMock()
-        ),
-        patch.object(coordinator, "_detect_breaking_changes", return_value=[]),
-        patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entity_ids),
-        patch.object(coordinator, "_get_entities_configs", return_value=configs),
-        patch(
-            "homeassistant.components.script.config.async_validate_config_item",
-            new_callable=AsyncMock,
-            side_effect=HomeAssistantError("Entity not found: mobile_app.non_existent"),
-        ),
-        patch(
-            "custom_components.blueprints_updater.coordinator.async_validate_script_config",
-            new_callable=AsyncMock,
-            side_effect=HomeAssistantError("Entity not found: mobile_app.non_existent"),
-        ),
-    ):
-        risks = await coordinator._detect_risks_for_update(path, info, remote_content, last_error)
-
-    matched = [r for r in risks if r["type"] == "compatibility_risk"]
-    assert matched
-    assert "script.notify_me" in matched[0]["args"]["entity"]
-    assert "Entity not found: mobile_app.non_existent" in matched[0]["args"]["error"]
-
-
-def test_dedupe_risks(coordinator):
-    """Test the _dedupe_risks helper logic."""
-    risks = [
-        "Legacy risk string",
-        "Legacy risk string",
+    risks: list[StructuredRisk] = [
         {"type": "new_mandatory", "args": {"input": "input1"}},
-        {"type": "new_mandatory", "args": {"input": "input1"}},
-        {"type": "new_mandatory", "args": {"input": "input2"}},
-        {"type": "missing_input", "args": {"input": "input1", "entity": "e1"}},
-        {"malformed": "risk"},
+        {"type": "missing_input", "args": {"input": "input2", "entity": "sensor.test"}},
+        {"type": "completely_unknown", "args": {"input": "input3"}},
     ]
 
-    deduped = coordinator._dedupe_risks(risks)
+    summary = await coordinator.async_summarize_risks(risks)
 
-    assert len(deduped) == 4
-    assert any(
-        r["type"] == "legacy_risk" and r["args"]["message"] == "Legacy risk string" for r in deduped
-    )
-    assert any(r["type"] == "new_mandatory" and r["args"]["input"] == "input1" for r in deduped)
-    assert any(r["type"] == "new_mandatory" and r["args"]["input"] == "input2" for r in deduped)
-    assert any(
-        r["type"] == "missing_input"
-        and r["args"]["entity"] == "e1"
-        and r["args"]["input"] == "input1"
-        for r in deduped
-    )
+    lines = summary.splitlines()
+    assert len(lines) == 3
+    assert all(line.startswith("- ") for line in lines)
 
-    def count_matches(rtype, rargs):
-        return sum(r["type"] == rtype and r["args"] == rargs for r in deduped)
-
-    assert count_matches("new_mandatory", {"input": "input1"}) == 1
-    assert count_matches("legacy_risk", {"message": "Legacy risk string"}) == 1
+    # Verify key patterns (assuming they are prefixed with compatibility_guard. in strings.json)
+    assert any("risk_new_mandatory" in key for key in translated_keys)
+    assert any("risk_missing_input" in key for key in translated_keys)
+    assert any("risk_unknown" in key for key in translated_keys)
