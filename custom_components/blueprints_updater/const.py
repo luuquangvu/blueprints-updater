@@ -34,7 +34,6 @@ DOMAIN_GIST = "gist.github.com"
 DOMAIN_HA_FORUM = "community.home-assistant.io"
 DOMAIN_JSDELIVR = "cdn.jsdelivr.net"
 
-RE_GITHUB_BLOB = re.compile(r"/blob/", re.IGNORECASE)
 RE_GIST_RAW = re.compile(r"/raw/?$", re.IGNORECASE)
 RE_FORUM_TOPIC_ID = re.compile(r"/t/(?:[^/]+/)?(\d+)")
 RE_FORUM_CODE_BLOCK = re.compile(r"<code[^>]*>(.*?)</code>", re.DOTALL)

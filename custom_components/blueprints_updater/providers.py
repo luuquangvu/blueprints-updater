@@ -17,7 +17,6 @@ from .const import (
     RE_FORUM_CODE_BLOCK,
     RE_FORUM_TOPIC_ID,
     RE_GIST_RAW,
-    RE_GITHUB_BLOB,
 )
 
 
@@ -67,17 +66,11 @@ class GitHubProvider(SourceProvider):
         if hostname != DOMAIN_GITHUB:
             return url
 
-        if not RE_GITHUB_BLOB.search(parsed.path):
+        path_parts = parsed.path.strip("/").split("/")
+        if len(path_parts) < 5 or path_parts[2].lower() != "blob":
             return url
 
-        path_parts = parsed.path.strip("/").split("/")
-        new_parts = []
-        blob_removed = False
-        for i, part in enumerate(path_parts):
-            if part == "blob" and i == 2 and not blob_removed:
-                blob_removed = True
-                continue
-            new_parts.append(part)
+        new_parts = [*path_parts[:2], *path_parts[3:]]
 
         return urlunparse(
             (
@@ -199,20 +192,27 @@ class HAForumProvider(SourceProvider):
         if not response_json:
             return None
 
-        post_stream = response_json.get("post_stream", {})
-        posts = post_stream.get("posts", [])
-        if not posts:
+        post_stream = response_json.get("post_stream")
+        if not isinstance(post_stream, dict):
             return None
 
-        post_content = posts[0].get("cooked")
-        if not isinstance(post_content, str):
+        posts = post_stream.get("posts")
+        if not isinstance(posts, list):
             return None
 
-        code_blocks: list[str] = RE_FORUM_CODE_BLOCK.findall(post_content)
-        for block in code_blocks:
-            unquoted_block = html.unescape(block).strip()
-            if "blueprint:" in unquoted_block:
-                return unquoted_block
+        for post in posts:
+            if not isinstance(post, dict):
+                continue
+
+            post_content = post.get("cooked")
+            if not isinstance(post_content, str):
+                continue
+
+            code_blocks: list[str] = RE_FORUM_CODE_BLOCK.findall(post_content)
+            for block in code_blocks:
+                unquoted_block = html.unescape(block).strip()
+                if "blueprint:" in unquoted_block:
+                    return unquoted_block
         return None
 
 
