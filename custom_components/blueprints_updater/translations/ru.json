@@ -131,7 +131,7 @@
     "risk_removed_input": "Ввод {input} удален, но в данный момент используется {count} сущностями.",
     "risk_selector_mismatch": "Тип селектора изменен для {input}: с {old_type} на {new_type} (влияет на {count} сущностей).",
     "risk_validation_failed_blueprint": "Новое содержимое чертежа недействительно: {error}",
-    "risk_unknown": "Неизвестная ошибка: {error}",
+    "risk_unknown": "Неизвестная ошибка: {type}",
     "risk_legacy": "{message}",
     "risk_compatibility": "Ошибка совместимости для {entity}: {error}",
     "risk_system_error": "Системная ошибка: {error}",

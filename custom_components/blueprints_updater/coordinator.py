@@ -1653,7 +1653,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 rargs["error"] = rargs.get("error", str(risk))
 
             translation_key = RISK_TYPE_TRANSLATIONS.get(rtype, "risk_unknown")
-            msg = await self.async_translate(translation_key, **rargs)
+            msg = await self.async_translate(translation_key, type=rtype, **rargs)
             lines.append(f"- {msg}")
         return "\n".join(lines)
 

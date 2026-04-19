@@ -253,7 +253,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                     rargs["error"] = rargs.get("error", str(risk))
 
                 translation_key = RISK_TYPE_TRANSLATIONS.get(rtype, "risk_unknown")
-                msg = await self.coordinator.async_translate(translation_key, **rargs)
+                msg = await self.coordinator.async_translate(translation_key, type=rtype, **rargs)
                 notes += f"- {msg}\n"
 
         notes += "\n\n" + await self.coordinator.async_translate("update_safety_message")
