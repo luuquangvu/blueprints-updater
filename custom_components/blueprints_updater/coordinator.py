@@ -1709,7 +1709,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         blueprints_hub = self.hass.data.get("blueprint", {}).get(domain)
         if not blueprints_hub:
-            return []
+            if not configs:
+                return []
+            return [
+                {
+                    "type": BlueprintRiskType.SYSTEM_ERROR,
+                    "args": {
+                        "error": f"Blueprint hub for domain '{domain}' is not available",
+                        "path": rel_path,
+                    },
+                }
+            ]
 
         async with (
             self._blueprint_validate_lock,
