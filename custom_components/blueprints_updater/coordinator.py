@@ -2178,7 +2178,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return
 
         self._update_coordinator_status_data(
-            path, updatable, last_error, remote_hash, remote_content, new_etag
+            path, updatable, last_error, remote_hash, remote_content, new_etag, risks
         )
 
     async def _detect_risks_for_update(
@@ -2296,7 +2296,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             await self._async_send_auto_update_notification(
                 title,
                 message,
-                blueprint_id=slugify(path),
                 source_unique_id=slugify(rel_path) if rel_path else None,
             )
             if self.data and path in self.data:
@@ -2347,6 +2346,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         remote_hash: str,
         remote_content: str,
         new_etag: str | None,
+        risks: list[StructuredRisk] | None = None,
     ) -> None:
         """Update internal data state for a blueprint.
 
@@ -2357,11 +2357,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             remote_hash: Hash of remote content.
             remote_content: Content if updatable.
             new_etag: Associated ETag.
+            risks: Optional list of identified breaking risks to store/preserve.
 
         """
         if not (self.data and path in self.data):
             return
 
+        update_data: dict[str, Any]
         if last_error:
             update_data = {
                 "last_error": last_error,
@@ -2371,7 +2373,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "remote_content": None,
                 "updatable": False,
                 "update_blocking_reason": None,
-                "breaking_risks": [],
             }
         else:
             update_data = {
@@ -2382,8 +2383,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "remote_content": remote_content if updatable else None,
                 "updatable": updatable,
                 "update_blocking_reason": None,
-                "breaking_risks": [],
             }
+
+        if risks is None:
+            risks = self.data[path].get("breaking_risks", [])
+        update_data["breaking_risks"] = risks
 
         self.data[path].update(update_data)
 
@@ -2391,7 +2395,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self,
         title: str,
         message: str,
-        blueprint_id: str | None = None,
         source_unique_id: str | None = None,
     ) -> None:
         """Send a persistent notification to the Home Assistant UI.
@@ -2399,20 +2402,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         Args:
             title: Title of the notification.
             message: Content of the notification.
-            blueprint_id: Optional unique identifier for the blueprint.
             source_unique_id: Stable, unique identifier for the blueprint source.
 
         """
-        if not source_unique_id:
-            base_id = (
-                f"{DOMAIN}_auto_update_block_{blueprint_id}"
-                if blueprint_id
-                else f"{DOMAIN}_auto_update_block"
-            )
-        else:
-            suffix = f"_{blueprint_id}" if blueprint_id else ""
-            base_id = f"{DOMAIN}_auto_update_block_{source_unique_id}{suffix}"
-
+        base_id = f"{DOMAIN}_auto_update_block"
+        if source_unique_id:
+            base_id = f"{base_id}_{source_unique_id}"
         try:
             await self.hass.services.async_call(
                 "persistent_notification",

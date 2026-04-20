@@ -45,14 +45,14 @@ async def test_update_entity_release_notes_risks(mock_coordinator):
         "breaking_risks": [
             {"type": "new_mandatory", "args": {"input": "input_a"}},
             {"type": "missing_input", "args": {"entity": "entity_1", "input": "input_b"}},
-            {"type": "removed_input", "args": {"input": "input_c", "count": "3"}},
+            {"type": "removed_input", "args": {"input": "input_c", "count": 3}},
             {
                 "type": "selector_mismatch",
                 "args": {
                     "input": "input_d",
                     "old_type": "old",
                     "new_type": "new",
-                    "count": "5",
+                    "count": 5,
                 },
             },
             {"type": "compatibility_risk", "args": {"entity": "entity_2", "error": "err_msg"}},
@@ -106,6 +106,7 @@ async def test_update_entity_remove_path(mock_coordinator, hass):
         async_update_entities(hass, mock_entry, mock_coordinator, current_entities, mock_add)
         mock_create_task.assert_called_once()
         coro = mock_create_task.call_args[0][0]
+        assert coro.__name__ == "async_remove"
         coro.close()
 
 

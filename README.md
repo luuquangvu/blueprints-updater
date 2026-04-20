@@ -92,12 +92,13 @@ The integration will look for the specified numbered backup file, restore the or
 
 The **Advanced Compatibility Guard** is a professional-grade safety layer designed to protect your smart home logic from breaking changes in blueprint updates.
 
-When an update is detected, the integration performs a deep impact analysis:
+When an update is detected, the system performs a multi-stage safety check:
 
-1.  **Schema Validation**: Verifies the new blueprint content against Home Assistant's internal validation engine.
-2.  **Cross-Validation**: Temporarily injects the update to validate every automation and script currently using that blueprint.
-3.  **Risk Detection**: If the new version would cause an entity to fail (e.g., due to a removed input or incompatible schema), it flags the update with a specific **"compatibility error"** status.
-4.  **Silent Break Prevention**: Reporting these risks before the update is finalized ensures you never unknowingly break your critical smart home automations.
+1.  **Code Validation**: Automatically verifies the new blueprint's structure to ensure it complies with Home Assistant's rules.
+2.  **Impact Analysis**: Simulates the update against your existing automations to see if anything will break.
+3.  **Risk Alerts**: If a problem is found (such as a missing required setting), the update is flagged with a **"compatibility error"**.
+4.  **Auto-Update Protection**: Blueprints at risk of causing errors are automatically blocked from auto-updating (**"blocked-auto-update"**) to safeguard your smart home from unexpected incidents.
+5.  **Full Transparency**: For blocked updates, you can review the **"UPDATE RISK REPORT"** to see specific breaking changes (like missing mandatory inputs) and use the **"Git Diff"** section for a detailed code comparison before proceeding manually.
 
 ### Refreshing the Blueprint List
 

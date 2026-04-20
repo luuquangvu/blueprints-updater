@@ -23,7 +23,7 @@ async def test_detect_risks_system_error_on_exception(hass):
     info = {"rel_path": rel_path, "name": "Test Blueprint"}
     coordinator.data = {path: info}
 
-    remote_content = "blueprint: name: New"
+    remote_content = "blueprint:\n  name: New"
 
     with (
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),

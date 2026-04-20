@@ -1,7 +1,7 @@
 """Tests for increasing coverage of Config Flow."""
 
 from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -43,6 +43,7 @@ async def test_options_flow_lifecycle(hass):
 
     with patch(
         "custom_components.blueprints_updater.config_flow._async_get_blueprint_options",
+        new_callable=AsyncMock,
         return_value=[],
     ):
         result = await handler.async_step_init()

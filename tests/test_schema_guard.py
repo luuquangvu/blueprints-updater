@@ -167,8 +167,6 @@ blueprint:
         }
     }
 
-    from unittest.mock import patch
-
     with (
         patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
         patch.object(coordinator, "_get_entities_configs", return_value=configs),

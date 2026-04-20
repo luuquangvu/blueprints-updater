@@ -359,7 +359,10 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         self._localized_blocking_reason = None
         if blocking := info.get("update_blocking_reason"):
-            self._localized_blocking_reason = await self.coordinator.async_translate(blocking)
+            name = info.get("name") or self.name
+            self._localized_blocking_reason = await self.coordinator.async_translate(
+                blocking, name=name
+            )
 
         if self.hass and self.entity_id:
             self.async_write_ha_state()

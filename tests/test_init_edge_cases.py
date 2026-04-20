@@ -13,11 +13,6 @@ from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
-async def async_raise_val_err(*args, **kwargs) -> None:
-    """Helper to raise ValueError in an async context."""
-    raise ValueError("JSON fail")
-
-
 async def async_raise_gen_err(*args, **kwargs) -> None:
     """Helper to raise RuntimeError in an async context."""
     raise RuntimeError("e")
@@ -124,7 +119,7 @@ async def test_init_coverage_boosters(hass: HomeAssistant) -> None:
 
 
 @pytest.mark.asyncio
-async def test_coordinator_additional_coverage_v5(hass: HomeAssistant) -> None:
+async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssistant) -> None:
     """Target specific uncovered lines in coordinator.py."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
@@ -142,9 +137,6 @@ async def test_coordinator_additional_coverage_v5(hass: HomeAssistant) -> None:
 
     mock_resp = MagicMock()
     mock_resp.headers = {"Content-Type": "application/json"}
-
-    async def _async_json(*args, **kwargs) -> dict:
-        return {"mock": "data"}
 
     mock_resp.json = MagicMock(return_value={"mock": "data"})
     mock_resp.json.side_effect = ValueError("JSON fail")
