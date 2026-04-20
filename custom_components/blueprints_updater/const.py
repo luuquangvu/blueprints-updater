@@ -1,6 +1,7 @@
 """Constants for the Blueprints Updater integration."""
 
 import re
+from enum import StrEnum
 
 DOMAIN = "blueprints_updater"
 CONF_UPDATE_INTERVAL = "update_interval"
@@ -58,7 +59,7 @@ SPECIAL_USE_TLDS = {
 }
 
 
-class BlueprintRiskType:
+class BlueprintRiskType(StrEnum):
     """Risk types for breaking change detection."""
 
     LEGACY = "legacy_risk"
@@ -71,7 +72,7 @@ class BlueprintRiskType:
     SYSTEM_ERROR = "system_error"
 
 
-class BlueprintBlockingReason:
+class BlueprintBlockingReason(StrEnum):
     """Reasons why an update or auto-update is blocked."""
 
     BREAKING_CHANGE = "auto_update_blocked_by_breaking_change"

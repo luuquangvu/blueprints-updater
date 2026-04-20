@@ -125,7 +125,11 @@ blueprint:
 
 
 def test_detect_breaking_changes_missing_input(coordinator):
-    """Test detecting missing input values for newly mandatory inputs on existing entities."""
+    """Test detecting missing input values for newly mandatory inputs on existing entities.
+
+    The entity config intentionally omits the 'motion_sensor' input to trigger the
+    missing_input detection when the default value is removed from the blueprint.
+    """
     old_content = """
 blueprint:
   name: Old
@@ -155,9 +159,7 @@ blueprint:
         "automation.test": {
             "use_blueprint": {
                 "path": rel_path,
-                "input": {
-                    # Intentionally omit "motion_sensor" to trigger missing_input
-                },
+                "input": {},
             },
         }
     }

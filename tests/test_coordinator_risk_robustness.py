@@ -47,7 +47,7 @@ async def test_detect_risks_missing_rel_path(hass):
         coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
 
     path = "/config/blueprints/automation/test.yaml"
-    info = {"name": "Test Blueprint"}  # missing rel_path
+    info = {"name": "Test Blueprint"}
     coordinator.data = {path: info}
 
     risks = await coordinator._detect_risks_for_update(path, info, "content", None)

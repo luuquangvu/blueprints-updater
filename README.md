@@ -63,37 +63,37 @@
 
 [![Add Blueprints Updater to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=luuquangvu&repository=blueprints-updater&category=integration)
 
-1.  Open **HACS** in Home Assistant.
-2.  Search for **Blueprints Updater**.
-3.  If not found, click the three dots in the top right corner and select **Custom repositories**.
-4.  Add `https://github.com/luuquangvu/blueprints-updater` with category **Integration**.
-5.  Search for **Blueprints Updater** and click **Download**.
-6.  Restart Home Assistant.
+1. Open **HACS** in Home Assistant.
+2. Search for **Blueprints Updater**.
+3. If not found, click the three dots in the top right corner and select **Custom repositories**.
+4. Add `https://github.com/luuquangvu/blueprints-updater` with category **Integration**.
+5. Search for **Blueprints Updater** and click **Download**.
+6. Restart Home Assistant.
 
 ### Option 2: Manual Installation
 
-1.  Download the latest release and extract the files.
-2.  Copy the `custom_components/blueprints_updater` folder into your Home Assistant `config/custom_components/` directory.
-3.  Restart Home Assistant.
+1. Download the latest release and extract the files.
+2. Copy the `custom_components/blueprints_updater` folder into your Home Assistant `config/custom_components/` directory.
+3. Restart Home Assistant.
 
 ---
 
 ## Setup & Configuration
 
-1.  Go to **Settings** > **Devices & Services**.
-2.  Click **Add Integration** and search for **Blueprints Updater**.
-3.  **Enable Auto-Update**: (Optional) If enabled, blueprints matching your criteria will be updated automatically without manual intervention. **A persistent notification will appear** after each successful auto-update to keep you informed of which blueprints were updated.
-4.  Choose your **Update Interval** (default is 24 hours).
-5.  Select your **Filter Mode**:
-    - **Update All**: Tracks all blueprints found in your directory.
-    - **Whitelist**: Only tracks blueprints you explicitly select from the list.
-    - **Blacklist**: Tracks all blueprints _except_ the ones you select.
-6.  **Use jsDelivr CDN**: (Optional, default: Enabled) Optimizes your updates by fetching GitHub-hosted blueprints via the jsDelivr CDN. If the CDN is unreachable or encounters an error, the integration will seamlessly fall back to the original GitHub URL to ensure uninterrupted service.
-7.  Once added, the integration will scan your blueprints. If updates are found, they will appear as `update` entities in your dashboard.
+1. Go to **Settings** > **Devices & Services**.
+2. Click **Add Integration** and search for **Blueprints Updater**.
+3. **Enable Auto-Update**: (Optional) If enabled, blueprints matching your criteria will be updated automatically without manual intervention. **A persistent notification will appear** after each successful auto-update to keep you informed of which blueprints were updated.
+4. Choose your **Update Interval** (default is 24 hours).
+5. Select your **Filter Mode**:
+   - **Update All**: Tracks all blueprints found in your directory.
+   - **Whitelist**: Only tracks blueprints you explicitly select from the list.
+   - **Blacklist**: Tracks all blueprints _except_ the ones you select.
+6. **Use jsDelivr CDN**: (Optional, default: Enabled) Optimizes your updates by fetching GitHub-hosted blueprints via the jsDelivr CDN. If the CDN is unreachable or encounters an error, the integration will seamlessly fall back to the original GitHub URL to ensure uninterrupted service.
+7. Once added, the integration will scan your blueprints. If updates are found, they will appear as `update` entities in your dashboard.
 
 ---
 
-## See it in Action!
+## See it in Action
 
 If you want to see how the update process works immediately, you can use the **Motion-Activated Light/Switch (Frequent Updates)** blueprint. This blueprint is updated frequently via GitHub Actions to simulate a new release.
 
@@ -102,9 +102,9 @@ If you want to see how the update process works immediately, you can use the **M
 
 **Manual Import:**
 
-1.  Copy this URL: `https://github.com/luuquangvu/demo-blueprints/blob/main/blueprints/motion_light_blueprint.yaml`
-2.  In Home Assistant, go to **Settings** > **Automations & Scenes** > **Blueprints**.
-3.  Click **Import Blueprint** and paste the URL.
+1. Copy this URL: `https://github.com/luuquangvu/demo-blueprints/blob/main/blueprints/motion_light_blueprint.yaml`
+2. In Home Assistant, go to **Settings** > **Automations & Scenes** > **Blueprints**.
+3. Click **Import Blueprint** and paste the URL.
 
 Once imported, **Blueprints Updater** will detect it on the next scheduled scan. To see it immediately, you can [trigger a manual refresh](#refreshing-the-blueprint-list). When the GitHub Action updates the blueprint, you will receive a notification and can perform the update.
 
@@ -138,11 +138,11 @@ The **Advanced Compatibility Guard** is a professional-grade safety layer design
 
 When an update is detected, the system performs a multi-stage safety check:
 
-1.  **Code Validation**: Automatically verifies the new blueprint's structure to ensure it complies with Home Assistant's rules.
-2.  **Impact Analysis**: Simulates the update against your existing automations to see if anything will break.
-3.  **Risk Alerts**: If a problem is found (such as a missing required setting), the update is flagged with a **"compatibility error"**.
-4.  **Auto-Update Protection**: Blueprints at risk of causing errors are automatically blocked from auto-updating (**"blocked-auto-update"**) to safeguard your smart home from unexpected incidents.
-5.  **Full Transparency**: For blocked updates, you can review the **"UPDATE RISK REPORT"** to see specific breaking changes (like missing mandatory inputs) and use the **"Git Diff"** section for a detailed code comparison before proceeding manually.
+1. **Code Validation**: Automatically verifies the new blueprint's structure to ensure it complies with Home Assistant's rules.
+2. **Impact Analysis**: Simulates the update against your existing automations to see if anything will break.
+3. **Risk Alerts**: If a problem is found (such as a missing required setting), the update is flagged with a **"compatibility error"**.
+4. **Auto-Update Protection**: Blueprints at risk of causing errors are automatically blocked from auto-updating (**"blocked-auto-update"**) to safeguard your smart home from unexpected incidents.
+5. **Full Transparency**: For blocked updates, you can review the **"UPDATE RISK REPORT"** to see specific breaking changes (like missing mandatory inputs) and use the **"Git Diff"** section for a detailed code comparison before proceeding manually.
 
 ## Refreshing the Blueprint List
 
@@ -162,9 +162,9 @@ To apply changes instantly without waiting for the next scheduled background sca
 
 You might notice that Blueprints Updater flags an update even for blueprints you have just installed. This happens because:
 
-1.  **YAML Restructuring**: When you import a blueprint, Home Assistant often uses its own internal YAML parser to restructure the file format. This can lead to subtle formatting differences compared to the author's original file.
-2.  **Original Fidelity**: This integration prioritizes maintaining the **original blueprint structure** exactly as intended by the author for maximum accuracy and stability.
-3.  **Alignment**: The initial "update" you see is often just the system aligning your local version with the author's original source content to ensure long-term compatibility and clean tracking.
+1. **YAML Restructuring**: When you import a blueprint, Home Assistant often uses its own internal YAML parser to restructure the file format. This can lead to subtle formatting differences compared to the author's original file.
+2. **Original Fidelity**: This integration prioritizes maintaining the **original blueprint structure** exactly as intended by the author for maximum accuracy and stability.
+3. **Alignment**: The initial "update" you see is often just the system aligning your local version with the author's original source content to ensure long-term compatibility and clean tracking.
 
 ### Why is an update offered if I installed a forked version of a blueprint?
 
