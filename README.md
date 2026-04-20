@@ -15,6 +15,31 @@
 
 ---
 
+## Table of Contents
+
+- [Blueprints Updater for Home Assistant](#blueprints-updater-for-home-assistant)
+  - [Table of Contents](#table-of-contents)
+  - [Features](#features)
+  - [Installation](#installation)
+    - [Option 1: Using HACS (Recommended)](#option-1-using-hacs-recommended)
+    - [Option 2: Manual Installation](#option-2-manual-installation)
+  - [Setup \& Configuration](#setup--configuration)
+  - [See it in Action!](#see-it-in-action)
+  - [Backup \& Restore](#backup--restore)
+    - [Enabling Backups](#enabling-backups)
+    - [Restoring a Backup](#restoring-a-backup)
+  - [Advanced Compatibility Guard](#advanced-compatibility-guard)
+  - [Refreshing the Blueprint List](#refreshing-the-blueprint-list)
+  - [Frequently Asked Questions (FAQ)](#frequently-asked-questions-faq)
+    - [Why is there an update immediately after a fresh installation?](#why-is-there-an-update-immediately-after-a-fresh-installation)
+    - [Why is an update offered if I installed a forked version of a blueprint?](#why-is-an-update-offered-if-i-installed-a-forked-version-of-a-blueprint)
+  - [Requirements](#requirements)
+  - [Code Quality \& Security](#code-quality--security)
+  - [Contributing](#contributing)
+  - [License](#license)
+
+---
+
 ## Features
 
 - **Seamless Native Integration**: Blends perfectly into the Home Assistant ecosystem, looking and feeling like a core feature. Manage everything directly from your dashboard with single-click or bulk updates.
@@ -66,51 +91,9 @@
 6.  **Use jsDelivr CDN**: (Optional, default: Enabled) Optimizes your updates by fetching GitHub-hosted blueprints via the jsDelivr CDN. If the CDN is unreachable or encounters an error, the integration will seamlessly fall back to the original GitHub URL to ensure uninterrupted service.
 7.  Once added, the integration will scan your blueprints. If updates are found, they will appear as `update` entities in your dashboard.
 
-### Backup & Restore
+---
 
-Blueprints Updater provides a built-in safety net by allowing you to back up blueprints before they are updated and restore them if needed.
-
-#### Enabling Backups
-
-When installing an update from the Home Assistant dashboard, you will have the option to check the **Backup** toggle. If enabled, the integration will automatically save your current blueprint to a numbered backup file (`.bak.1`, `.bak.2`, etc.) before replacing it with the new version.
-
-> **Note:** If you have **Auto-Update** enabled in the integration settings, it will **always** create a backup automatically before applying an update, providing a guaranteed safety net with zero effort required.
-
-#### Restoring a Backup
-
-If you find that a newly updated blueprint breaks your automations or has an incompatible change, you can easily revert to the previous version:
-
-1. Go to **Developer Tools** > **Actions**. _Note: Administrative privileges are required._
-2. Search for the **`blueprints_updater.restore_blueprint`** action.
-3. Select the `update` entity associated with the blueprint you want to restore.
-4. (Optional) Provide the **Backup Version** you wish to restore (default is **1** for the most recent).
-5. Click **Perform Action**.
-
-The integration will look for the specified numbered backup file, restore the original YAML content, and automatically reload your automations and scripts to apply the change immediately.
-
-### Advanced Compatibility Guard
-
-The **Advanced Compatibility Guard** is a professional-grade safety layer designed to protect your smart home logic from breaking changes in blueprint updates.
-
-When an update is detected, the system performs a multi-stage safety check:
-
-1.  **Code Validation**: Automatically verifies the new blueprint's structure to ensure it complies with Home Assistant's rules.
-2.  **Impact Analysis**: Simulates the update against your existing automations to see if anything will break.
-3.  **Risk Alerts**: If a problem is found (such as a missing required setting), the update is flagged with a **"compatibility error"**.
-4.  **Auto-Update Protection**: Blueprints at risk of causing errors are automatically blocked from auto-updating (**"blocked-auto-update"**) to safeguard your smart home from unexpected incidents.
-5.  **Full Transparency**: For blocked updates, you can review the **"UPDATE RISK REPORT"** to see specific breaking changes (like missing mandatory inputs) and use the **"Git Diff"** section for a detailed code comparison before proceeding manually.
-
-### Refreshing the Blueprint List
-
-Since Home Assistant does not constantly monitor the file system to save resources, **newly added or deleted blueprints will not be reflected immediately**.
-
-To apply changes instantly without waiting for the next scheduled background scan, you must do **one** of the following:
-
-1. **Run the Reload Action (Recommended)**: Go to **Developer Tools** > **YAML**, find **Blueprints Updater** in the **YAML configuration reloading** list, and click **Reload**. Alternatively, use the **`blueprints_updater.reload`** action in **Developer Tools** > **Actions** (Administrator only).
-2. **Reload the Integration**: Go to **Settings** > **Devices & Services** > **Blueprints Updater**, click the three dots, and select **Reload**.
-3. **Restart Home Assistant**.
-
-### See it in action!
+## See it in Action!
 
 If you want to see how the update process works immediately, you can use the **Motion-Activated Light/Switch (Frequent Updates)** blueprint. This blueprint is updated automatically frequently via GitHub Actions to simulate a new release.
 
@@ -124,6 +107,74 @@ If you want to see how the update process works immediately, you can use the **M
 3.  Click **Import Blueprint** and paste the URL.
 
 Once imported, **Blueprints Updater** will detect it on the next scheduled scan. To see it immediately, you can [trigger a manual refresh](#refreshing-the-blueprint-list). When the GitHub Action updates the blueprint, you will receive a notification and can perform the update.
+
+---
+
+## Backup & Restore
+
+Blueprints Updater provides a built-in safety net by allowing you to back up blueprints before they are updated and restore them if needed.
+
+### Enabling Backups
+
+When installing an update from the Home Assistant dashboard, you will have the option to check the **Backup** toggle. If enabled, the integration will automatically save your current blueprint to a numbered backup file (`.bak.1`, `.bak.2`, etc.) before replacing it with the new version.
+
+> **Note:** If you have **Auto-Update** enabled in the integration settings, it will **always** create a backup automatically before applying an update, providing a guaranteed safety net with zero effort required.
+
+### Restoring a Backup
+
+If you find that a newly updated blueprint breaks your automations or has an incompatible change, you can easily revert to the previous version:
+
+1. Go to **Developer Tools** > **Actions**. _Note: Administrative privileges are required._
+2. Search for the **`blueprints_updater.restore_blueprint`** action.
+3. Select the `update` entity associated with the blueprint you want to restore.
+4. (Optional) Provide the **Backup Version** you wish to restore (default is **1** for the most recent).
+5. Click **Perform Action**.
+
+The integration will look for the specified numbered backup file, restore the original YAML content, and automatically reload your automations and scripts to apply the change immediately.
+
+## Advanced Compatibility Guard
+
+The **Advanced Compatibility Guard** is a professional-grade safety layer designed to protect your smart home logic from breaking changes in blueprint updates.
+
+When an update is detected, the system performs a multi-stage safety check:
+
+1.  **Code Validation**: Automatically verifies the new blueprint's structure to ensure it complies with Home Assistant's rules.
+2.  **Impact Analysis**: Simulates the update against your existing automations to see if anything will break.
+3.  **Risk Alerts**: If a problem is found (such as a missing required setting), the update is flagged with a **"compatibility error"**.
+4.  **Auto-Update Protection**: Blueprints at risk of causing errors are automatically blocked from auto-updating (**"blocked-auto-update"**) to safeguard your smart home from unexpected incidents.
+5.  **Full Transparency**: For blocked updates, you can review the **"UPDATE RISK REPORT"** to see specific breaking changes (like missing mandatory inputs) and use the **"Git Diff"** section for a detailed code comparison before proceeding manually.
+
+## Refreshing the Blueprint List
+
+Since Home Assistant does not constantly monitor the file system to save resources, **newly added or deleted blueprints will not be reflected immediately**.
+
+To apply changes instantly without waiting for the next scheduled background scan, you must do **one** of the following:
+
+1. **Run the Reload Action (Recommended)**: Go to **Developer Tools** > **YAML**, find **Blueprints Updater** in the **YAML configuration reloading** list, and click **Reload**. Alternatively, use the **`blueprints_updater.reload`** action in **Developer Tools** > **Actions** (Administrator only).
+2. **Reload the Integration**: Go to **Settings** > **Devices & Services** > **Blueprints Updater**, click the three dots, and select **Reload**.
+3. **Restart Home Assistant**.
+
+---
+
+## Frequently Asked Questions (FAQ)
+
+### Why is there an update immediately after a fresh installation?
+
+You might notice that Blueprints Updater flags an update even for blueprints you have just installed. This happens because:
+
+1.  **YAML Restructuring**: When you import a blueprint, Home Assistant often uses its own internal YAML parser to restructure the file format. This can lead to subtle formatting differences compared to the author's original file.
+2.  **Original Fidelity**: This integration prioritizes maintaining the **original blueprint structure** exactly as intended by the author for maximum accuracy and stability.
+3.  **Alignment**: The initial "update" you see is often just the system aligning your local version with the author's original source content to ensure long-term compatibility and clean tracking.
+
+### Why is an update offered if I installed a forked version of a blueprint?
+
+Sometimes authors of forked blueprints (improved or maintained versions of an original) keep the original `source_url` pointing to the upstream repository. Since the `source_url` is what Blueprints Updater tracks, it will look at the original repository for updates. If the content in the fork you installed differs from the original upstream repository, an update will be offered.
+
+- **Update Notification**: An update is displayed whenever the remote source differs from your local version.
+- **Auto-Update Behavior**: If the changes in the upstream repository are minor and do not pose a risk to your existing automations, the blueprint **might still auto-update** (if enabled).
+- **Auto-Update Protection**: The system only blocks updates and sends a **system notification** (along with a warning in the logs) if the **Advanced Compatibility Guard** detects a legitimate risk of breaking your existing automations or if a system error occurs during validation.
+- **Reviewing Changes**: To ensure you don't lose custom features or improvements provided by a fork, it is strongly recommended to use the **Git Diff** section to review pending updates before proceeding with an update.
+- **Blacklisting Updates**: If you prefer to stay on a specific forked version indefinitely and stop receiving update notifications for it, you can add that blueprint to the **Blacklist** (or exclude it from the **Whitelist**) in the integration's configuration.
 
 ---
 
