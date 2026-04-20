@@ -48,7 +48,6 @@ blueprint:
       selector:
         boolean: {}
 """
-    rel_path = "automation/test.yaml"
 
     entities = ["automation.test_sensor"]
     configs = {
@@ -64,9 +63,7 @@ blueprint:
         patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
         patch.object(coordinator, "_get_entities_configs", return_value=configs),
     ):
-        risks = coordinator._detect_breaking_changes(
-            old_content, new_content, rel_path, entities, configs
-        )
+        risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
 
     assert any(
         risk["type"] == BlueprintRiskType.SELECTOR_MISMATCH
@@ -87,9 +84,8 @@ blueprint:
       selector:
         text: {}
 """
-    rel_path = "automation/test.yaml"
 
-    risks = coordinator._detect_breaking_changes(old_content, new_content, rel_path, [], {})
+    risks = coordinator._detect_breaking_changes(old_content, new_content, {})
     assert any(
         risk["type"] == BlueprintRiskType.NEW_MANDATORY and risk["args"]["input"] == "new_input"
         for risk in risks
@@ -106,7 +102,6 @@ blueprint:
       name: Old
 """
     new_content = "blueprint:\n  name: New\n  input: {}"
-    rel_path = "automation/test.yaml"
 
     entities = ["automation.test"]
     configs = {
@@ -119,9 +114,7 @@ blueprint:
         patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
         patch.object(coordinator, "_get_entities_configs", return_value=configs),
     ):
-        risks = coordinator._detect_breaking_changes(
-            old_content, new_content, rel_path, entities, configs
-        )
+        risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
 
     assert any(
         risk["type"] == BlueprintRiskType.REMOVED_INPUT and risk["args"]["input"] == "old_input"
@@ -171,9 +164,7 @@ blueprint:
         patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
         patch.object(coordinator, "_get_entities_configs", return_value=configs),
     ):
-        risks = coordinator._detect_breaking_changes(
-            old_content, new_content, rel_path, entities, configs
-        )
+        risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
 
     assert any(
         risk["type"] == BlueprintRiskType.MISSING_INPUT
