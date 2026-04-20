@@ -1,0 +1,115 @@
+"""Tests for coordinator behavior during blueprint validation and hub interactions.
+
+This module provides focused testing for the coordination logic between the
+blueprints_updater integration and the Home Assistant blueprint hub, ensuring
+robust fail-safe mechanisms are in place during compatibility checks.
+"""
+
+import asyncio
+from datetime import timedelta
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from homeassistant.exceptions import HomeAssistantError
+
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintUpdateCoordinator,
+)
+
+
+@pytest.fixture
+def coordinator(hass):
+    """Fixture for BlueprintUpdateCoordinator used in validation tests."""
+    entry = MagicMock()
+    entry.entry_id = "test_entry_validation"
+    entry.options = {}
+    entry.data = {}
+
+    with patch(
+        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__", return_value=None
+    ):
+        coord = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+        coord.hass = hass
+        coord.setup_complete = True
+        coord.data = {}
+        coord._translations = {}
+        coord._blueprint_validate_lock = asyncio.Lock()
+        return coord
+
+
+@pytest.mark.asyncio
+async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinator):
+    """Verify that blueprint consumer validation correctly manages the hub's temporary state.
+
+    Ensures that the hub content is injected for validation and always restored to
+    its original content (or removed if new) regardless of validation outcome.
+    """
+    rel_path = "automation/test.yaml"
+    content = "blueprint:\n  name: test\n  domain: automation\n"
+
+    mock_hub = AsyncMock()
+    original_bp = MagicMock()
+    mock_hub.async_get_blueprint = AsyncMock(return_value=original_bp)
+    mock_hub.async_add_blueprint = AsyncMock()
+    mock_hub.async_remove_blueprint = AsyncMock()
+
+    hass.data["blueprint"] = {"automation": mock_hub}
+
+    configs: dict[str, dict[str, Any]] = {
+        "automation.test": {"alias": "Existing", "use_blueprint": {"path": rel_path, "input": {}}}
+    }
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_validate_automation_config",
+        AsyncMock(),
+    ):
+        risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
+        assert risks == []
+        mock_hub.async_add_blueprint.assert_called_with(original_bp, rel_path)
+        assert mock_hub.async_add_blueprint.call_count == 2
+
+    mock_hub.async_add_blueprint.reset_mock()
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_validate_automation_config",
+        AsyncMock(side_effect=HomeAssistantError("Validation failed")),
+    ):
+        risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
+        assert len(risks) == 1
+        assert "Validation failed" in risks[0]["args"]["error"]
+        assert mock_hub.async_add_blueprint.call_count == 2
+
+    mock_hub.async_add_blueprint.reset_mock()
+    mock_hub.async_add_blueprint.side_effect = [None, Exception("Restore failed")]
+    await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
+
+
+@pytest.mark.asyncio
+async def test_process_blueprint_content_error_branch_coverage(coordinator):
+    """Verify that processing logic correctly categorizes different failure modes.
+
+    Ensures that both structural dictionary checks and YAML syntax errors are
+    accurately reflected in the blueprint's last_error state.
+    """
+    from homeassistant.components.blueprint.errors import InvalidBlueprint
+
+    path = "automation/test.yaml"
+    info: dict[str, Any] = {"rel_path": "test.yaml", "name": "Test BP", "local_hash": "old_hash"}
+    coordinator.data[path] = info
+
+    await coordinator._process_blueprint_content(
+        path, info, "only_non_blueprint_data: True", "etag", "url", [], set()
+    )
+    assert coordinator.data[path]["last_error"] == "invalid_blueprint"
+    await coordinator._process_blueprint_content(
+        path, info, "invalid: yaml: [data", "etag", "url", [], set()
+    )
+    assert "yaml_syntax_error" in coordinator.data[path]["last_error"]
+    with patch(
+        "custom_components.blueprints_updater.coordinator.Blueprint",
+        side_effect=InvalidBlueprint("automation", "test", {}, "Mock Schema Failure"),
+    ):
+        await coordinator._process_blueprint_content(
+            path, info, "blueprint:\n  name: Test\n  domain: automation\n", "etag", "url", [], set()
+        )
+        assert "validation_error" in coordinator.data[path]["last_error"]
+        assert "Mock Schema Failure" in coordinator.data[path]["last_error"]

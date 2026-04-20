@@ -13,7 +13,7 @@ def mock_coordinator(hass):
     """Fixture for BlueprintUpdateCoordinator with minimal mocking."""
 
     def mock_init(
-        self, hass, logger, name=None, update_interval=None, config_entry=None, **kwargs
+        self, hass, logger, *, name=None, update_interval=None, config_entry=None, **kwargs
     ) -> None:
         """Mock side effect to simulate base class setup without failing checks."""
         self.hass = hass
