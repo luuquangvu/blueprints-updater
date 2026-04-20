@@ -1341,13 +1341,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         schema[key] = {"mandatory": True, "selector": None}
                         continue
 
-                    input_val = val.get("input")
-                    if (
-                        isinstance(input_val, dict)
-                        and "selector" not in val
-                        and "default" not in val
-                    ):
-                        _process_inputs(input_val)
+                    if "input" in val:
+                        input_val = val.get("input")
+                        if isinstance(input_val, dict) and input_val:
+                            _process_inputs(input_val)
                         continue
 
                     selector_dict = val.get("selector")
@@ -1357,9 +1354,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         else None
                     )
                     is_mandatory = "default" not in val
-
-                    if not selector and is_mandatory and "selector" not in val:
-                        continue
 
                     schema[key] = {"mandatory": is_mandatory, "selector": selector}
 

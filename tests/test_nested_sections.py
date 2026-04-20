@@ -144,3 +144,53 @@ blueprint:
         risks = coordinator._detect_breaking_changes(old_content, new_content, {})
 
     assert len(risks) == 0
+
+
+@pytest.mark.asyncio
+async def test_extract_inputs_schema_no_selector():
+    """Test that inputs without selectors are correctly included."""
+    content = """
+blueprint:
+  name: No Selector Test
+  domain: automation
+  input:
+    valid_input_no_selector:
+      name: No Selector Input
+    shorthand_input_metadata:
+      name: Just Name
+      description: Just Description
+    """
+    schema, error = BlueprintUpdateCoordinator._extract_inputs_schema(content)
+    assert error is None
+    assert "valid_input_no_selector" in schema
+    assert schema["valid_input_no_selector"]["selector"] is None
+    assert "shorthand_input_metadata" in schema
+    assert schema["shorthand_input_metadata"]["selector"] is None
+
+
+@pytest.mark.asyncio
+async def test_extract_inputs_schema_sections():
+    """Test that sections are correctly identified and recurse while headers are skipped."""
+    content = """
+blueprint:
+  name: Section Test
+  domain: automation
+  input:
+    empty_section_header:
+      name: Empty Section
+      input: {}
+    null_section_header:
+      name: Null Section
+      input: null
+    real_section:
+      name: Real Section
+      input:
+        nested_input:
+          name: Nested
+    """
+    schema, error = BlueprintUpdateCoordinator._extract_inputs_schema(content)
+    assert error is None
+    assert "empty_section_header" not in schema
+    assert "null_section_header" not in schema
+    assert "real_section" not in schema
+    assert "nested_input" in schema
