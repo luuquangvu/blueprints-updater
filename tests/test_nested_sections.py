@@ -7,7 +7,10 @@ import pytest
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from custom_components.blueprints_updater.const import DOMAIN
-from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintRiskType,
+    BlueprintUpdateCoordinator,
+)
 
 
 @pytest.mark.asyncio
@@ -96,10 +99,13 @@ blueprint:
         patch.object(coordinator, "_get_entities_configs", return_value={}),
     ):
         risks = coordinator._detect_breaking_changes(
-            old_content, new_content, "automation/test.yaml"
+            old_content, new_content, "automation/test.yaml", [], {}
         )
 
-    assert any(r["type"] == "new_mandatory" and r["args"]["input"] == "target_input" for r in risks)
+    assert any(
+        r["type"] == BlueprintRiskType.NEW_MANDATORY and r["args"]["input"] == "target_input"
+        for r in risks
+    )
 
 
 @pytest.mark.asyncio
@@ -132,7 +138,7 @@ blueprint:
         patch.object(coordinator, "_get_entities_configs", return_value={}),
     ):
         risks = coordinator._detect_breaking_changes(
-            old_content, new_content, "automation/test.yaml"
+            old_content, new_content, "automation/test.yaml", [], {}
         )
 
     assert len(risks) == 0

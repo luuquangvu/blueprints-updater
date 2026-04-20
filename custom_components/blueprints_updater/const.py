@@ -57,13 +57,34 @@ SPECIAL_USE_TLDS = {
     "onion",
 }
 
+
+class BlueprintRiskType:
+    """Risk types for breaking change detection."""
+
+    LEGACY = "legacy_risk"
+    NEW_MANDATORY = "new_mandatory"
+    MISSING_INPUT = "missing_input"
+    REMOVED_INPUT = "removed_input"
+    SELECTOR_MISMATCH = "selector_mismatch"
+    COMPATIBILITY = "compatibility_risk"
+    VALIDATION_FAILED = "validation_failed_blueprint"
+    SYSTEM_ERROR = "system_error"
+
+
+class BlueprintBlockingReason:
+    """Reasons why an update or auto-update is blocked."""
+
+    BREAKING_CHANGE = "auto_update_blocked_by_breaking_change"
+    SYSTEM_ERROR = "system_error"
+
+
 RISK_TYPE_TRANSLATIONS = {
-    "legacy_risk": "risk_legacy",
-    "new_mandatory": "risk_new_mandatory",
-    "missing_input": "risk_missing_input",
-    "removed_input": "risk_removed_input",
-    "selector_mismatch": "risk_selector_mismatch",
-    "compatibility_risk": "risk_compatibility",
-    "validation_failed_blueprint": "risk_validation_failed_blueprint",
-    "system_error": "risk_system_error",
+    BlueprintRiskType.LEGACY: "risk_legacy",
+    BlueprintRiskType.NEW_MANDATORY: "risk_new_mandatory",
+    BlueprintRiskType.MISSING_INPUT: "risk_missing_input",
+    BlueprintRiskType.REMOVED_INPUT: "risk_removed_input",
+    BlueprintRiskType.SELECTOR_MISMATCH: "risk_selector_mismatch",
+    BlueprintRiskType.COMPATIBILITY: "risk_compatibility",
+    BlueprintRiskType.VALIDATION_FAILED: "risk_validation_failed_blueprint",
+    BlueprintRiskType.SYSTEM_ERROR: "risk_system_error",
 }

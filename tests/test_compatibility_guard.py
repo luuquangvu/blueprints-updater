@@ -8,6 +8,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.coordinator import (
+    BlueprintBlockingReason,
+    BlueprintRiskType,
     BlueprintUpdateCoordinator,
     StructuredRisk,
 )
@@ -46,7 +48,7 @@ async def test_auto_update_guard_blocks_when_risks_present(coordinator: Blueprin
     ):
         new_content = "blueprint: name: New"
         risks: list[StructuredRisk] = [
-            {"type": "compatibility_risk", "args": {"entity": "automation.test"}}
+            {"type": BlueprintRiskType.COMPATIBILITY, "args": {"entity": "automation.test"}}
         ]
 
         result = await coordinator._handle_auto_update_step(
@@ -63,7 +65,7 @@ async def test_auto_update_guard_blocks_when_risks_present(coordinator: Blueprin
     assert result is True
     entry = coordinator.data[blueprint_path]
     assert entry["updatable"] is True
-    assert entry["update_blocking_reason"] == "auto_update_blocked_by_breaking_change"
+    assert entry["update_blocking_reason"] == BlueprintBlockingReason.BREAKING_CHANGE
 
 
 @pytest.mark.asyncio
@@ -74,13 +76,14 @@ async def test_auto_update_proceeds_when_risks_and_no_consumers(
     blueprint_path = "automation/test_no_consumers.yaml"
     await _prepare_blueprint_entry(coordinator, blueprint_path)
 
-    # No consumers
     with (
         patch.object(coordinator, "_get_entities_using_blueprint", return_value=[]),
         patch.object(coordinator, "async_install_blueprint", return_value=None),
     ):
         new_content = "blueprint: name: New"
-        risks: list[StructuredRisk] = [{"type": "new_mandatory", "args": {"input": "test"}}]
+        risks: list[StructuredRisk] = [
+            {"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": "test"}}
+        ]
 
         result = await coordinator._handle_auto_update_step(
             blueprint_path,
@@ -111,8 +114,11 @@ async def test_async_summarize_risks_formatting_and_translation_fallback(coordin
     monkeypatch.setattr(coordinator, "async_translate", fake_async_translate)
 
     risks: list[StructuredRisk] = [
-        {"type": "new_mandatory", "args": {"input": "input1"}},
-        {"type": "missing_input", "args": {"input": "input2", "entity": "sensor.test"}},
+        {"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": "input1"}},
+        {
+            "type": BlueprintRiskType.MISSING_INPUT,
+            "args": {"input": "input2", "entity": "sensor.test"},
+        },
         {"type": "completely_unknown", "args": {"input": "input3"}},
     ]
 
@@ -122,7 +128,6 @@ async def test_async_summarize_risks_formatting_and_translation_fallback(coordin
     assert len(lines) == 3
     assert all(line.startswith("- ") for line in lines)
 
-    # Verify key patterns (assuming they are prefixed with compatibility_guard. in strings.json)
     assert any("risk_new_mandatory" in key for key in translated_keys)
     assert any("risk_missing_input" in key for key in translated_keys)
     assert any("risk_unknown" in key for key in translated_keys)

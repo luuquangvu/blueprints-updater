@@ -71,6 +71,8 @@ from .const import (
     SPECIAL_USE_TLDS,
     STORAGE_KEY_DATA,
     STORAGE_VERSION,
+    BlueprintBlockingReason,
+    BlueprintRiskType,
 )
 from .providers import registry
 from .utils import get_max_backups, retry_async
@@ -1432,7 +1434,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> list[StructuredRisk]:
         """Detect new mandatory inputs in the schema."""
         return [
-            {"type": "new_mandatory", "args": {"input": key}}
+            {"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": key}}
             for key, props in new_schema.items()
             if props["mandatory"] and (key not in old_schema or not old_schema[key]["mandatory"])
         ]
@@ -1455,7 +1457,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             inputs: dict[str, Any] = raw_input
             risks.extend(
                 {
-                    "type": "missing_input",
+                    "type": BlueprintRiskType.MISSING_INPUT,
                     "args": {"entity": entity_id, "input": key},
                 }
                 for key, props in new_schema.items()
@@ -1480,7 +1482,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 ):
                     risks.append(
                         {
-                            "type": "selector_mismatch",
+                            "type": BlueprintRiskType.SELECTOR_MISMATCH,
                             "args": {
                                 "input": key,
                                 "old_type": old_selector or "none",
@@ -1502,7 +1504,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         for key in old_schema:
             if key not in new_schema and (affected := self._get_affected_entities(configs, key)):
                 risks.append(
-                    {"type": "removed_input", "args": {"input": key, "count": len(affected)}}
+                    {
+                        "type": BlueprintRiskType.REMOVED_INPUT,
+                        "args": {"input": key, "count": len(affected)},
+                    }
                 )
         return risks
 
@@ -1525,7 +1530,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if isinstance(risk, str):
                 if risk not in seen:
                     seen.add(risk)
-                    unique_risks.append({"type": "legacy_risk", "args": {"message": risk}})
+                    unique_risks.append(
+                        {"type": BlueprintRiskType.LEGACY, "args": {"message": risk}}
+                    )
                 continue
 
             if not isinstance(risk, dict) or "type" not in risk or "args" not in risk:
@@ -1542,7 +1549,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return unique_risks
 
     def _detect_breaking_changes(
-        self, old_content: str, new_content: str, rel_path: str
+        self,
+        old_content: str,
+        new_content: str,
+        rel_path: str,
+        entity_ids: list[str],
+        configs: dict[str, dict[str, Any]],
     ) -> list[StructuredRisk]:
         """Detect potential breaking changes between two versions of a blueprint.
 
@@ -1550,6 +1562,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             old_content: Current local YAML content.
             new_content: Remote YAML content from update.
             rel_path: Relative path of the blueprint (e.g. automation/motion.yaml).
+            entity_ids: Precomputed list of entities using this blueprint.
+            configs: Precomputed configurations for those entities.
 
         Returns:
             A list of structured risks describing the detected changes and potential issues.
@@ -1557,12 +1571,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         old_schema, old_error = self._extract_inputs_schema(old_content)
         if old_error:
-            return [{"type": "validation_failed_blueprint", "args": {"error": old_error}}]
+            return [
+                {
+                    "type": BlueprintRiskType.VALIDATION_FAILED,
+                    "args": {"error": old_error},
+                }
+            ]
         new_schema, new_error = self._extract_inputs_schema(new_content)
         if new_error:
-            return [{"type": "validation_failed_blueprint", "args": {"error": new_error}}]
-        entity_ids = self._get_entities_using_blueprint_list(rel_path)
-        configs = self._get_entities_configs(entity_ids)
+            return [
+                {
+                    "type": BlueprintRiskType.VALIDATION_FAILED,
+                    "args": {"error": new_error},
+                }
+            ]
 
         risks = []
         risks.extend(self._detect_new_mandatory_inputs(old_schema, new_schema))
@@ -1610,7 +1632,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if not isinstance(blueprint_dict, dict):
                 return [
                     {
-                        "type": "validation_failed_blueprint",
+                        "type": BlueprintRiskType.VALIDATION_FAILED,
                         "args": {"error": f"{rel_path}: Not a dictionary"},
                     }
                 ]
@@ -1624,7 +1646,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         except HomeAssistantError as err:
             return [
                 {
-                    "type": "validation_failed_blueprint",
+                    "type": BlueprintRiskType.VALIDATION_FAILED,
                     "args": {"error": _sanitize_error_detail(str(err))},
                 }
             ]
@@ -1634,7 +1656,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return []
 
         async with self._blueprint_validate_lock:
-            original_bp = await blueprints_hub.async_get_blueprint(rel_path)
+            original_bp = None
+            try:
+                original_bp = await blueprints_hub.async_get_blueprint(rel_path)
+            except HomeAssistantError as err:
+                _LOGGER.debug(
+                    "Blueprint %s not in hub during validation (first sync?): %s", rel_path, err
+                )
+
             await blueprints_hub.async_add_blueprint(blueprint_obj, rel_path)
 
             try:
@@ -1647,7 +1676,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     except HomeAssistantError as err:
                         risks.append(
                             {
-                                "type": "compatibility_risk",
+                                "type": BlueprintRiskType.COMPATIBILITY,
                                 "args": {
                                     "entity": entity_id,
                                     "error": _sanitize_error_detail(str(err)),
@@ -2177,18 +2206,26 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.warning(
                 "Missing relative path for blueprint at %s, skipping risk detection", path
             )
-            return [{"type": "system_error", "args": {"error": "missing_path", "path": path}}]
+            return [
+                {
+                    "type": BlueprintRiskType.SYSTEM_ERROR,
+                    "args": {"error": "missing_path", "path": path},
+                }
+            ]
 
         if not last_error and self.data and path in self.data:
             local_file = self.hass.config.path("blueprints", rel_path)
             try:
+                entity_ids = self._get_entities_using_blueprint_list(rel_path)
+                configs = self._get_entities_configs(entity_ids)
+
                 if os.path.isfile(local_file):
                     with open(local_file, encoding="utf-8") as f:
                         old_content = f.read()
-                    risks = self._detect_breaking_changes(old_content, remote_content, rel_path)
+                    risks = self._detect_breaking_changes(
+                        old_content, remote_content, rel_path, entity_ids, configs
+                    )
 
-                entity_ids = self._get_entities_using_blueprint_list(rel_path)
-                configs = self._get_entities_configs(entity_ids)
                 compatibility_risks = await self._async_validate_blueprint_consumers(
                     rel_path, remote_content, configs
                 )
@@ -2201,7 +2238,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
                 risks.append(
                     {
-                        "type": "system_error",
+                        "type": BlueprintRiskType.SYSTEM_ERROR,
                         "args": {
                             "error": safe_error,
                             "path": path,
@@ -2240,7 +2277,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         rel_path = info.get("rel_path")
         in_use_entities = self._get_entities_using_blueprint(rel_path) if rel_path else []
-        guard_failed = any(risk.get("type") == "system_error" for risk in risks)
+        guard_failed = any(risk.get("type") == BlueprintRiskType.SYSTEM_ERROR for risk in risks)
         is_breaking = bool(risks) and (guard_failed or bool(in_use_entities))
 
         if is_breaking:
@@ -2270,10 +2307,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "remote_content": remote_content,
                         "last_error": None,
                         "invalid_remote_hash": None,
-                        "update_blocking_reason": "auto_update_blocked_by_breaking_change",
+                        "update_blocking_reason": BlueprintBlockingReason.BREAKING_CHANGE,
                         "etag": new_etag,
                     }
                 )
+                if guard_failed:
+                    self.data[path]["update_blocking_reason"] = BlueprintBlockingReason.SYSTEM_ERROR
             return True
 
         try:

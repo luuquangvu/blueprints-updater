@@ -5,7 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintRiskType,
+    BlueprintUpdateCoordinator,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -61,10 +64,13 @@ blueprint:
         patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
         patch.object(coordinator, "_get_entities_configs", return_value=configs),
     ):
-        risks = coordinator._detect_breaking_changes(old_content, new_content, rel_path)
+        risks = coordinator._detect_breaking_changes(
+            old_content, new_content, rel_path, entities, configs
+        )
 
     assert any(
-        risk["type"] == "selector_mismatch" and risk["args"]["input"] == "motion_sensor"
+        risk["type"] == BlueprintRiskType.SELECTOR_MISMATCH
+        and risk["args"]["input"] == "motion_sensor"
         for risk in risks
     )
 
@@ -83,9 +89,10 @@ blueprint:
 """
     rel_path = "automation/test.yaml"
 
-    risks = coordinator._detect_breaking_changes(old_content, new_content, rel_path)
+    risks = coordinator._detect_breaking_changes(old_content, new_content, rel_path, [], {})
     assert any(
-        risk["type"] == "new_mandatory" and risk["args"]["input"] == "new_input" for risk in risks
+        risk["type"] == BlueprintRiskType.NEW_MANDATORY and risk["args"]["input"] == "new_input"
+        for risk in risks
     )
 
 
@@ -112,10 +119,13 @@ blueprint:
         patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
         patch.object(coordinator, "_get_entities_configs", return_value=configs),
     ):
-        risks = coordinator._detect_breaking_changes(old_content, new_content, rel_path)
+        risks = coordinator._detect_breaking_changes(
+            old_content, new_content, rel_path, entities, configs
+        )
 
     assert any(
-        risk["type"] == "removed_input" and risk["args"]["input"] == "old_input" for risk in risks
+        risk["type"] == BlueprintRiskType.REMOVED_INPUT and risk["args"]["input"] == "old_input"
+        for risk in risks
     )
 
 
@@ -163,10 +173,12 @@ blueprint:
         patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
         patch.object(coordinator, "_get_entities_configs", return_value=configs),
     ):
-        risks = coordinator._detect_breaking_changes(old_content, new_content, rel_path)
+        risks = coordinator._detect_breaking_changes(
+            old_content, new_content, rel_path, entities, configs
+        )
 
     assert any(
-        risk["type"] == "missing_input"
+        risk["type"] == BlueprintRiskType.MISSING_INPUT
         and risk["args"]["entity"] == "automation.test"
         and risk["args"]["input"] == "motion_sensor"
         for risk in risks
