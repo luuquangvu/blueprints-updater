@@ -100,6 +100,7 @@ async def test_auto_update_proceeds_when_risks_and_no_consumers(
     entry = coordinator.data[blueprint_path]
     assert entry["updatable"] is False
     assert entry["update_blocking_reason"] is None
+    assert entry["breaking_risks"] == []
 
 
 @pytest.mark.asyncio
@@ -131,3 +132,60 @@ async def test_async_summarize_risks_formatting_and_translation_fallback(coordin
     assert any("risk_new_mandatory" in key for key in translated_keys)
     assert any("risk_missing_input" in key for key in translated_keys)
     assert any("risk_unknown" in key for key in translated_keys)
+
+
+@pytest.mark.asyncio
+async def test_get_risk_summary_shim(coordinator: BlueprintUpdateCoordinator, monkeypatch):
+    """Verify that the _get_risk_summary legacy shim correctly calls async_summarize_risks."""
+    translated_keys = []
+
+    async def fake_async_translate(key, **kwargs):
+        translated_keys.append(key)
+        return f"translated:{key}"
+
+    monkeypatch.setattr(coordinator, "async_translate", fake_async_translate)
+
+    risks: list[StructuredRisk] = [
+        {"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": "input1"}},
+        {"type": "unknown_risk_type", "args": {"foo": "bar"}},
+    ]
+
+    summary = await coordinator._get_risk_summary(risks)
+
+    assert "- translated:risk_new_mandatory" in summary
+    assert "- translated:risk_unknown" in summary
+    assert "\n" in summary
+    assert any("risk_new_mandatory" in k for k in translated_keys)
+    assert any("risk_unknown" in k for k in translated_keys)
+
+
+@pytest.mark.asyncio
+async def test_auto_update_guard_blocks_on_system_error(coordinator: BlueprintUpdateCoordinator):
+    """Auto-update is blocked when a system error risk is present, even without consumers."""
+    blueprint_path = "automation/system_error.yaml"
+    await _prepare_blueprint_entry(coordinator, blueprint_path)
+
+    with (
+        patch.object(coordinator, "_get_entities_using_blueprint", return_value=[]),
+        patch.object(coordinator, "_async_send_auto_update_notification", return_value=None),
+        patch.object(coordinator, "async_translate", side_effect=lambda key, **kwargs: key),
+    ):
+        risks: list[StructuredRisk] = [
+            {"type": BlueprintRiskType.SYSTEM_ERROR, "args": {"error": "Critical fail"}}
+        ]
+
+        result = await coordinator._handle_auto_update_step(
+            blueprint_path,
+            coordinator.data[blueprint_path],
+            "blueprint: name: New",
+            "new_hash",
+            "new_etag",
+            risks,
+            [],
+            set(),
+        )
+
+    assert result is True
+    entry = coordinator.data[blueprint_path]
+    assert entry["updatable"] is True
+    assert entry["update_blocking_reason"] == BlueprintBlockingReason.SYSTEM_ERROR

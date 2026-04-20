@@ -68,7 +68,6 @@ def retry_async(
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> _T:
             """Wrapper for retry_async."""
-            context = "unknown"
             if sig:
                 try:
                     bound_args = sig.bind(*args, **kwargs)

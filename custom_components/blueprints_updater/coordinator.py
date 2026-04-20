@@ -1511,7 +1511,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
         return risks
 
-    def _dedupe_risks(self, risks: Iterable[StructuredRisk | str]) -> list[StructuredRisk]:
+    @staticmethod
+    def _dedupe_risks(risks: Iterable[StructuredRisk | str]) -> list[StructuredRisk]:
         """De-duplicate risks and convert legacy string risks to structured format.
 
         This ensures that identical risks (by type and arguments) are only
@@ -1552,8 +1553,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self,
         old_content: str,
         new_content: str,
-        rel_path: str,
-        entity_ids: list[str],
         configs: dict[str, dict[str, Any]],
     ) -> list[StructuredRisk]:
         """Detect potential breaking changes between two versions of a blueprint.
@@ -1561,8 +1560,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         Args:
             old_content: Current local YAML content.
             new_content: Remote YAML content from update.
-            rel_path: Relative path of the blueprint (e.g. automation/motion.yaml).
-            entity_ids: Precomputed list of entities using this blueprint.
             configs: Precomputed configurations for those entities.
 
         Returns:
@@ -2229,9 +2226,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 if os.path.isfile(local_file):
                     with open(local_file, encoding="utf-8") as f:
                         old_content = f.read()
-                    risks = self._detect_breaking_changes(
-                        old_content, remote_content, rel_path, entity_ids, configs
-                    )
+                    risks = self._detect_breaking_changes(old_content, remote_content, configs)
 
                 compatibility_risks = await self._async_validate_blueprint_consumers(
                     rel_path, remote_content, configs
@@ -2459,7 +2454,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         _LOGGER.debug("[Pacing] Dispatching request for (redacted URL)")
 
-        response = await self._execute_with_redirect_guard(session, url, headers, etag)
+        response = await self._execute_with_redirect_guard(session, url, headers)
         new_etag = response.headers.get("ETag") or etag
         content = await self._parse_provider_response(response, url)
         return content, new_etag
@@ -2487,7 +2482,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         session: httpx.AsyncClient,
         url: str,
         headers: dict[str, str],
-        etag: str | None,
     ) -> httpx.Response:
         """Perform the HTTP GET with manual redirect following and safety checks.
 
@@ -2499,7 +2493,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             session: Async HTTP client.
             url: Original request URL.
             headers: Request headers (e.g. If-None-Match).
-            etag: Cached ETag to pass through on 304 responses.
 
         Returns:
             The final httpx.Response.
@@ -2507,7 +2500,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         current_url = url
         current_headers = headers.copy()
-        response: httpx.Response | None = None
 
         for redirect_count in range(21):
             response = await session.get(
@@ -2543,8 +2535,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         raise httpx.HTTPError("Request failed without response")
 
+    @staticmethod
     async def _parse_provider_response(
-        self,
         response: httpx.Response,
         url: str,
     ) -> str | None:
