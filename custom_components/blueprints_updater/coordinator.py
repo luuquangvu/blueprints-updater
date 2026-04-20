@@ -1341,16 +1341,26 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         schema[key] = {"mandatory": True, "selector": None}
                         continue
 
-                    nested_inputs = val.get("input")
-                    if isinstance(nested_inputs, dict):
-                        _process_inputs(nested_inputs)
+                    input_val = val.get("input")
+                    if (
+                        isinstance(input_val, dict)
+                        and "selector" not in val
+                        and "default" not in val
+                    ):
+                        _process_inputs(input_val)
                         continue
-                    is_mandatory = "default" not in val
+
+                    selector_dict = val.get("selector")
                     selector = (
-                        next(iter(val.get("selector", {})), None)
-                        if isinstance(val.get("selector"), dict)
+                        next(iter(selector_dict), None)
+                        if isinstance(selector_dict, dict) and selector_dict
                         else None
                     )
+                    is_mandatory = "default" not in val
+
+                    if not selector and is_mandatory and "selector" not in val:
+                        continue
+
                     schema[key] = {"mandatory": is_mandatory, "selector": selector}
 
             _process_inputs(inputs)
@@ -1612,6 +1622,31 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             result.extend(scripts_with_blueprint(self.hass, bp_id))
         return list(dict.fromkeys(result))
 
+    @contextlib.asynccontextmanager
+    async def _temporary_hub_blueprint(self, blueprints_hub: Any, bp_id: str, blueprint: Blueprint):
+        """Temporarily override a blueprint in the hub's in-memory cache.
+
+        This allows validation against new content without writing to disk
+        or affecting the permanent blueprint index.
+
+        Args:
+            blueprints_hub: The HA BlueprintHub instance.
+            bp_id: The blueprint identifier (path).
+            blueprint: The new Blueprint object to inject.
+
+        """
+        blueprints = blueprints_hub._blueprints
+        original_bp = blueprints.get(bp_id)
+
+        blueprints[bp_id] = blueprint
+        try:
+            yield
+        finally:
+            if original_bp:
+                blueprints[bp_id] = original_bp
+            else:
+                blueprints.pop(bp_id, None)
+
     async def _async_validate_blueprint_consumers(
         self,
         rel_path: str,
@@ -1654,50 +1689,30 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not blueprints_hub:
             return []
 
-        async with self._blueprint_validate_lock:
-            original_bp = None
-            try:
-                original_bp = await blueprints_hub.async_get_blueprint(bp_id)
-            except HomeAssistantError as err:
-                _LOGGER.debug(
-                    "Blueprint %s not in hub during validation (first sync?): %s", rel_path, err
-                )
-
-            await blueprints_hub.async_add_blueprint(blueprint_obj, bp_id)
-
-            try:
-                for entity_id, config in configs.items():
-                    try:
-                        if domain == "automation":
-                            await async_validate_automation_config(
-                                self.hass, config_key=entity_id, config=config
-                            )
-                        else:
-                            object_id = entity_id.split(".", 1)[1]
-                            await async_validate_script_config(
-                                self.hass, object_id=object_id, config=config
-                            )
-                    except HomeAssistantError as err:
-                        risks.append(
-                            {
-                                "type": BlueprintRiskType.COMPATIBILITY,
-                                "args": {
-                                    "entity": entity_id,
-                                    "error": _sanitize_error_detail(str(err)),
-                                },
-                            }
-                        )
-            finally:
+        async with (
+            self._blueprint_validate_lock,
+            self._temporary_hub_blueprint(blueprints_hub, bp_id, blueprint_obj),
+        ):
+            for entity_id, config in configs.items():
                 try:
-                    if original_bp:
-                        await blueprints_hub.async_add_blueprint(original_bp, bp_id)
+                    if domain == "automation":
+                        await async_validate_automation_config(
+                            self.hass, config_key=entity_id, config=config
+                        )
                     else:
-                        await blueprints_hub.async_remove_blueprint(bp_id)
-                except Exception as err:
-                    _LOGGER.error(
-                        "Failed to restore original blueprint during validation of %s: %s",
-                        rel_path,
-                        err,
+                        object_id = entity_id.split(".", 1)[1]
+                        await async_validate_script_config(
+                            self.hass, object_id=object_id, config=config
+                        )
+                except HomeAssistantError as err:
+                    risks.append(
+                        {
+                            "type": BlueprintRiskType.COMPATIBILITY,
+                            "args": {
+                                "entity": entity_id,
+                                "error": _sanitize_error_detail(str(err)),
+                            },
+                        }
                     )
 
         return risks

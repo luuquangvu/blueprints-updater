@@ -48,11 +48,9 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
     rel_path = "automation/test.yaml"
     content = "blueprint:\n  name: test\n  domain: automation\n"
 
-    mock_hub = AsyncMock()
+    mock_hub = MagicMock()
     original_bp = MagicMock()
-    mock_hub.async_get_blueprint = AsyncMock(return_value=original_bp)
-    mock_hub.async_add_blueprint = AsyncMock()
-    mock_hub.async_remove_blueprint = AsyncMock()
+    mock_hub._blueprints = {"test.yaml": original_bp}
 
     hass.data["blueprint"] = {"automation": mock_hub}
 
@@ -62,13 +60,20 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
     with patch(
         "custom_components.blueprints_updater.coordinator.async_validate_automation_config",
         AsyncMock(),
-    ):
+    ) as mock_validate:
+
+        async def check_during_validation(*args, **kwargs):
+            assert mock_hub._blueprints["test.yaml"] != original_bp
+            return None
+
+        mock_validate.side_effect = check_during_validation
+
         risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
         assert risks == []
-        mock_hub.async_add_blueprint.assert_called_with(original_bp, "test.yaml")
-        assert mock_hub.async_add_blueprint.call_count == 2
 
-    mock_hub.async_add_blueprint.reset_mock()
+        assert mock_hub._blueprints["test.yaml"] == original_bp
+
+    mock_hub._blueprints = {}
     with patch(
         "custom_components.blueprints_updater.coordinator.async_validate_automation_config",
         AsyncMock(side_effect=HomeAssistantError("Validation failed")),
@@ -76,11 +81,7 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
         risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
         assert len(risks) == 1
         assert "Validation failed" in risks[0]["args"]["error"]
-        assert mock_hub.async_add_blueprint.call_count == 2
-
-    mock_hub.async_add_blueprint.reset_mock()
-    mock_hub.async_add_blueprint.side_effect = [None, Exception("Restore failed")]
-    await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
+        assert "test.yaml" not in mock_hub._blueprints
 
 
 @pytest.mark.asyncio

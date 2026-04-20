@@ -43,6 +43,8 @@ blueprint:
           input:
             input_four:
               name: Input 4
+              selector:
+                text: {}
     """
 
     schema, error = BlueprintUpdateCoordinator._extract_inputs_schema(content)
@@ -78,6 +80,8 @@ blueprint:
     section:
       input:
         target_input:
+          selector:
+            text: {}
           default: old
     """
     new_content = """
@@ -87,6 +91,8 @@ blueprint:
     section:
       input:
         target_input:
+          selector:
+            text: {}
           # removed default -> mandatory
     """
 

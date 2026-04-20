@@ -100,6 +100,8 @@ blueprint:
   input:
     old_input:
       name: Old
+      selector:
+        text: {}
 """
     new_content = "blueprint:\n  name: New\n  input: {}"
 
