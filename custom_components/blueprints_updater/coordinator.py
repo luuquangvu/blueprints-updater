@@ -99,7 +99,7 @@ def _sanitize_error_detail(detail: str, max_length: int = 120) -> str:
 class StructuredRisk(TypedDict):
     """Structured breaking change risk."""
 
-    type: str
+    type: BlueprintRiskType
     args: dict[str, Any]
 
 
@@ -1455,10 +1455,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 continue
 
             raw_input = use_bp.get("input")
-            if not isinstance(raw_input, dict):
-                continue
+            inputs: dict[str, Any] = raw_input if isinstance(raw_input, dict) else {}
 
-            inputs: dict[str, Any] = raw_input
             risks.extend(
                 {
                     "type": BlueprintRiskType.MISSING_INPUT,
@@ -1757,13 +1755,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         lines = []
         for risk in risks:
-            rtype = risk.get("type", "unknown")
+            rtype = risk.get("type", BlueprintRiskType.SYSTEM_ERROR)
             rargs = dict(risk.get("args", {}))
             if rtype not in RISK_TYPE_TRANSLATIONS:
                 rargs["error"] = rargs.get("error", str(risk))
 
             translation_key = RISK_TYPE_TRANSLATIONS.get(rtype, "risk_unknown")
-            msg = await self.async_translate(translation_key, type=rtype, **rargs)
+            msg = await self.async_translate(translation_key, type=str(rtype), **rargs)
             lines.append(f"- {msg}")
         return "\n".join(lines)
 

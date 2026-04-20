@@ -154,14 +154,19 @@ blueprint:
           domain: binary_sensor
 """
     rel_path = "automation/test.yaml"
-    entities = ["automation.test"]
+    entities = ["automation.test", "automation.no_input"]
     configs = {
         "automation.test": {
             "use_blueprint": {
                 "path": rel_path,
                 "input": {},
             },
-        }
+        },
+        "automation.no_input": {
+            "use_blueprint": {
+                "path": rel_path,
+            },
+        },
     }
 
     with (
@@ -170,9 +175,10 @@ blueprint:
     ):
         risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
 
-    assert any(
-        risk["type"] == BlueprintRiskType.MISSING_INPUT
-        and risk["args"]["entity"] == "automation.test"
-        and risk["args"]["input"] == "motion_sensor"
+    found_entities = {
+        risk["args"]["entity"]
         for risk in risks
-    )
+        if risk["type"] == BlueprintRiskType.MISSING_INPUT
+        and risk["args"]["input"] == "motion_sensor"
+    }
+    assert found_entities == {"automation.test", "automation.no_input"}

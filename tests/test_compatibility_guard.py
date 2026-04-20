@@ -1,6 +1,7 @@
 """Tests for Blueprints Updater Advanced Compatibility Guard logic."""
 
 from datetime import timedelta
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -114,14 +115,17 @@ async def test_async_summarize_risks_formatting_and_translation_fallback(coordin
 
     monkeypatch.setattr(coordinator, "async_translate", fake_async_translate)
 
-    risks: list[StructuredRisk] = [
-        {"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": "input1"}},
-        {
-            "type": BlueprintRiskType.MISSING_INPUT,
-            "args": {"input": "input2", "entity": "sensor.test"},
-        },
-        {"type": "completely_unknown", "args": {"input": "input3"}},
-    ]
+    risks: list[StructuredRisk] = cast(
+        list[StructuredRisk],
+        [
+            {"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": "input1"}},
+            {
+                "type": BlueprintRiskType.MISSING_INPUT,
+                "args": {"input": "input2", "entity": "sensor.test"},
+            },
+            {"type": "completely_unknown", "args": {"input": "input3"}},
+        ],
+    )
 
     summary = await coordinator.async_summarize_risks(risks)
 
@@ -145,10 +149,13 @@ async def test_get_risk_summary_shim(coordinator: BlueprintUpdateCoordinator, mo
 
     monkeypatch.setattr(coordinator, "async_translate", fake_async_translate)
 
-    risks: list[StructuredRisk] = [
-        {"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": "input1"}},
-        {"type": "unknown_risk_type", "args": {"foo": "bar"}},
-    ]
+    risks: list[StructuredRisk] = cast(
+        list[StructuredRisk],
+        [
+            {"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": "input1"}},
+            {"type": "unknown_risk_type", "args": {"foo": "bar"}},
+        ],
+    )
 
     summary = await coordinator._get_risk_summary(risks)
 

@@ -11,6 +11,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import BlueprintRiskType
@@ -97,29 +98,39 @@ async def test_process_blueprint_content_error_branch_coverage(coordinator):
     Ensures that both structural dictionary checks and YAML syntax errors are
     accurately reflected in the blueprint's last_error state.
     """
-    from homeassistant.components.blueprint.errors import InvalidBlueprint
-
-    path = "automation/test.yaml"
     info: dict[str, Any] = {"rel_path": "test.yaml", "name": "Test BP", "local_hash": "old_hash"}
-    coordinator.data[path] = info
 
+    path1 = "automation/invalid.yaml"
+    coordinator.data[path1] = dict(info)
     await coordinator._process_blueprint_content(
-        path, info, "only_non_blueprint_data: True", "etag", "url", [], set()
+        path1, info, "only_non_blueprint_data: True", "etag", "url", [], set()
     )
-    assert coordinator.data[path]["last_error"] == "invalid_blueprint"
+    assert coordinator.data[path1]["last_error"] == "invalid_blueprint"
+
+    path2 = "automation/syntax.yaml"
+    coordinator.data[path2] = dict(info)
     await coordinator._process_blueprint_content(
-        path, info, "invalid: yaml: [data", "etag", "url", [], set()
+        path2, info, "invalid: yaml: [data", "etag", "url", [], set()
     )
-    assert "yaml_syntax_error" in coordinator.data[path]["last_error"]
+    assert coordinator.data[path2]["last_error"].startswith("yaml_syntax_error|")
+
+    path3 = "automation/schema.yaml"
+    coordinator.data[path3] = dict(info)
     with patch(
         "custom_components.blueprints_updater.coordinator.Blueprint",
         side_effect=InvalidBlueprint("automation", "test", {}, "Mock Schema Failure"),
     ):
         await coordinator._process_blueprint_content(
-            path, info, "blueprint:\n  name: Test\n  domain: automation\n", "etag", "url", [], set()
+            path3,
+            info,
+            "blueprint:\n  name: Test\n  domain: automation\n",
+            "etag",
+            "url",
+            [],
+            set(),
         )
-        assert "validation_error" in coordinator.data[path]["last_error"]
-        assert "Mock Schema Failure" in coordinator.data[path]["last_error"]
+        assert coordinator.data[path3]["last_error"].startswith("validation_error|")
+        assert "Mock Schema Failure" in coordinator.data[path3]["last_error"]
 
 
 @pytest.mark.asyncio
