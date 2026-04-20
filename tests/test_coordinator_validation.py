@@ -65,7 +65,7 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
     ):
         risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
         assert risks == []
-        mock_hub.async_add_blueprint.assert_called_with(original_bp, rel_path)
+        mock_hub.async_add_blueprint.assert_called_with(original_bp, "test.yaml")
         assert mock_hub.async_add_blueprint.call_count == 2
 
     mock_hub.async_add_blueprint.reset_mock()

@@ -1355,7 +1355,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             _process_inputs(inputs)
             return schema, None
-        except (HomeAssistantError, KeyError, TypeError) as err:
+        except HomeAssistantError as err:
             _LOGGER.warning("Failed to extract inputs schema from blueprint: %s", err)
             return {}, str(err)
 
@@ -1637,7 +1637,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     }
                 ]
 
-            domain = rel_path.split("/")[0]
+            parts = rel_path.split("/", 1)
+            domain = parts[0]
+            bp_id = parts[1] if len(parts) > 1 else rel_path
             schema = AUTOMATION_BLUEPRINT_SCHEMA if domain == "automation" else BLUEPRINT_SCHEMA
 
             blueprint_obj = Blueprint(
@@ -1658,21 +1660,26 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         async with self._blueprint_validate_lock:
             original_bp = None
             try:
-                original_bp = await blueprints_hub.async_get_blueprint(rel_path)
+                original_bp = await blueprints_hub.async_get_blueprint(bp_id)
             except HomeAssistantError as err:
                 _LOGGER.debug(
                     "Blueprint %s not in hub during validation (first sync?): %s", rel_path, err
                 )
 
-            await blueprints_hub.async_add_blueprint(blueprint_obj, rel_path)
+            await blueprints_hub.async_add_blueprint(blueprint_obj, bp_id)
 
             try:
                 for entity_id, config in configs.items():
                     try:
                         if domain == "automation":
-                            await async_validate_automation_config(self.hass, entity_id, config)
+                            await async_validate_automation_config(
+                                self.hass, config_key=entity_id, config=config
+                            )
                         else:
-                            await async_validate_script_config(self.hass, entity_id, config)
+                            object_id = entity_id.split(".", 1)[1]
+                            await async_validate_script_config(
+                                self.hass, object_id=object_id, config=config
+                            )
                     except HomeAssistantError as err:
                         risks.append(
                             {
@@ -1686,9 +1693,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             finally:
                 try:
                     if original_bp:
-                        await blueprints_hub.async_add_blueprint(original_bp, rel_path)
+                        await blueprints_hub.async_add_blueprint(original_bp, bp_id)
                     else:
-                        await blueprints_hub.async_remove_blueprint(rel_path)
+                        await blueprints_hub.async_remove_blueprint(bp_id)
                 except Exception as err:
                     _LOGGER.error(
                         "Failed to restore original blueprint during validation of %s: %s",
