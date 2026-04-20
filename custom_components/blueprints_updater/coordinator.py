@@ -1673,8 +1673,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 ]
 
             parts = rel_path.split("/", 1)
+            if len(parts) < 2:
+                return [
+                    {
+                        "type": BlueprintRiskType.SYSTEM_ERROR,
+                        "args": {
+                            "error": (
+                                f"Malformed blueprint path: missing domain folder in '{rel_path}'"
+                            ),
+                            "path": rel_path,
+                        },
+                    }
+                ]
             domain = parts[0]
-            bp_id = parts[1] if len(parts) > 1 else rel_path
+            bp_id = parts[1]
             schema = AUTOMATION_BLUEPRINT_SCHEMA if domain == "automation" else BLUEPRINT_SCHEMA
 
             blueprint_obj = Blueprint(

@@ -100,11 +100,7 @@ blueprint:
     entry.domain = DOMAIN
     with patch.object(DataUpdateCoordinator, "__init__", return_value=None):
         coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
-    with (
-        patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=[]),
-        patch.object(coordinator, "_get_entities_configs", return_value={}),
-    ):
-        risks = coordinator._detect_breaking_changes(old_content, new_content, {})
+    risks = coordinator._detect_breaking_changes(old_content, new_content, {})
 
     assert any(
         r["type"] == BlueprintRiskType.NEW_MANDATORY and r["args"]["input"] == "target_input"
@@ -137,11 +133,7 @@ blueprint:
     entry.domain = DOMAIN
     with patch.object(DataUpdateCoordinator, "__init__", return_value=None):
         coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
-    with (
-        patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=[]),
-        patch.object(coordinator, "_get_entities_configs", return_value={}),
-    ):
-        risks = coordinator._detect_breaking_changes(old_content, new_content, {})
+    risks = coordinator._detect_breaking_changes(old_content, new_content, {})
 
     assert len(risks) == 0
 

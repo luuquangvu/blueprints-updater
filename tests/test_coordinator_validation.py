@@ -145,3 +145,21 @@ async def test_async_validate_blueprint_consumers_unexpected_error(hass, coordin
         assert len(risks) == 1
         assert risks[0]["type"] == BlueprintRiskType.SYSTEM_ERROR
         assert "Unexpected internal failure" in risks[0]["args"]["error"]
+
+
+@pytest.mark.asyncio
+async def test_async_validate_blueprint_consumers_malformed_path(coordinator):
+    """Verify that a rel_path without a domain folder returns a SYSTEM_ERROR.
+
+    Ensures that we don't silently skip validation or misparse filenames as domains.
+    """
+    rel_path = "invalid_path.yaml"  # Missing domain folder (e.g., automation/)
+    content = "blueprint:\n  name: test\n  domain: automation\n"
+    configs: dict[str, dict[str, Any]] = {}
+
+    risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
+
+    assert len(risks) == 1
+    assert risks[0]["type"] == BlueprintRiskType.SYSTEM_ERROR
+    assert "Malformed blueprint path" in risks[0]["args"]["error"]
+    assert risks[0]["args"]["path"] == rel_path
