@@ -880,8 +880,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     "notification_id": f"{DOMAIN}_auto_update",
                 },
             )
-        except Exception as err:
-            _LOGGER.warning("Failed to send auto-update notification: %s", err)
+        except Exception:
+            _LOGGER.exception("Failed to send auto-update notification")
 
     @staticmethod
     def _validate_blueprint(data: Any, source_url: str) -> str | None:
@@ -1657,6 +1657,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         This uses Home Assistant's native validation engine by temporarily
         injecting the content into the blueprint cache.
+
+        Args:
+            rel_path: Relative path of the blueprint.
+            blueprint_content: Raw YAML content for validation.
+            configs: Current configurations of all affected entities.
+
+        Returns:
+            A list of compatibility risks or system errors if validation fails.
+
         """
         risks = []
         try:
@@ -1682,6 +1691,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 {
                     "type": BlueprintRiskType.VALIDATION_FAILED,
                     "args": {"error": _sanitize_error_detail(str(err))},
+                }
+            ]
+        except Exception as err:
+            safe_error = _sanitize_error_detail(str(err))
+            _LOGGER.exception("Unexpected error during blueprint validation for %s", rel_path)
+            return [
+                {
+                    "type": BlueprintRiskType.SYSTEM_ERROR,
+                    "args": {"error": safe_error, "path": rel_path},
                 }
             ]
 
@@ -2216,7 +2234,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             last_error: Any validation error already found.
 
         Returns:
-            List of localized risk strings.
+            A list of identified breaking risks or system errors to preserve.
 
         """
         risks = []
@@ -2248,10 +2266,25 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
                 risks.extend(compatibility_risks)
 
-            except Exception as err:
+            except (OSError, HomeAssistantError) as err:
                 safe_error = _sanitize_error_detail(str(err))
                 _LOGGER.warning(
                     "Failed to check breaking changes for %s (%s): %s", path, rel_path, safe_error
+                )
+                risks.append(
+                    {
+                        "type": BlueprintRiskType.SYSTEM_ERROR,
+                        "args": {
+                            "error": safe_error,
+                            "path": path,
+                            "rel_path": rel_path,
+                        },
+                    }
+                )
+            except Exception as err:
+                safe_error = _sanitize_error_detail(str(err))
+                _LOGGER.exception(
+                    "Unexpected error checking breaking changes for %s (%s)", path, rel_path
                 )
                 risks.append(
                     {
@@ -2351,8 +2384,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             results_to_notify.append(info["name"])
             updated_domains.add(info.get("domain", "automation"))
             return True
-        except Exception as err:
-            _LOGGER.error("Auto-update failed for %s: %s", path, err)
+        except Exception:
+            _LOGGER.exception("Auto-update failed for %s", path)
             return False
 
     def _update_coordinator_status_data(
@@ -2435,8 +2468,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     "notification_id": base_id,
                 },
             )
-        except Exception as err:
-            _LOGGER.error("Failed to send auto update notification: %s", err)
+        except Exception:
+            _LOGGER.exception("Failed to send auto-update notification")
 
     @retry_async(
         max_retries=MAX_RETRIES,

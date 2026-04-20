@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.blueprints_updater.const import BlueprintRiskType
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
 )
@@ -70,6 +71,11 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
 
         risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
         assert risks == []
+        mock_validate.assert_awaited_once_with(
+            hass,
+            config_key="automation.test",
+            config=configs["automation.test"],
+        )
 
         assert mock_hub._blueprints["test.yaml"] == original_bp
 
@@ -114,3 +120,28 @@ async def test_process_blueprint_content_error_branch_coverage(coordinator):
         )
         assert "validation_error" in coordinator.data[path]["last_error"]
         assert "Mock Schema Failure" in coordinator.data[path]["last_error"]
+
+
+@pytest.mark.asyncio
+async def test_async_validate_blueprint_consumers_unexpected_error(hass, coordinator):
+    """Verify that unexpected errors during validation are caught and reported as SYSTEM_ERROR.
+
+    Ensures that the catch-all Exception block handles internal logic failure gracefully.
+    """
+    rel_path = "automation/test.yaml"
+    content = "blueprint:\n  name: test\n  domain: automation\n"
+    configs: dict[str, dict[str, Any]] = {
+        "automation.test": {
+            "alias": "Existing",
+            "use_blueprint": {"path": rel_path, "input": {}},
+        }
+    }
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.yaml_util.parse_yaml",
+        side_effect=RuntimeError("Unexpected internal failure"),
+    ):
+        risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
+        assert len(risks) == 1
+        assert risks[0]["type"] == BlueprintRiskType.SYSTEM_ERROR
+        assert "Unexpected internal failure" in risks[0]["args"]["error"]
