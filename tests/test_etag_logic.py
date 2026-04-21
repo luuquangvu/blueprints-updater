@@ -78,7 +78,7 @@ async def test_304_response_preserves_updatable_status(
 
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 304
-    mock_response.headers = {"ETag": "etag_v2"}
+    mock_response.headers = {"ETag": "etag_v2", "Content-Type": "text/yaml"}
     mock_response.raise_for_status = MagicMock(return_value=None)
 
     mock_session = MagicMock(spec=httpx.AsyncClient)
@@ -163,7 +163,7 @@ async def test_etag_migration_forces_download(
 
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
-    mock_response.headers = {"ETag": "new_etag"}
+    mock_response.headers = {"ETag": "new_etag", "Content-Type": "text/yaml"}
     mock_response.text = remote_content
     mock_response.raise_for_status = MagicMock(return_value=None)
 

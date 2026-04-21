@@ -17,7 +17,7 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, TypedDict, Union, cast
+from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -79,9 +79,9 @@ from .utils import get_max_backups, retry_async
 
 _LOGGER = logging.getLogger(__name__)
 
-JSONValue = Union[None, bool, int, float, str, "JSONDict", "JSONList"]
-JSONDict = Mapping[str, JSONValue]
-JSONList = Sequence[JSONValue]
+JSONDict = Mapping[str, "JSONValue"]
+JSONList = Sequence["JSONValue"]
+JSONValue = None | bool | int | float | str | JSONDict | JSONList
 
 
 def _sanitize_error_detail(detail: str, max_length: int = 120) -> str:
@@ -2653,13 +2653,24 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if response.status_code == 304:
             return None
 
+        content_type = response.headers.get("Content-Type", "")
+        normalized_ct = content_type.split(";", 1)[0].strip().lower()
         provider = registry.get_provider(str(response.url))
         if provider is None:
-            return response.text
+            if normalized_ct in (
+                "application/yaml",
+                "application/x-yaml",
+                "text/yaml",
+                "text/x-yaml",
+                "text/plain",
+            ):
+                return response.text
 
-        content_type = response.headers.get("Content-Type", "")
-        normalized_ct = content_type.lower().split(";", 1)[0].strip()
-        is_json = normalized_ct == "application/json" or normalized_ct.endswith("+json")
+            raise HomeAssistantError(
+                f"Unsupported content type '{content_type}' for YAML blueprint "
+                f"at URL '{response.url}'. No provider was found for this URL."
+            )
+        is_json = normalized_ct in ("application/json", "text/json")
         json_data = None
         if is_json:
             try:
