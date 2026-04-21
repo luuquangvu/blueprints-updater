@@ -1748,17 +1748,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         Returns:
             A formatted string with bullet points for each risk.
-
         """
         lines = []
         for risk in risks:
             rtype = risk.get("type", BlueprintRiskType.SYSTEM_ERROR)
             rargs = dict(risk.get("args", {}))
-            if rtype not in RISK_TYPE_TRANSLATIONS:
-                rargs["error"] = rargs.get("error", str(risk))
 
-            translation_key = RISK_TYPE_TRANSLATIONS.get(rtype, "risk_unknown")
-            msg = await self.async_translate(translation_key, type=str(rtype), **rargs)
+            translation_key = RISK_TYPE_TRANSLATIONS.get(rtype)
+
+            if translation_key is None:
+                translation_key = "risk_unknown"
+                rargs.pop("type", None)
+                msg = await self.async_translate(translation_key, **rargs)
+            else:
+                msg = await self.async_translate(translation_key, type=str(rtype), **rargs)
+
             lines.append(f"- {msg}")
         return "\n".join(lines)
 
@@ -2381,6 +2385,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "updatable": False,
                         "local_hash": remote_hash,
                         "last_error": None,
+                        "auto_update_last_error": None,
                         "breaking_risks": [],
                         "update_blocking_reason": None,
                         "etag": new_etag,
@@ -2451,6 +2456,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "remote_content": remote_content if updatable else None,
                 "updatable": updatable,
                 "update_blocking_reason": current_reason if updatable else None,
+                "auto_update_last_error": None,
             }
 
         if risks is None:
