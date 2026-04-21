@@ -10,7 +10,6 @@ dev = [
   "homeassistant>=2026.4",
   "httpx[http2]",
   "interrogate",
-  "orjson",
   "packaging",
   "pyright",
   "pytest>=9",
@@ -19,7 +18,6 @@ dev = [
   "ruff",
   "tomlkit",
   "ty",
-  "voluptuous",
 ]
 
 [tool.ruff]

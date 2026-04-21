@@ -853,7 +853,7 @@ async def test_async_background_refresh_503_resilience(coordinator):
 @pytest.mark.asyncio
 async def test_async_background_refresh_semaphore_limit(coordinator):
     """Test that background refresh respects MAX_CONCURRENT_REQUESTS."""
-    num_blueprints = MAX_CONCURRENT_REQUESTS
+    num_blueprints = MAX_CONCURRENT_REQUESTS + 2
     blueprints = {
         f"automation/bp{i}.yaml": {
             "name": f"BP{i}",

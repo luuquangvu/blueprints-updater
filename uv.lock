@@ -392,7 +392,6 @@ dev = [
     { name = "homeassistant" },
     { name = "httpx", extra = ["http2"] },
     { name = "interrogate" },
-    { name = "orjson" },
     { name = "packaging" },
     { name = "pyright" },
     { name = "pytest" },
@@ -401,7 +400,6 @@ dev = [
     { name = "ruff" },
     { name = "tomlkit" },
     { name = "ty" },
-    { name = "voluptuous" },
 ]
 
 [package.metadata]
@@ -411,7 +409,6 @@ dev = [
     { name = "homeassistant", specifier = ">=2026.4" },
     { name = "httpx", extras = ["http2"] },
     { name = "interrogate" },
-    { name = "orjson" },
     { name = "packaging" },
     { name = "pyright" },
     { name = "pytest", specifier = ">=9" },
@@ -420,7 +417,6 @@ dev = [
     { name = "ruff" },
     { name = "tomlkit" },
     { name = "ty" },
-    { name = "voluptuous" },
 ]
 
 [[package]]

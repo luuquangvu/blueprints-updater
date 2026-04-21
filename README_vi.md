@@ -43,7 +43,7 @@
 ## Tính năng chính
 
 - **Tích hợp sâu như tính năng hệ thống**: Hoạt động mượt mà và đồng bộ như các bản cập nhật chính thức. Bạn có thể dễ dàng quản lý và cập nhật hàng loạt blueprint ngay trên dashboard.
-- **Lớp bảo vệ Nâng cao (Advanced Compatibility Guard)**: Chủ động bảo vệ hệ thống khỏi các thay đổi gây lỗi (breaking changes). Tiện ích thực hiện kiểm tra chéo chuyên sâu giữa blueprint mới và toàn bộ automation/script hiện có trước khi cập nhật, giúp nhận diện và cảnh báo sớm các "Lỗi tương thích" (compatibility errors).
+- **Cơ chế Bảo vệ Tương thích Nâng cao (Advanced Compatibility Guard)**: Chủ động bảo vệ ngôi nhà thông minh khỏi các thay đổi gây lỗi (breaking changes). Trước khi áp dụng cập nhật, hệ thống thực hiện phân tích chuyên sâu toàn bộ automation và script phụ thuộc dựa trên nội dung blueprint mới, giúp nhận diện sớm rủi ro tương thích, lỗi hệ thống hoặc các xung đột tiềm ẩn nhằm ngăn ngừa tình trạng lỗi ngầm sau khi cập nhật.
 - **Tự động hóa hoàn toàn**: Khi bật chế độ tự động cập nhật, hệ thống sẽ thay bạn thực hiện mọi thao tác từ sao lưu, tải bản mới đến gửi thông báo chi tiết khi hoàn tất.
 - **Tối ưu hiệu suất và băng thông**: Sử dụng mã băm SHA256 và ETag để chỉ tải về khi thực sự có thay đổi từ nguồn, giảm thiểu tải cho hệ thống.
 - **Hỗ trợ Blueprint đa nền tảng**: Tương thích hoàn hảo với các tệp nguồn từ GitHub, GitHub Gist và Diễn đàn cộng đồng Home Assistant.

@@ -669,11 +669,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         A ghost update occurs when the content is effectively identical
         to the local version after transport-level normalization, but
         the previous hashes were out of sync.
-        This provides a secure fetch for all integration needs.
-
-        Note: The end of the redirect loop logic includes a safety raise
-        to satisfy the type checker, though it should be unreachable due
-        to the internal redirect counter.
 
         Args:
             current_local_hash: The hash of the freshly scanned local file.
@@ -2381,6 +2376,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 source_unique_id=slugify(rel_path) if rel_path else None,
             )
             if self.data and path in self.data:
+                blocking_reason = (
+                    BlueprintBlockingReason.SYSTEM_ERROR
+                    if guard_failed
+                    else BlueprintBlockingReason.BREAKING_CHANGE
+                )
                 self.data[path].update(
                     {
                         "updatable": True,
@@ -2388,12 +2388,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "remote_content": remote_content,
                         "last_error": None,
                         "invalid_remote_hash": None,
-                        "update_blocking_reason": BlueprintBlockingReason.BREAKING_CHANGE,
+                        "update_blocking_reason": blocking_reason,
                         "etag": new_etag,
                     }
                 )
-                if guard_failed:
-                    self.data[path]["update_blocking_reason"] = BlueprintBlockingReason.SYSTEM_ERROR
             return True
 
         try:
