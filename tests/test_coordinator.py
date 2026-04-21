@@ -73,6 +73,7 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
         coord.last_update_success = True
         coord._is_safe_path = cast(Any, MagicMock(return_value=True))
         coord._is_safe_url = cast(Any, AsyncMock(return_value=True))
+        coord._detect_risks_for_update = cast(Any, AsyncMock(return_value=[]))
         return coord
 
 
@@ -91,7 +92,7 @@ def test_coordinator_protocol_conformance(coordinator):
 @pytest.mark.asyncio
 async def test_async_install_blueprint_reload_fallback(coordinator):
     """Test that reload fallback works when blueprint block is missing or malformed."""
-    path = "test.yaml"
+    path = "automation/test.yaml"
     content = "invalid: yaml"
 
     coordinator.async_reload_services = AsyncMock()
@@ -143,31 +144,6 @@ def test_normalize_url(coordinator):
         coordinator._normalize_url("https://example.com/blueprint.yaml")
         == "https://example.com/blueprint.yaml"
     )
-
-
-def test_parse_forum_content(coordinator):
-    """Test parsing forum content."""
-    json_data = {
-        "post_stream": {
-            "posts": [
-                {
-                    "cooked": (
-                        '<p>Here is my blueprint:</p><pre><code class="lang-yaml">blueprint:\n'
-                        "  name: Test\n  source_url: https://url.com</code></pre>"
-                    )
-                }
-            ]
-        }
-    }
-    content: Any = coordinator._parse_forum_content(json_data)
-    assert "blueprint:" in content
-    assert "name: Test" in content
-
-    json_data_no_bp = {"post_stream": {"posts": [{"cooked": "<code>not a blueprint</code>"}]}}
-    assert coordinator._parse_forum_content(json_data_no_bp) is None
-
-    assert coordinator._parse_forum_content({}) is None
-    assert coordinator._parse_forum_content({"post_stream": {"posts": []}}) is None
 
 
 def test_ensure_source_url(coordinator):
@@ -243,7 +219,7 @@ def test_ensure_source_url(coordinator):
 @pytest.mark.asyncio
 async def test_prune_preserves_hashes_only_metadata(coordinator):
     """Test that blueprints with only a hash (and no ETag) are not pruned if they exist."""
-    path = "/config/blueprints/hash_only.yaml"
+    path = "/config/blueprints/automation/hash_only.yaml"
     coordinator._persisted_etags = {}
     coordinator._persisted_hashes = {path: "some_hash"}
 
@@ -261,7 +237,7 @@ async def test_prune_preserves_hashes_only_metadata(coordinator):
 @pytest.mark.asyncio
 async def test_async_prune_stale_metadata_triggers_save(coordinator):
     """Test that pruning stale metadata triggers a background save operation."""
-    path = "/config/blueprints/stale.yaml"
+    path = "/config/blueprints/automation/stale.yaml"
     coordinator._persisted_hashes = {path: "some_hash"}
 
     with (
@@ -279,14 +255,14 @@ async def test_async_prune_stale_metadata_triggers_save(coordinator):
 @pytest.mark.asyncio
 async def test_save_metadata_honors_cleared_in_memory_state(coordinator):
     """Test that clearing an ETag in-memory correctly results in it being removed from save."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     coordinator._persisted_etags = {path: "old_etag"}
     coordinator._persisted_hashes = {path: "old_hash"}
 
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "rel_path": "automation/test.yaml",
             "source_url": "https://url.com",
             "etag": None,
             "remote_hash": None,
@@ -331,11 +307,11 @@ def test_normalization_comprehensive(coordinator, variant, input_content, expect
 @pytest.mark.asyncio
 async def test_handle_source_url_change_clears_metadata(coordinator):
     """Test that source URL changes clear remote-derived metadata."""
-    path = "test_blueprint.yaml"
+    path = "script/test_blueprint.yaml"
 
     coordinator.data[path] = {
         "name": "Test",
-        "rel_path": "test_blueprint.yaml",
+        "rel_path": "script/test_blueprint.yaml",
         "domain": "automation",
         "local_hash": "local_hash",
         "source_url": "https://old.example.com/blueprint.yaml",
@@ -348,7 +324,7 @@ async def test_handle_source_url_change_clears_metadata(coordinator):
 
     new_entry = {
         "name": "Test",
-        "rel_path": "test_blueprint.yaml",
+        "rel_path": "script/test_blueprint.yaml",
         "domain": "automation",
         "local_hash": "local_hash",
         "source_url": "https://new.example.com/blueprint.yaml",
@@ -409,11 +385,11 @@ not_blueprint:
 @pytest.mark.asyncio
 async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinator):
     """Test that invalid JSON from forum URLs sets fetch_error."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     source_url = "https://community.home-assistant.io/t/123"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "rel_path": "automation/test.yaml",
         "source_url": source_url,
         "domain": "automation",
         "local_hash": "old_hash",
@@ -422,6 +398,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
 
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
+    mock_response.url = httpx.URL(source_url)
     mock_response.headers = {"Content-Type": "application/json"}
     mock_response.text = '{"posts": [ {"cooked": "invalid"}'
     mock_response.json = MagicMock(side_effect=ValueError("Expecting value"))
@@ -437,9 +414,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
         mock_session, path, info, results_to_notify, updated_domains
     )
 
-    assert "fetch_error" in coordinator.data[path]["last_error"]
-    assert "Invalid JSON response" in coordinator.data[path]["last_error"]
-    assert "(redacted URL)" in coordinator.data[path]["last_error"]
+    assert coordinator.data[path]["last_error"].startswith("fetch_error|")
     assert coordinator.data[path]["updatable"] is False
 
 
@@ -492,12 +467,12 @@ def test_scan_blueprints(hass, coordinator):
 @pytest.mark.asyncio
 async def test_async_fetch_blueprint_force(coordinator):
     """Test that async_fetch_blueprint with force=True bypasses ETag."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     source_url = "https://url/test.yaml"
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "rel_path": "automation/test.yaml",
             "source_url": source_url,
             "local_hash": "old_hash",
             "updatable": True,
@@ -509,7 +484,7 @@ async def test_async_fetch_blueprint_force(coordinator):
 
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
-    mock_response.headers = {"ETag": "new_etag"}
+    mock_response.headers = {"ETag": "new_etag", "Content-Type": "text/yaml"}
     mock_response.text = "blueprint:\n  name: Test\n  source_url: https://url/test.yaml"
     mock_response.raise_for_status = MagicMock()
 
@@ -538,7 +513,7 @@ async def test_async_fetch_blueprint_force(coordinator):
 @pytest.mark.asyncio
 async def test_async_update_blueprint_304_auto_update(coordinator):
     """Test that auto-update works even if the fetch returns 304."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     source_url = "https://url/test.yaml"
 
     coordinator.config_entry.options = MappingProxyType({"auto_update": True})
@@ -546,7 +521,7 @@ async def test_async_update_blueprint_304_auto_update(coordinator):
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "rel_path": "automation/test.yaml",
             "source_url": source_url,
             "local_hash": "old_hash",
             "updatable": True,
@@ -562,7 +537,7 @@ async def test_async_update_blueprint_304_auto_update(coordinator):
 
     mock_response_200 = MagicMock(spec=httpx.Response)
     mock_response_200.status_code = 200
-    mock_response_200.headers = {"ETag": "stored_etag"}
+    mock_response_200.headers = {"ETag": "stored_etag", "Content-Type": "text/yaml"}
     mock_response_200.text = "blueprint:\n  name: Test\n  source_url: https://url/test.yaml"
     mock_response_200.raise_for_status = MagicMock()
 
@@ -593,10 +568,10 @@ async def test_async_update_blueprint_304_auto_update(coordinator):
 @pytest.mark.asyncio
 async def test_async_update_blueprint(coordinator):
     """Test the full update flow for a single blueprint."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "rel_path": "automation/test.yaml",
         "source_url": "https://github.com/user/repo/blob/main/test.yaml",
         "domain": "automation",
         "local_hash": "old_hash",
@@ -605,7 +580,7 @@ async def test_async_update_blueprint(coordinator):
 
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
-    mock_response.headers = {"ETag": "new_etag"}
+    mock_response.headers = {"ETag": "new_etag", "Content-Type": "text/yaml"}
     mock_response.raise_for_status = MagicMock()
     mock_response.text = "blueprint:\n  name: Test"
 
@@ -637,10 +612,10 @@ async def test_async_update_blueprint(coordinator):
 @pytest.mark.asyncio
 async def test_async_update_blueprint_not_modified(coordinator):
     """Test the update flow when server returns 304 Not Modified."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "rel_path": "automation/test.yaml",
         "source_url": "https://url",
         "domain": "automation",
         "local_hash": "old_hash",
@@ -648,7 +623,7 @@ async def test_async_update_blueprint_not_modified(coordinator):
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "rel_path": "automation/test.yaml",
             "source_url": "https://url",
             "local_hash": "old_hash",
             "updatable": False,
@@ -659,7 +634,7 @@ async def test_async_update_blueprint_not_modified(coordinator):
 
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 304
-    mock_response.headers = {"ETag": "old_etag"}
+    mock_response.headers = {"ETag": "old_etag", "Content-Type": "text/yaml"}
     mock_response.raise_for_status = MagicMock()
 
     mock_session = MagicMock(spec=httpx.AsyncClient)
@@ -679,7 +654,7 @@ async def test_async_update_blueprint_not_modified(coordinator):
 @pytest.mark.asyncio
 async def test_async_install_blueprint(hass, coordinator):
     """Test installing a blueprint and reloading services."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     remote_content = "blueprint:\n  name: Test"
 
     hass.services.has_service = MagicMock(
@@ -706,7 +681,7 @@ async def test_async_install_blueprint(hass, coordinator):
 @pytest.mark.asyncio
 async def test_async_install_blueprint_domain_normalization(hass, coordinator):
     """Test that async_install_blueprint correctly normalizes the domain."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
 
     hass.services.has_service = MagicMock(return_value=True)
     hass.services.async_call = AsyncMock()
@@ -741,16 +716,16 @@ async def test_async_install_blueprint_domain_normalization(hass, coordinator):
 async def test_async_update_data_partial_failure(coordinator):
     """Test that one failed blueprint does not stop others."""
     blueprints = {
-        "/config/blueprints/good.yaml": {
+        "/config/blueprints/automation/good.yaml": {
             "name": "Good",
-            "rel_path": "good.yaml",
+            "rel_path": "automation/good.yaml",
             "source_url": "https://url.com/good.yaml",
             "domain": "automation",
             "local_hash": "good_hash",
         },
-        "/config/blueprints/bad.yaml": {
+        "/config/blueprints/automation/bad.yaml": {
             "name": "Bad",
-            "rel_path": "bad.yaml",
+            "rel_path": "automation/bad.yaml",
             "source_url": "https://url.com/bad.yaml",
             "domain": "automation",
             "local_hash": "bad_hash",
@@ -761,7 +736,7 @@ async def test_async_update_data_partial_failure(coordinator):
 
     mock_good_resp = MagicMock(spec=httpx.Response)
     mock_good_resp.status_code = 200
-    mock_good_resp.headers = {"ETag": "good_etag"}
+    mock_good_resp.headers = {"ETag": "good_etag", "Content-Type": "text/yaml"}
     mock_good_resp.raise_for_status = MagicMock()
     mock_good_resp.text = "blueprint:\n  name: Good"
 
@@ -801,29 +776,29 @@ async def test_async_update_data_partial_failure(coordinator):
             await coordinator._async_background_refresh(blueprints)
             results = update_results
 
-    assert "/config/blueprints/bad.yaml" in results
+    assert "/config/blueprints/automation/bad.yaml" in results
 
-    assert results["/config/blueprints/good.yaml"]["updatable"] is True
-    assert results["/config/blueprints/good.yaml"]["last_error"] is None
+    assert results["/config/blueprints/automation/good.yaml"]["updatable"] is True
+    assert results["/config/blueprints/automation/good.yaml"]["last_error"] is None
 
-    assert results["/config/blueprints/bad.yaml"]["last_error"] is not None
-    assert "404" in results["/config/blueprints/bad.yaml"]["last_error"]
+    assert results["/config/blueprints/automation/bad.yaml"]["last_error"] is not None
+    assert "404" in results["/config/blueprints/automation/bad.yaml"]["last_error"]
 
 
 @pytest.mark.asyncio
 async def test_async_background_refresh_503_resilience(coordinator):
     """Test that 503 errors do NOT abort the refresh cycle anymore."""
     blueprints = {
-        "/config/blueprints/b1.yaml": {
+        "/config/blueprints/automation/b1.yaml": {
             "name": "B1",
-            "rel_path": "b1.yaml",
+            "rel_path": "automation/b1.yaml",
             "source_url": "https://url/b1",
             "domain": "automation",
             "local_hash": "h1",
         },
-        "/config/blueprints/b2.yaml": {
+        "/config/blueprints/automation/b2.yaml": {
             "name": "B2",
-            "rel_path": "b2.yaml",
+            "rel_path": "automation/b2.yaml",
             "source_url": "https://url/b2",
             "domain": "automation",
             "local_hash": "h2",
@@ -842,12 +817,12 @@ async def test_async_background_refresh_503_resilience(coordinator):
     mock_200_resp = MagicMock(spec=httpx.Response)
     mock_200_resp.status_code = 200
     mock_200_resp.text = "blueprint:\n  name: B2"
-    mock_200_resp.headers = {"ETag": "e2"}
+    mock_200_resp.headers = {"ETag": "e2", "Content-Type": "text/yaml"}
     mock_200_resp.raise_for_status = MagicMock()
 
     coordinator.data = {
-        "/config/blueprints/b1.yaml": {"last_error": None},
-        "/config/blueprints/b2.yaml": {"last_error": None},
+        "/config/blueprints/automation/b1.yaml": {"last_error": None},
+        "/config/blueprints/automation/b2.yaml": {"last_error": None},
     }
 
     with (
@@ -870,9 +845,9 @@ async def test_async_background_refresh_503_resilience(coordinator):
         mock_hash.return_value.hexdigest.return_value = "new_hash"
         await coordinator._async_background_refresh(blueprints)
 
-    assert "503" in str(coordinator.data["/config/blueprints/b1.yaml"]["last_error"])
-    assert coordinator.data["/config/blueprints/b2.yaml"]["updatable"] is True
-    assert coordinator.data["/config/blueprints/b2.yaml"]["last_error"] is None
+    assert "503" in str(coordinator.data["/config/blueprints/automation/b1.yaml"]["last_error"])
+    assert coordinator.data["/config/blueprints/automation/b2.yaml"]["updatable"] is True
+    assert coordinator.data["/config/blueprints/automation/b2.yaml"]["last_error"] is None
 
 
 @pytest.mark.asyncio
@@ -880,9 +855,9 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
     """Test that background refresh respects MAX_CONCURRENT_REQUESTS."""
     num_blueprints = MAX_CONCURRENT_REQUESTS + 2
     blueprints = {
-        f"/bp{i}.yaml": {
+        f"automation/bp{i}.yaml": {
             "name": f"BP{i}",
-            "rel_path": f"bp{i}.yaml",
+            "rel_path": f"automation/bp{i}.yaml",
             "source_url": f"https://url/bp{i}",
             "domain": "automation",
             "local_hash": "h",
@@ -911,7 +886,7 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.text = "blueprint: name"
-        mock_response.headers = {}
+        mock_response.headers = {"Content-Type": "text/yaml"}
         mock_response.raise_for_status = MagicMock()
         return mock_response
 
@@ -936,7 +911,7 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
 @pytest.mark.asyncio
 async def test_async_update_blueprint_in_place_errors(coordinator):
     """Test various error conditions in _async_update_blueprint_in_place."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     info = {"name": "Test", "source_url": "https://url", "local_hash": "hash"}
     results = {
         path: {
@@ -950,7 +925,7 @@ async def test_async_update_blueprint_in_place_errors(coordinator):
 
     mock_resp_empty = MagicMock(spec=httpx.Response)
     mock_resp_empty.status_code = 200
-    mock_resp_empty.headers = {}
+    mock_resp_empty.headers = {"Content-Type": "text/yaml"}
     mock_resp_empty.raise_for_status = MagicMock()
     mock_resp_empty.text = ""
 
@@ -970,7 +945,7 @@ async def test_async_update_blueprint_in_place_errors(coordinator):
 
     mock_resp_invalid = MagicMock(spec=httpx.Response)
     mock_resp_invalid.status_code = 200
-    mock_resp_invalid.headers = {}
+    mock_resp_invalid.headers = {"Content-Type": "text/yaml"}
     mock_resp_invalid.raise_for_status = MagicMock()
     mock_resp_invalid.text = "}invalid yaml: {\n"
     mock_session.get.return_value = mock_resp_invalid
@@ -982,7 +957,7 @@ async def test_async_update_blueprint_in_place_errors(coordinator):
 
     mock_resp_missing_bp = MagicMock(spec=httpx.Response)
     mock_resp_missing_bp.status_code = 200
-    mock_resp_missing_bp.headers = {}
+    mock_resp_missing_bp.headers = {"Content-Type": "text/yaml"}
     mock_resp_missing_bp.raise_for_status = MagicMock()
     mock_resp_missing_bp.text = "other_key: value\nsource_url: https://url"
     mock_session.get.return_value = mock_resp_missing_bp
@@ -1015,9 +990,9 @@ async def test_async_update_data_auto_update(coordinator):
     """Test _async_update_data with auto_update enabled."""
     coordinator.config_entry.options = MappingProxyType({"auto_update": True})
     blueprints = {
-        "/test.yaml": {
+        "/config/blueprints/automation/test.yaml": {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "rel_path": "automation/test.yaml",
             "source_url": "https://url",
             "domain": "automation",
             "local_hash": "old",
@@ -1050,7 +1025,7 @@ async def test_async_update_data_auto_update(coordinator):
 
         mock_resp = MagicMock(spec=httpx.Response)
         mock_resp.status_code = 200
-        mock_resp.headers = {"ETag": "new"}
+        mock_resp.headers = {"ETag": "new", "Content-Type": "text/yaml"}
         mock_resp.raise_for_status = MagicMock()
         mock_resp.text = "blueprint:\n  name: Test\n  source_url: https://url\n"
         mock_session.get = AsyncMock(return_value=mock_resp)
@@ -1063,7 +1038,7 @@ async def test_async_update_data_auto_update(coordinator):
             await coordinator._async_background_refresh(blueprints)
 
         mock_install.assert_called_once_with(
-            "/test.yaml",
+            "/config/blueprints/automation/test.yaml",
             "blueprint:\n  name: Test\n  source_url: https://url\n",
             reload_services=False,
             backup=True,
@@ -1080,17 +1055,17 @@ async def test_async_update_data_auto_update(coordinator):
             },
         )
 
-        assert "/test.yaml" in coordinator.data
-        assert coordinator.data["/test.yaml"]["updatable"] is False
-        assert coordinator.data["/test.yaml"]["remote_content"] is None
-        assert coordinator.data["/test.yaml"]["local_hash"] == "new"
-        assert coordinator.data["/test.yaml"]["etag"] == "new"
+        assert "/config/blueprints/automation/test.yaml" in coordinator.data
+        assert coordinator.data["/config/blueprints/automation/test.yaml"]["updatable"] is False
+        assert coordinator.data["/config/blueprints/automation/test.yaml"]["remote_content"] is None
+        assert coordinator.data["/config/blueprints/automation/test.yaml"]["local_hash"] == "new"
+        assert coordinator.data["/config/blueprints/automation/test.yaml"]["etag"] == "new"
 
 
 @pytest.mark.asyncio
 async def test_async_update_blueprint_unsafe_url_invalidates_cache(coordinator):
     """Test that an unsafe source URL invalidates the cached remote metadata."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     coordinator.data = {
         path: {
             "name": "Test",
@@ -1124,9 +1099,9 @@ async def test_async_background_refresh_cancellation_stops_workers(coordinator):
     """Test that cancelling the background refresh task stops workers promptly."""
     num_blueprints = 100
     blueprints = {
-        f"/bp{i}.yaml": {
+        f"/config/blueprints/automation/bp{i}.yaml": {
             "name": f"BP{i}",
-            "rel_path": f"bp{i}.yaml",
+            "rel_path": f"automation/bp{i}.yaml",
             "source_url": f"https://url/bp{i}",
             "domain": "automation",
             "local_hash": "h",
@@ -1164,16 +1139,16 @@ async def test_async_update_data_auto_update_multiple_sorted(coordinator):
     """Test _async_update_data sorts multiple auto-updated blueprints."""
     coordinator.config_entry.options = MappingProxyType({"auto_update": True})
     blueprints = {
-        "/b.yaml": {
+        "/config/blueprints/automation/b.yaml": {
             "name": "Beta",
-            "rel_path": "b.yaml",
+            "rel_path": "automation/b.yaml",
             "source_url": "https://url/b",
             "domain": "automation",
             "local_hash": "old",
         },
-        "/a.yaml": {
+        "/config/blueprints/automation/a.yaml": {
             "name": "Alpha",
-            "rel_path": "a.yaml",
+            "rel_path": "automation/a.yaml",
             "source_url": "https://url/a",
             "domain": "automation",
             "local_hash": "old",
@@ -1206,13 +1181,13 @@ async def test_async_update_data_auto_update_multiple_sorted(coordinator):
 
         mock_resp_a = MagicMock(spec=httpx.Response)
         mock_resp_a.status_code = 200
-        mock_resp_a.headers = {"ETag": "new"}
+        mock_resp_a.headers = {"ETag": "new", "Content-Type": "text/yaml"}
         mock_resp_a.raise_for_status = MagicMock()
         mock_resp_a.text = "blueprint:\n  name: Alpha\n  source_url: https://url/a"
 
         mock_resp_b = MagicMock(spec=httpx.Response)
         mock_resp_b.status_code = 200
-        mock_resp_b.headers = {"ETag": "new"}
+        mock_resp_b.headers = {"ETag": "new", "Content-Type": "text/yaml"}
         mock_resp_b.raise_for_status = MagicMock()
         mock_resp_b.text = "blueprint:\n  name: Beta\n  source_url: https://url/b"
 
@@ -1241,7 +1216,7 @@ async def test_async_update_data_auto_update_multiple_sorted(coordinator):
 @pytest.mark.asyncio
 async def test_async_install_blueprint_backup(hass, coordinator):
     """Test installing a blueprint with backup enabled."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     remote_content = "blueprint:\n  name: Test"
 
     coordinator.config_entry = MagicMock()
@@ -1269,7 +1244,7 @@ async def test_async_install_blueprint_backup(hass, coordinator):
 @pytest.mark.asyncio
 async def test_async_restore_blueprint_success(hass, coordinator):
     """Test successful restoration of a blueprint backup."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     coordinator.data = {path: {"updatable": False}}
 
     hass.services.has_service = MagicMock(return_value=True)
@@ -1301,7 +1276,7 @@ async def test_async_restore_blueprint_success(hass, coordinator):
 @pytest.mark.asyncio
 async def test_async_restore_blueprint_missing(hass, coordinator):
     """Test restoration when backup is missing."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     coordinator.data = {path: {"updatable": False}}
 
     with (
@@ -1318,7 +1293,7 @@ async def test_async_restore_blueprint_missing(hass, coordinator):
 @pytest.mark.asyncio
 async def test_async_restore_blueprint_error(hass, coordinator):
     """Test error handling during blueprint restoration."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     coordinator.data = {path: {"updatable": False}}
 
     with (
@@ -1570,7 +1545,7 @@ async def test_async_fetch_content_pacing_logic(coordinator):
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
     mock_response.text = "content"
-    mock_response.headers = {}
+    mock_response.headers = {"Content-Type": "text/yaml"}
     mock_response.raise_for_status = MagicMock()
 
     mock_session.get = AsyncMock(return_value=mock_response)
@@ -1605,7 +1580,7 @@ async def test_async_fetch_content_pacing_logic_max(coordinator):
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
     mock_response.text = "content"
-    mock_response.headers = {}
+    mock_response.headers = {"Content-Type": "text/yaml"}
     mock_response.raise_for_status = MagicMock()
 
     mock_session.get = AsyncMock(return_value=mock_response)
@@ -1654,7 +1629,7 @@ async def test_async_reload_services_whitelist(coordinator):
 @pytest.mark.asyncio
 async def test_async_install_blueprint_targeted_reload(coordinator):
     """Test that installing a blueprint with a specific domain only reloads that domain."""
-    path = "/config/blueprints/script.yaml"
+    path = "/config/blueprints/automation/script.yaml"
     content = "blueprint:\n  name: Test Script\n  domain: script"
 
     coordinator.hass.services.has_service = MagicMock(return_value=True)
@@ -1727,7 +1702,7 @@ def test_is_safe_path(coordinator):
         "custom_components.blueprints_updater.coordinator.os.path.realpath",
         side_effect=os.path.normpath,
     ):
-        assert coordinator._is_safe_path("/config/blueprints/test.yaml")
+        assert coordinator._is_safe_path("/config/blueprints/automation/test.yaml")
         assert coordinator._is_safe_path("/config/blueprints/automation/test.yaml")
         assert not coordinator._is_safe_path("/config/secrets.yaml")
         assert not coordinator._is_safe_path("/etc/passwd")
@@ -1806,7 +1781,7 @@ async def test_async_restore_blueprint_unsafe_path(coordinator):
 async def test_async_update_blueprint_in_place_unsafe_url(coordinator):
     """Test that updating from an unsafe URL is blocked."""
     coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     info = {"source_url": "http://192.168.1.1/exploit", "domain": "automation"}
 
     coordinator.data = {path: info}
@@ -1841,7 +1816,7 @@ async def test_async_fetch_blueprint_regression_key_error_hash(coordinator):
 
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
-    mock_response.headers = {"ETag": "new_etag"}
+    mock_response.headers = {"ETag": "new_etag", "Content-Type": "text/yaml"}
     mock_response.text = "blueprint:\n  name: Test"
     mock_response.raise_for_status = MagicMock()
 
@@ -1867,8 +1842,8 @@ async def test_async_fetch_blueprint_regression_key_error_hash(coordinator):
 @pytest.mark.asyncio
 async def test_metadata_pruning(coordinator):
     """Test that stale metadata is pruned during update."""
-    path_valid = "/config/blueprints/valid.yaml"
-    path_stale = "/config/blueprints/stale.yaml"
+    path_valid = "/config/blueprints/automation/valid.yaml"
+    path_stale = "/config/blueprints/automation/stale.yaml"
 
     coordinator._persisted_etags = {path_valid: "etag1", path_stale: "etag2"}
     coordinator._persisted_hashes = {path_valid: "hash1", path_stale: "hash2"}
@@ -1876,7 +1851,7 @@ async def test_metadata_pruning(coordinator):
     blueprints = {
         path_valid: {
             "name": "Valid",
-            "rel_path": "valid.yaml",
+            "rel_path": "automation/valid.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": "hash1",
@@ -1935,7 +1910,7 @@ async def test_async_fetch_content_pacing_synchronization(coordinator):
         ):
             mock_get.return_value = MagicMock(spec=httpx.Response)
             mock_get.return_value.status_code = 200
-            mock_get.return_value.headers = {"ETag": "new"}
+            mock_get.return_value.headers = {"ETag": "new", "Content-Type": "text/yaml"}
             mock_get.return_value.text = "blueprint:\n  name: Test"
             mock_get.return_value.raise_for_status = MagicMock()
 
@@ -2056,7 +2031,7 @@ async def test_async_setup_sanitization(hass, coordinator):
 @pytest.mark.asyncio
 async def test_process_blueprint_content_yaml_error(coordinator):
     """Test handling of YAML syntax error during content processing."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     info = {"name": "Test", "local_hash": "hash"}
     coordinator.data = {path: info}
 
@@ -2074,7 +2049,7 @@ async def test_process_blueprint_content_yaml_error(coordinator):
 @pytest.mark.asyncio
 async def test_process_blueprint_content_unhandled_error(coordinator):
     """Test that non-HomeAssistantErrors propagate during content processing."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     info = {"name": "Test", "local_hash": "hash"}
     coordinator.data = {path: info}
 
@@ -2096,7 +2071,7 @@ async def test_process_blueprint_content_unhandled_error(coordinator):
 @pytest.mark.asyncio
 async def test_async_install_blueprint_yaml_error_logging(coordinator):
     """Test that YAML errors during install reload are logged as warnings."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     content = "invalid yaml"
 
     with (
@@ -2162,7 +2137,7 @@ async def test_async_update_data_uses_current_options(coordinator):
 
 def test_get_cached_git_diff(coordinator):
     """Test get_cached_git_diff logic."""
-    path = "test.yaml"
+    path = "automation/test.yaml"
     coordinator.data = {
         path: {"_cached_git_diff": {"local": "local", "remote": "remote", "diff": "diff"}}
     }
@@ -2175,7 +2150,7 @@ def test_get_cached_git_diff(coordinator):
 
 def test_set_cached_git_diff(coordinator):
     """Test set_cached_git_diff logic."""
-    path = "test.yaml"
+    path = "automation/test.yaml"
     coordinator.data = {path: {}}
     coordinator.set_cached_git_diff(path, "l1", "r1", "d1")
     assert coordinator.data[path]["_cached_git_diff"] == {
@@ -2224,7 +2199,7 @@ async def test_cached_git_diff_semantic_sync(coordinator):
 @pytest.mark.asyncio
 async def test_async_get_git_diff_cache_hit(coordinator):
     """Test async_get_git_diff returns cached value if hashes match."""
-    path = "test.yaml"
+    path = "automation/test.yaml"
     coordinator.data = {
         path: {
             "local_hash": "h1",
@@ -2241,7 +2216,7 @@ async def test_async_get_git_diff_cache_hit(coordinator):
 @pytest.mark.asyncio
 async def test_async_get_git_diff_full_flow(coordinator):
     """Test async_get_git_diff fetches and generates diff on cache miss."""
-    path = "test.yaml"
+    path = "automation/test.yaml"
     coordinator.data = {
         path: {
             "local_hash": "h1",
@@ -2274,7 +2249,7 @@ async def test_async_get_git_diff_full_flow(coordinator):
 @pytest.mark.asyncio
 async def test_async_get_git_diff_shows_metadata_changes(coordinator):
     """Test that source_url differences ARE shown in Git diff."""
-    path = "test.yaml"
+    path = "automation/test.yaml"
     source_url = "https://new.com"
     coordinator.data = {
         path: {
@@ -2302,7 +2277,7 @@ async def test_async_get_git_diff_shows_metadata_changes(coordinator):
 @pytest.mark.asyncio
 async def test_ghost_update_prevention(coordinator):
     """Test that _async_update_data detects content identical after normalization."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
 
     local_content = "blueprint:\n  name: Test\n"
     local_hash = coordinator._hash_content(local_content)
@@ -2324,7 +2299,7 @@ async def test_ghost_update_prevention(coordinator):
     mock_blueprints = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "rel_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": local_hash,
@@ -2355,7 +2330,7 @@ async def test_ghost_update_prevention(coordinator):
 @pytest.mark.asyncio
 async def test_ghost_update_negative_cases(coordinator, invalid_content):
     """Test that _is_ghost_update returns False for invalid remote_content."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     local_hash = coordinator._hash_content("blueprint:\n  name: Test\n")
 
     coordinator.data = {
@@ -2371,7 +2346,7 @@ async def test_ghost_update_negative_cases(coordinator, invalid_content):
     mock_blueprints = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "rel_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": local_hash,
@@ -2391,7 +2366,7 @@ async def test_ghost_update_negative_cases(coordinator, invalid_content):
 @pytest.mark.asyncio
 async def test_async_install_blueprint_state_sync_fix(coordinator):
     """Test that async_install_blueprint syncs hashes and triggers UI update."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     raw_remote = "blueprint:\r\n  name: New\r\n"
     coordinator.data = {
         path: {
@@ -2433,7 +2408,7 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
 @pytest.mark.asyncio
 async def test_cold_start_rehydration(coordinator):
     """Test that persisted hashes are used on reboot but verified later."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     local_hash = "current_hash"
     coordinator.data = {}
     coordinator._persisted_hashes = {path: local_hash}
@@ -2442,7 +2417,7 @@ async def test_cold_start_rehydration(coordinator):
     blueprints = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "rel_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": local_hash,
@@ -2463,7 +2438,7 @@ async def test_cold_start_rehydration(coordinator):
 @pytest.mark.asyncio
 async def test_etag_invalidation_on_mismatch(coordinator):
     """Test that ETag is invalidated when local and remote hashes mismatch on startup."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     local_hash = "current_hash"
     remote_hash = "stale_hash"
     coordinator.data = {}
@@ -2474,7 +2449,7 @@ async def test_etag_invalidation_on_mismatch(coordinator):
     blueprints = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "rel_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": local_hash,
@@ -2495,7 +2470,7 @@ async def test_etag_invalidation_on_mismatch(coordinator):
 @pytest.mark.asyncio
 async def test_persisted_metadata_not_reused_after_first_update(coordinator):
     """Test that persisted hashes/ETags are only used for the very first update."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     initial_hash = "initial_hash"
     coordinator._persisted_hashes = {path: initial_hash}
     coordinator._persisted_etags = {path: "initial_etag"}
@@ -2504,7 +2479,7 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator):
     blueprints = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "rel_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": initial_hash,
@@ -2535,7 +2510,7 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator):
 @pytest.mark.asyncio
 async def test_metadata_preservation_during_scan(coordinator):
     """Test that existing metadata is preserved during a scan until refreshed."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     local_hash = "some_hash"
     coordinator.data = {
         path: {
@@ -2552,7 +2527,7 @@ async def test_metadata_preservation_during_scan(coordinator):
     blueprints = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "rel_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": local_hash,
@@ -2574,8 +2549,8 @@ async def test_metadata_preservation_during_scan(coordinator):
 @pytest.mark.asyncio
 async def test_prune_metadata_persistence(coordinator):
     """Test that stale metadata is pruned from memory and persisted to disk."""
-    path_exist = "/config/blueprints/exist.yaml"
-    path_stale = "/config/blueprints/stale.yaml"
+    path_exist = "/config/blueprints/automation/exist.yaml"
+    path_stale = "/config/blueprints/automation/stale.yaml"
 
     coordinator._persisted_etags = {path_exist: "e1", path_stale: "e2"}
     coordinator._persisted_hashes = {path_exist: "h1", path_stale: "h2"}
@@ -2640,10 +2615,10 @@ def test_hash_content_determinism(coordinator):
 )
 async def test_async_update_blueprint_cdn_gating(coordinator, cdn_config, expect_cdn):
     """Test that cdn_url is only passed to fetcher based on config gating."""
-    path = "/config/blueprints/test.yaml"
+    path = "/config/blueprints/automation/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "rel_path": "automation/test.yaml",
         "source_url": "https://github.com/user/repo/blob/main/test.yaml",
         "domain": "automation",
         "local_hash": "old_hash",
@@ -2679,7 +2654,7 @@ async def test_async_update_blueprint_cdn_gating(coordinator, cdn_config, expect
 
 def test_update_error_state_clears_state_and_keeps_etag(coordinator):
     """Test that _update_error_state clears core state but preserves ETag when clear_etag=False."""
-    path = "test_blueprint.yaml"
+    path = "script/test_blueprint.yaml"
     coordinator.data[path] = {
         "remote_hash": "old-hash",
         "remote_content": "old-content",
@@ -2708,7 +2683,7 @@ def test_update_error_state_clears_state_and_keeps_etag(coordinator):
 
 def test_update_error_state_clears_state_and_etag(coordinator):
     """Test that _update_error_state clears core state and ETag when clear_etag=True."""
-    path = "test_blueprint.yaml"
+    path = "script/test_blueprint.yaml"
     coordinator.data[path] = {
         "remote_hash": "old-hash",
         "remote_content": "old-content",

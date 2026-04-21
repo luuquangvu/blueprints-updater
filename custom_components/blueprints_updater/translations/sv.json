@@ -108,7 +108,7 @@
     "auto_update_message": "Följande blueprints har uppdaterats automatiskt:\n\n{blueprints}",
     "update_available_short": "Uppdatering tillgänglig",
     "update_available": "Uppdatering tillgänglig från {source_url}",
-    "auto_update_warning": "Varning: Uppdateringar kan medföra risker för bakåtkompatibilitet om författaren introducerar banbrytande ändringar (breaking changes). Det rekommenderas starkt att aktivera säkerhetskopieringsalternativet före installation.",
+    "update_safety_message": "Tips: Det rekommenderas att aktivera säkerhetskopieringsalternativet innan du installerar uppdateringar.",
     "usage_warning": "Varning: Denna uppdatering kommer att påverka {count} körande {domain}.",
     "up_to_date": "Uppdaterad",
     "install_error": "Kan inte installera blueprint: {error}. Fjärrfilen har fel och kan inte appliceras säkert.",
@@ -123,6 +123,19 @@
     "unsafe_url": "Osäker URL: {error}",
     "content_missing": "Innehållet i blueprint saknas eller kunde inte hämtas.",
     "git_diff_title": "Kodändringar (Git Diff)",
-    "semantic_sync_notice": "Denna blueprint är semantiskt identisk, men kräver en strukturell uppdatering för att anpassas till den nya kanoniska formateringen (t.ex. normalisering av radbrytningar, metadata-injektion)."
+    "semantic_sync_notice": "Denna blueprint är semantiskt identisk, men kräver en strukturell uppdatering för att anpassas till den nya kanoniska formateringen (t.ex. normalisering av radbrytningar, metadata-injektion).",
+    "breaking_risks_title": "RISKRAPPORT FÖR UPPDATERING",
+    "auto_update_blocked_by_breaking_change": "Automatisk uppdatering blockerad för {name} på grund av upptäckta stora förändringar",
+    "risk_new_mandatory": "Ny obligatorisk inmatning {input} har lagts till.",
+    "risk_missing_input": "Entiteten {entity} saknar obligatorisk inmatning {input} som krävs av den nya versionen.",
+    "risk_removed_input": "Inmatning {input} har tagits bort, men används för närvarande av {count} entiteter.",
+    "risk_selector_mismatch": "Selectortyp har ändrats för {input}: från {old_type} till {new_type} (påverkar {count} entiteter).",
+    "risk_validation_failed_blueprint": "Nytt blueprint-innehåll är ogiltigt: {error}",
+    "risk_unknown": "Okänt fel",
+    "risk_legacy": "{message}",
+    "risk_compatibility": "Kompatibilitetsfel för {entity}: {error}",
+    "risk_system_error": "Systemfel: {error}",
+    "breaking_risks_report": "Automatisk uppdatering för {name} blockerades som en försiktighetsåtgärd. Upptäckta risker:\n{risks}\n\nGranska och installera manuellt om det är korrekt.",
+    "auto_update_blocked_by_system_error": "Automatisk uppdatering för {name} har pausats på grund av ett oväntat fel vid kompatibilitetskontrollen."
   }
 }

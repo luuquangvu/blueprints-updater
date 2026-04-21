@@ -108,7 +108,7 @@
     "auto_update_message": "Os seguintes blueprints foram atualizados automaticamente:\n\n{blueprints}",
     "update_available_short": "Atualização disponível",
     "update_available": "Atualização disponível em {source_url}",
-    "auto_update_warning": "Aviso: As atualizações podem acarretar riscos de retrocompatibilidade se o autor introduzir alterações profundas (breaking changes). Recomenda-se vivamente ativar a opção de backup antes de instalar.",
+    "update_safety_message": "Dica: Recomenda-se ativar a opção de backup antes de instalar atualizações.",
     "usage_warning": "Aviso: Esta atualização afetará {count} {domain} em execução.",
     "up_to_date": "Atualizado",
     "install_error": "Não foi possível instalar o blueprint: {error}. O ficheiro remoto contém erros e não pode ser aplicado em segurança.",
@@ -123,6 +123,19 @@
     "unsafe_url": "URL inseguro: {error}",
     "content_missing": "O conteúdo do blueprint está ausente ou não pôde ser obtido.",
     "git_diff_title": "Alterações de Código (Git Diff)",
-    "semantic_sync_notice": "Este blueprint é semanticamente idêntico, mas requer uma atualização estrutural para se alinhar com a nova formatação canónica (ex: normalização de quebras de linha, injeção de metadados)."
+    "semantic_sync_notice": "Este blueprint é semanticamente idêntico, mas requer uma atualização estrutural para se alinhar com a nova formatação canónica (ex: normalização de quebras de linha, injeção de metadados).",
+    "breaking_risks_title": "RELATÓRIO DE RISCO DE ATUALIZAÇÃO",
+    "auto_update_blocked_by_breaking_change": "Atualização automática bloqueada para {name} devido a alterações críticas detetadas",
+    "risk_new_mandatory": "Nova entrada obrigatória {input} adicionada.",
+    "risk_missing_input": "Falta à entidade {entity} a entrada obrigatória {input} exigida pela nova versão.",
+    "risk_removed_input": "Entrada {input} removida, mas atualmente utilizada por {count} entidades.",
+    "risk_selector_mismatch": "Tipo de seletor alterado para {input}: de {old_type} para {new_type} (afeta {count} entidades).",
+    "risk_validation_failed_blueprint": "O novo conteúdo do blueprint é inválido: {error}",
+    "risk_unknown": "Erro desconhecido",
+    "risk_legacy": "{message}",
+    "risk_compatibility": "Erro de compatibilidade para {entity}: {error}",
+    "risk_system_error": "Erro do sistema: {error}",
+    "breaking_risks_report": "A atualização automática para {name} foi bloqueada por precaução. Riscos detetados:\n{risks}\n\nPor favor, reveja e instale manualmente se estiver correto.",
+    "auto_update_blocked_by_system_error": "Atualização automática de {name} suspensa devido a um erro inesperado na verificação de compatibilidade."
   }
 }

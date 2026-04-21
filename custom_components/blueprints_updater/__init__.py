@@ -52,9 +52,9 @@ async def async_setup(hass: HomeAssistant, _: ConfigType) -> bool:
             _LOGGER.debug("Clearing Blueprints Updater translation cache due to config change")
             hass.data[DOMAIN]["translation_cache"] = {}
 
-        for coordinator in hass.data[DOMAIN].get("coordinators", {}).values():
-            if hasattr(coordinator, "clear_translations"):
-                coordinator.clear_translations()
+        for active_coordinator in hass.data[DOMAIN].get("coordinators", {}).values():
+            if hasattr(active_coordinator, "clear_translations"):
+                active_coordinator.clear_translations()
 
     hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _clear_cache)
 

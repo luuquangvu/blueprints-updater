@@ -7,15 +7,17 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-  "homeassistant>=2026.4.3",
-  "ruff",
-  "ty",
-  "pyright",
-  "pytest",
-  "pytest-asyncio",
+  "h2>=4,<5",
+  "homeassistant>=2026.4",
   "interrogate",
   "packaging",
+  "pyright",
+  "pytest>=9",
+  "pytest-asyncio",
+  "pytest-cov",
+  "ruff",
   "tomlkit",
+  "ty",
 ]
 
 [tool.ruff]
@@ -48,6 +50,7 @@ indent-style = "space"
 asyncio_mode = "auto"
 pythonpath = ["."]
 filterwarnings = ["ignore::DeprecationWarning"]
+addopts = ["--cov=custom_components", "--cov-fail-under=90"]
 
 [tool.pyright]
 typeCheckingMode = "standard"
@@ -55,4 +58,4 @@ typeCheckingMode = "standard"
 [tool.interrogate]
 fail-under = 100
 ignore_nested_functions = true
-exclude = ["tests"]
+exclude = ["tests", "scratch"]

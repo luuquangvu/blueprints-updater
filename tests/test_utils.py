@@ -1,6 +1,7 @@
 """Tests for Blueprints Updater utilities."""
 
 import asyncio
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -146,25 +147,13 @@ def test_retry_async_invalid_args():
             pass
 
     with pytest.raises(TypeError, match="exceptions must be a tuple of Exception subclasses"):
-
-        @retry_async(3, [Exception])  # type: ignore
-        async def mock_func_list():
-            """Mock mock_func_list."""
-            pass
+        cast(Any, retry_async)(3, [Exception])
 
     with pytest.raises(TypeError, match="All items in exceptions must be subclasses of Exception"):
-
-        @retry_async(3, (str,))  # type: ignore
-        async def mock_func_4():
-            """Mock mock_func_4."""
-            pass
+        cast(Any, retry_async)(3, (str,))
 
     with pytest.raises(TypeError, match="All items in exceptions must be subclasses of Exception"):
-
-        @retry_async(3, (Exception, str))  # type: ignore
-        async def mock_func_5():
-            """Mock mock_func_5."""
-            pass
+        cast(Any, retry_async)(3, (Exception, str))
 
 
 def test_get_config_int():

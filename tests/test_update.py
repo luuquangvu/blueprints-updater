@@ -1,5 +1,6 @@
 """Tests for Blueprints Updater update entities."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
@@ -73,7 +74,15 @@ async def test_update_entities_lifecycle(hass):
     coordinator.async_add_listener = MagicMock()
 
     hass.data = {DOMAIN: {"coordinators": {"test_entry": coordinator}}}
-    hass.async_create_task = MagicMock()
+
+    tasks_created = []
+
+    def _async_create_task(coro, name=None):
+        task = asyncio.create_task(coro)
+        tasks_created.append(task)
+        return task
+
+    hass.async_create_task = MagicMock(side_effect=_async_create_task)
     hass.states = MagicMock()
 
     async_add_entities = MagicMock()
@@ -114,7 +123,11 @@ async def test_update_entities_lifecycle(hass):
         entity.entity_id = "update.test1"
         mock_entity_registry.async_get.return_value = MagicMock()
 
+        tasks_created.clear()
         update_callback()
+
+        assert len(tasks_created) == 1
+        await tasks_created[0]
 
         mock_entity_registry.async_remove.assert_called_once_with("update.test1")
 
@@ -146,10 +159,9 @@ def coordinator():
             "up_to_date": "Up to date",
             "update_available_short": "Update available",
             "update_available": f"Update available from {kwargs.get('source_url')}",
-            "auto_update_warning": (
-                "Warning: Updates may carry backward incompatibility risks "
-                "if the author introduces breaking changes. It is highly recommended "
-                "to enable the backup option before installing."
+            "update_safety_message": (
+                "Safety Tip: It is recommended to enable the backup option "
+                "before installing updates to ensure you can revert if needed."
             ),
             "usage_warning": (
                 f"Warning: This update will affect {kwargs.get('count')} "
@@ -201,9 +213,8 @@ async def test_entity_properties(coordinator):
     assert entity.release_summary == "Update available"
     assert await entity.async_release_notes() == (
         "Update available from https://url.com\n\n"
-        "Warning: Updates may carry backward incompatibility risks "
-        "if the author introduces breaking changes. It is highly recommended "
-        "to enable the backup option before installing."
+        "Safety Tip: It is recommended to enable the backup option "
+        "before installing updates to ensure you can revert if needed."
     )
     assert entity.extra_state_attributes == {}
 

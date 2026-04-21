@@ -9,7 +9,11 @@ from typing import Any, Protocol, runtime_checkable
 
 from homeassistant.core import HomeAssistant
 
-from custom_components.blueprints_updater.coordinator import BlueprintMetadata, GitDiffResult
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintMetadata,
+    GitDiffResult,
+    StructuredRisk,
+)
 
 
 @runtime_checkable
@@ -165,6 +169,16 @@ class BlueprintCoordinatorInternal(Protocol):
         """Perform a background refresh of all blueprints."""
         ...
 
+    async def _detect_risks_for_update(
+        self,
+        path: str,
+        info: dict[str, Any],
+        remote_content: str,
+        last_error: str | None,
+    ) -> list[StructuredRisk]:
+        """Detect potential breaking changes or security risks."""
+        ...
+
     def _is_safe_path(self, path: str) -> bool:
         """Check if path is within blueprints directory."""
         ...
@@ -180,11 +194,6 @@ class BlueprintCoordinatorInternal(Protocol):
     @staticmethod
     def _normalize_url(url: str) -> str:
         """Normalize URL for consistent identifier usage."""
-        ...
-
-    @staticmethod
-    def _parse_forum_content(json_data: dict[str, Any]) -> str | None:
-        """Parse blueprint content from forum JSON responses."""
         ...
 
     @staticmethod

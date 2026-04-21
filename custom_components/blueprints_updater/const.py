@@ -1,6 +1,7 @@
 """Constants for the Blueprints Updater integration."""
 
 import re
+from enum import StrEnum
 
 DOMAIN = "blueprints_updater"
 CONF_UPDATE_INTERVAL = "update_interval"
@@ -34,12 +35,11 @@ DOMAIN_GIST = "gist.github.com"
 DOMAIN_HA_FORUM = "community.home-assistant.io"
 DOMAIN_JSDELIVR = "cdn.jsdelivr.net"
 
-RE_GITHUB_BLOB = re.compile(r"/blob/", re.IGNORECASE)
-RE_GIST_RAW = re.compile(r"/raw/?$", re.IGNORECASE)
 RE_FORUM_TOPIC_ID = re.compile(r"/t/(?:[^/]+/)?(\d+)")
 RE_FORUM_CODE_BLOCK = re.compile(r"<code[^>]*>(.*?)</code>", re.DOTALL)
 RE_BLUEPRINT_KEY = re.compile(r"^(blueprint:\s*(?:#.*)?)$", re.MULTILINE)
 RE_URL_REDACTION = re.compile(r"https?://\S+", re.IGNORECASE)
+RE_GIST_RAW = re.compile(r"/raw(/|$)")
 
 MAX_CONCURRENT_REQUESTS = 5
 REQUEST_TIMEOUT = 15
@@ -56,4 +56,36 @@ SPECIAL_USE_TLDS = {
     "example",
     "internal",
     "onion",
+}
+
+
+class BlueprintRiskType(StrEnum):
+    """Risk types for breaking change detection."""
+
+    LEGACY = "legacy_risk"
+    NEW_MANDATORY = "new_mandatory"
+    MISSING_INPUT = "missing_input"
+    REMOVED_INPUT = "removed_input"
+    SELECTOR_MISMATCH = "selector_mismatch"
+    COMPATIBILITY = "compatibility_risk"
+    VALIDATION_FAILED = "validation_failed_blueprint"
+    SYSTEM_ERROR = "system_error"
+
+
+class BlueprintBlockingReason(StrEnum):
+    """Reasons why an update or auto-update is blocked."""
+
+    BREAKING_CHANGE = "auto_update_blocked_by_breaking_change"
+    SYSTEM_ERROR = "auto_update_blocked_by_system_error"
+
+
+RISK_TYPE_TRANSLATIONS = {
+    BlueprintRiskType.LEGACY: "risk_legacy",
+    BlueprintRiskType.NEW_MANDATORY: "risk_new_mandatory",
+    BlueprintRiskType.MISSING_INPUT: "risk_missing_input",
+    BlueprintRiskType.REMOVED_INPUT: "risk_removed_input",
+    BlueprintRiskType.SELECTOR_MISMATCH: "risk_selector_mismatch",
+    BlueprintRiskType.COMPATIBILITY: "risk_compatibility",
+    BlueprintRiskType.VALIDATION_FAILED: "risk_validation_failed_blueprint",
+    BlueprintRiskType.SYSTEM_ERROR: "risk_system_error",
 }

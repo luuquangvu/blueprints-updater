@@ -23,7 +23,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import BlueprintUpdateCoordinator
+from .coordinator import BlueprintUpdateCoordinator, StructuredRisk
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,73 +45,109 @@ async def async_setup_entry(
 
     current_entities: dict[str, BlueprintUpdateEntity] = {}
 
-    @callback
-    def async_update_entities() -> None:
-        """Add new blueprint entities or remove deleted ones from Home Assistant."""
-        entity_registry = er.async_get(hass)
+    def async_update_entities_wrapper() -> None:
+        """Wrapper for async_update_entities to be used as callback."""
+        async_update_entities(hass, entry, coordinator, current_entities, async_add_entities)
 
-        entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
-        new_id_to_path: dict[str, str] = {}
-        legacy_id_to_new_id: dict[str, str] = {}
-        for info in coordinator.data.values():
-            rel_path = info["rel_path"]
-            new_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, rel_path)
-            legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id(rel_path)
-            new_id_to_path[new_id] = rel_path
-            legacy_id_to_new_id[legacy_id] = new_id
+    async_update_entities_wrapper()
 
-        for entity_entry in entries:
-            if entity_entry.domain != "update":
-                continue
+    entry.async_on_unload(coordinator.async_add_listener(async_update_entities_wrapper))
 
-            unique_id = entity_entry.unique_id
-            if unique_id in new_id_to_path:
-                continue
 
-            if new_id := legacy_id_to_new_id.get(unique_id):
-                _LOGGER.info(
-                    "Migrating legacy unique_id for %s: %s -> %s",
-                    entity_entry.entity_id,
-                    unique_id,
-                    new_id,
+async def _async_purge_entity_registry(
+    hass: HomeAssistant,
+    entity_registry: er.EntityRegistry,
+    entity_id: str,
+    entity: BlueprintUpdateEntity | None = None,
+) -> None:
+    """Remove entity from registry and state machine, optionally calling async_remove.
+
+    Args:
+        hass: HomeAssistant instance.
+        entity_registry: The entity registry.
+        entity_id: The entity ID to remove.
+        entity: Optional entity object to handle lifecycle cleanup first.
+    """
+    if entity and entity.hass:
+        try:
+            await entity.async_remove(force_remove=True)
+        except Exception:
+            _LOGGER.exception("Failed to call async_remove for entity %s", entity_id)
+
+    try:
+        if entity_registry.async_get(entity_id):
+            entity_registry.async_remove(entity_id)
+        hass.states.async_remove(entity_id)
+    except Exception:
+        _LOGGER.exception("Failed to purge registry/state for entity %s", entity_id)
+
+
+@callback
+def async_update_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: BlueprintUpdateCoordinator,
+    current_entities: dict[str, BlueprintUpdateEntity],
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Add new blueprint entities or remove deleted ones from Home Assistant."""
+    entity_registry = er.async_get(hass)
+
+    entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+    new_id_to_path: dict[str, str] = {}
+    legacy_id_to_new_id: dict[str, str] = {}
+    for info in coordinator.data.values():
+        rel_path = info["rel_path"]
+        new_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, rel_path)
+        legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id(rel_path)
+        new_id_to_path[new_id] = rel_path
+        legacy_id_to_new_id[legacy_id] = new_id
+
+    for entity_entry in entries:
+        if entity_entry.domain != "update":
+            continue
+
+        unique_id = entity_entry.unique_id
+        if unique_id in new_id_to_path:
+            continue
+
+        if new_id := legacy_id_to_new_id.get(unique_id):
+            _LOGGER.info(
+                "Migrating legacy unique_id for %s: %s -> %s",
+                entity_entry.entity_id,
+                unique_id,
+                new_id,
+            )
+            entity_registry.async_update_entity(entity_entry.entity_id, new_unique_id=new_id)
+            continue
+
+        _LOGGER.debug("Removing orphaned registry entry for entity: %s", entity_entry.entity_id)
+        entity_registry.async_remove(entity_entry.entity_id)
+        hass.states.async_remove(entity_entry.entity_id)
+
+    new_entities = []
+    for path, info in coordinator.data.items():
+        if path not in current_entities:
+            entity = BlueprintUpdateEntity(coordinator, path, info)
+            current_entities[path] = entity
+            new_entities.append(entity)
+
+    if new_entities:
+        _LOGGER.debug("Adding %d new blueprint update entities", len(new_entities))
+        async_add_entities(new_entities)
+
+    removed_paths = []
+    removed_paths.extend(path for path in current_entities if path not in coordinator.data)
+    if removed_paths:
+        for path in removed_paths:
+            _LOGGER.debug("Removing blueprint update entity for deleted file: %s", path)
+            entity = current_entities.pop(path)
+            if entity.entity_id:
+                hass.async_create_task(
+                    _async_purge_entity_registry(hass, entity_registry, entity.entity_id, entity)
                 )
-                entity_registry.async_update_entity(entity_entry.entity_id, new_unique_id=new_id)
-                continue
-
-            _LOGGER.debug("Removing orphaned registry entry for entity: %s", entity_entry.entity_id)
-            entity_registry.async_remove(entity_entry.entity_id)
-            hass.states.async_remove(entity_entry.entity_id)
-
-        new_entities = []
-        for path, info in coordinator.data.items():
-            if path not in current_entities:
-                entity = BlueprintUpdateEntity(coordinator, path, info)
-                current_entities[path] = entity
-                new_entities.append(entity)
-
-        if new_entities:
-            _LOGGER.debug("Adding %d new blueprint update entities", len(new_entities))
-            async_add_entities(new_entities)
-
-        removed_paths = []
-        for path in current_entities:
-            if path not in coordinator.data:
-                removed_paths.append(path)
-
-        if removed_paths:
-            for path in removed_paths:
-                _LOGGER.debug("Removing blueprint update entity for deleted file: %s", path)
-                entity = current_entities.pop(path)
-                if entity.entity_id:
-                    if entity_registry.async_get(entity.entity_id):
-                        entity_registry.async_remove(entity.entity_id)
-                    hass.states.async_remove(entity.entity_id)
-                else:
-                    hass.async_create_task(entity.async_remove(force_remove=True))
-
-    async_update_entities()
-
-    entry.async_on_unload(coordinator.async_add_listener(async_update_entities))
+            elif entity and entity.hass:
+                hass.async_create_task(entity.async_remove(force_remove=True))
 
 
 class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], UpdateEntity):
@@ -147,6 +183,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         self._attr_release_url = info.get("source_url")
         self._attr_release_summary = None
         self._localized_error: str | None = None
+        self._localized_blocking_reason: str | None = None
 
     @property
     def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]
@@ -208,8 +245,6 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         notes = await self.coordinator.async_translate(
             "update_available", source_url=info.get("source_url", "<unknown>")
         )
-        notes += "\n\n" + await self.coordinator.async_translate("auto_update_warning")
-
         rel_path = info.get("rel_path", "")
         parts = rel_path.split("/", 1)
         domain = parts[0]
@@ -234,6 +269,14 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             notes += "\n\n" + await self.coordinator.async_translate(
                 "usage_warning", count=total_usage, domain=domain
             )
+
+        breaking_risks: list[StructuredRisk] = info.get("breaking_risks", [])
+        if breaking_risks:
+            risks_title = await self.coordinator.async_translate("breaking_risks_title")
+            risk_summary = await self.coordinator.async_summarize_risks(breaking_risks)
+            notes += f"\n\n{risks_title}\n{risk_summary}\n"
+
+        notes += "\n\n" + await self.coordinator.async_translate("update_safety_message")
 
         diff_result = await self.coordinator.async_get_git_diff(self._path)
 
@@ -285,6 +328,12 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             info = self.coordinator.data[self._path]
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
+            if blocking := info.get("update_blocking_reason"):
+                attrs["update_blocking_reason"] = self._localized_blocking_reason or blocking
+            if auto_update_error := info.get("auto_update_last_error"):
+                attrs["auto_update_last_error"] = auto_update_error
+            if risks := info.get("breaking_risks"):
+                attrs["breaking_risks"] = risks
         return attrs
 
     _cached_property_names_by_class: ClassVar[dict[type, list[str]]] = {}
@@ -337,6 +386,13 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 )
             else:
                 self._localized_error = await self.coordinator.async_translate(error)
+
+        self._localized_blocking_reason = None
+        if blocking := info.get("update_blocking_reason"):
+            name = info.get("name") or self.name
+            self._localized_blocking_reason = await self.coordinator.async_translate(
+                blocking, name=name
+            )
 
         if self.hass and self.entity_id:
             self.async_write_ha_state()

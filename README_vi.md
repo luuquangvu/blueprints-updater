@@ -15,10 +15,35 @@
 
 ---
 
+## Mục lục
+
+- [Blueprints Updater cho Home Assistant](#blueprints-updater-cho-home-assistant)
+  - [Mục lục](#mục-lục)
+  - [Tính năng chính](#tính-năng-chính)
+  - [Cài đặt](#cài-đặt)
+    - [Cách 1: Sử dụng HACS (Khuyên dùng)](#cách-1-sử-dụng-hacs-khuyên-dùng)
+    - [Cách 2: Cài đặt thủ công](#cách-2-cài-đặt-thủ-công)
+  - [Hướng dẫn thiết lập \& Cấu hình](#hướng-dẫn-thiết-lập--cấu-hình)
+  - [Xem thử ngay](#xem-thử-ngay)
+  - [Sao lưu \& Phục hồi (Backup \& Restore)](#sao-lưu--phục-hồi-backup--restore)
+    - [Kích hoạt Sao lưu](#kích-hoạt-sao-lưu)
+    - [Khôi phục bản Sao lưu](#khôi-phục-bản-sao-lưu)
+  - [Lớp bảo vệ Nâng cao (Advanced Compatibility Guard)](#lớp-bảo-vệ-nâng-cao-advanced-compatibility-guard)
+  - [Làm mới danh sách Blueprint](#làm-mới-danh-sách-blueprint)
+  - [Các câu hỏi thường gặp (FAQ)](#các-câu-hỏi-thường-gặp-faq)
+    - [Tại sao có bản cập nhật ngay sau khi vừa cài đặt?](#tại-sao-có-bản-cập-nhật-ngay-sau-khi-vừa-cài-đặt)
+    - [Tại sao tôi nhận được thông báo cập nhật khi đang dùng một bản Fork (nhánh rẽ) của blueprint?](#tại-sao-tôi-nhận-được-thông-báo-cập-nhật-khi-đang-dùng-một-bản-fork-nhánh-rẽ-của-blueprint)
+  - [Yêu cầu](#yêu-cầu)
+  - [Chất lượng Mã nguồn \& Bảo mật](#chất-lượng-mã-nguồn--bảo-mật)
+  - [Đóng góp](#đóng-góp)
+  - [Bản quyền](#bản-quyền)
+
+---
+
 ## Tính năng chính
 
 - **Tích hợp sâu như tính năng hệ thống**: Hoạt động mượt mà và đồng bộ như các bản cập nhật chính thức. Bạn có thể dễ dàng quản lý và cập nhật hàng loạt blueprint ngay trên dashboard.
-- **An toàn tuyệt đối, tự động sao lưu**: Mỗi bản cập nhật đều được kiểm tra kỹ về cú pháp YAML và khả năng tương thích trước khi áp dụng. Hệ thống sao lưu xoay vòng giúp bạn yên tâm khôi phục bất cứ lúc nào.
+- **Cơ chế Bảo vệ Tương thích Nâng cao (Advanced Compatibility Guard)**: Chủ động bảo vệ ngôi nhà thông minh khỏi các thay đổi gây lỗi (breaking changes). Trước khi áp dụng cập nhật, hệ thống thực hiện phân tích toàn diện toàn bộ automation và script phụ thuộc dựa trên nội dung blueprint mới, giúp nhận diện sớm rủi ro tương thích, lỗi hệ thống hoặc các xung đột tiềm ẩn nhằm ngăn ngừa tình trạng lỗi ngầm sau khi cập nhật.
 - **Tự động hóa hoàn toàn**: Khi bật chế độ tự động cập nhật, hệ thống sẽ thay bạn thực hiện mọi thao tác từ sao lưu, tải bản mới đến gửi thông báo chi tiết khi hoàn tất.
 - **Tối ưu hiệu suất và băng thông**: Sử dụng mã băm SHA256 và ETag để chỉ tải về khi thực sự có thay đổi từ nguồn, giảm thiểu tải cho hệ thống.
 - **Hỗ trợ Blueprint đa nền tảng**: Tương thích hoàn hảo với các tệp nguồn từ GitHub, GitHub Gist và Diễn đàn cộng đồng Home Assistant.
@@ -38,45 +63,64 @@
 
 [![Add Blueprints Updater to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=luuquangvu&repository=blueprints-updater&category=integration)
 
-1.  Mở **HACS** trong Home Assistant.
-2.  Tìm kiếm **Blueprints Updater**.
-3.  Nếu không tìm thấy, nhấp vào biểu tượng ba chấm ở góc trên cùng bên phải và chọn **Kho lưu trữ tùy chỉnh (Custom repositories)**.
-4.  Thêm `https://github.com/luuquangvu/blueprints-updater` với danh mục **Bộ tích hợp (Integration)**.
-5.  Tìm kiếm **Blueprints Updater** và nhấp vào **Tải xuống (Download)**.
-6.  Khởi động lại Home Assistant.
+1. Mở **HACS** trong Home Assistant.
+2. Tìm kiếm **Blueprints Updater**.
+3. Nếu không tìm thấy, nhấp vào biểu tượng ba chấm ở góc trên cùng bên phải và chọn **Kho lưu trữ tùy chỉnh (Custom repositories)**.
+4. Thêm `https://github.com/luuquangvu/blueprints-updater` với danh mục **Bộ tích hợp (Integration)**.
+5. Tìm kiếm **Blueprints Updater** và nhấp vào **Tải xuống (Download)**.
+6. Khởi động lại Home Assistant.
 
 ### Cách 2: Cài đặt thủ công
 
-1.  Tải bản phát hành mới nhất và giải nén các tệp.
-2.  Sao chép thư mục `custom_components/blueprints_updater` vào thư mục `config/custom_components/` của Home Assistant.
-3.  Khởi động lại Home Assistant.
+1. Tải bản phát hành mới nhất và giải nén các tệp.
+2. Sao chép thư mục `custom_components/blueprints_updater` vào thư mục `config/custom_components/` của Home Assistant.
+3. Khởi động lại Home Assistant.
 
 ---
 
 ## Hướng dẫn thiết lập & Cấu hình
 
-1.  Đi tới **Cài đặt (Settings)** > **Thiết bị & Dịch vụ (Devices & Services)**.
-2.  Nhấp vào **Thêm bộ tích hợp (Add Integration)** và tìm kiếm **Blueprints Updater**.
-3.  **Bật Tự động Cập nhật**: (Tùy chọn) Nếu được bật, các blueprint phù hợp với tiêu chí của bạn sẽ được cập nhật tự động mà không cần can thiệp thủ công. **Một thông báo hệ thống sẽ xuất hiện** sau mỗi lần tự động cập nhật thành công để bạn biết những blueprint nào đã được cập nhật.
-4.  Chọn **Khoảng thời gian cập nhật (Update Interval)** (mặc định là 24 giờ).
-5.  Chọn **Chế độ lọc (Filter Mode)**:
-    - **Cập nhật tất cả (Update All)**: Theo dõi tất cả blueprint tìm thấy trong thư mục của bạn.
-    - **Danh sách trắng (Whitelist)**: Chỉ theo dõi các blueprint bạn chọn cụ thể từ danh sách.
-    - **Danh sách đen (Blacklist)**: Theo dõi tất cả các blueprint _ngoại trừ_ những cái bạn chọn.
-6.  **Sử dụng jsDelivr CDN**: (Tùy chọn, mặc định là bật) Bật tính năng này để sử dụng CDN jsDelivr khi tải các blueprint từ GitHub, giúp tăng hiệu suất. Nếu CDN không thể truy cập hoặc trả về lỗi, hệ thống sẽ tự động sử dụng link GitHub gốc để đảm bảo việc cập nhật thành công.
-7.  Sau khi thêm, tích hợp sẽ quét các blueprint của bạn. Nếu tìm thấy bản cập nhật, chúng sẽ xuất hiện dưới dạng thực thể `update` trong bảng điều khiển của bạn.
+1. Đi tới **Cài đặt (Settings)** > **Thiết bị & Dịch vụ (Devices & Services)**.
+2. Nhấp vào **Thêm bộ tích hợp (Add Integration)** và tìm kiếm **Blueprints Updater**.
+3. **Bật Tự động Cập nhật**: (Tùy chọn) Nếu được bật, các blueprint phù hợp với tiêu chí của bạn sẽ được cập nhật tự động mà không cần can thiệp thủ công. **Một thông báo hệ thống sẽ xuất hiện** sau mỗi lần tự động cập nhật thành công để bạn biết những blueprint nào đã được cập nhật.
+4. Chọn **Khoảng thời gian cập nhật (Update Interval)** (mặc định là 24 giờ).
+5. Chọn **Chế độ lọc (Filter Mode)**:
+   - **Cập nhật tất cả (Update All)**: Theo dõi tất cả blueprint tìm thấy trong thư mục của bạn.
+   - **Danh sách trắng (Whitelist)**: Chỉ theo dõi các blueprint bạn chọn cụ thể từ danh sách.
+   - **Danh sách đen (Blacklist)**: Theo dõi tất cả các blueprint _ngoại trừ_ những cái bạn chọn.
+6. **Sử dụng jsDelivr CDN**: (Tùy chọn, mặc định là bật) Bật tính năng này để sử dụng CDN jsDelivr khi tải các blueprint từ GitHub, giúp tăng hiệu suất. Nếu CDN không thể truy cập hoặc trả về lỗi, hệ thống sẽ tự động sử dụng link GitHub gốc để đảm bảo việc cập nhật thành công.
+7. Sau khi thêm, tích hợp sẽ quét các blueprint của bạn. Nếu tìm thấy bản cập nhật, chúng sẽ xuất hiện dưới dạng thực thể `update` trong bảng điều khiển của bạn.
 
-### Sao lưu & Phục hồi (Backup & Restore)
+---
+
+## Xem thử ngay
+
+Nếu bạn muốn thấy quy trình cập nhật hoạt động như thế nào ngay lập tức, bạn có thể sử dụng bản thiết kế **Motion-Activated Light/Switch (Frequent Updates)**. Bản thiết kế này được cập nhật thường xuyên thông qua GitHub Actions để mô phỏng một bản phát hành mới.
+
+**Cài đặt nhanh:**
+[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fluuquangvu%2Fdemo-blueprints%2Fblob%2Fmain%2Fblueprints%2Fmotion_light_blueprint.yaml)
+
+**Cài đặt thủ công:**
+
+1. Sao chép URL này: `https://github.com/luuquangvu/demo-blueprints/blob/main/blueprints/motion_light_blueprint.yaml`
+2. Trong Home Assistant, đi tới **Cài đặt** > **Tự động hóa & Cảnh** > **Bản thiết kế**.
+3. Nhấp vào **Nhập bản thiết kế** và dán URL vào.
+
+Sau khi nhập xong, **Blueprints Updater** sẽ tự động phát hiện nó trong lần quét định kỳ tiếp theo. Để thấy kết quả ngay lập tức, bạn có thể [kích hoạt quét thủ công](#làm-mới-danh-sách-blueprint). Khi GitHub Action cập nhật bản thiết kế, bạn sẽ nhận được thông báo trong Home Assistant và có thể thực hiện cập nhật.
+
+---
+
+## Sao lưu & Phục hồi (Backup & Restore)
 
 Blueprints Updater cung cấp một mạng lưới an toàn tích hợp sẵn, cho phép bạn sao lưu các blueprint trước khi chúng được cập nhật và khôi phục chúng nếu cần thiết.
 
-#### Kích hoạt Sao lưu
+### Kích hoạt Sao lưu
 
 Khi cài đặt bản cập nhật từ bảng điều khiển Home Assistant, bạn sẽ có tùy chọn tích chọn **Backup (Sao lưu)**. Nếu được bật, tiện ích sẽ tự động lưu blueprint hiện tại của bạn thành một tệp sao lưu có đánh số (`.bak.1`, `.bak.2`, v.v.) trước khi ghi đè bằng phiên bản mới.
 
 > **Lưu ý:** Nếu bạn đang bật tùy chọn **Tự động Cập nhật (Auto-Update)**, tiện ích sẽ **luôn luôn** tự động sao lưu cấu hình trước khi ghi đè bản mới nhất, tạo ra một mạng lưới an toàn 100% giúp bạn hoàn toàn yên tâm.
 
-#### Khôi phục bản Sao lưu
+### Khôi phục bản Sao lưu
 
 Nếu bạn phát hiện ra rằng bản blueprint mới cập nhật làm hỏng các automations hoặc có thay đổi không tương thích, bạn có thể dễ dàng quay về phiên bản trước đó:
 
@@ -88,7 +132,19 @@ Nếu bạn phát hiện ra rằng bản blueprint mới cập nhật làm hỏn
 
 Tiện ích sẽ tự động tìm tệp sao lưu tương ứng, khôi phục lại nội dung YAML gốc, và tự động tải lại (reload) các automations và scripts để áp dụng các thay đổi ngay lập tức.
 
-### Làm mới danh sách Blueprint
+## Lớp bảo vệ Nâng cao (Advanced Compatibility Guard)
+
+**Advanced Compatibility Guard** là một lớp bảo mật chuyên nghiệp được thiết kế để bảo vệ logic ngôi nhà thông minh của bạn khỏi các thay đổi gây lỗi (breaking changes) trong các bản cập nhật blueprint.
+
+Khi phát hiện bản cập nhật, hệ thống sẽ thực hiện quy trình kiểm tra an toàn gồm nhiều bước:
+
+1. **Kiểm tra cấu trúc**: Tự động xác thực nội dung của blueprint mới để đảm bảo nó tuân thủ các quy tắc của Home Assistant.
+2. **Phân tích tác động**: Giả lập việc cập nhật trên các tự động hóa (automations) và tập lệnh (scripts) hiện có của bạn để xem có thành phần nào bị hỏng hay không.
+3. **Cảnh báo rủi ro**: Nếu phát hiện vấn đề (chẳng hạn như thiếu thông số bắt buộc), bản cập nhật sẽ bị đánh dấu trạng thái **"Lỗi tương thích (compatibility error)"**.
+4. **Bảo vệ cập nhật tự động**: Các blueprint có nguy cơ gây lỗi sẽ bị chặn cập nhật tự động (**"blocked-auto-update"**) nhằm bảo vệ ngôi nhà của bạn khỏi các sự cố không đáng có.
+5. **Minh bạch thay đổi**: Đối với các bản cập nhật bị chặn, bạn có thể xem **"BÁO CÁO RỦI RO CẬP NHẬT (UPDATE RISK REPORT)"** để biết các thay đổi gây lỗi cụ thể (như thiếu tham số bắt buộc) và xem chi tiết phần **"Git Diff"** để so sánh mã nguồn trước khi quyết định cài đặt thủ công.
+
+## Làm mới danh sách Blueprint
 
 Vì Home Assistant không liên tục giám sát tệp hệ thống để tiết kiệm tài nguyên, nên **việc thêm hoặc xóa blueprint sẽ không được cập nhật ngay lập tức**.
 
@@ -98,20 +154,27 @@ Vì Home Assistant không liên tục giám sát tệp hệ thống để tiết
 2. **Reload Tích hợp**: Vào **Cài đặt (Settings)** > **Thiết bị & Dịch vụ (Devices & Services)** > **Blueprints Updater**, nhấn vào ba chấm và chọn **Tải lại (Reload)**.
 3. **Khởi động lại Home Assistant**.
 
-### Xem thử ngay!
+---
 
-Nếu bạn muốn thấy quy trình cập nhật hoạt động như thế nào ngay lập tức, bạn có thể sử dụng bản thiết kế **Motion-Activated Light/Switch (Frequent Updates)**. Bản thiết kế này được cập nhật tự động thường xuyên thông qua GitHub Actions để mô phỏng một bản phát hành mới.
+## Các câu hỏi thường gặp (FAQ)
 
-**Cài đặt nhanh:**
-[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fluuquangvu%2Fdemo-blueprints%2Fblob%2Fmain%2Fblueprints%2Fmotion_light_blueprint.yaml)
+### Tại sao có bản cập nhật ngay sau khi vừa cài đặt?
 
-**Cài đặt thủ công:**
+Bạn có thể nhận thấy bản cập nhật xuất hiện ngay cả với các blueprint vừa mới cài đặt. Điều này xảy ra do:
 
-1.  Sao chép URL này: `https://github.com/luuquangvu/demo-blueprints/blob/main/blueprints/motion_light_blueprint.yaml`
-2.  Trong Home Assistant, đi tới **Cài đặt** > **Tự động hóa & Cảnh** > **Bản thiết kế**.
-3.  Nhấp vào **Nhập bản thiết kế** và dán URL vào.
+1. **Tái cấu trúc YAML**: Khi bạn nhập một blueprint, Home Assistant thường sử dụng bộ phân tích YAML nội bộ để tái cấu trúc định dạng tệp. Điều này dẫn đến những sai khác nhỏ về định dạng so với tệp gốc của tác giả.
+2. **Đảm bảo tính nguyên bản**: Tiện ích này ưu tiên duy trì **cấu trúc blueprint gốc** đúng như ý định của tác giả để đảm bảo độ chính xác và tính ổn định cao nhất.
+3. **Đồng bộ hóa**: Bản "cập nhật" đầu tiên thường chỉ là quá trình hệ thống đồng bộ hóa phiên bản cục bộ của bạn với nội dung gốc từ nguồn của tác giả, đảm bảo khả năng tương thích lâu dài và theo dõi chính xác các thay đổi sau này.
 
-Sau khi nhập xong, **Blueprints Updater** sẽ tự động phát hiện nó trong lần quét định kỳ tiếp theo. Để thấy kết quả ngay lập tức, bạn có thể [kích hoạt quét thủ công](#làm-mới-danh-sách-blueprint). Khi GitHub Action cập nhật bản thiết kế, bạn sẽ nhận được thông báo trong Home Assistant và có thể thực hiện cập nhật.
+### Tại sao tôi nhận được thông báo cập nhật khi đang dùng một bản Fork (nhánh rẽ) của blueprint?
+
+Đôi khi các tác giả của bản fork (phiên bản được cải tiến hoặc duy trì từ bản gốc) vẫn giữ nguyên `source_url` trỏ về kho lưu trữ gốc. Vì `source_url` là thông tin duy nhất để Blueprints Updater theo dõi, hệ thống sẽ kiểm tra kho lưu trữ gốc đó để tìm bản cập nhật. Nếu bản fork bạn đã cài đặt có sự khác biệt so với bản gốc trên kho lưu trữ đó, hệ thống sẽ đề xuất cập nhật.
+
+- **Thông báo cập nhật**: Một bản cập nhật sẽ được hiển thị bất cứ khi nào nguồn từ xa có sự khác biệt so với phiên bản cục bộ của bạn.
+- **Cập nhật tự động**: Nếu các thay đổi từ kho gốc là nhỏ và không gây ra bất kỳ lỗi tương thích nào, blueprint **vẫn có thể tự động cập nhật** (nếu bạn đã bật tính năng này).
+- **Chặn cập nhật tự động**: Hệ thống chỉ chặn cập nhật và gửi **thông báo hệ thống** (kèm cảnh báo trong log) nếu **Lớp bảo vệ Nâng cao** phát hiện bản cập nhật có rủi ro làm hỏng các automation hiện có của bạn hoặc xảy ra lỗi hệ thống trong quá trình kiểm tra.
+- **Rà soát thay đổi**: Để đảm bảo không mất đi các cải tiến hoặc tính năng đặc thù của bản fork, bạn nên tận dụng phần **Git Diff** để rà soát các thay đổi trước khi quyết định thực hiện cập nhật.
+- **Danh sách chặn (Blacklist)**: Nếu bạn muốn duy trì phiên bản fork hiện tại lâu dài và ngừng nhận thông báo cập nhật cho nó, bạn có thể thêm blueprint đó vào **Blacklist** (hoặc loại khỏi **Whitelist**) trong phần cấu hình của tiện ích.
 
 ---
 
