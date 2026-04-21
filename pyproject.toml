@@ -7,7 +7,7 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-  "h2>=3,<5",
+  "h2>=4,<5",
   "homeassistant>=2026.4",
   "interrogate",
   "packaging",
