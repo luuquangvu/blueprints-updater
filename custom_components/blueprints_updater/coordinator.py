@@ -2671,11 +2671,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 ) from err
 
         content = provider.parse_content(response.text, json_data)
-        if content is None and is_json:
+        if content is None:
+            if is_json:
+                raise HomeAssistantError(
+                    "Failed to extract blueprint content from JSON response at (redacted URL)"
+                )
             raise HomeAssistantError(
-                "Failed to extract blueprint content from JSON response at (redacted URL)"
+                "Failed to extract blueprint content from response at (redacted URL)"
             )
-        return content or ""
+        return content
 
     @staticmethod
     def _normalize_url(url: str) -> str:
