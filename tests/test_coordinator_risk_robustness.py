@@ -54,4 +54,4 @@ async def test_detect_risks_missing_rel_path(hass):
     assert len(risks) == 1
     assert risks[0]["type"] == "system_error"
     assert risks[0]["args"]["error"] == "missing_path"
-    assert risks[0]["args"]["path"] == path
+    assert risks[0]["args"]["path"] == "test.yaml"

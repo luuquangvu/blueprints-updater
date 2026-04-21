@@ -2260,7 +2260,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return [
                 {
                     "type": BlueprintRiskType.SYSTEM_ERROR,
-                    "args": {"error": "missing_path", "path": path},
+                    "args": {"error": "missing_path", "path": os.path.basename(path)},
                 }
             ]
 
@@ -2396,8 +2396,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             results_to_notify.append(info["name"])
             updated_domains.add(info.get("domain", "automation"))
             return True
-        except Exception:
+        except Exception as err:
             _LOGGER.exception("Auto-update failed for %s", path)
+            if self.data and path in self.data:
+                self.data[path].update(
+                    {
+                        "updatable": True,
+                        "remote_hash": remote_hash,
+                        "remote_content": remote_content,
+                        "invalid_remote_hash": None,
+                        "update_blocking_reason": BlueprintBlockingReason.SYSTEM_ERROR,
+                        "etag": new_etag,
+                        "auto_update_last_error": _sanitize_error_detail(str(err)),
+                    }
+                )
             return False
 
     def _update_coordinator_status_data(
