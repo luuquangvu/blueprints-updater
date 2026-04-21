@@ -126,8 +126,8 @@ async def test_update_entities_lifecycle(hass):
         tasks_created.clear()
         update_callback()
 
-        assert tasks_created
-        await asyncio.gather(*tasks_created)
+        assert len(tasks_created) == 1
+        await tasks_created[0]
 
         mock_entity_registry.async_remove.assert_called_once_with("update.test1")
 
