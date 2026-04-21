@@ -990,7 +990,7 @@ async def test_async_update_data_auto_update(coordinator):
     """Test _async_update_data with auto_update enabled."""
     coordinator.config_entry.options = MappingProxyType({"auto_update": True})
     blueprints = {
-        "/automation/test.yaml": {
+        "/config/blueprints/automation/test.yaml": {
             "name": "Test",
             "rel_path": "automation/test.yaml",
             "source_url": "https://url",
@@ -1038,7 +1038,7 @@ async def test_async_update_data_auto_update(coordinator):
             await coordinator._async_background_refresh(blueprints)
 
         mock_install.assert_called_once_with(
-            "/automation/test.yaml",
+            "/config/blueprints/automation/test.yaml",
             "blueprint:\n  name: Test\n  source_url: https://url\n",
             reload_services=False,
             backup=True,
@@ -1055,11 +1055,11 @@ async def test_async_update_data_auto_update(coordinator):
             },
         )
 
-        assert "/automation/test.yaml" in coordinator.data
-        assert coordinator.data["/automation/test.yaml"]["updatable"] is False
-        assert coordinator.data["/automation/test.yaml"]["remote_content"] is None
-        assert coordinator.data["/automation/test.yaml"]["local_hash"] == "new"
-        assert coordinator.data["/automation/test.yaml"]["etag"] == "new"
+        assert "/config/blueprints/automation/test.yaml" in coordinator.data
+        assert coordinator.data["/config/blueprints/automation/test.yaml"]["updatable"] is False
+        assert coordinator.data["/config/blueprints/automation/test.yaml"]["remote_content"] is None
+        assert coordinator.data["/config/blueprints/automation/test.yaml"]["local_hash"] == "new"
+        assert coordinator.data["/config/blueprints/automation/test.yaml"]["etag"] == "new"
 
 
 @pytest.mark.asyncio
@@ -1099,9 +1099,9 @@ async def test_async_background_refresh_cancellation_stops_workers(coordinator):
     """Test that cancelling the background refresh task stops workers promptly."""
     num_blueprints = 100
     blueprints = {
-        f"/automation/bp{i}.yaml": {
+        f"/config/blueprints/automation/bp{i}.yaml": {
             "name": f"BP{i}",
-            "rel_path": f"bp{i}.yaml",
+            "rel_path": f"automation/bp{i}.yaml",
             "source_url": f"https://url/bp{i}",
             "domain": "automation",
             "local_hash": "h",
@@ -1139,14 +1139,14 @@ async def test_async_update_data_auto_update_multiple_sorted(coordinator):
     """Test _async_update_data sorts multiple auto-updated blueprints."""
     coordinator.config_entry.options = MappingProxyType({"auto_update": True})
     blueprints = {
-        "/automation/b.yaml": {
+        "/config/blueprints/automation/b.yaml": {
             "name": "Beta",
             "rel_path": "automation/b.yaml",
             "source_url": "https://url/b",
             "domain": "automation",
             "local_hash": "old",
         },
-        "/automation/a.yaml": {
+        "/config/blueprints/automation/a.yaml": {
             "name": "Alpha",
             "rel_path": "automation/a.yaml",
             "source_url": "https://url/a",

@@ -43,7 +43,7 @@
 ## Features
 
 - **Seamless Native Integration**: Blends perfectly into the Home Assistant ecosystem, looking and feeling like a core feature. Manage everything directly from your dashboard with single-click or bulk updates.
-- **Advanced Compatibility Guard**: Safeguard your smart home against breaking changes with proactive validation. Before applying any update, the system performs a deep analysis of all dependent automations and scripts against the new blueprint content, identifying compatibility risks, system errors, and other blocking issues to prevent silent failures.
+- **Advanced Compatibility Guard**: Safeguard your smart home against breaking changes with proactive validation. Before applying any update, the system performs a thorough analysis of all dependent automations and scripts against the new blueprint content, identifying compatibility risks, system errors, and other blocking issues to prevent silent failures.
 - **Set It and Forget It**: Automate your entire workflow. Enable auto-updates and let the system handle backups, downloads, and change notifications for you.
 - **Smart Change Detection**: Minimizes system overhead by using SHA256 hashing and ETag headers to pull data only when a genuine change is detected.
 - **Universal Source Compatibility**: Robustly handles blueprints from GitHub, GitHub Gist, and the Home Assistant Community Forum.
