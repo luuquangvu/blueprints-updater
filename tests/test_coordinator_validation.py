@@ -93,7 +93,7 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
 async def test_process_blueprint_content_error_handling(coordinator):
     """Test error handling in content processing.
 
-    Covers hash validation and directory creation failures.
+    Covers invalid blueprint handling, YAML syntax errors, and schema validation error handling.
     """
     info: dict[str, Any] = {"rel_path": "test.yaml", "name": "Test BP", "local_hash": "old_hash"}
 

@@ -12,13 +12,8 @@ from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.blueprints_updater as bp_updater
 from custom_components.blueprints_updater import async_setup, async_setup_entry, async_unload_entry
-from custom_components.blueprints_updater.const import DOMAIN
+from custom_components.blueprints_updater.const import ALLOWED_RELOAD_DOMAINS, DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
-
-
-async def async_raise_gen_err(*args, **kwargs) -> None:
-    """Helper to raise RuntimeError in an async context."""
-    raise RuntimeError("e")
 
 
 async def _async_none(*args, **kwargs) -> None:
@@ -191,4 +186,9 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
     hass.data["automation"] = mock_comp
     assert coordinator._get_entities_configs(["automation.missing"]) == {}
 
-    await coordinator.async_reload_services(None)
+    with (
+        patch.object(coordinator.hass.services, "async_call", new_callable=AsyncMock) as mock_call,
+        patch.object(coordinator.hass.services, "has_service", return_value=True),
+    ):
+        await coordinator.async_reload_services(None)
+        assert mock_call.call_count == len(ALLOWED_RELOAD_DOMAINS)
