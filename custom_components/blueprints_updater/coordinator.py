@@ -669,6 +669,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         A ghost update occurs when the content is effectively identical
         to the local version after transport-level normalization, but
         the previous hashes were out of sync.
+        This provides a secure fetch for all integration needs.
+
+        Note: The end of the redirect loop logic includes a safety raise
+        to satisfy the type checker, though it should be unreachable due
+        to the internal redirect counter.
 
         Args:
             current_local_hash: The hash of the freshly scanned local file.
@@ -1617,6 +1622,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         This allows validation against new content without writing to disk
         or affecting the permanent blueprint index.
 
+        Note: This method accesses the private `_blueprints` attribute because
+        Home Assistant's `DomainBlueprints` does not provide a public API for
+        direct cache injection, which is necessary for this validation logic.
+
         Args:
             blueprints_hub: The HA BlueprintHub instance.
             bp_id: The blueprint identifier (path).
@@ -1624,13 +1633,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         blueprints = blueprints_hub._blueprints
+        original_exists = bp_id in blueprints
         original_bp = blueprints.get(bp_id)
 
         blueprints[bp_id] = blueprint
         try:
             yield
         finally:
-            if original_bp:
+            if original_exists:
                 blueprints[bp_id] = original_bp
             else:
                 blueprints.pop(bp_id, None)
@@ -1770,6 +1780,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 rargs.pop("type", None)
                 msg = await self.async_translate(translation_key, **cast(Any, rargs))
             else:
+                rargs.pop("type", None)
                 msg = await self.async_translate(
                     translation_key, type=str(rtype), **cast(Any, rargs)
                 )
@@ -2275,9 +2286,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     for eid, cfg in full_configs.items()
                 }
 
-                if os.path.isfile(local_file):
-                    with open(local_file, encoding="utf-8") as f:
-                        old_content = f.read()
+                old_content = await self.hass.async_add_executor_job(
+                    self._read_local_file, local_file
+                )
+                if old_content:
                     risks = self._detect_breaking_changes(old_content, remote_content, configs)
 
                 compatibility_risks = await self._async_validate_blueprint_consumers(
@@ -2616,8 +2628,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             current_url = next_url
             current_headers = {}
 
-        # This point should be unreachable due to the internal check `if redirect_count >= 20`
-        # but we add it to satisfy the type checker.
         _LOGGER.error("Redirect loop exceeded range without raising")
         raise httpx.HTTPError("Too many redirects")
 
@@ -2995,6 +3005,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             "source_url": source_url.strip(),
             "local_hash": BlueprintUpdateCoordinator._hash_content(content),
         }
+
+    def _read_local_file(self, full_path: str) -> str | None:
+        """Read a local file in the executor.
+
+        Args:
+            full_path: Absolute path to the file.
+
+        Returns:
+            The file content string, or None if the file does not exist or
+            is not a file.
+        """
+        if not os.path.isfile(full_path):
+            return None
+        with open(full_path, encoding="utf-8") as f:
+            return f.read()
 
     @staticmethod
     def scan_blueprints(

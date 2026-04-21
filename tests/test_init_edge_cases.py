@@ -35,6 +35,8 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
     """Test the initialization lifecycle.
 
     Includes service registration and core configuration event handling.
+    The service registration check handles variants where service name and
+    handler could be positional arguments or keyword arguments.
     """
     hass.data.clear()
 
@@ -87,10 +89,8 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
 
         update_all_handler = None
         for call in mock_register.call_args_list:
-            # Service name could be positional (index 2) or kwarg 'service'
             service_name = call.args[2] if len(call.args) > 2 else call.kwargs.get("service")
             if service_name == "update_all":
-                # Handler could be positional (index 3) or kwarg 'service_func'
                 update_all_handler = (
                     call.args[3] if len(call.args) > 3 else call.kwargs.get("service_func")
                 )

@@ -71,7 +71,7 @@ blueprint:
 
 @pytest.mark.asyncio
 async def test_breaking_change_detection_with_sections(hass):
-    """Test that breaking changes are detected inside sections."""
+    """Test that breaking changes (like removing a default value) are detected inside sections."""
     old_content = """
 blueprint:
   name: Test
@@ -92,7 +92,6 @@ blueprint:
         target_input:
           selector:
             text: {}
-          # removed default -> mandatory
     """
 
     entry = MagicMock()

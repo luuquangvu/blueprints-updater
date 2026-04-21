@@ -163,7 +163,7 @@ async def test_async_validate_blueprint_consumers_malformed_path(coordinator):
 
     Ensures that we don't silently skip validation or misparse filenames as domains.
     """
-    rel_path = "invalid_path.yaml"  # Missing domain folder (e.g., automation/)
+    rel_path = "invalid_path.yaml"
     content = "blueprint:\n  name: test\n  domain: automation\n"
     configs: dict[str, dict[str, Any]] = {}
 
