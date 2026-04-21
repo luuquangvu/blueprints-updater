@@ -14,10 +14,10 @@ import shutil
 import socket
 import textwrap
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, TypedDict
+from typing import Any, TypedDict, Union, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -79,6 +79,10 @@ from .utils import get_max_backups, retry_async
 
 _LOGGER = logging.getLogger(__name__)
 
+JSONValue = Union[None, bool, int, float, str, "JSONDict", "JSONList"]
+JSONDict = Mapping[str, JSONValue]
+JSONList = Sequence[JSONValue]
+
 
 def _sanitize_error_detail(detail: str, max_length: int = 120) -> str:
     """Sanitize error detail to avoid delimiter clashes and overly long messages.
@@ -97,10 +101,15 @@ def _sanitize_error_detail(detail: str, max_length: int = 120) -> str:
 
 
 class StructuredRisk(TypedDict):
-    """Structured breaking change risk."""
+    """Structured breaking change risk.
+
+    The ``args`` field must be JSON-serializable, as it is used for
+    deduplication and logging. Typical shapes include e.g.
+    ``{"input": "<string>"}`` or ``{"entity": "<entity_id>", "error": "<string>"}``.
+    """
 
     type: BlueprintRiskType
-    args: dict[str, Any]
+    args: JSONDict
 
 
 class ParsedBlueprintData(TypedDict):
@@ -1759,9 +1768,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if translation_key is None:
                 translation_key = "risk_unknown"
                 rargs.pop("type", None)
-                msg = await self.async_translate(translation_key, **rargs)
+                msg = await self.async_translate(translation_key, **cast(Any, rargs))
             else:
-                msg = await self.async_translate(translation_key, type=str(rtype), **rargs)
+                msg = await self.async_translate(
+                    translation_key, type=str(rtype), **cast(Any, rargs)
+                )
 
             lines.append(f"- {msg}")
         return "\n".join(lines)
@@ -2629,7 +2640,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if response.status_code == 304:
             return None
 
-        provider = registry.get_provider(url)
+        provider = registry.get_provider(str(response.url))
         if provider is None:
             return response.text
 

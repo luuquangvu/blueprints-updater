@@ -397,6 +397,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
 
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
+    mock_response.url = httpx.URL(source_url)
     mock_response.headers = {"Content-Type": "application/json"}
     mock_response.text = '{"posts": [ {"cooked": "invalid"}'
     mock_response.json = MagicMock(side_effect=ValueError("Expecting value"))
