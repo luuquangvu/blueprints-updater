@@ -92,11 +92,10 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
 
 
 @pytest.mark.asyncio
-async def test_process_blueprint_content_error_branch_coverage(coordinator):
-    """Verify that processing logic correctly categorizes different failure modes.
+async def test_process_blueprint_content_error_handling(coordinator):
+    """Test error handling in content processing.
 
-    Ensures that both structural dictionary checks and YAML syntax errors are
-    accurately reflected in the blueprint's last_error state.
+    Covers hash validation and directory creation failures.
     """
     info: dict[str, Any] = {"rel_path": "test.yaml", "name": "Test BP", "local_hash": "old_hash"}
 

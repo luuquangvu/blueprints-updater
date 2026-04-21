@@ -1,4 +1,7 @@
-"""Tests for increasing coverage of Source Providers."""
+"""Edge case tests for Source Providers.
+
+Includes hostname normalization and malformed response parsing.
+"""
 
 from custom_components.blueprints_updater.providers import (
     GitHubProvider,

@@ -131,7 +131,7 @@
     "risk_removed_input": "Eingabe {input} entfernt, wird aber derzeit von {count} Entitäten verwendet.",
     "risk_selector_mismatch": "Selector-Typ für {input} geändert: von {old_type} zu {new_type} (betrifft {count} Entitäten).",
     "risk_validation_failed_blueprint": "Neuer Blueprint-Inhalt ist ungültig: {error}",
-    "risk_unknown": "Unbekannter Fehler: {type}",
+    "risk_unknown": "Unbekannter Fehler",
     "risk_legacy": "{message}",
     "risk_compatibility": "Kompatibilitätsfehler für {entity}: {error}",
     "risk_system_error": "Systemfehler: {error}",

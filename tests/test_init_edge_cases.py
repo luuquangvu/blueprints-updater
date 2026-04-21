@@ -29,8 +29,11 @@ async def _async_true(*args, **kwargs) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_init_coverage_boosters(hass: HomeAssistant) -> None:
-    """Target missing lines in __init__.py."""
+async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
+    """Test the initialization lifecycle.
+
+    Includes service registration and core configuration event handling.
+    """
     from custom_components.blueprints_updater.__init__ import (
         async_setup,
         async_setup_entry,
@@ -108,8 +111,9 @@ async def test_init_coverage_boosters(hass: HomeAssistant) -> None:
         coordinator.config_entry = entry
         with patch.object(
             coordinator, "async_reload_services", side_effect=Exception("Update fail")
-        ):
+        ) as mock_reload:
             await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
+            mock_reload.assert_called_once()
 
         with (
             patch(f"{init_path}.async_register_admin_service", side_effect=Exception("Reg fail")),
@@ -137,7 +141,6 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
 
     mock_resp = MagicMock()
     mock_resp.is_redirect = False
-    mock_resp.status = 200
     mock_resp.status_code = 200
     mock_resp.headers = {"Content-Type": "application/json"}
     mock_resp.json = MagicMock(side_effect=ValueError("JSON fail"))
@@ -157,10 +160,14 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
 
     with patch.object(coordinator, "async_request_refresh", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.side_effect = async_raise_gen_err
+        # Verify that setup completes without propagating the refresh error
         await coordinator.async_setup()
+
     mock_comp = MagicMock()
     mock_comp.get_entity.return_value = None
     hass.data["automation"] = mock_comp
-    coordinator._get_entities_configs(["automation.missing"])
+    # Verify it returns an empty dict for missing entities
+    assert coordinator._get_entities_configs(["automation.missing"]) == {}
 
+    # Verify reload completes without error
     await coordinator.async_reload_services(None)

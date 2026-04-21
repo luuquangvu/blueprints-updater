@@ -131,7 +131,7 @@
     "risk_removed_input": "Inmatning {input} har tagits bort, men används för närvarande av {count} entiteter.",
     "risk_selector_mismatch": "Selectortyp har ändrats för {input}: från {old_type} till {new_type} (påverkar {count} entiteter).",
     "risk_validation_failed_blueprint": "Nytt blueprint-innehåll är ogiltigt: {error}",
-    "risk_unknown": "Okänt fel: {type}",
+    "risk_unknown": "Okänt fel",
     "risk_legacy": "{message}",
     "risk_compatibility": "Kompatibilitetsfel för {entity}: {error}",
     "risk_system_error": "Systemfel: {error}",

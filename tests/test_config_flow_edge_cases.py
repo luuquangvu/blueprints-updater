@@ -1,4 +1,4 @@
-"""Tests for increasing coverage of Config Flow."""
+"""Edge case and error handling tests for the configuration and options flow."""
 
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch

@@ -1,4 +1,4 @@
-"""Tests for increasing coverage of Update Entities."""
+"""Edge case and boundary condition tests for blueprint update entities."""
 
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch

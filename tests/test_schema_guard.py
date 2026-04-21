@@ -49,14 +49,9 @@ blueprint:
         boolean: {}
 """
 
-    entities = ["automation.test_sensor"]
     configs = {"automation.test_sensor": {"motion_sensor": "binary_sensor.motion"}}
 
-    with (
-        patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
-        patch.object(coordinator, "_get_entities_configs", return_value=configs),
-    ):
-        risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
+    risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
 
     assert any(
         risk["type"] == BlueprintRiskType.SELECTOR_MISMATCH
@@ -98,14 +93,9 @@ blueprint:
 """
     new_content = "blueprint:\n  name: New\n  input: {}"
 
-    entities = ["automation.test"]
     configs = {"automation.test": {"old_input": "value"}}
 
-    with (
-        patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
-        patch.object(coordinator, "_get_entities_configs", return_value=configs),
-    ):
-        risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
+    risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
 
     assert any(
         risk["type"] == BlueprintRiskType.REMOVED_INPUT and risk["args"]["input"] == "old_input"
@@ -142,17 +132,12 @@ blueprint:
         entity:
           domain: binary_sensor
 """
-    entities = ["automation.test", "automation.no_input"]
     configs = {
         "automation.test": {},
         "automation.no_input": {},
     }
 
-    with (
-        patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
-        patch.object(coordinator, "_get_entities_configs", return_value=configs),
-    ):
-        risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
+    risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
 
     found_entities = {
         risk["args"]["entity"]
