@@ -15,10 +15,10 @@
 
 ---
 
-## Phụ lục
+## Mục lục
 
 - [Blueprints Updater cho Home Assistant](#blueprints-updater-cho-home-assistant)
-  - [Phụ lục](#phụ-lục)
+  - [Mục lục](#mục-lục)
   - [Tính năng chính](#tính-năng-chính)
   - [Cài đặt](#cài-đặt)
     - [Cách 1: Sử dụng HACS (Khuyên dùng)](#cách-1-sử-dụng-hacs-khuyên-dùng)

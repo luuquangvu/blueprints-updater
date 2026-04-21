@@ -34,7 +34,6 @@ async def test_detect_risks_system_error_on_exception(hass):
     assert len(risks) == 1
     assert risks[0]["type"] == "system_error"
     assert risks[0]["args"]["error"] == "Test Exception"
-    assert risks[0]["args"]["path"] == path
     assert risks[0]["args"]["rel_path"] == rel_path
 
 

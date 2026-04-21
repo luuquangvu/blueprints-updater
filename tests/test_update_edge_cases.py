@@ -62,8 +62,16 @@ async def test_update_entity_release_notes_risks(mock_coordinator):
     }
     mock_coordinator.data = {path: info}
 
-    with patch(
-        "custom_components.blueprints_updater.update.automations_with_blueprint", return_value=[]
+    with (
+        patch(
+            "custom_components.blueprints_updater.update.automations_with_blueprint",
+            return_value=[],
+        ),
+        patch.object(
+            mock_coordinator,
+            "async_get_git_diff",
+            return_value=AsyncMock(return_value=None),
+        ),
     ):
         entity = BlueprintUpdateEntity(mock_coordinator, path, info)
         notes = await entity.async_release_notes()

@@ -2290,7 +2290,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "type": BlueprintRiskType.SYSTEM_ERROR,
                         "args": {
                             "error": safe_error,
-                            "path": path,
                             "rel_path": rel_path,
                         },
                     }
@@ -2305,7 +2304,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "type": BlueprintRiskType.SYSTEM_ERROR,
                         "args": {
                             "error": safe_error,
-                            "path": path,
                             "rel_path": rel_path,
                         },
                     }

@@ -1,6 +1,6 @@
 """Tests for specific error handling and edge cases in BlueprintUpdateCoordinator."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -86,8 +86,12 @@ async def test_prune_stale_metadata(coordinator):
     coordinator._persisted_hashes = {"path1": "hash1", "path2": "hash2"}
     coordinator.data = {"path1": {}}
 
-    with patch("os.path.isfile", side_effect=lambda x: x == "path1"):
+    with (
+        patch("os.path.isfile", side_effect=lambda x: x == "path1"),
+        patch.object(coordinator, "_async_save_metadata", new_callable=AsyncMock) as mock_save,
+    ):
         await coordinator._async_prune_stale_metadata({"path1"})
+        mock_save.assert_called_once_with(force=True)
 
     assert "path2" not in coordinator._persisted_etags
     assert "path2" not in coordinator._persisted_hashes

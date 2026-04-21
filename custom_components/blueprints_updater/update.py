@@ -54,6 +54,22 @@ async def async_setup_entry(
     entry.async_on_unload(coordinator.async_add_listener(async_update_entities_wrapper))
 
 
+async def _async_purge_entity_registry(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry, entity_id: str
+) -> None:
+    """Remove entity from registry and state machine.
+
+    Args:
+        hass: HomeAssistant instance.
+        entity_registry: The entity registry.
+        entity_id: The entity ID to remove.
+
+    """
+    if entity_registry.async_get(entity_id):
+        entity_registry.async_remove(entity_id)
+    hass.states.async_remove(entity_id)
+
+
 @callback
 def async_update_entities(
     hass: HomeAssistant,
@@ -115,9 +131,9 @@ def async_update_entities(
             _LOGGER.debug("Removing blueprint update entity for deleted file: %s", path)
             entity = current_entities.pop(path)
             if entity.entity_id:
-                if entity_registry.async_get(entity.entity_id):
-                    entity_registry.async_remove(entity.entity_id)
-                hass.states.async_remove(entity.entity_id)
+                hass.async_create_task(
+                    _async_purge_entity_registry(hass, entity_registry, entity.entity_id)
+                )
             else:
                 hass.async_create_task(entity.async_remove(force_remove=True))
 

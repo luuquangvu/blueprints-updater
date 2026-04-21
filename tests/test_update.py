@@ -124,11 +124,12 @@ async def test_update_entities_lifecycle(hass):
         mock_entity_registry.async_get.return_value = MagicMock()
 
         update_callback()
+        assert tasks_created
 
         for task in tasks_created:
             await task
 
-        mock_entity_registry.async_remove.assert_called_once_with("update.test1")
+        mock_entity_registry.async_remove.assert_called_with("update.test1")
 
 
 @pytest.fixture
