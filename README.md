@@ -24,7 +24,7 @@
     - [Option 1: Using HACS (Recommended)](#option-1-using-hacs-recommended)
     - [Option 2: Manual Installation](#option-2-manual-installation)
   - [Setup \& Configuration](#setup--configuration)
-  - [See it in Action!](#see-it-in-action)
+  - [See it in Action](#see-it-in-action)
   - [Backup \& Restore](#backup--restore)
     - [Enabling Backups](#enabling-backups)
     - [Restoring a Backup](#restoring-a-backup)

@@ -39,7 +39,7 @@ def coordinator(hass):
     return instance
 
 
-async def _prepare_blueprint_entry(coordinator: BlueprintUpdateCoordinator, blueprint_path: str):
+def _prepare_blueprint_entry(coordinator: BlueprintUpdateCoordinator, blueprint_path: str):
     """Helper to pre-populate coordinator state for a blueprint."""
     coordinator.data[blueprint_path] = {
         "updatable": True,
@@ -54,7 +54,7 @@ async def _prepare_blueprint_entry(coordinator: BlueprintUpdateCoordinator, blue
 async def test_auto_update_guard_blocks_when_risks_present(coordinator: BlueprintUpdateCoordinator):
     """Auto-update is blocked when compatibility risk is present and entities are in use."""
     blueprint_path = "automation/test_blueprint.yaml"
-    await _prepare_blueprint_entry(coordinator, blueprint_path)
+    _prepare_blueprint_entry(coordinator, blueprint_path)
 
     with patch.object(
         coordinator, "_get_entities_using_blueprint", return_value=["automation.test"]
@@ -90,7 +90,7 @@ async def test_auto_update_proceeds_when_risks_and_no_consumers(
 ):
     """Auto-update proceeds when risks exist but no entities use the blueprint."""
     blueprint_path = "automation/test_no_consumers.yaml"
-    await _prepare_blueprint_entry(coordinator, blueprint_path)
+    _prepare_blueprint_entry(coordinator, blueprint_path)
 
     with (
         patch.object(coordinator, "_get_entities_using_blueprint", return_value=[]),
@@ -185,7 +185,7 @@ async def test_get_risk_summary_shim(coordinator: BlueprintUpdateCoordinator, mo
 async def test_auto_update_guard_blocks_on_system_error(coordinator: BlueprintUpdateCoordinator):
     """Auto-update is blocked when a system error risk is present, even without consumers."""
     blueprint_path = "automation/system_error.yaml"
-    await _prepare_blueprint_entry(coordinator, blueprint_path)
+    _prepare_blueprint_entry(coordinator, blueprint_path)
 
     with (
         patch.object(coordinator, "_get_entities_using_blueprint", return_value=[]),

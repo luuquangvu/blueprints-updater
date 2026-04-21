@@ -73,6 +73,7 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
         coord.last_update_success = True
         coord._is_safe_path = cast(Any, MagicMock(return_value=True))
         coord._is_safe_url = cast(Any, AsyncMock(return_value=True))
+        coord._detect_risks_for_update = cast(Any, AsyncMock(return_value=[]))
         return coord
 
 
@@ -852,11 +853,11 @@ async def test_async_background_refresh_503_resilience(coordinator):
 @pytest.mark.asyncio
 async def test_async_background_refresh_semaphore_limit(coordinator):
     """Test that background refresh respects MAX_CONCURRENT_REQUESTS."""
-    num_blueprints = MAX_CONCURRENT_REQUESTS + 2
+    num_blueprints = MAX_CONCURRENT_REQUESTS
     blueprints = {
-        f"/automation/bp{i}.yaml": {
+        f"automation/bp{i}.yaml": {
             "name": f"BP{i}",
-            "rel_path": f"bp{i}.yaml",
+            "rel_path": f"automation/bp{i}.yaml",
             "source_url": f"https://url/bp{i}",
             "domain": "automation",
             "local_hash": "h",

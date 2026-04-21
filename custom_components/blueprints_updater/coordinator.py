@@ -2295,7 +2295,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "type": BlueprintRiskType.SYSTEM_ERROR,
                         "args": {
                             "error": safe_error,
-                            "rel_path": rel_path,
+                            "path": rel_path,
                         },
                     }
                 )
@@ -2309,7 +2309,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "type": BlueprintRiskType.SYSTEM_ERROR,
                         "args": {
                             "error": safe_error,
-                            "rel_path": rel_path,
+                            "path": rel_path,
                         },
                     }
                 )
@@ -2616,7 +2616,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             current_url = next_url
             current_headers = {}
 
-        raise httpx.HTTPError("Request failed without response")
+        # This point should be unreachable due to the internal check `if redirect_count >= 20`
+        # but we add it to satisfy the type checker.
+        _LOGGER.error("Redirect loop exceeded range without raising")
+        raise httpx.HTTPError("Too many redirects")
 
     @staticmethod
     async def _parse_provider_response(

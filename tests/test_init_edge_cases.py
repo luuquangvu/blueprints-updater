@@ -5,10 +5,12 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EVENT_CORE_CONFIG_UPDATE
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.blueprints_updater import async_setup, async_setup_entry, async_unload_entry
 from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
@@ -34,16 +36,12 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
 
     Includes service registration and core configuration event handling.
     """
-    from custom_components.blueprints_updater.__init__ import (
-        async_setup,
-        async_setup_entry,
-        async_unload_entry,
-    )
-
     hass.data.clear()
 
     entry = MagicMock()
     entry.entry_id = "test_entry"
+    entry.state = ConfigEntryState.SETUP_IN_PROGRESS
+    entry.domain = DOMAIN
     entry.options = {}
     entry.data = {}
 
@@ -60,10 +58,12 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
     hass.config_entries.async_forward_entry_setups = AsyncMock(side_effect=_async_none)
     hass.config_entries.async_unload_platforms = AsyncMock(side_effect=_async_true)
 
+    import custom_components.blueprints_updater as bp_updater
+
     init_path = "custom_components.blueprints_updater.__init__"
     with (
         patch(f"{init_path}.BlueprintUpdateCoordinator", return_value=coordinator),
-        patch(f"{init_path}.async_register_admin_service") as mock_register,
+        patch.object(bp_updater, "async_register_admin_service") as mock_register,
     ):
         await async_setup(hass, {})
 
@@ -85,14 +85,16 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
         with pytest.raises(Exception, match="Setup fail"):
             await async_setup_entry(hass, entry)
 
-        update_all_handler = next(
-            (
-                (call.args[3] if len(call.args) > 3 else call.kwargs.get("service_func"))
-                for call in mock_register.call_args_list
-                if len(call.args) > 2 and call.args[2] == "update_all"
-            ),
-            None,
-        )
+        update_all_handler = None
+        for call in mock_register.call_args_list:
+            # Service name could be positional (index 2) or kwarg 'service'
+            service_name = call.args[2] if len(call.args) > 2 else call.kwargs.get("service")
+            if service_name == "update_all":
+                # Handler could be positional (index 3) or kwarg 'service_func'
+                update_all_handler = (
+                    call.args[3] if len(call.args) > 3 else call.kwargs.get("service_func")
+                )
+                break
         assert update_all_handler is not None
 
         hass.data[DOMAIN]["coordinators"] = {}
@@ -115,11 +117,13 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
             await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
             mock_reload.assert_called_once()
 
-        with (
-            patch(f"{init_path}.async_register_admin_service", side_effect=Exception("Reg fail")),
-            pytest.raises(Exception, match="Reg fail"),
-        ):
-            await async_setup(hass, {})
+            with (
+                patch.object(
+                    bp_updater, "async_register_admin_service", side_effect=Exception("Reg fail")
+                ),
+                pytest.raises(Exception, match="Reg fail"),
+            ):
+                await async_setup(hass, {})
 
 
 @pytest.mark.asyncio
@@ -158,16 +162,28 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
             with pytest.raises(HomeAssistantError, match="Invalid JSON response"):
                 await coordinator._async_fetch_content(mock_client.return_value, "mock_url")
 
-    with patch.object(coordinator, "async_request_refresh", new_callable=AsyncMock) as mock_refresh:
-        mock_refresh.side_effect = async_raise_gen_err
-        # Verify that setup completes without propagating the refresh error
-        await coordinator.async_setup()
+    with patch(
+        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator.async_config_entry_first_refresh",
+        new_callable=AsyncMock,
+    ) as mock_refresh:
+        mock_refresh.side_effect = Exception("Refresh fail")
+        entry = MagicMock()
+        entry.data = {}
+        entry.options = {"update_interval": 24}
+        entry.entry_id = "test_entry"
+
+        with (
+            patch(
+                "custom_components.blueprints_updater.BlueprintUpdateCoordinator",
+                return_value=coordinator,
+            ),
+            pytest.raises(Exception, match="Refresh fail"),
+        ):
+            await async_setup_entry(hass, entry)
 
     mock_comp = MagicMock()
     mock_comp.get_entity.return_value = None
     hass.data["automation"] = mock_comp
-    # Verify it returns an empty dict for missing entities
     assert coordinator._get_entities_configs(["automation.missing"]) == {}
 
-    # Verify reload completes without error
     await coordinator.async_reload_services(None)

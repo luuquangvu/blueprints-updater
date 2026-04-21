@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
@@ -89,8 +90,16 @@ async def test_prune_stale_metadata(coordinator):
     with (
         patch("os.path.isfile", side_effect=lambda x: x == "path1"),
         patch.object(coordinator, "_async_save_metadata", new_callable=AsyncMock) as mock_save,
+        patch.object(
+            coordinator.hass,
+            "async_create_background_task",
+            wraps=coordinator.hass.async_create_background_task,
+        ) as mock_bg,
     ):
         await coordinator._async_prune_stale_metadata({"path1"})
+        for call in mock_bg.call_args_list:
+            if call.kwargs.get("name") == f"{DOMAIN}_prune_save":
+                await call.args[0]
         mock_save.assert_called_once_with(force=True)
 
     assert "path2" not in coordinator._persisted_etags

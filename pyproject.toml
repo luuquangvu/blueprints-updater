@@ -8,15 +8,18 @@ dependencies = []
 [dependency-groups]
 dev = [
   "homeassistant>=2026.4",
-  "ruff",
-  "ty",
+  "httpx[http2]",
+  "interrogate",
+  "orjson",
+  "packaging",
   "pyright",
   "pytest>=9",
   "pytest-asyncio",
   "pytest-cov",
-  "interrogate",
-  "packaging",
+  "ruff",
   "tomlkit",
+  "ty",
+  "voluptuous",
 ]
 
 [tool.ruff]
@@ -49,7 +52,7 @@ indent-style = "space"
 asyncio_mode = "auto"
 pythonpath = ["."]
 filterwarnings = ["ignore::DeprecationWarning"]
-addopts = ["--cov=custom_components.blueprints_updater", "--cov-fail-under=90"]
+addopts = ["--cov=custom_components", "--cov-fail-under=90"]
 
 [tool.pyright]
 typeCheckingMode = "standard"

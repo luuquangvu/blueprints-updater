@@ -9,7 +9,11 @@ from typing import Any, Protocol, runtime_checkable
 
 from homeassistant.core import HomeAssistant
 
-from custom_components.blueprints_updater.coordinator import BlueprintMetadata, GitDiffResult
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintMetadata,
+    GitDiffResult,
+    StructuredRisk,
+)
 
 
 @runtime_checkable
@@ -163,6 +167,16 @@ class BlueprintCoordinatorInternal(Protocol):
 
     async def _async_background_refresh(self, blueprints: dict[str, Any]) -> None:
         """Perform a background refresh of all blueprints."""
+        ...
+
+    async def _detect_risks_for_update(
+        self,
+        path: str,
+        info: dict[str, Any],
+        remote_content: str,
+        last_error: str | None,
+    ) -> list[StructuredRisk]:
+        """Detect potential breaking changes or security risks."""
         ...
 
     def _is_safe_path(self, path: str) -> bool:

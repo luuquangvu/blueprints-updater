@@ -7,16 +7,6 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 
-async def _async_none(*args, **kwargs) -> None:
-    """Mock async function."""
-    return None
-
-
-async def _async_dict(*args, **kwargs) -> dict:
-    """Mock async function returning empty dict."""
-    return {}
-
-
 @pytest.fixture(autouse=True)
 def mock_asyncio_sleep():
     """Mock asyncio.sleep for all tests to run instantly."""
@@ -29,8 +19,8 @@ def mock_asyncio_sleep():
 def mock_storage():
     """Mock Home Assistant storage."""
     with patch("custom_components.blueprints_updater.coordinator.Store") as mock_store:
-        mock_store.return_value.async_load = AsyncMock(side_effect=_async_dict)
-        mock_store.return_value.async_save = AsyncMock(side_effect=_async_none)
+        mock_store.return_value.async_load = AsyncMock(return_value={})
+        mock_store.return_value.async_save = AsyncMock(return_value=None)
         yield mock_store
 
 
@@ -41,7 +31,7 @@ def hass():
     hass_mock.config = MagicMock()
     hass_mock.config.path.return_value = "/config/blueprints"
     hass_mock.services = MagicMock()
-    hass_mock.services.async_call = AsyncMock(side_effect=_async_none)
+    hass_mock.services.async_call = AsyncMock(return_value=None)
 
     hass_mock.bus = MagicMock()
     hass_mock.bus.async_listen = MagicMock(return_value=lambda: None)

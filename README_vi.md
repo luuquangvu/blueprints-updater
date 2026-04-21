@@ -24,7 +24,7 @@
     - [Cách 1: Sử dụng HACS (Khuyên dùng)](#cách-1-sử-dụng-hacs-khuyên-dùng)
     - [Cách 2: Cài đặt thủ công](#cách-2-cài-đặt-thủ-công)
   - [Hướng dẫn thiết lập \& Cấu hình](#hướng-dẫn-thiết-lập--cấu-hình)
-  - [Xem thử ngay!](#xem-thử-ngay)
+  - [Xem thử ngay](#xem-thử-ngay)
   - [Sao lưu \& Phục hồi (Backup \& Restore)](#sao-lưu--phục-hồi-backup--restore)
     - [Kích hoạt Sao lưu](#kích-hoạt-sao-lưu)
     - [Khôi phục bản Sao lưu](#khôi-phục-bản-sao-lưu)

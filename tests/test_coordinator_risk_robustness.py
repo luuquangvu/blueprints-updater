@@ -27,14 +27,17 @@ async def test_detect_risks_system_error_on_exception(hass):
 
     with (
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
-        patch("builtins.open", side_effect=Exception("Test Exception")),
+        patch(
+            "custom_components.blueprints_updater.coordinator.open",
+            side_effect=Exception("Test Exception"),
+        ),
     ):
         risks = await coordinator._detect_risks_for_update(path, info, remote_content, None)
 
     assert len(risks) == 1
     assert risks[0]["type"] == "system_error"
     assert risks[0]["args"]["error"] == "Test Exception"
-    assert risks[0]["args"]["rel_path"] == rel_path
+    assert risks[0]["args"]["path"] == rel_path
 
 
 @pytest.mark.asyncio

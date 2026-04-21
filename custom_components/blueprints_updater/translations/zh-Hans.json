@@ -131,7 +131,7 @@
     "risk_removed_input": "输入 {input} 已移除，但当前正被 {count} 个实体使用。",
     "risk_selector_mismatch": "{input} 的选择器类型已更改：从 {old_type} 更改为 {new_type}（影响 {count} 个实体）。",
     "risk_validation_failed_blueprint": "新的蓝图内容无效：{error}",
-    "risk_unknown": "未知错误：{type}",
+    "risk_unknown": "未知错误",
     "risk_legacy": "{message}",
     "risk_compatibility": "{entity} 的兼容性错误：{error}",
     "risk_system_error": "系统错误：{error}",
