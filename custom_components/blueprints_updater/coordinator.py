@@ -1777,6 +1777,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if translation_key is None:
                 translation_key = "risk_unknown"
                 rargs.pop("type", None)
+                rargs.setdefault("error", str(rtype or risk))
                 msg = await self.async_translate(translation_key, **cast(Any, rargs))
             else:
                 rargs.pop("type", None)
