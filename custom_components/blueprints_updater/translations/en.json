@@ -135,6 +135,7 @@
     "risk_legacy": "{message}",
     "risk_compatibility": "Compatibility Error for {entity}: {error}",
     "risk_system_error": "System error: {error}",
-    "breaking_risks_report": "Auto-update for {name} was blocked as a precaution. Detected risks:\n{risks}\n\nPlease review and install manually if correct."
+    "breaking_risks_report": "Auto-update for {name} was blocked as a precaution. Detected risks:\n{risks}\n\nPlease review and install manually if correct.",
+    "auto_update_blocked_by_system_error": "Auto-update for {name} was paused due to an unexpected error during compatibility check."
   }
 }

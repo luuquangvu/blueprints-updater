@@ -136,10 +136,11 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
         )
 
     mock_resp = MagicMock()
+    mock_resp.is_redirect = False
+    mock_resp.status = 200
+    mock_resp.status_code = 200
     mock_resp.headers = {"Content-Type": "application/json"}
-
-    mock_resp.json = MagicMock(return_value={"mock": "data"})
-    mock_resp.json.side_effect = ValueError("JSON fail")
+    mock_resp.json = MagicMock(side_effect=ValueError("JSON fail"))
 
     coord_path = "custom_components.blueprints_updater.coordinator"
     prov_path = "custom_components.blueprints_updater.providers"

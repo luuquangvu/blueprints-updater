@@ -70,7 +70,7 @@ async def test_update_entity_release_notes_risks(mock_coordinator):
         patch.object(
             mock_coordinator,
             "async_get_git_diff",
-            return_value=AsyncMock(return_value=None),
+            new=AsyncMock(return_value=None),
         ),
     ):
         entity = BlueprintUpdateEntity(mock_coordinator, path, info)

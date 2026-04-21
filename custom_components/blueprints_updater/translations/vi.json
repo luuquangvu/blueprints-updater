@@ -135,6 +135,7 @@
     "risk_legacy": "{message}",
     "risk_compatibility": "Lỗi tương thích cho {entity}: {error}",
     "risk_system_error": "Lỗi hệ thống: {error}",
-    "breaking_risks_report": "Tự động cập nhật cho {name} đã bị chặn để đảm bảo an toàn. Các rủi ro phát hiện được:\n{risks}\n\nVui lòng xem xét và cài đặt thủ công nếu thấy đúng."
+    "breaking_risks_report": "Tự động cập nhật cho {name} đã bị chặn để đảm bảo an toàn. Các rủi ro phát hiện được:\n{risks}\n\nVui lòng xem xét và cài đặt thủ công nếu thấy đúng.",
+    "auto_update_blocked_by_system_error": "Tự động cập nhật cho {name} đã bị tạm dừng do lỗi phát sinh ngoài dự kiến khi kiểm tra tương thích."
   }
 }

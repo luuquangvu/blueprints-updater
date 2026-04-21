@@ -135,6 +135,7 @@
     "risk_legacy": "{message}",
     "risk_compatibility": "Erro de compatibilidade para {entity}: {error}",
     "risk_system_error": "Erro do sistema: {error}",
-    "breaking_risks_report": "A atualização automática para {name} foi bloqueada por precaução. Riscos detetados:\n{risks}\n\nPor favor, reveja e instale manualmente se estiver correto."
+    "breaking_risks_report": "A atualização automática para {name} foi bloqueada por precaução. Riscos detetados:\n{risks}\n\nPor favor, reveja e instale manualmente se estiver correto.",
+    "auto_update_blocked_by_system_error": "Atualização automática de {name} suspensa devido a um erro inesperado na verificação de compatibilidade."
   }
 }

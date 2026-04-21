@@ -135,6 +135,7 @@
     "risk_legacy": "{message}",
     "risk_compatibility": "Kompatibilitetsfel för {entity}: {error}",
     "risk_system_error": "Systemfel: {error}",
-    "breaking_risks_report": "Automatisk uppdatering för {name} blockerades som en försiktighetsåtgärd. Upptäckta risker:\n{risks}\n\nGranska och installera manuellt om det är korrekt."
+    "breaking_risks_report": "Automatisk uppdatering för {name} blockerades som en försiktighetsåtgärd. Upptäckta risker:\n{risks}\n\nGranska och installera manuellt om det är korrekt.",
+    "auto_update_blocked_by_system_error": "Automatisk uppdatering för {name} har pausats på grund av ett oväntat fel vid kompatibilitetskontrollen."
   }
 }

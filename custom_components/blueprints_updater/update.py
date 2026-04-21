@@ -55,16 +55,22 @@ async def async_setup_entry(
 
 
 async def _async_purge_entity_registry(
-    hass: HomeAssistant, entity_registry: er.EntityRegistry, entity_id: str
+    hass: HomeAssistant,
+    entity_registry: er.EntityRegistry,
+    entity_id: str,
+    entity: BlueprintUpdateEntity | None = None,
 ) -> None:
-    """Remove entity from registry and state machine.
+    """Remove entity from registry and state machine, optionally calling async_remove.
 
     Args:
         hass: HomeAssistant instance.
         entity_registry: The entity registry.
         entity_id: The entity ID to remove.
-
+        entity: Optional entity object to handle lifecycle cleanup first.
     """
+    if entity and entity.hass:
+        await entity.async_remove(force_remove=True)
+
     if entity_registry.async_get(entity_id):
         entity_registry.async_remove(entity_id)
     hass.states.async_remove(entity_id)
@@ -132,7 +138,7 @@ def async_update_entities(
             entity = current_entities.pop(path)
             if entity.entity_id:
                 hass.async_create_task(
-                    _async_purge_entity_registry(hass, entity_registry, entity.entity_id)
+                    _async_purge_entity_registry(hass, entity_registry, entity.entity_id, entity)
                 )
             else:
                 hass.async_create_task(entity.async_remove(force_remove=True))

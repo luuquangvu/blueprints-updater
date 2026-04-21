@@ -50,14 +50,7 @@ blueprint:
 """
 
     entities = ["automation.test_sensor"]
-    configs = {
-        "automation.test_sensor": {
-            "use_blueprint": {
-                "path": "automation/test.yaml",
-                "input": {"motion_sensor": "binary_sensor.motion"},
-            }
-        }
-    }
+    configs = {"automation.test_sensor": {"motion_sensor": "binary_sensor.motion"}}
 
     with (
         patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
@@ -106,11 +99,7 @@ blueprint:
     new_content = "blueprint:\n  name: New\n  input: {}"
 
     entities = ["automation.test"]
-    configs = {
-        "automation.test": {
-            "use_blueprint": {"path": "automation/test.yaml", "input": {"old_input": "value"}}
-        }
-    }
+    configs = {"automation.test": {"old_input": "value"}}
 
     with (
         patch.object(coordinator, "_get_entities_using_blueprint_list", return_value=entities),
@@ -153,20 +142,10 @@ blueprint:
         entity:
           domain: binary_sensor
 """
-    rel_path = "automation/test.yaml"
     entities = ["automation.test", "automation.no_input"]
     configs = {
-        "automation.test": {
-            "use_blueprint": {
-                "path": rel_path,
-                "input": {},
-            },
-        },
-        "automation.no_input": {
-            "use_blueprint": {
-                "path": rel_path,
-            },
-        },
+        "automation.test": {},
+        "automation.no_input": {},
     }
 
     with (

@@ -1,8 +1,8 @@
 """Tests for Blueprints Updater Advanced Compatibility Guard logic."""
 
 from datetime import timedelta
-from typing import cast
-from unittest.mock import MagicMock, patch
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -17,13 +17,25 @@ from custom_components.blueprints_updater.coordinator import (
 
 
 @pytest.fixture
-async def coordinator(hass):
+def coordinator(hass):
     """Create a real BlueprintUpdateCoordinator instance for tests."""
     entry = MagicMock()
     entry.domain = DOMAIN
+    entry.entry_id = "test_entry"
+    entry.options = {}
+    entry.data = {}
     with patch.object(DataUpdateCoordinator, "__init__", return_value=None):
         instance = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+
+    instance.hass = hass
+    instance.config_entry = entry
+    instance.setup_complete = True
     instance.data = {}
+
+    instance.async_translate = cast(
+        Any, AsyncMock(side_effect=lambda key, **kwargs: f"translated:{key}")
+    )
+
     return instance
 
 
@@ -49,7 +61,10 @@ async def test_auto_update_guard_blocks_when_risks_present(coordinator: Blueprin
     ):
         new_content = "blueprint: name: New"
         risks: list[StructuredRisk] = [
-            {"type": BlueprintRiskType.COMPATIBILITY, "args": {"entity": "automation.test"}}
+            {
+                "type": BlueprintRiskType.COMPATIBILITY,
+                "args": {"entity": "automation.test", "error": "Incompatible change"},
+            }
         ]
 
         result = await coordinator._handle_auto_update_step(

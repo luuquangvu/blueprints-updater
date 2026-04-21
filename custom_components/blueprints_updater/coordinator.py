@@ -1424,13 +1424,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     @staticmethod
     def _get_affected_entities(configs: dict[str, dict[str, Any]], key: str) -> list[str]:
         """Find entities using a specific input key."""
-        return [
-            eid
-            for eid, full_cfg in configs.items()
-            if isinstance(full_cfg.get("use_blueprint"), dict)
-            and isinstance(full_cfg["use_blueprint"].get("input"), dict)
-            and key in full_cfg["use_blueprint"]["input"]
-        ]
+        return [eid for eid, inputs in configs.items() if key in inputs]
 
     @staticmethod
     def _detect_new_mandatory_inputs(
@@ -1449,14 +1443,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> list[StructuredRisk]:
         """Detect missing mandatory inputs for existing entities."""
         risks = []
-        for entity_id, full_config in configs.items():
-            use_bp = full_config.get("use_blueprint")
-            if not isinstance(use_bp, dict):
-                continue
-
-            raw_input = use_bp.get("input")
-            inputs: dict[str, Any] = raw_input if isinstance(raw_input, dict) else {}
-
+        for entity_id, inputs in configs.items():
             risks.extend(
                 {
                     "type": BlueprintRiskType.MISSING_INPUT,
@@ -1562,7 +1549,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         Args:
             old_content: Current local YAML content.
             new_content: Remote YAML content from update.
-            configs: Precomputed configurations for those entities.
+            configs: Precomputed map of entity_id -> input_map.
 
         Returns:
             A list of structured risks describing the detected changes and potential issues.
@@ -2211,11 +2198,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if self.data and path in self.data:
             self.data[path]["breaking_risks"] = risks
 
-        if (
-            updatable
-            and not last_error
-            and self.is_auto_update_enabled()
-            and await self._handle_auto_update_step(
+        if updatable and not last_error and self.is_auto_update_enabled():
+            auto_update_handled = await self._handle_auto_update_step(
                 path,
                 info,
                 remote_content,
@@ -2225,8 +2209,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 results_to_notify,
                 updated_domains,
             )
-        ):
-            return
+            if auto_update_handled or (
+                self.data and path in self.data and self.data[path].get("update_blocking_reason")
+            ):
+                return
 
         self._update_coordinator_status_data(
             path, updatable, last_error, remote_hash, remote_content, new_etag, risks
@@ -2268,7 +2254,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             local_file = self.hass.config.path("blueprints", rel_path)
             try:
                 entity_ids = self._get_entities_using_blueprint_list(rel_path)
-                configs = self._get_entities_configs(entity_ids)
+                full_configs = self._get_entities_configs(entity_ids)
+                configs = {
+                    eid: cfg.get("use_blueprint", {}).get("input", {})
+                    for eid, cfg in full_configs.items()
+                }
 
                 if os.path.isfile(local_file):
                     with open(local_file, encoding="utf-8") as f:
@@ -2276,7 +2266,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     risks = self._detect_breaking_changes(old_content, remote_content, configs)
 
                 compatibility_risks = await self._async_validate_blueprint_consumers(
-                    rel_path, remote_content, configs
+                    rel_path, remote_content, full_configs
                 )
                 risks.extend(compatibility_risks)
 
@@ -2348,9 +2338,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 info["name"],
                 len(risks),
             )
-            title = await self.async_translate(
-                "auto_update_blocked_by_breaking_change", name=info["name"]
+            title_key = (
+                "auto_update_blocked_by_system_error"
+                if guard_failed
+                else "auto_update_blocked_by_breaking_change"
             )
+            title = await self.async_translate(title_key, name=info["name"])
             risk_summary = await self._get_risk_summary(risks)
             message = await self.async_translate(
                 "breaking_risks_report", name=info["name"], risks=risk_summary
@@ -2437,7 +2430,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not (self.data and path in self.data):
             return
 
-        update_data: dict[str, Any]
+        current_reason = self.data[path].get("update_blocking_reason")
+
         if last_error:
             update_data = {
                 "last_error": last_error,
@@ -2446,7 +2440,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "remote_hash": None,
                 "remote_content": None,
                 "updatable": False,
-                "update_blocking_reason": None,
+                "update_blocking_reason": current_reason,
             }
         else:
             update_data = {
@@ -2456,7 +2450,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "remote_hash": remote_hash,
                 "remote_content": remote_content if updatable else None,
                 "updatable": updatable,
-                "update_blocking_reason": None,
+                "update_blocking_reason": current_reason if updatable else None,
             }
 
         if risks is None:

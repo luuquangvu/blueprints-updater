@@ -135,6 +135,7 @@
     "risk_legacy": "{message}",
     "risk_compatibility": "Błąd kompatybilności dla {entity}: {error}",
     "risk_system_error": "Błąd systemu: {error}",
-    "breaking_risks_report": "Automatyczna aktualizacja dla {name} została zablokowana zapobiegawczo. Wykryte zagrożenia:\n{risks}\n\nProszę sprawdź i zainstaluj ręcznie, jeśli są poprawne."
+    "breaking_risks_report": "Automatyczna aktualizacja dla {name} została zablokowana zapobiegawczo. Wykryte zagrożenia:\n{risks}\n\nProszę sprawdź i zainstaluj ręcznie, jeśli są poprawne.",
+    "auto_update_blocked_by_system_error": "Automatyczna aktualizacja {name} wstrzymana z powodu nieoczekiwanego błędu sprawdzania zgodności."
   }
 }

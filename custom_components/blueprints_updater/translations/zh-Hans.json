@@ -135,6 +135,7 @@
     "risk_legacy": "{message}",
     "risk_compatibility": "{entity} 的兼容性错误：{error}",
     "risk_system_error": "系统错误：{error}",
-    "breaking_risks_report": "为了预防起见，{name} 的自动更新已阻止。检测到的风险：\n{risks}\n\n如果正确，请检查并手动安装。"
+    "breaking_risks_report": "为了预防起见，{name} 的自动更新已阻止。检测到的风险：\n{risks}\n\n如果正确，请检查并手动安装。",
+    "auto_update_blocked_by_system_error": "{name} 的自动更新已暂停，因为兼容性检查过程中出现意外错误。"
   }
 }

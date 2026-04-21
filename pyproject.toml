@@ -7,11 +7,11 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-  "homeassistant>=2026.4.3",
+  "homeassistant>=2026.4",
   "ruff",
   "ty",
   "pyright",
-  "pytest",
+  "pytest>=9",
   "pytest-asyncio",
   "pytest-cov",
   "interrogate",

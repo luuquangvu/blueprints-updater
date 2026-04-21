@@ -13,8 +13,7 @@ from custom_components.blueprints_updater.coordinator import (
 )
 
 
-@pytest.mark.asyncio
-async def test_extract_inputs_schema_nested_sections():
+def test_extract_inputs_schema_nested_sections():
     """Test that _extract_inputs_schema correctly flattens nested sections."""
     content = """
 blueprint:
@@ -100,7 +99,15 @@ blueprint:
     entry.domain = DOMAIN
     with patch.object(DataUpdateCoordinator, "__init__", return_value=None):
         coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
-    risks = coordinator._detect_breaking_changes(old_content, new_content, {})
+    configs = {
+        "automation.test": {
+            "use_blueprint": {
+                "path": "automation/test.yaml",
+                "input": {"target_input": "old"},
+            }
+        }
+    }
+    risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
 
     assert any(
         r["type"] == BlueprintRiskType.NEW_MANDATORY and r["args"]["input"] == "target_input"
@@ -133,13 +140,20 @@ blueprint:
     entry.domain = DOMAIN
     with patch.object(DataUpdateCoordinator, "__init__", return_value=None):
         coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
-    risks = coordinator._detect_breaking_changes(old_content, new_content, {})
+    configs = {
+        "automation.test": {
+            "use_blueprint": {
+                "path": "automation/test.yaml",
+                "input": {"input_one": "val"},
+            }
+        }
+    }
+    risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
 
     assert len(risks) == 0
 
 
-@pytest.mark.asyncio
-async def test_extract_inputs_schema_no_selector():
+def test_extract_inputs_schema_no_selector():
     """Test that inputs without selectors are correctly included."""
     content = """
 blueprint:
@@ -160,8 +174,7 @@ blueprint:
     assert schema["shorthand_input_metadata"]["selector"] is None
 
 
-@pytest.mark.asyncio
-async def test_extract_inputs_schema_sections():
+def test_extract_inputs_schema_sections():
     """Test that sections are correctly identified and recurse while headers are skipped."""
     content = """
 blueprint:

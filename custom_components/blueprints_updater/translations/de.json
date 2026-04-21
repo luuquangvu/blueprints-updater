@@ -135,6 +135,7 @@
     "risk_legacy": "{message}",
     "risk_compatibility": "Kompatibilitätsfehler für {entity}: {error}",
     "risk_system_error": "Systemfehler: {error}",
-    "breaking_risks_report": "Das automatische Update für {name} wurde vorsorglich blockiert. Erkannte Risiken:\n{risks}\n\nBitte überprüfen Sie diese und installieren Sie sie manuell, falls sie korrekt sind."
+    "breaking_risks_report": "Das automatische Update für {name} wurde vorsorglich blockiert. Erkannte Risiken:\n{risks}\n\nBitte überprüfen Sie diese und installieren Sie sie manuell, falls sie korrekt sind.",
+    "auto_update_blocked_by_system_error": "Automatisches Update für {name} pausiert; ein unerwarteter Fehler trat bei der Kompatibilitätsprüfung auf."
   }
 }

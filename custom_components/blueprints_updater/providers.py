@@ -16,6 +16,7 @@ from .const import (
     DOMAIN_JSDELIVR,
     RE_FORUM_CODE_BLOCK,
     RE_FORUM_TOPIC_ID,
+    RE_GIST_RAW,
 )
 
 
@@ -129,7 +130,7 @@ class GistProvider(SourceProvider):
     def normalize_url(self, url: str) -> str:
         """Normalize Gist URL to raw endpoint."""
         parsed = urlparse(url)
-        if "/raw" in parsed.path:
+        if RE_GIST_RAW.search(parsed.path):
             return url
 
         return urlunparse(
