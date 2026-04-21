@@ -79,6 +79,11 @@ async def test_merge_previous_data_edge_cases(coordinator):
     coordinator._merge_previous_data(results)
     assert results["path1"]["updatable"] is False
 
+    coordinator.data = {"path1": "not a dict"}
+    results = {"path1": {"local_hash": "A", "remote_hash": "B", "updatable": True}}
+    coordinator._merge_previous_data(results)
+    assert results["path1"]["updatable"] is True
+
 
 @pytest.mark.asyncio
 async def test_prune_stale_metadata(coordinator):
@@ -93,14 +98,14 @@ async def test_prune_stale_metadata(coordinator):
         patch.object(
             coordinator.hass,
             "async_create_background_task",
-            wraps=coordinator.hass.async_create_background_task,
+            side_effect=lambda coro, name=None: coro,
         ) as mock_bg,
     ):
         await coordinator._async_prune_stale_metadata({"path1"})
         for call in mock_bg.call_args_list:
             if call.kwargs.get("name") == f"{DOMAIN}_prune_save":
                 await call.args[0]
-        mock_save.assert_called_once_with(force=True)
+        mock_save.assert_awaited_once_with(force=True)
 
     assert "path2" not in coordinator._persisted_etags
     assert "path2" not in coordinator._persisted_hashes

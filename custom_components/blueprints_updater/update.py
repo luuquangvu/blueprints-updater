@@ -324,6 +324,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 attrs["last_error"] = self._localized_error or error
             if blocking := info.get("update_blocking_reason"):
                 attrs["update_blocking_reason"] = self._localized_blocking_reason or blocking
+            if auto_update_error := info.get("auto_update_last_error"):
+                attrs["auto_update_last_error"] = auto_update_error
             if risks := info.get("breaking_risks"):
                 attrs["breaking_risks"] = risks
         return attrs

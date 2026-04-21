@@ -98,14 +98,7 @@ blueprint:
     entry.domain = DOMAIN
     with patch.object(DataUpdateCoordinator, "__init__", return_value=None):
         coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
-    configs = {
-        "automation.test": {
-            "use_blueprint": {
-                "path": "automation/test.yaml",
-                "input": {"target_input": "old"},
-            }
-        }
-    }
+    configs = {"automation.test": {"target_input": "old"}}
     risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
 
     assert any(

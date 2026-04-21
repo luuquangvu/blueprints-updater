@@ -67,21 +67,14 @@ class GitHubProvider(SourceProvider):
             return url
 
         path_parts = parsed.path.strip("/").split("/")
-        if len(path_parts) < 4:
-            return url
-        blob_index = -1
-        for idx in range(2, len(path_parts)):
-            part = path_parts[idx].lower()
-            if part in ("blob", "raw"):
-                blob_index = idx
-                break
-
-        if blob_index == -1:
+        if len(path_parts) < 5:
             return url
 
-        if blob_index + 1 >= len(path_parts):
+        route_segment = path_parts[2].lower()
+        if route_segment not in ("blob", "raw"):
             return url
-        new_parts = [*path_parts[:blob_index], *path_parts[blob_index + 1 :]]
+
+        new_parts = [*path_parts[:2], *path_parts[3:]]
 
         return urlunparse(
             (

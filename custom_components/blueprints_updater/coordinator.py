@@ -519,7 +519,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return
 
         for path, info in results.items():
-            if path in self.data:
+            if path in self.data and isinstance(self.data[path], dict):
                 prev = self._handle_source_url_change(path, info, self.data[path])
 
                 is_updatable, next_invalid, next_error, next_remote = (
@@ -1733,7 +1733,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                             self.hass, config_key=entity_id, config=config
                         )
                     else:
-                        object_id = entity_id.split(".", 1)[1]
+                        object_id = (
+                            entity_id.split(".", 1)[1]
+                            if entity_id.startswith("script.") and "." in entity_id
+                            else entity_id
+                        )
                         await async_validate_script_config(
                             self.hass, object_id=object_id, config=config
                         )
@@ -2456,27 +2460,25 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not (self.data and path in self.data):
             return
 
-        current_reason = self.data[path].get("update_blocking_reason")
-
         if last_error:
-            update_data = {
+            update_data: dict[str, Any] = {
                 "last_error": last_error,
                 "etag": new_etag,
                 "invalid_remote_hash": remote_hash,
                 "remote_hash": None,
                 "remote_content": None,
                 "updatable": False,
-                "update_blocking_reason": current_reason,
+                "update_blocking_reason": None,
             }
         else:
-            update_data = {
+            update_data: dict[str, Any] = {
                 "last_error": last_error,
                 "etag": new_etag,
                 "invalid_remote_hash": None,
                 "remote_hash": remote_hash,
                 "remote_content": remote_content if updatable else None,
                 "updatable": updatable,
-                "update_blocking_reason": current_reason if updatable else None,
+                "update_blocking_reason": None,
                 "auto_update_last_error": None,
             }
 

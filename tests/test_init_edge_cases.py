@@ -117,13 +117,13 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
             await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
             mock_reload.assert_called_once()
 
-            with (
-                patch.object(
-                    bp_updater, "async_register_admin_service", side_effect=Exception("Reg fail")
-                ),
-                pytest.raises(Exception, match="Reg fail"),
-            ):
-                await async_setup(hass, {})
+        with (
+            patch.object(
+                bp_updater, "async_register_admin_service", side_effect=Exception("Reg fail")
+            ),
+            pytest.raises(Exception, match="Reg fail"),
+        ):
+            await async_setup(hass, {})
 
 
 @pytest.mark.asyncio
@@ -140,7 +140,13 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
     dom: set[str] = set()
     with patch.object(coordinator, "_detect_risks_for_update", return_value=[]):
         await coordinator._process_blueprint_content(
-            "p", coordinator.data["p"], "invalid: yaml: :", "e", "u", res, dom
+            path="p",
+            info=coordinator.data["p"],
+            remote_content="invalid: yaml: :",
+            new_etag="e",
+            source_url="u",
+            results_to_notify=res,
+            updated_domains=dom,
         )
 
     mock_resp = MagicMock()
