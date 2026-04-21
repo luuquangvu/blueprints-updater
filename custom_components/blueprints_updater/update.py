@@ -140,7 +140,7 @@ def async_update_entities(
                 hass.async_create_task(
                     _async_purge_entity_registry(hass, entity_registry, entity.entity_id, entity)
                 )
-            else:
+            elif entity and entity.hass:
                 hass.async_create_task(entity.async_remove(force_remove=True))
 
 

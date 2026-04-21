@@ -59,7 +59,10 @@ async def test_coordinator_misc(coordinator: BlueprintUpdateCoordinator):
     """Test misc coordinator paths."""
     coordinator._refresh_lock = MagicMock()
     coordinator._refresh_lock.locked.return_value = True
-    await coordinator._async_background_refresh({})
+    with patch.object(coordinator, "_start_background_refresh") as mock_start:
+        await coordinator._async_background_refresh({})
+        assert coordinator._background_task is None
+        mock_start.assert_not_called()
 
     mock_task = MagicMock()
     mock_task.done.return_value = False

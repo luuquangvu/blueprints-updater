@@ -56,8 +56,11 @@ async def test_auto_update_guard_blocks_when_risks_present(coordinator: Blueprin
     blueprint_path = "automation/test_blueprint.yaml"
     _prepare_blueprint_entry(coordinator, blueprint_path)
 
-    with patch.object(
-        coordinator, "_get_entities_using_blueprint", return_value=["automation.test"]
+    with (
+        patch.object(
+            coordinator, "_get_entities_using_blueprint", return_value=["automation.test"]
+        ),
+        patch.object(coordinator, "_async_send_auto_update_notification", return_value=None),
     ):
         new_content = "blueprint: name: New"
         risks: list[StructuredRisk] = [

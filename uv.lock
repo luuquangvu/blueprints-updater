@@ -406,7 +406,7 @@ dev = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "h2" },
+    { name = "h2", specifier = ">=3,<5" },
     { name = "homeassistant", specifier = ">=2026.4" },
     { name = "interrogate" },
     { name = "packaging" },

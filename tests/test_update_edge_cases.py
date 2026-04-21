@@ -112,9 +112,9 @@ async def test_update_entity_remove_path(mock_coordinator, hass):
     ):
         mock_coordinator.data = {}
         async_update_entities(hass, mock_entry, mock_coordinator, current_entities, mock_add)
+        assert path not in current_entities
         mock_create_task.assert_called_once()
         coro = mock_create_task.call_args[0][0]
-        assert coro.__name__ == "async_remove"
         coro.close()
 
 

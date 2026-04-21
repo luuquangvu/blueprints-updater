@@ -3010,7 +3010,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             "local_hash": BlueprintUpdateCoordinator._hash_content(content),
         }
 
-    def _read_local_file(self, full_path: str) -> str | None:
+    @staticmethod
+    def _read_local_file(full_path: str) -> str | None:
         """Read a local file in the executor.
 
         Args:

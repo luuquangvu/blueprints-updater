@@ -138,7 +138,7 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
 
     res: list[str] = []
     dom: set[str] = set()
-    with patch.object(coordinator, "_detect_risks_for_update", return_value=[]):
+    with patch.object(coordinator, "_detect_risks_for_update", new=AsyncMock(return_value=[])):
         await coordinator._process_blueprint_content(
             path="p",
             info=coordinator.data["p"],
