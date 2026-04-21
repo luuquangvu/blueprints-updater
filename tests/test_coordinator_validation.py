@@ -15,9 +15,7 @@ from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import BlueprintRiskType
-from custom_components.blueprints_updater.coordinator import (
-    BlueprintUpdateCoordinator,
-)
+from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
 @pytest.fixture

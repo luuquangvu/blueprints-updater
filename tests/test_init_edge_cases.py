@@ -10,6 +10,7 @@ from homeassistant.const import EVENT_CORE_CONFIG_UPDATE
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 
+import custom_components.blueprints_updater as bp_updater
 from custom_components.blueprints_updater import async_setup, async_setup_entry, async_unload_entry
 from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
@@ -59,8 +60,6 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
     hass.config_entries = MagicMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock(side_effect=_async_none)
     hass.config_entries.async_unload_platforms = AsyncMock(side_effect=_async_true)
-
-    import custom_components.blueprints_updater as bp_updater
 
     init_path = "custom_components.blueprints_updater.__init__"
     with (

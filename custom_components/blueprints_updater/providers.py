@@ -96,8 +96,17 @@ class GitHubProvider(SourceProvider):
         if hostname == DOMAIN_GITHUB_RAW:
             if len(path_parts) < 4:
                 return None
-            user, repo, branch = path_parts[:3]
-            path = "/".join(path_parts[3:])
+            if (
+                len(path_parts) >= 6
+                and path_parts[2] == "refs"
+                and path_parts[3] in ("heads", "tags")
+            ):
+                user, repo = path_parts[:2]
+                branch = path_parts[4]
+                path = "/".join(path_parts[5:])
+            else:
+                user, repo, branch = path_parts[:3]
+                path = "/".join(path_parts[3:])
         elif hostname == DOMAIN_GITHUB:
             if len(path_parts) < 5:
                 return None
@@ -105,8 +114,16 @@ class GitHubProvider(SourceProvider):
             if path_parts[2].lower() not in ("blob", "raw"):
                 return None
             user, repo = path_parts[:2]
-            branch = path_parts[3]
-            path = "/".join(path_parts[4:])
+            if (
+                len(path_parts) >= 7
+                and path_parts[3] == "refs"
+                and path_parts[4] in ("heads", "tags")
+            ):
+                branch = path_parts[5]
+                path = "/".join(path_parts[6:])
+            else:
+                branch = path_parts[3]
+                path = "/".join(path_parts[4:])
         else:
             return None
 
@@ -161,8 +178,6 @@ class HAForumProvider(SourceProvider):
     def normalize_url(self, url: str) -> str:
         """Normalize Forum URL to topic JSON endpoint."""
         parsed = urlparse(url)
-        if "/t/" not in parsed.path:
-            return url
 
         match = RE_FORUM_TOPIC_ID.search(parsed.path)
         if not match:

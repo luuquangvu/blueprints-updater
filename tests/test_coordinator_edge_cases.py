@@ -1,8 +1,10 @@
 """Tests for specific error handling and edge cases in BlueprintUpdateCoordinator."""
 
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
@@ -17,8 +19,6 @@ def coordinator(hass):
     with patch(
         "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__", return_value=None
     ):
-        from datetime import timedelta
-
         coord = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
         coord.hass = hass
         coord.config_entry = entry
@@ -59,8 +59,6 @@ async def test_extract_inputs_schema_malformed(coordinator):
 
 def test_extract_inputs_schema_exception(coordinator):
     """Test _extract_inputs_schema with forced exception."""
-    from homeassistant.exceptions import HomeAssistantError
-
     with patch("homeassistant.util.yaml.parse_yaml", side_effect=HomeAssistantError("forced")):
         schema, error = coordinator._extract_inputs_schema("any")
         assert schema == {}

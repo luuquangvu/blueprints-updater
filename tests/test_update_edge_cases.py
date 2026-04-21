@@ -1,12 +1,13 @@
 """Edge case and boundary condition tests for blueprint update entities."""
 
+from datetime import timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
-from custom_components.blueprints_updater.update import BlueprintUpdateEntity
+from custom_components.blueprints_updater.update import BlueprintUpdateEntity, async_update_entities
 
 
 @pytest.fixture
@@ -19,8 +20,6 @@ def mock_coordinator(hass):
     with patch(
         "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__", return_value=None
     ):
-        from datetime import timedelta
-
         coord = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
         coord.hass = hass
         coord.config_entry = entry
@@ -89,8 +88,6 @@ async def test_update_entity_release_notes_risks(mock_coordinator):
 @pytest.mark.asyncio
 async def test_update_entity_remove_path(mock_coordinator, hass):
     """Test the entity removal path."""
-    from custom_components.blueprints_updater.update import async_update_entities
-
     path = "automation/test.yaml"
     info = {"name": "Test", "rel_path": path}
 
