@@ -7,8 +7,8 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+  "h2",
   "homeassistant>=2026.4",
-  "httpx[http2]",
   "interrogate",
   "packaging",
   "pyright",
