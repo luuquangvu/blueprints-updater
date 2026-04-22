@@ -595,9 +595,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return False
         return self._hash_content(content, already_normalized=already_normalized) == target_hash
 
-    @staticmethod
     def _handle_source_url_change(
-        path: str, info: dict[str, Any], prev: dict[str, Any]
+        self, path: str, info: dict[str, Any], prev: dict[str, Any]
     ) -> dict[str, Any]:
         """Handle detected change in blueprint source URL.
 
@@ -622,6 +621,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 prev_url,
                 curr_url,
             )
+            self._persisted_etags.pop(path, None)
+            self._persisted_hashes.pop(path, None)
             return {
                 **prev,
                 "remote_hash": None,
@@ -629,6 +630,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "remote_content": None,
                 "last_error": None,
                 "etag": None,
+                "updatable": False,
             }
         return prev
 
@@ -2216,10 +2218,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             blueprint_dict = yaml_util.parse_yaml(remote_content)
             last_error = self._validate_blueprint(blueprint_dict, source_url)
         except (HomeAssistantError, InvalidBlueprint) as err:
+            _LOGGER.warning(
+                "Invalid blueprint content from (redacted URL): %s",
+                _sanitize_error_detail(str(err)),
+            )
             updatable = False
             remote_hash = ""
             last_error = f"yaml_syntax_error|{_sanitize_error_detail(str(err))}"
         except Exception as err:
+            _LOGGER.exception("Unexpected error processing blueprint for %s", path)
             updatable = False
             remote_hash = ""
             last_error = f"processing_error|{_sanitize_error_detail(str(err))}"

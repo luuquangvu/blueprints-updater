@@ -235,6 +235,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
     assert coordinator.data[path]["updatable"] is False
 
 
+@pytest.mark.asyncio
 async def test_background_refresh_deduplication(hass, coordinator):
     """Test that multiple refresh requests do not start duplicate background tasks."""
     blueprints = {
@@ -280,6 +281,7 @@ async def test_background_refresh_deduplication(hass, coordinator):
         await coordinator.async_shutdown()
 
 
+@pytest.mark.asyncio
 async def test_background_refresh_shutdown(hass, coordinator):
     """Test that shutdown cancels the background task."""
 

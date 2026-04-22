@@ -139,7 +139,7 @@ Khi phát hiện bản cập nhật, hệ thống sẽ thực hiện quy trình 
 2. **Phân tích tác động**: Giả lập việc cập nhật trên các tự động hóa (automations) và tập lệnh (scripts) hiện có của bạn để xem có thành phần nào bị hỏng hay không.
 3. **Cảnh báo rủi ro**: Nếu phát hiện vấn đề (chẳng hạn như thiếu thông số bắt buộc), bản cập nhật sẽ bị đánh dấu trạng thái **"Lỗi tương thích (compatibility error)"**.
 4. **Bảo vệ cập nhật tự động**: Các blueprint có nguy cơ gây lỗi sẽ bị chặn cập nhật tự động nhằm bảo vệ ngôi nhà của bạn khỏi các sự cố không đáng có.
-5. **Minh bạch thay đổi**: Đối với các bản cập nhật bị chặn, bạn có thể xem **"CẢNH BÁO THAY ĐỔI LỚN (POTENTIAL BREAKING CHANGES)"** để biết các thay đổi gây lỗi cụ thể (như thiếu tham số bắt buộc) và xem chi tiết phần **"Git Diff"** để so sánh mã nguồn trước khi quyết định cài đặt thủ công.
+5. **Minh bạch thay đổi**: Đối với các bản cập nhật bị chặn, bạn có thể xem **"NGUY CƠ GÂY MẤT TƯƠNG THÍCH (POTENTIAL BREAKING CHANGES)"** để biết các thay đổi gây lỗi cụ thể (như thiếu tham số bắt buộc) và xem chi tiết phần **"Git Diff"** để so sánh mã nguồn trước khi quyết định cài đặt thủ công.
 
 ## Làm mới danh sách Blueprint
 

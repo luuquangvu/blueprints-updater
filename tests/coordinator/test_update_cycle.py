@@ -45,7 +45,7 @@ async def test_scan_blueprints(coordinator):
         ),
         patch("custom_components.blueprints_updater.coordinator.os.path.isdir", return_value=True),
         patch(
-            "custom_components.blueprints_updater.coordinator.open",
+            "builtins.open",
             side_effect=[
                 mock_open(
                     read_data="blueprint:\n  name: Test\n  domain: automation\n  source_url: https://example.com/blueprint1.yaml\n"
@@ -88,7 +88,7 @@ async def test_scan_blueprints_domain_extraction(coordinator):
         ),
         patch("custom_components.blueprints_updater.coordinator.os.path.isdir", return_value=True),
         patch(
-            "custom_components.blueprints_updater.coordinator.open",
+            "builtins.open",
             side_effect=[
                 mock_open(
                     read_data="blueprint:\n  name: Test\n  source_url: https://example.com/blueprint1.yaml\n"
@@ -177,12 +177,14 @@ async def test_async_update_data_partial_failure(coordinator):
         },
     }
 
-    coordinator._async_fetch_with_cdn_fallback = AsyncMock(
-        side_effect=[
-            (f"blueprint:\n  name: OK\n  domain: automation\n  source_url: {url1}\n", "e1"),
-            httpx.RequestError("Failed"),
-        ]
-    )
+    def mock_fetch(session, path, url, cdn_url, *args, **kwargs):
+        if url == url1:
+            return (f"blueprint:\n  name: OK\n  domain: automation\n  source_url: {url1}\n", "e1")
+        if url == url2:
+            raise httpx.RequestError("Failed")
+        return None, None
+
+    coordinator._async_fetch_with_cdn_fallback = AsyncMock(side_effect=mock_fetch)
 
     with (
         patch.object(BlueprintUpdateCoordinator, "scan_blueprints", return_value=blueprints),
@@ -293,8 +295,15 @@ async def test_async_update_data_auto_update_multiple_sorted(mock_translate, coo
         },
     }
 
+    def mock_fetch(session, path, url, cdn_url, *args, **kwargs):
+        if url == u1:
+            return (c1, "e1")
+        if url == u2:
+            return (c2, "e2")
+        return None, None
+
     coordinator.async_install_blueprint = AsyncMock()
-    coordinator._async_fetch_with_cdn_fallback = AsyncMock(side_effect=[(c2, "e2"), (c1, "e1")])
+    coordinator._async_fetch_with_cdn_fallback = AsyncMock(side_effect=mock_fetch)
 
     with (
         patch.object(
@@ -347,29 +356,33 @@ async def test_async_background_refresh_concurrency_and_cancellation(hass, coord
     max_observed_concurrency = 0
     processed_count = 0
 
-    worker_started_event = asyncio.Event()
     block_event = asyncio.Event()
+
+    workers_ready = asyncio.Condition()
 
     async def mock_update_in_place(*args, **kwargs):
         nonlocal active_workers, max_observed_concurrency, processed_count
-        active_workers += 1
-        max_observed_concurrency = max(max_observed_concurrency, active_workers)
-
-        worker_started_event.set()
+        async with workers_ready:
+            active_workers += 1
+            max_observed_concurrency = max(max_observed_concurrency, active_workers)
+            workers_ready.notify_all()
 
         try:
             await block_event.wait()
             processed_count += 1
         finally:
-            active_workers -= 1
+            async with workers_ready:
+                active_workers -= 1
+                workers_ready.notify_all()
 
     coordinator._async_update_blueprint_in_place = AsyncMock(side_effect=mock_update_in_place)
 
     refresh_task = asyncio.create_task(coordinator._async_background_refresh(coordinator.data))
-    await worker_started_event.wait()
 
-    for _ in range(10):
-        await asyncio.sleep(0)
+    async with workers_ready:
+        await asyncio.wait_for(
+            workers_ready.wait_for(lambda: active_workers == MAX_CONCURRENT_REQUESTS), timeout=2.0
+        )
 
     assert max_observed_concurrency <= MAX_CONCURRENT_REQUESTS
     assert active_workers == MAX_CONCURRENT_REQUESTS
@@ -507,6 +520,8 @@ async def test_handle_source_url_change_clears_metadata(coordinator):
 
     assert result.get("etag") is None
     assert result.get("remote_hash") is None
+    assert path not in coordinator._persisted_etags
+    assert path not in coordinator._persisted_hashes
 
 
 @pytest.mark.asyncio
@@ -557,7 +572,7 @@ async def test_detect_risks_system_error_on_exception(coordinator):
     with (
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
         patch(
-            "custom_components.blueprints_updater.coordinator.open",
+            "builtins.open",
             side_effect=Exception("Test Exception"),
         ),
     ):
@@ -942,7 +957,7 @@ async def test_async_update_blueprint_304_auto_update(coordinator):
             mock_session, path, info, results_to_notify, updated_domains
         )
 
-        mock_install.assert_called_once()
+        mock_install.assert_awaited_once()
         assert mock_session.get.call_count == 2
 
 
