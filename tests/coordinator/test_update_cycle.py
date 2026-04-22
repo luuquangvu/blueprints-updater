@@ -2,7 +2,6 @@
 
 import asyncio
 import contextlib
-import hashlib
 import os
 from types import MappingProxyType
 from typing import Any, cast
@@ -445,7 +444,7 @@ async def test_ghost_update_prevention(coordinator):
     path = "/config/blueprints/automation/test.yaml"
     url = "https://github.com/user/repo/blob/main/test.yaml"
     content = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n"
-    local_hash = hashlib.sha256(content.encode()).hexdigest()
+    local_hash = coordinator._hash_content(content)
 
     coordinator.data[path] = {
         "local_hash": local_hash,
@@ -483,7 +482,7 @@ async def test_yaml_normalization_ignores_comments(coordinator):
     content = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n"
 
     canonical_content = yaml_util.dump(cast(dict[str, Any], yaml_util.parse_yaml(content)))
-    local_hash = hashlib.sha256(canonical_content.encode()).hexdigest()
+    local_hash = coordinator._hash_content(canonical_content)
 
     coordinator.data[path] = {
         "local_hash": local_hash,
@@ -772,7 +771,7 @@ async def test_async_install_blueprint_state_synchronization(coordinator):
     """Test that self.data is updated immediately after async_install_blueprint."""
     path = "/config/blueprints/automation/test.yaml"
     remote_content = "blueprint:\n  name: New Version\n  source_url: https://url\n"
-    new_hash = hashlib.sha256(remote_content.encode()).hexdigest()
+    new_hash = coordinator._hash_content(remote_content)
 
     coordinator.data = {
         path: {

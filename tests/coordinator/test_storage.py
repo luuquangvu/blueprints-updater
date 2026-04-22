@@ -116,7 +116,12 @@ async def test_async_save_metadata_empty_data(coordinator):
     coordinator._persisted_etags = {"stale": "etag"}
     coordinator._persisted_hashes = {"stale": "hash"}
 
-    with patch.object(coordinator._store, "async_save", new_callable=AsyncMock) as mock_save:
+    with (
+        patch.object(coordinator._store, "async_save", new_callable=AsyncMock) as mock_save,
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
+        ),
+    ):
         await coordinator._async_save_metadata()
 
     mock_save.assert_called_once_with({"etags": {}, "remote_hashes": {}})

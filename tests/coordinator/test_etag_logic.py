@@ -1,6 +1,5 @@
 """Tests for Blueprints Updater ETag logic."""
 
-import hashlib
 from datetime import timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -52,8 +51,8 @@ async def test_304_response_preserves_updatable_status(
     local_content = "blueprint:\n  name: Old"
     remote_content = "blueprint:\n  name: New"
 
-    local_hash = hashlib.sha256(local_content.encode()).hexdigest()
-    remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
+    local_hash = coordinator._hash_content(local_content)
+    remote_hash = coordinator._hash_content(remote_content)
 
     info = {
         "name": "Test",
@@ -142,8 +141,6 @@ async def test_etag_migration_forces_download(
     """Test that if remote_hash is missing from persisted data, the ETag is ignored."""
     path = "/config/blueprints/test.yaml"
     remote_content = "blueprint:\n  name: fresh\n  domain: automation"
-    remote_hash = hashlib.sha256(remote_content.encode()).hexdigest()
-
     info = {
         "name": "Test",
         "rel_path": "test.yaml",
@@ -151,6 +148,8 @@ async def test_etag_migration_forces_download(
         "source_url": "https://github.com/user/repo/bp.yaml",
         "local_hash": "stale_hash",
     }
+    remote_content_with_url = coordinator._ensure_source_url(remote_content, info["source_url"])
+    remote_hash = coordinator._hash_content(remote_content_with_url)
 
     coordinator.data = {
         path: {
@@ -173,11 +172,9 @@ async def test_etag_migration_forces_download(
 
     results_to_notify: list[str] = []
     updated_domains: set[str] = set()
-    with patch("custom_components.blueprints_updater.coordinator.hashlib.sha256") as mock_sha:
-        mock_sha.return_value.hexdigest.return_value = remote_hash
-        await coordinator._async_update_blueprint_in_place(
-            mock_session, path, info, results_to_notify, updated_domains
-        )
+    await coordinator._async_update_blueprint_in_place(
+        mock_session, path, info, results_to_notify, updated_domains
+    )
 
     _args, kwargs = mock_session.get.call_args
     assert "If-None-Match" not in kwargs.get("headers", {})

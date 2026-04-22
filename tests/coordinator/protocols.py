@@ -114,6 +114,10 @@ class BlueprintCoordinatorInternal(Protocol):
     _last_request_time: float
     _background_task: Any
 
+    def _hash_content(self, content: str, already_normalized: bool = False) -> str:
+        """Compute SHA256 hash of content."""
+        ...
+
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch blueprint update data (internal handler)."""
         ...

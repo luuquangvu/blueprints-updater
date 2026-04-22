@@ -28,7 +28,7 @@ async def test_detect_risks_system_error_on_exception(hass):
     with (
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
         patch(
-            "builtins.open",
+            "custom_components.blueprints_updater.coordinator.open",
             side_effect=Exception("Test Exception"),
         ),
     ):

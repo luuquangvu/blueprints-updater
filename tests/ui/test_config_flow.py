@@ -1,5 +1,6 @@
 """Tests for Blueprints Updater config flow."""
 
+import os
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
@@ -189,13 +190,25 @@ async def test_options_flow_enhanced_coercion(hass: HomeAssistant):
 @pytest.mark.asyncio
 async def test_config_flow_scanning(hass: HomeAssistant):
     """Test config flow scanning."""
+    # Use absolute paths and realistic metadata
+    base_path = os.path.abspath("blueprints")
+    full_path = os.path.join(base_path, "automation/test.yaml")
+
     with (
         patch(
             "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator.scan_blueprints"
         ) as mock_scan,
-        patch.object(hass.config, "path", return_value="blueprints"),
+        patch.object(hass.config, "path", return_value=base_path),
     ):
-        mock_scan.return_value = {"blueprints/automation/test.yaml": {"name": "Test BP"}}
+        mock_scan.return_value = {
+            full_path: {
+                "name": "Test BP",
+                "domain": "automation",
+                "source_url": "https://example.com/test.yaml",
+                "local_hash": "hash123",
+                "rel_path": "automation/test.yaml",
+            }
+        }
         options = await _async_get_blueprint_options(hass)
         assert len(options) == 1
         assert options[0]["value"] == "automation/test.yaml"

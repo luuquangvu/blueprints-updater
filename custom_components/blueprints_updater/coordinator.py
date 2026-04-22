@@ -2223,12 +2223,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 _sanitize_error_detail(str(err)),
             )
             updatable = False
-            remote_hash = ""
+            remote_hash = None
             last_error = f"yaml_syntax_error|{_sanitize_error_detail(str(err))}"
         except Exception as err:
             _LOGGER.exception("Unexpected error processing blueprint for %s", path)
             updatable = False
-            remote_hash = ""
+            remote_hash = None
             last_error = f"processing_error|{_sanitize_error_detail(str(err))}"
 
         risks = await self._detect_risks_for_update(path, info, remote_content, last_error)
@@ -2343,7 +2343,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         path: str,
         info: dict[str, Any],
         remote_content: str,
-        remote_hash: str,
+        remote_hash: str | None,
         new_etag: str | None,
         risks: list[StructuredRisk],
         results_to_notify: list[str],
@@ -2452,7 +2452,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         path: str,
         updatable: bool,
         last_error: str | None,
-        remote_hash: str,
+        remote_hash: str | None,
         remote_content: str,
         new_etag: str | None,
         risks: list[StructuredRisk] | None = None,
@@ -3018,10 +3018,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if domain == "automation" and rel_path:
             parts = rel_path.split("/")
-            if len(parts) >= 2:
-                inferred = BlueprintUpdateCoordinator._normalize_domain(parts[0])
-                if inferred != "automation":
-                    domain = inferred
+            if len(parts) >= 2 and parts[0] in ALLOWED_RELOAD_DOMAINS:
+                domain = parts[0]
 
         normalized_content = BlueprintUpdateCoordinator._ensure_source_url(content, source_url)
         return {
