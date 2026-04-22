@@ -3064,32 +3064,37 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         _LOGGER.debug("Scanning blueprints in: %s", blueprint_path)
         selected_set = set(selected_blueprints)
 
-        for root, _, files in os.walk(blueprint_path):
-            for file in files:
-                if not file.endswith(".yaml"):
-                    continue
+        for domain in ALLOWED_RELOAD_DOMAINS:
+            domain_path = os.path.join(blueprint_path, domain)
+            if not os.path.isdir(domain_path):
+                continue
 
-                full_path = os.path.join(root, file)
-                rel_path = os.path.relpath(full_path, blueprint_path).replace("\\", "/")
+            for root, _, files in os.walk(domain_path):
+                for file in files:
+                    if not (file.endswith(".yaml") or file.endswith(".yml")):
+                        continue
 
-                if not BlueprintUpdateCoordinator._should_include_blueprint(
-                    rel_path, filter_mode, selected_set
-                ):
-                    continue
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, blueprint_path).replace("\\", "/")
 
-                try:
-                    with open(full_path, encoding="utf-8") as f:
-                        content = f.read()
-
-                    if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
-                        full_path, content, rel_path
+                    if not BlueprintUpdateCoordinator._should_include_blueprint(
+                        rel_path, filter_mode, selected_set
                     ):
-                        found_blueprints[full_path] = {
-                            **parsed_data,
-                            "rel_path": rel_path,
-                        }
+                        continue
 
-                except OSError as err:
-                    _LOGGER.error("Error reading blueprint at %s: %s", full_path, err)
+                    try:
+                        with open(full_path, encoding="utf-8") as f:
+                            content = f.read()
+
+                        if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
+                            full_path, content, rel_path
+                        ):
+                            found_blueprints[full_path] = {
+                                **parsed_data,
+                                "rel_path": rel_path,
+                            }
+
+                    except OSError as err:
+                        _LOGGER.error("Error reading blueprint at %s: %s", full_path, err)
 
         return found_blueprints

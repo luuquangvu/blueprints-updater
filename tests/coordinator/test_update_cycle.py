@@ -25,81 +25,116 @@ from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoor
 
 @pytest.mark.asyncio
 async def test_scan_blueprints(coordinator):
-    """Test scanning for blueprints on disk."""
-    base_path = "C:/config/blueprints" if os.name == "nt" else "/config/blueprints"
-    auto_path = os.path.normpath(os.path.join(base_path, "automation"))
-    script_path = os.path.normpath(os.path.join(base_path, "script"))
+    """Test scanning for blueprints across all valid domains and ignoring invalid ones."""
+    base_path = os.path.normpath("/config/blueprints")
+    auto_path = os.path.join(base_path, "automation")
+    script_path = os.path.join(base_path, "script")
+    temp_path = os.path.join(base_path, "template")
+    invalid_path = os.path.join(base_path, "not_a_domain")
+
+    def mock_open_side_effect(path, *args, **kwargs):
+        if "test.yaml" in path:
+            return mock_open(
+                read_data="blueprint:\n  name: Auto YAML\n  domain: automation\n  source_url: https://example.com/a.yaml\n"
+            ).return_value
+        if "test.yml" in path:
+            return mock_open(
+                read_data="blueprint:\n  name: Auto YML\n  domain: automation\n  source_url: https://example.com/b.yml\n"
+            ).return_value
+        if "script1.yaml" in path:
+            return mock_open(
+                read_data="blueprint:\n  name: Script\n  domain: script\n  source_url: https://example.com/s.yaml\n"
+            ).return_value
+        if "temp.yaml" in path:
+            return mock_open(
+                read_data="blueprint:\n  name: Temp\n  domain: template\n  source_url: https://example.com/t.yaml\n"
+            ).return_value
+        return mock_open().return_value
 
     with (
         patch(
             "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._get_entities_using_blueprint_list",
-            return_value=["automation.test"],
+            return_value=[],
         ),
         patch(
             "custom_components.blueprints_updater.coordinator.os.walk",
-            return_value=[
-                (auto_path, [], ["test.yaml"]),
-                (script_path, [], ["script1.yaml"]),
-            ],
+            side_effect=lambda p: (
+                [(p, [], ["test.yaml", "test.yml"])]
+                if p.endswith("automation")
+                else [(p, [], ["script1.yaml"])]
+                if p.endswith("script")
+                else [(p, [], ["temp.yaml"])]
+                if p.endswith("template")
+                else [(p, [], ["ignored.yaml"])]
+                if "not_a_domain" in p
+                else []
+            ),
         ),
         patch("custom_components.blueprints_updater.coordinator.os.path.isdir", return_value=True),
-        patch(
-            "builtins.open",
-            side_effect=[
-                mock_open(
-                    read_data="blueprint:\n  name: Test\n  domain: automation\n  source_url: https://example.com/blueprint1.yaml\n"
-                ).return_value,
-                mock_open(
-                    read_data="blueprint:\n  name: Script\n  domain: script\n  source_url: https://example.com/blueprint2.yaml\n"
-                ).return_value,
-            ],
-        ),
+        patch("builtins.open", side_effect=mock_open_side_effect),
         patch.object(coordinator.hass.config, "path", return_value=base_path),
     ):
         blueprints = BlueprintUpdateCoordinator.scan_blueprints(
             coordinator.hass, FILTER_MODE_ALL, []
         )
 
-    path_test = os.path.normpath(os.path.join(auto_path, "test.yaml"))
+    path_yaml = os.path.normpath(os.path.join(auto_path, "test.yaml"))
+    path_yml = os.path.normpath(os.path.join(auto_path, "test.yml"))
+    path_script = os.path.normpath(os.path.join(script_path, "script1.yaml"))
+    path_temp = os.path.normpath(os.path.join(temp_path, "temp.yaml"))
+    path_ignored = os.path.normpath(os.path.join(invalid_path, "ignored.yaml"))
 
-    assert len(blueprints) == 2
-    assert path_test in blueprints
-    assert blueprints[path_test]["name"] == "Test"
-    assert blueprints[path_test]["domain"] == "automation"
+    assert len(blueprints) == 4
+    assert path_yaml in blueprints
+    assert path_yml in blueprints
+    assert path_script in blueprints
+    assert path_temp in blueprints
+    assert path_ignored not in blueprints
+    assert blueprints[path_yaml]["name"] == "Auto YAML"
+    assert blueprints[path_yml]["name"] == "Auto YML"
+    assert blueprints[path_script]["name"] == "Script"
+    assert blueprints[path_temp]["name"] == "Temp"
 
 
 @pytest.mark.asyncio
 async def test_scan_blueprints_domain_extraction(coordinator):
     """Test that domain is extracted correctly from folder structure during scan."""
-    base_path = "C:/config/blueprints" if os.name == "nt" else "/config/blueprints"
-    auto_path = os.path.normpath(os.path.join(base_path, "automation"))
-    script_path = os.path.normpath(os.path.join(base_path, "script"))
-    nested_path = os.path.normpath(os.path.join(base_path, "nested/deep/automation"))
+    base_path = os.path.normpath("/config/blueprints")
+    auto_path = os.path.join(base_path, "automation")
+    script_path = os.path.join(base_path, "script")
+    sub_auto_path = os.path.join(base_path, "automation", "luuquangvu")
+
+    def mock_open_side_effect_extraction(path, *args, **kwargs):
+        if "a.yaml" in path:
+            return mock_open(
+                read_data="blueprint:\n  name: Test\n  source_url: https://example.com/blueprint1.yaml\n"
+            ).return_value
+        if "s.yaml" in path:
+            return mock_open(
+                read_data="blueprint:\n  name: Test\n  source_url: https://example.com/blueprint2.yaml\n"
+            ).return_value
+        if "d.yaml" in path:
+            return mock_open(
+                read_data="blueprint:\n  name: Test\n  source_url: https://example.com/blueprint3.yaml\n"
+            ).return_value
+        return mock_open().return_value
 
     with (
         patch(
             "custom_components.blueprints_updater.coordinator.os.walk",
-            return_value=[
-                (auto_path, [], ["a.yaml"]),
-                (script_path, [], ["s.yaml"]),
-                (nested_path, [], ["d.yaml"]),
-            ],
+            side_effect=lambda p: (
+                [
+                    (p, ["luuquangvu"], ["a.yaml"]),
+                    (os.path.join(p, "luuquangvu"), [], ["d.yaml"]),
+                ]
+                if p.endswith("automation")
+                else [(p, [], ["s.yaml"])]
+                if p.endswith("script")
+                else []
+            ),
         ),
         patch("custom_components.blueprints_updater.coordinator.os.path.isdir", return_value=True),
-        patch(
-            "builtins.open",
-            side_effect=[
-                mock_open(
-                    read_data="blueprint:\n  name: Test\n  source_url: https://example.com/blueprint1.yaml\n"
-                ).return_value,
-                mock_open(
-                    read_data="blueprint:\n  name: Test\n  source_url: https://example.com/blueprint2.yaml\n"
-                ).return_value,
-                mock_open(
-                    read_data="blueprint:\n  name: Test\n  source_url: https://example.com/blueprint3.yaml\n"
-                ).return_value,
-            ],
-        ),
+        patch("builtins.open", side_effect=mock_open_side_effect_extraction),
         patch.object(coordinator.hass.config, "path", return_value=base_path),
     ):
         blueprints = BlueprintUpdateCoordinator.scan_blueprints(
@@ -108,7 +143,7 @@ async def test_scan_blueprints_domain_extraction(coordinator):
 
     path_a = os.path.normpath(os.path.join(auto_path, "a.yaml"))
     path_s = os.path.normpath(os.path.join(script_path, "s.yaml"))
-    path_d = os.path.normpath(os.path.join(nested_path, "d.yaml"))
+    path_d = os.path.normpath(os.path.join(sub_auto_path, "d.yaml"))
 
     assert blueprints[path_a]["domain"] == "automation"
     assert blueprints[path_s]["domain"] == "script"
