@@ -298,9 +298,7 @@ async def test_async_update_data_auto_update_multiple_sorted(mock_translate, coo
     def mock_fetch(session, path, url, cdn_url, *args, **kwargs):
         if url == u1:
             return (c1, "e1")
-        if url == u2:
-            return (c2, "e2")
-        return None, None
+        return (c2, "e2") if url == u2 else (None, None)
 
     coordinator.async_install_blueprint = AsyncMock()
     coordinator._async_fetch_with_cdn_fallback = AsyncMock(side_effect=mock_fetch)

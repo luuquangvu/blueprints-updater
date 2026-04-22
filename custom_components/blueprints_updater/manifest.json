@@ -9,7 +9,7 @@
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/luuquangvu/blueprints-updater/issues",
-  "requirements": ["h2>=3,<5"],
+  "requirements": ["h2>=4,<5"],
   "single_config_entry": true,
   "version": "2.0.0-rc.1"
 }
