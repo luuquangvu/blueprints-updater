@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from custom_components.blueprints_updater.const import CONF_MAX_BACKUPS, CONF_UPDATE_INTERVAL
 from custom_components.blueprints_updater.utils import (
     get_config_int,
     get_max_backups,
@@ -205,3 +206,30 @@ def test_get_max_backups():
 
     config.options = {"max_backups": 20}
     assert get_max_backups(config) == 10
+
+
+@pytest.mark.asyncio
+async def test_utils_behavior():
+    """Test utils behavior."""
+    assert get_config_int("NOT_A_DICT_OR_OBJ", "key", 10) == 10
+    assert get_update_interval(None) == 24
+    assert get_update_interval({CONF_UPDATE_INTERVAL: 12}) == 12
+
+    entry = MagicMock()
+    entry.options = {CONF_UPDATE_INTERVAL: 15}
+    entry.data = {}
+    assert get_update_interval(entry) == 15
+
+    assert get_max_backups(None) == 3
+    assert get_max_backups({CONF_MAX_BACKUPS: 5}) == 5
+
+    mock_calls = 0
+
+    async def mock_func(*args, **kwargs):
+        nonlocal mock_calls
+        mock_calls += 1
+        raise RuntimeError("Fail")
+
+    with pytest.raises(RuntimeError, match="Fail"):
+        await retry_async(max_retries=2, exceptions=(RuntimeError,))(mock_func)()
+    assert mock_calls == 3

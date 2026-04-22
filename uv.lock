@@ -397,6 +397,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "pytest-timeout" },
     { name = "ruff" },
     { name = "tomlkit" },
     { name = "ty" },
@@ -414,6 +415,7 @@ dev = [
     { name = "pytest", specifier = ">=9" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "pytest-timeout" },
     { name = "ruff" },
     { name = "tomlkit" },
     { name = "ty" },
@@ -483,30 +485,30 @@ wheels = [
 
 [[package]]
 name = "boto3"
-version = "1.42.92"
+version = "1.42.93"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore" },
     { name = "jmespath" },
     { name = "s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e7/3b/84cafa37e85a57618554bd2bc21bd569417097f45f18c23ef488e6c69683/boto3-1.42.92.tar.gz", hash = "sha256:55ec6ef6fc81f46d567a7d1d398d1e5c375d468905d0ccd9e1f767f0c77dbe9b", size = 113207, upload-time = "2026-04-20T19:38:17.293Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dd/ac/e6b2b24d53c830500176f710594efcde626186b5b3c9aead6f8837976956/boto3-1.42.93.tar.gz", hash = "sha256:ff81c6bac708cb95c4f8b27e331ac67d95c6908dd86bcb7b15b8941960f2bc4c", size = 113218, upload-time = "2026-04-21T21:30:39.733Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8f/8f/350ffd50aaa515429464deb1dc85893a21a64cb41892feb6b22ce87304ad/boto3-1.42.92-py3-none-any.whl", hash = "sha256:c90d9a170faa0585755fa103a3cd9595e1f53443864e902c180f3d8177589125", size = 140555, upload-time = "2026-04-20T19:38:14.323Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/2d/fcc35bde9fa47ac463a3023c73838e23e9281cde7f5e86fe7c459c3b72aa/boto3-1.42.93-py3-none-any.whl", hash = "sha256:51e34e30e65bea4df0ff77f91abdcb97297eb74c3b27eb576b2abbd758452967", size = 140554, upload-time = "2026-04-21T21:30:36.581Z" },
 ]
 
 [[package]]
 name = "botocore"
-version = "1.42.92"
+version = "1.42.93"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jmespath" },
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d5/0a/6785ce224ba4483b3e1282d959e1dd2c2898823336f013464c43cb154036/botocore-1.42.92.tar.gz", hash = "sha256:f1193d3057a2d0267353d7ef4e136be37ea432336d097fcb1951fae566ca3a22", size = 15235239, upload-time = "2026-04-20T19:38:05.085Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1b/d4/eb53f7ed81836696abf7103c9c901a0cace9217328094ca93419016a78c9/botocore-1.42.93.tar.gz", hash = "sha256:9ce49863c50b43f7942edd295fb16bfc6d227264ce6fc32c8f2426ef11b9351b", size = 15239759, upload-time = "2026-04-21T21:30:23.707Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/32/b8/41d4d7ba75a4fb4f11362e96371a12695bc6ba0bb7cc680137db0213f97e/botocore-1.42.92-py3-none-any.whl", hash = "sha256:09ddefddbb1565ceef4b44b4b6e61b1ca5f12701d1494ecc85c1133d1b1e81fb", size = 14916275, upload-time = "2026-04-20T19:38:01.684Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/0c/ccc57c9a7bcd4553620bf6f50a3640ba68d189330fc4787dbddb2d851534/botocore-1.42.93-py3-none-any.whl", hash = "sha256:96ae26cd6302a7c7563398517b90a438168a4efdf4f73ab38882cefb8df721cc", size = 14923656, upload-time = "2026-04-21T21:30:17.597Z" },
 ]
 
 [[package]]
@@ -1644,6 +1646,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b1/51/a849f96e117386044471c8ec2bd6cfebacda285da9525c9106aeb28da671/pytest_cov-7.1.0.tar.gz", hash = "sha256:30674f2b5f6351aa09702a9c8c364f6a01c27aae0c1366ae8016160d1efc56b2", size = 55592, upload-time = "2026-03-21T20:11:16.284Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9d/7a/d968e294073affff457b041c2be9868a40c1c71f4a35fcc1e45e5493067b/pytest_cov-7.1.0-py3-none-any.whl", hash = "sha256:a0461110b7865f9a271aa1b51e516c9a95de9d696734a2f71e3e78f46e1d4678", size = 22876, upload-time = "2026-03-21T20:11:14.438Z" },
+]
+
+[[package]]
+name = "pytest-timeout"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/82/4c9ecabab13363e72d880f2fb504c5f750433b2b6f16e99f4ec21ada284c/pytest_timeout-2.4.0.tar.gz", hash = "sha256:7e68e90b01f9eff71332b25001f85c75495fc4e3a836701876183c4bcfd0540a", size = 17973, upload-time = "2025-05-05T19:44:34.99Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/b6/3127540ecdf1464a00e5a01ee60a1b09175f6913f0644ac748494d9c4b21/pytest_timeout-2.4.0-py3-none-any.whl", hash = "sha256:c42667e5cdadb151aeb5b26d114aff6bdf5a907f176a007a30b940d3d865b5c2", size = 14382, upload-time = "2025-05-05T19:44:33.502Z" },
 ]
 
 [[package]]

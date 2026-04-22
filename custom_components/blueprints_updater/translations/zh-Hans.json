@@ -124,7 +124,7 @@
     "content_missing": "蓝图内容缺失或无法获取",
     "git_diff_title": "代码更改 (Git Diff)",
     "semantic_sync_notice": "此蓝图在语义上是完全相同的，但需要进行结构更新以符合新的规范格式（例如：换行符标准化、元数据注入）。",
-    "breaking_risks_title": "更新风险报告",
+    "breaking_risks_title": "⚠️ 潜在的破坏性变更",
     "auto_update_blocked_by_breaking_change": "由于检测到重大更改，{name} 的自动更新已阻止",
     "risk_new_mandatory": "添加了新的必填输入 {input}。",
     "risk_missing_input": "实体 {entity} 缺少新版本要求的必填输入 {input}。",

@@ -124,7 +124,7 @@
     "content_missing": "Innehållet i blueprint saknas eller kunde inte hämtas.",
     "git_diff_title": "Kodändringar (Git Diff)",
     "semantic_sync_notice": "Denna blueprint är semantiskt identisk, men kräver en strukturell uppdatering för att anpassas till den nya kanoniska formateringen (t.ex. normalisering av radbrytningar, metadata-injektion).",
-    "breaking_risks_title": "RISKRAPPORT FÖR UPPDATERING",
+    "breaking_risks_title": "⚠️ POTENTIELLA BREAKING CHANGES",
     "auto_update_blocked_by_breaking_change": "Automatisk uppdatering blockerad för {name} på grund av upptäckta stora förändringar",
     "risk_new_mandatory": "Ny obligatorisk inmatning {input} har lagts till.",
     "risk_missing_input": "Entiteten {entity} saknar obligatorisk inmatning {input} som krävs av den nya versionen.",

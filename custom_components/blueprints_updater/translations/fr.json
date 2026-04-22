@@ -124,7 +124,7 @@
     "content_missing": "Le contenu du blueprint est manquant ou n'a pas pu être récupéré.",
     "git_diff_title": "Modifications du code (Git Diff)",
     "semantic_sync_notice": "Ce blueprint est sémantiquement identique, mais nécessite une mise à jour structurelle pour s'aligner sur le nouveau format canonique (ex: normalisation des sauts de ligne, injection de métadonnées).",
-    "breaking_risks_title": "RAPPORT DE RISQUE DE MISE À JOUR",
+    "breaking_risks_title": "⚠️ RISQUES DE RUPTURE DE COMPATIBILITÉ",
     "auto_update_blocked_by_breaking_change": "Mise à jour automatique bloquée pour {name} en raison de changements majeurs détectés",
     "risk_new_mandatory": "Nouvelle entrée obligatoire {input} ajoutée.",
     "risk_missing_input": "L'entité {entity} n'a pas l'entrée obligatoire {input} requise par la nouvelle version.",

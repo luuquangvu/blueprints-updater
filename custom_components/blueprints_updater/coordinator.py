@@ -1,7 +1,5 @@
 """Data coordinator for Blueprints Updater."""
 
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import difflib
@@ -22,6 +20,7 @@ from urllib.parse import urlparse
 
 import httpx
 import orjson
+import yaml
 from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.automation.config import (
     AUTOMATION_BLUEPRINT_SCHEMA,
@@ -63,7 +62,6 @@ from .const import (
     MAX_RETRIES,
     MAX_SEND_INTERVAL,
     MIN_SEND_INTERVAL,
-    RE_BLUEPRINT_KEY,
     RE_URL_REDACTION,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
@@ -2209,16 +2207,22 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             updated_domains: Set to track domains requiring reload.
 
         """
-        remote_content = self._ensure_source_url(remote_content, source_url)
-        remote_hash = self._hash_content(remote_content, already_normalized=True)
-        local_hash = info["local_hash"]
-        updatable = remote_hash != local_hash
-
         try:
+            remote_content = self._ensure_source_url(remote_content, source_url)
+            remote_hash = self._hash_content(remote_content, already_normalized=True)
+            local_hash = info["local_hash"]
+            updatable = remote_hash != local_hash
+
             blueprint_dict = yaml_util.parse_yaml(remote_content)
             last_error = self._validate_blueprint(blueprint_dict, source_url)
         except (HomeAssistantError, InvalidBlueprint) as err:
+            updatable = False
+            remote_hash = ""
             last_error = f"yaml_syntax_error|{_sanitize_error_detail(str(err))}"
+        except Exception as err:
+            updatable = False
+            remote_hash = ""
+            last_error = f"processing_error|{_sanitize_error_detail(str(err))}"
 
         risks = await self._detect_risks_for_update(path, info, remote_content, last_error)
         if self.data and path in self.data:
@@ -2773,61 +2777,49 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _ensure_source_url(content: str, source_url: str) -> str:
-        """Ensure a source_url is present in the blueprint metadata.
+        """Ensure the target source_url is present in the blueprint metadata.
 
-        Parses the YAML to check for ``blueprint.source_url``. If a valid
-        source_url already exists (even if formatted differently), the
-        original content is returned (but still canonicalized). Otherwise,
-        the URL is injected after the ``blueprint:`` key via deterministic
-        text substitution.
-
-        IMPORTANT: This function always performs transport-level canonical
-        normalization (BOM removal and line ending sync) as a side effect.
+        Always uses structured YAML parsing to guarantee data integrity and
+        consistency with Home Assistant's core blueprint handling.
 
         Args:
             content: Raw YAML blueprint content.
-            source_url: Fallback URL to inject when the content has none.
+            source_url: Target URL to enforce in the content.
 
         Returns:
-            The YAML content with a source_url guaranteed to be present
-            in the blueprint block, and always in canonical form.
+            The YAML content with the target source_url guaranteed to be
+            present in the blueprint block, in canonical YAML form.
 
         """
+        if not isinstance(content, str):
+            _LOGGER.debug("Non-string content passed to _ensure_source_url: %s", type(content))
+            return ""
+        if not isinstance(source_url, str):
+            _LOGGER.debug(
+                "Non-string source_url passed to _ensure_source_url: %s", type(source_url)
+            )
+            return BlueprintUpdateCoordinator._normalize_content(content)
+
         try:
             parsed = yaml_util.parse_yaml(content)
         except HomeAssistantError:
             parsed = None
 
-        if isinstance(parsed, dict) and "blueprint" in parsed:
-            blueprint = parsed["blueprint"]
-            if not isinstance(blueprint, dict):
-                blueprint = parsed["blueprint"] = {}
+        if not isinstance(parsed, dict) or "blueprint" not in parsed:
+            return BlueprintUpdateCoordinator._normalize_content(content)
 
-            existing = blueprint.get("source_url")
-            if isinstance(existing, str) and existing.strip():
-                return BlueprintUpdateCoordinator._normalize_content(content)
+        blueprint = parsed["blueprint"]
+        if not isinstance(blueprint, dict):
+            blueprint = parsed["blueprint"] = {}
 
-        content = BlueprintUpdateCoordinator._normalize_content(content)
         source_url = source_url.strip()
+        blueprint["source_url"] = source_url
 
-        if RE_BLUEPRINT_KEY.search(content):
-            return RE_BLUEPRINT_KEY.sub(
-                rf"\1\n  source_url: {source_url}",
-                content,
-                count=1,
-            )
-
-        if isinstance(parsed, dict) and "blueprint" in parsed:
-            blueprint = parsed["blueprint"]
-            if not isinstance(blueprint, dict):
-                blueprint = parsed["blueprint"] = {}
-            blueprint["source_url"] = source_url
-            try:
-                return yaml_util.dump(parsed)
-            except Exception as err:
-                _LOGGER.warning("Structured YAML injection failed for %s: %s", source_url, err)
-
-        return content
+        try:
+            return yaml_util.dump(parsed)
+        except (yaml.YAMLError, TypeError, ValueError) as err:
+            _LOGGER.warning("YAML canonicalization failed for %s: %s", source_url, err)
+            return BlueprintUpdateCoordinator._normalize_content(content)
 
     @staticmethod
     def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
@@ -2993,7 +2985,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return bp_info
 
     @staticmethod
-    def _parse_blueprint_data(path: str, content: str) -> ParsedBlueprintData | None:
+    def _parse_blueprint_data(
+        path: str, content: str, rel_path: str | None = None
+    ) -> ParsedBlueprintData | None:
         """Parse raw YAML content and extract blueprint metadata if valid."""
         bp_info = BlueprintUpdateCoordinator._get_blueprint_block(path, content)
         if bp_info is None:
@@ -3014,6 +3008,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             else os.path.basename(path)
         )
         domain = BlueprintUpdateCoordinator._normalize_domain(bp_info.get("domain"))
+
+        if domain == "automation" and rel_path:
+            parts = rel_path.split("/")
+            if len(parts) >= 2:
+                inferred = BlueprintUpdateCoordinator._normalize_domain(parts[0])
+                if inferred != "automation":
+                    domain = inferred
 
         return {
             "name": name,
@@ -3073,7 +3074,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         content = f.read()
 
                     if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
-                        full_path, content
+                        full_path, content, rel_path
                     ):
                         found_blueprints[full_path] = {
                             **parsed_data,

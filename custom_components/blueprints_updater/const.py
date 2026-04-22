@@ -37,7 +37,6 @@ DOMAIN_JSDELIVR = "cdn.jsdelivr.net"
 
 RE_FORUM_TOPIC_ID = re.compile(r"/t/(?:[^/]+/)?(\d+)")
 RE_FORUM_CODE_BLOCK = re.compile(r"<code[^>]*>(.*?)</code>", re.DOTALL)
-RE_BLUEPRINT_KEY = re.compile(r"^(blueprint:\s*(?:#.*)?)$", re.MULTILINE)
 RE_URL_REDACTION = re.compile(r"https?://\S+", re.IGNORECASE)
 RE_GIST_RAW = re.compile(r"/raw(/|$)")
 

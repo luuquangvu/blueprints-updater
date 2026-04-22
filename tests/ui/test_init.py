@@ -570,3 +570,19 @@ async def test_async_update_options_refreshes_coordinator(hass: HomeAssistant):
     assert coordinator_mock.config_entry == entry
     assert coordinator_mock.update_interval == timedelta(hours=12)
     assert coordinator_mock.async_request_refresh.called
+
+
+@pytest.mark.asyncio
+async def test_init_unload_path(hass: HomeAssistant):
+    """Test unloading entry in __init__.py."""
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+
+    mock_coord = AsyncMock()
+    hass.data[DOMAIN] = {"coordinators": {"test_entry": mock_coord}}
+
+    hass.config_entries = MagicMock()
+    hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+
+    assert await async_unload_entry(hass, entry) is True
+    assert "test_entry" not in hass.data[DOMAIN]["coordinators"]

@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from custom_components.blueprints_updater.config_flow import (
     BlueprintsUpdaterConfigFlow,
     BlueprintsUpdaterOptionsFlowHandler,
+    _async_get_blueprint_options,
 )
 from custom_components.blueprints_updater.const import (
     CONF_MAX_BACKUPS,
@@ -183,3 +184,17 @@ async def test_options_flow_enhanced_coercion(hass: HomeAssistant):
 
         assert defaults.get(CONF_MAX_BACKUPS) == 1
         assert defaults.get(CONF_UPDATE_INTERVAL) == 10
+
+
+@pytest.mark.asyncio
+async def test_config_flow_scanning(hass: HomeAssistant):
+    """Test config flow scanning."""
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator.scan_blueprints"
+        ) as mock_scan,
+        patch.object(hass.config, "path", return_value="blueprints"),
+    ):
+        mock_scan.return_value = {"blueprints/automation/test.yaml": {"name": "Test BP"}}
+        options = await _async_get_blueprint_options(hass)
+        assert len(options) == 1
