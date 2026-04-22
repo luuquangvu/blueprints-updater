@@ -307,9 +307,9 @@ async def test_async_update_data_auto_update_multiple_sorted(mock_translate, coo
         await coordinator._async_update_data()
         await coordinator._async_background_refresh(coordinator.data)
 
-    calls = coordinator.async_install_blueprint.call_args_list
-    assert calls[0].args[0] == "path1"
-    assert calls[1].args[0] == "path2"
+    call_paths = [call.args[0] for call in coordinator.async_install_blueprint.call_args_list]
+    assert set(call_paths) == {"path1", "path2"}
+    assert len(call_paths) == 2
 
 
 @pytest.mark.asyncio

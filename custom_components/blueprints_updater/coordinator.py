@@ -2837,7 +2837,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         with open(local_path, encoding="utf-8") as f:
             local_text = f.read()
 
-        local_text = BlueprintUpdateCoordinator._normalize_content(local_text)
+        local_text = BlueprintUpdateCoordinator._ensure_source_url(local_text, source_url)
         remote_text = BlueprintUpdateCoordinator._ensure_source_url(remote_text, source_url)
 
         local_lines = local_text.splitlines(keepends=True)
@@ -3016,11 +3016,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 if inferred != "automation":
                     domain = inferred
 
+        normalized_content = BlueprintUpdateCoordinator._ensure_source_url(content, source_url)
         return {
             "name": name,
             "domain": domain,
             "source_url": source_url.strip(),
-            "local_hash": BlueprintUpdateCoordinator._hash_content(content),
+            "local_hash": BlueprintUpdateCoordinator._hash_content(
+                normalized_content, already_normalized=True
+            ),
         }
 
     @staticmethod

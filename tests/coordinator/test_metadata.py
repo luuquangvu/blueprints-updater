@@ -4,8 +4,12 @@ from typing import Any, cast
 from unittest.mock import mock_open, patch
 
 import pytest
+import yaml
 
-from custom_components.blueprints_updater.coordinator import GitDiffResult
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintUpdateCoordinator,
+    GitDiffResult,
+)
 
 
 def test_normalize_url(coordinator):
@@ -109,6 +113,71 @@ def test_ensure_source_url(coordinator):
     content_none = "not_a_blueprint: true"
     expected_none = coordinator._normalize_content(content_none)
     assert coordinator._ensure_source_url(content_none, source_url) == expected_none
+
+
+def test_ensure_source_url_non_string_content_logs_and_returns_empty(coordinator, caplog):
+    """Non-string content should be logged and result in an empty string."""
+    content = {"blueprint": {"name": "Test"}}
+
+    with caplog.at_level("DEBUG"):
+        result = coordinator._ensure_source_url(content, "https://example.com/blueprint.yaml")
+
+    assert result == ""
+    assert any(record.levelname == "DEBUG" for record in caplog.records)
+
+
+def test_ensure_source_url_non_string_source_url_falls_back_to_normalize_content(
+    coordinator, monkeypatch, caplog
+):
+    """Non-string source_url should log and fall back to _normalize_content(content)."""
+    original_content = "blueprint:\n  name: Test"
+    sentinel_result = "normalized-content"
+
+    normalize_calls = {}
+
+    def _fake_normalize_content(content: str) -> str:
+        normalize_calls["called_with"] = content
+        return sentinel_result
+
+    monkeypatch.setattr(BlueprintUpdateCoordinator, "_normalize_content", _fake_normalize_content)
+
+    with caplog.at_level("DEBUG"):
+        result = coordinator._ensure_source_url(original_content, source_url=12345)
+
+    assert result == sentinel_result
+    assert normalize_calls["called_with"] == original_content
+    assert any(record.levelname == "DEBUG" for record in caplog.records)
+
+
+def test_ensure_source_url_yaml_dump_failure_falls_back_to_normalize_content(
+    coordinator, monkeypatch, caplog
+):
+    """If yaml_util.dump raises, we should log and fall back to _normalize_content(content)."""
+    import custom_components.blueprints_updater.coordinator as coord_mod
+
+    original_content = "blueprint:\n  name: Test"
+    sentinel_result = "normalized-after-dump-failure"
+
+    normalize_calls = {}
+
+    def _fake_normalize_content(content: str) -> str:
+        normalize_calls["called_with"] = content
+        return sentinel_result
+
+    def _failing_dump(*args, **kwargs):
+        raise yaml.YAMLError("simulated dump failure")
+
+    monkeypatch.setattr(coord_mod.yaml_util, "dump", _failing_dump)
+    monkeypatch.setattr(BlueprintUpdateCoordinator, "_normalize_content", _fake_normalize_content)
+
+    with caplog.at_level("WARNING"):
+        result = coordinator._ensure_source_url(
+            original_content, "https://example.com/blueprint.yaml"
+        )
+
+    assert result == sentinel_result
+    assert normalize_calls["called_with"] == original_content
+    assert any(record.levelname == "WARNING" for record in caplog.records)
 
 
 def test_ensure_source_url_prioritizes_local(coordinator):
@@ -300,34 +369,6 @@ async def test_async_get_git_diff_full_flow(coordinator):
             "diff": diff,
             "semantic_sync": False,
         }
-
-
-@pytest.mark.asyncio
-async def test_async_get_git_diff_shows_metadata_changes(coordinator):
-    """Test that source_url differences ARE shown in Git diff."""
-    path = "automation/test.yaml"
-    source_url = "https://new.com"
-    coordinator.data = {
-        path: {
-            "local_hash": "h1",
-            "remote_hash": "h2",
-            "source_url": source_url,
-            "updatable": True,
-        }
-    }
-
-    local_content = "blueprint:\n  source_url: https://old.com\n  name: Same"
-    remote_content = "blueprint:\n  source_url: https://new.com\n  name: Same"
-
-    with (
-        patch.object(coordinator, "async_fetch_diff_content", return_value=remote_content),
-        patch("builtins.open", mock_open(read_data=local_content)),
-    ):
-        res = await coordinator.async_get_git_diff(path)
-        assert res is not None
-        assert res.is_semantic_sync is False
-        assert "-  source_url: https://old.com" in res.diff_text
-        assert "+  source_url: https://new.com" in res.diff_text
 
 
 @pytest.mark.asyncio

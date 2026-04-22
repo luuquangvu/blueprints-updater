@@ -125,7 +125,7 @@
     "git_diff_title": "Zmiany w kodzie (Git Diff)",
     "semantic_sync_notice": "Ten blueprint jest semantycznie identyczny, ale wymaga aktualizacji strukturalnej w celu dostosowania do nowego formatu kanonicznego (np. normalizacja znaków końca linii, wstrzykiwanie metadanych).",
     "breaking_risks_title": "⚠️ POTENCJALNE ZMIANY ŁAMIĄCE KOMPATYBILNOŚĆ",
-    "auto_update_blocked_by_breaking_change": "Automatyczna aktualizacja zablokowana dla {name} z powodu wykrytych istotnych zmian",
+    "auto_update_blocked_by_breaking_change": "Automatyczna aktualizacja zablokowana dla {name} z powodu wykrytych zmian łamiących kompatybilność",
     "risk_new_mandatory": "Dodano nowe wymagane pole {input}.",
     "risk_missing_input": "Encja {entity} nie posiada wymaganego pola {input}, które jest wymagane przez nową wersję.",
     "risk_removed_input": "Pole {input} zostało usunięte, ale jest obecnie używane przez {count} encji.",

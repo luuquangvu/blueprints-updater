@@ -198,3 +198,5 @@ async def test_config_flow_scanning(hass: HomeAssistant):
         mock_scan.return_value = {"blueprints/automation/test.yaml": {"name": "Test BP"}}
         options = await _async_get_blueprint_options(hass)
         assert len(options) == 1
+        assert options[0]["value"] == "automation/test.yaml"
+        assert options[0]["label"] == "Test BP [automation/test.yaml]"

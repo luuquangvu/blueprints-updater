@@ -231,5 +231,5 @@ async def test_utils_behavior():
         raise RuntimeError("Fail")
 
     with pytest.raises(RuntimeError, match="Fail"):
-        await retry_async(max_retries=2, exceptions=(RuntimeError,))(mock_func)()
+        await retry_async(max_retries=2, base_delay=0, exceptions=(RuntimeError,))(mock_func)()
     assert mock_calls == 3

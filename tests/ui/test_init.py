@@ -578,7 +578,8 @@ async def test_init_unload_path(hass: HomeAssistant):
     entry = MagicMock()
     entry.entry_id = "test_entry"
 
-    mock_coord = AsyncMock()
+    mock_coord = MagicMock()
+    mock_coord.async_shutdown = AsyncMock()
     hass.data[DOMAIN] = {"coordinators": {"test_entry": mock_coord}}
 
     hass.config_entries = MagicMock()
@@ -586,3 +587,4 @@ async def test_init_unload_path(hass: HomeAssistant):
 
     assert await async_unload_entry(hass, entry) is True
     assert "test_entry" not in hass.data[DOMAIN]["coordinators"]
+    mock_coord.async_shutdown.assert_awaited_once()

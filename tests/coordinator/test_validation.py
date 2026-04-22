@@ -192,18 +192,21 @@ async def test_is_safe_url(coordinator):
     coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
     coord: Any = coordinator
 
-    assert await coord._is_safe_url("https://github.com/user/repo")
-    assert await coord._is_safe_url("https://raw.githubusercontent.com/user/repo/main/bp.yaml")
-    assert await coord._is_safe_url("https://gist.github.com/user/gistid")
-    assert await coord._is_safe_url("https://community.home-assistant.io/t/topic/123")
-    assert await coord._is_safe_url("https://gitlab.com/user/repo/-/raw/main/bp.yaml")
-    assert await coord._is_safe_url("https://bitbucket.org/user/repo/raw/main/bp.yaml")
+    addr_info = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 443))]
+    with patch("socket.getaddrinfo", return_value=addr_info):
+        assert await coord._is_safe_url("https://github.com/user/repo")
+        assert await coord._is_safe_url("https://raw.githubusercontent.com/user/repo/main/bp.yaml")
+        assert await coord._is_safe_url("https://gist.github.com/user/gistid")
+        assert await coord._is_safe_url("https://community.home-assistant.io/t/topic/123")
+        assert await coord._is_safe_url("https://gitlab.com/user/repo/-/raw/main/bp.yaml")
+        assert await coord._is_safe_url("https://bitbucket.org/user/repo/raw/main/bp.yaml")
 
-    assert not await coord._is_safe_url("http://localhost:8123")
-    assert not await coord._is_safe_url("http://homeassistant.local:8123")
-    assert not await coord._is_safe_url("http://test.example/api")
-    assert not await coord._is_safe_url("http://192.168.1.1/admin")
-    assert not await coord._is_safe_url("http://127.0.0.1/admin")
+    with patch("socket.getaddrinfo", side_effect=socket.gaierror):
+        assert not await coord._is_safe_url("http://localhost:8123")
+        assert not await coord._is_safe_url("http://homeassistant.local:8123")
+        assert not await coord._is_safe_url("http://test.example/api")
+        assert not await coord._is_safe_url("http://192.168.1.1/admin")
+        assert not await coord._is_safe_url("http://127.0.0.1/admin")
 
 
 @pytest.mark.asyncio
