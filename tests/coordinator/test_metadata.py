@@ -1,7 +1,7 @@
 """Tests for coordinator metadata handling logic."""
 
 from typing import Any, cast
-from unittest.mock import mock_open, patch
+from unittest.mock import AsyncMock, mock_open, patch
 
 import pytest
 import yaml
@@ -329,13 +329,27 @@ async def test_async_get_git_diff_cache_hit(coordinator):
         path: {
             "local_hash": "h1",
             "remote_hash": "h2",
-            "_cached_git_diff": {"local": "h1", "remote": "h2", "diff": "cached_diff"},
+            "source_url": "https://url.com",
+            "_cached_git_diff": {
+                "local": "h1",
+                "remote": "h2",
+                "diff": "cached diff",
+                "semantic_sync": False,
+            },
         }
     }
-    expected = GitDiffResult(diff_text="cached diff", is_semantic_sync=False)
-    with patch.object(coordinator, "get_cached_git_diff", return_value=expected):
+    read_local = mock_open()
+    with (
+        patch.object(
+            coordinator, "async_fetch_diff_content", new_callable=AsyncMock
+        ) as fetch_remote,
+        patch("builtins.open", read_local),
+    ):
         res = await coordinator.async_get_git_diff(path)
-        assert res == expected
+
+    assert res == GitDiffResult(diff_text="cached diff", is_semantic_sync=False)
+    fetch_remote.assert_not_called()
+    read_local.assert_not_called()
 
 
 @pytest.mark.asyncio
