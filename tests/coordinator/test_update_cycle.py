@@ -1135,6 +1135,7 @@ async def test_async_update_blueprint_in_place_errors_isolated(
     else:
         mock_resp = MagicMock(spec=httpx.Response)
         mock_resp.status_code = 200
+        mock_resp.url = httpx.URL("https://url")
         mock_resp.headers = {"Content-Type": "text/yaml"}
         mock_resp.raise_for_status = MagicMock()
         mock_resp.text = response_text

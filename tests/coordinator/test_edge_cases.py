@@ -175,6 +175,7 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
 
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
+        mock_response.url = httpx.URL("https://mock_url")
         mock_response.text = "blueprint: name"
         mock_response.headers = {"Content-Type": "text/yaml"}
         mock_response.raise_for_status = MagicMock()
