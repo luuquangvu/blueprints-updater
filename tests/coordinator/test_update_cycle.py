@@ -253,7 +253,8 @@ async def test_async_background_refresh_503_resilience(coordinator):
             MagicMock(), path, coordinator.data[path], [], set()
         )
         any_warn_match = any(
-            "Service Unavailable" in str(call) for call in mock_warn.call_args_list
+            any("Service Unavailable" in str(a) for a in (*call.args, *call.kwargs.values()))
+            for call in mock_warn.call_args_list
         )
         assert any_warn_match, "Expected warning containing 'Service Unavailable' was not logged"
 
@@ -306,7 +307,7 @@ async def test_async_update_data_auto_update(mock_translate, coordinator):
 @pytest.mark.asyncio
 @patch.object(BlueprintUpdateCoordinator, "async_translate", return_value="Mocked Translation")
 async def test_async_update_data_auto_update_multiple_sorted(mock_translate, coordinator):
-    """Test auto-update handles multiple blueprints in correct order."""
+    """Test auto-update installs all queued blueprints (concurrent order not guaranteed)."""
     coordinator.config_entry.options = {"auto_update": True}
     u1 = "https://example.com/blueprint1.yaml"
     u2 = "https://example.com/blueprint2.yaml"
