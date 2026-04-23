@@ -5,7 +5,7 @@ import contextlib
 import os
 from types import MappingProxyType
 from typing import Any, cast
-from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, mock_open, patch
 from urllib.parse import urlparse
 
 import httpx
@@ -662,8 +662,7 @@ async def test_async_install_blueprint(hass, coordinator):
     assert hass.services.async_call.call_count == 1
     hass.services.async_call.assert_any_call("automation", "reload")
 
-    with pytest.raises(AssertionError):
-        hass.services.async_call.assert_any_call("template", "reload")
+    assert call("template", "reload") not in hass.services.async_call.call_args_list
 
 
 @pytest.mark.asyncio
