@@ -1,7 +1,5 @@
 """Source providers for Blueprints Updater."""
 
-from __future__ import annotations
-
 import html
 from abc import ABC, abstractmethod
 from collections.abc import Iterator

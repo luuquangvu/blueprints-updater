@@ -95,9 +95,25 @@ async def test_auto_update_proceeds_when_risks_and_no_consumers(
     blueprint_path = "automation/test_no_consumers.yaml"
     _prepare_blueprint_entry(coordinator, blueprint_path)
 
+    async def mock_install(path, *args, **kwargs):
+        if coordinator.data and path in coordinator.data:
+            coordinator.data[path].update(
+                {
+                    "updatable": False,
+                    "local_hash": "new_hash",
+                    "remote_hash": "new_hash",
+                    "last_error": None,
+                    "auto_update_last_error": None,
+                    "remote_content": None,
+                    "invalid_remote_hash": None,
+                    "breaking_risks": [],
+                    "update_blocking_reason": None,
+                }
+            )
+
     with (
         patch.object(coordinator, "_get_entities_using_blueprint", return_value=[]),
-        patch.object(coordinator, "async_install_blueprint", return_value=None),
+        patch.object(coordinator, "async_install_blueprint", side_effect=mock_install),
     ):
         new_content = "blueprint: name: New"
         risks: list[StructuredRisk] = [

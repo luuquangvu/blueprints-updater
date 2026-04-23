@@ -30,9 +30,6 @@
     - [Khôi phục bản Sao lưu](#khôi-phục-bản-sao-lưu)
   - [Lớp bảo vệ Nâng cao (Advanced Compatibility Guard)](#lớp-bảo-vệ-nâng-cao-advanced-compatibility-guard)
   - [Làm mới danh sách Blueprint](#làm-mới-danh-sách-blueprint)
-  - [Các câu hỏi thường gặp (FAQ)](#các-câu-hỏi-thường-gặp-faq)
-    - [Tại sao có bản cập nhật ngay sau khi vừa cài đặt?](#tại-sao-có-bản-cập-nhật-ngay-sau-khi-vừa-cài-đặt)
-    - [Tại sao tôi nhận được thông báo cập nhật khi đang dùng một bản Fork (nhánh rẽ) của blueprint?](#tại-sao-tôi-nhận-được-thông-báo-cập-nhật-khi-đang-dùng-một-bản-fork-nhánh-rẽ-của-blueprint)
   - [Yêu cầu](#yêu-cầu)
   - [Chất lượng Mã nguồn \& Bảo mật](#chất-lượng-mã-nguồn--bảo-mật)
   - [Đóng góp](#đóng-góp)
@@ -141,8 +138,8 @@ Khi phát hiện bản cập nhật, hệ thống sẽ thực hiện quy trình 
 1. **Kiểm tra cấu trúc**: Tự động xác thực nội dung của blueprint mới để đảm bảo nó tuân thủ các quy tắc của Home Assistant.
 2. **Phân tích tác động**: Giả lập việc cập nhật trên các tự động hóa (automations) và tập lệnh (scripts) hiện có của bạn để xem có thành phần nào bị hỏng hay không.
 3. **Cảnh báo rủi ro**: Nếu phát hiện vấn đề (chẳng hạn như thiếu thông số bắt buộc), bản cập nhật sẽ bị đánh dấu trạng thái **"Lỗi tương thích (compatibility error)"**.
-4. **Bảo vệ cập nhật tự động**: Các blueprint có nguy cơ gây lỗi sẽ bị chặn cập nhật tự động (**"blocked-auto-update"**) nhằm bảo vệ ngôi nhà của bạn khỏi các sự cố không đáng có.
-5. **Minh bạch thay đổi**: Đối với các bản cập nhật bị chặn, bạn có thể xem **"BÁO CÁO RỦI RO CẬP NHẬT (UPDATE RISK REPORT)"** để biết các thay đổi gây lỗi cụ thể (như thiếu tham số bắt buộc) và xem chi tiết phần **"Git Diff"** để so sánh mã nguồn trước khi quyết định cài đặt thủ công.
+4. **Bảo vệ cập nhật tự động**: Các blueprint có nguy cơ gây lỗi sẽ bị chặn cập nhật tự động nhằm bảo vệ ngôi nhà của bạn khỏi các sự cố không đáng có.
+5. **Minh bạch thay đổi**: Đối với các bản cập nhật bị chặn, bạn có thể xem **"[CẢNH BÁO] NGUY CƠ GÂY MẤT TƯƠNG THÍCH"** để biết các thay đổi gây lỗi cụ thể (như thiếu tham số bắt buộc) và xem chi tiết phần **"Git Diff"** để so sánh mã nguồn trước khi quyết định cài đặt thủ công.
 
 ## Làm mới danh sách Blueprint
 
@@ -153,28 +150,6 @@ Vì Home Assistant không liên tục giám sát tệp hệ thống để tiết
 1. **Chạy hành động Reload (Khuyên dùng)**: Vào **Công cụ nhà phát triển (Developer Tools)** > **YAML**, tìm **Blueprints Updater** trong danh sách **YAML configuration reloading** và nhấn **Reload**. Hoặc sử dụng hành động **`blueprints_updater.reload`** trong phần **Hành động (Actions)** (Chỉ dành cho quản trị viên).
 2. **Reload Tích hợp**: Vào **Cài đặt (Settings)** > **Thiết bị & Dịch vụ (Devices & Services)** > **Blueprints Updater**, nhấn vào ba chấm và chọn **Tải lại (Reload)**.
 3. **Khởi động lại Home Assistant**.
-
----
-
-## Các câu hỏi thường gặp (FAQ)
-
-### Tại sao có bản cập nhật ngay sau khi vừa cài đặt?
-
-Bạn có thể nhận thấy bản cập nhật xuất hiện ngay cả với các blueprint vừa mới cài đặt. Điều này xảy ra do:
-
-1. **Tái cấu trúc YAML**: Khi bạn nhập một blueprint, Home Assistant thường sử dụng bộ phân tích YAML nội bộ để tái cấu trúc định dạng tệp. Điều này dẫn đến những sai khác nhỏ về định dạng so với tệp gốc của tác giả.
-2. **Đảm bảo tính nguyên bản**: Tiện ích này ưu tiên duy trì **cấu trúc blueprint gốc** đúng như ý định của tác giả để đảm bảo độ chính xác và tính ổn định cao nhất.
-3. **Đồng bộ hóa**: Bản "cập nhật" đầu tiên thường chỉ là quá trình hệ thống đồng bộ hóa phiên bản cục bộ của bạn với nội dung gốc từ nguồn của tác giả, đảm bảo khả năng tương thích lâu dài và theo dõi chính xác các thay đổi sau này.
-
-### Tại sao tôi nhận được thông báo cập nhật khi đang dùng một bản Fork (nhánh rẽ) của blueprint?
-
-Đôi khi các tác giả của bản fork (phiên bản được cải tiến hoặc duy trì từ bản gốc) vẫn giữ nguyên `source_url` trỏ về kho lưu trữ gốc. Vì `source_url` là thông tin duy nhất để Blueprints Updater theo dõi, hệ thống sẽ kiểm tra kho lưu trữ gốc đó để tìm bản cập nhật. Nếu bản fork bạn đã cài đặt có sự khác biệt so với bản gốc trên kho lưu trữ đó, hệ thống sẽ đề xuất cập nhật.
-
-- **Thông báo cập nhật**: Một bản cập nhật sẽ được hiển thị bất cứ khi nào nguồn từ xa có sự khác biệt so với phiên bản cục bộ của bạn.
-- **Cập nhật tự động**: Nếu các thay đổi từ kho gốc là nhỏ và không gây ra bất kỳ lỗi tương thích nào, blueprint **vẫn có thể tự động cập nhật** (nếu bạn đã bật tính năng này).
-- **Chặn cập nhật tự động**: Hệ thống chỉ chặn cập nhật và gửi **thông báo hệ thống** (kèm cảnh báo trong log) nếu **Lớp bảo vệ Nâng cao** phát hiện bản cập nhật có rủi ro làm hỏng các automation hiện có của bạn hoặc xảy ra lỗi hệ thống trong quá trình kiểm tra.
-- **Rà soát thay đổi**: Để đảm bảo không mất đi các cải tiến hoặc tính năng đặc thù của bản fork, bạn nên tận dụng phần **Git Diff** để rà soát các thay đổi trước khi quyết định thực hiện cập nhật.
-- **Danh sách chặn (Blacklist)**: Nếu bạn muốn duy trì phiên bản fork hiện tại lâu dài và ngừng nhận thông báo cập nhật cho nó, bạn có thể thêm blueprint đó vào **Blacklist** (hoặc loại khỏi **Whitelist**) trong phần cấu hình của tiện ích.
 
 ---
 

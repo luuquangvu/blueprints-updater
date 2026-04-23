@@ -11,10 +11,12 @@ dev = [
   "homeassistant>=2026.4",
   "interrogate",
   "packaging",
+  "pre-commit",
   "pyright",
   "pytest>=9",
   "pytest-asyncio",
   "pytest-cov",
+  "pytest-timeout",
   "ruff",
   "tomlkit",
   "ty",
@@ -50,7 +52,8 @@ indent-style = "space"
 asyncio_mode = "auto"
 pythonpath = ["."]
 filterwarnings = ["ignore::DeprecationWarning"]
-addopts = ["--cov=custom_components", "--cov-fail-under=90"]
+addopts = ["--cov=custom_components", "--cov-fail-under=90", "--timeout=60"]
+testpaths = ["tests"]
 
 [tool.pyright]
 typeCheckingMode = "standard"

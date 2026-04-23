@@ -114,6 +114,11 @@ class BlueprintCoordinatorInternal(Protocol):
     _last_request_time: float
     _background_task: Any
 
+    @staticmethod
+    def _hash_content(content: str, already_normalized: bool = False) -> str:
+        """Compute SHA256 hash of content."""
+        ...
+
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Fetch blueprint update data (internal handler)."""
         ...
@@ -187,7 +192,8 @@ class BlueprintCoordinatorInternal(Protocol):
         """Check if the URL is safe."""
         ...
 
-    def _validate_blueprint(self, blueprint_dict: dict[str, Any], source_url: str) -> str | None:
+    @staticmethod
+    def _validate_blueprint(data: Any, source_url: str) -> str | None:
         """Validate blueprint structure and return error tag if invalid."""
         ...
 

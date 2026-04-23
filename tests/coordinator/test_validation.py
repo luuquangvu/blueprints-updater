@@ -6,6 +6,8 @@ robust fail-safe mechanisms are in place during compatibility checks.
 """
 
 import asyncio
+import os
+import socket
 from datetime import timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,16 +28,13 @@ def coordinator(hass):
     entry.options = {}
     entry.data = {}
 
-    with patch(
-        "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__", return_value=None
-    ):
-        coord = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
-        coord.hass = hass
-        coord.setup_complete = True
-        coord.data = {}
-        coord._translations = {}
-        coord._blueprint_validate_lock = asyncio.Lock()
-        return coord
+    coord = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+    coord.hass = hass
+    coord.setup_complete = True
+    coord.data = {}
+    coord._translations = {}
+    coord._blueprint_validate_lock = asyncio.Lock()
+    return coord
 
 
 @pytest.mark.asyncio
@@ -171,3 +170,108 @@ async def test_async_validate_blueprint_consumers_malformed_path(coordinator):
     assert risks[0]["type"] == BlueprintRiskType.SYSTEM_ERROR
     assert "Malformed blueprint path" in risks[0]["args"]["error"]
     assert risks[0]["args"]["path"] == rel_path
+
+
+def test_is_safe_path(hass, coordinator):
+    """Test _is_safe_path logic."""
+    coordinator._is_safe_path = BlueprintUpdateCoordinator._is_safe_path.__get__(coordinator)
+
+    base_config = "/home/hass/config"
+    blueprints_dir = os.path.join(base_config, "blueprints")
+
+    hass.config.path.side_effect = lambda *args: os.path.join(base_config, *args)
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.os.path.realpath",
+        side_effect=os.path.normpath,
+    ):
+        assert coordinator._is_safe_path(os.path.join(blueprints_dir, "automation/test.yaml"))
+        assert coordinator._is_safe_path(os.path.join(blueprints_dir, "script/another.yaml"))
+        assert not coordinator._is_safe_path(os.path.join(base_config, "secrets.yaml"))
+        assert not coordinator._is_safe_path("/etc/passwd")
+        assert not coordinator._is_safe_path(os.path.join(blueprints_dir, "../secrets.yaml"))
+
+
+@pytest.mark.asyncio
+async def test_is_safe_url(coordinator):
+    """Test _is_safe_url logic."""
+    coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
+    coord: Any = coordinator
+
+    addr_info = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 443))]
+    with patch("socket.getaddrinfo", return_value=addr_info):
+        assert await coord._is_safe_url("https://github.com/user/repo")
+        assert await coord._is_safe_url("https://raw.githubusercontent.com/user/repo/main/bp.yaml")
+        assert await coord._is_safe_url("https://gist.github.com/user/gistid")
+        assert await coord._is_safe_url("https://community.home-assistant.io/t/topic/123")
+        assert await coord._is_safe_url("https://gitlab.com/user/repo/-/raw/main/bp.yaml")
+        assert await coord._is_safe_url("https://bitbucket.org/user/repo/raw/main/bp.yaml")
+
+        assert await coord._is_safe_url("http://github.com/somepath")
+
+    with patch("socket.getaddrinfo", side_effect=socket.gaierror):
+        assert not await coord._is_safe_url("http://localhost:8123")
+        assert not await coord._is_safe_url("http://homeassistant.local:8123")
+        assert not await coord._is_safe_url("http://test.example/api")
+        assert not await coord._is_safe_url("http://192.168.1.1/admin")
+        assert not await coord._is_safe_url("http://127.0.0.1/admin")
+
+
+@pytest.mark.asyncio
+async def test_is_safe_url_dns_resolution(coordinator):
+    """Test _is_safe_url logic with DNS resolution."""
+    coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
+    coord: Any = coordinator
+
+    with patch("socket.getaddrinfo") as mock_getaddr:
+        mock_getaddr.return_value = [(None, None, None, None, ("192.168.1.50", 0))]
+        assert not await coord._is_safe_url("https://malicious-dns.com/bp.yaml")
+
+    with patch("socket.getaddrinfo") as mock_getaddr:
+        mock_getaddr.return_value = [(None, None, None, None, ("8.8.8.8", 0))]
+        assert await coord._is_safe_url("https://google.com/bp.yaml")
+    with patch("socket.getaddrinfo", side_effect=socket.gaierror):
+        assert not await coord._is_safe_url("https://unresolvable.com/bp.yaml")
+
+
+def test_get_validated_filter_mode_normalization(coordinator):
+    """Test that filter mode is normalized (lowercase and stripped)."""
+    assert coordinator._get_validated_filter_mode("  All  ") == "all"
+    assert coordinator._get_validated_filter_mode("WHITELIST") == "whitelist"
+    assert coordinator._get_validated_filter_mode("Blacklist") == "blacklist"
+    assert coordinator._get_validated_filter_mode("invalid") == "all"
+    assert coordinator._get_validated_filter_mode(None) == "all"
+    assert coordinator._get_validated_filter_mode(123) == "all"
+
+
+def test_get_validated_selected_blueprints_hardening(coordinator):
+    """Test the hardening of _get_validated_selected_blueprints."""
+    assert coordinator._get_validated_selected_blueprints(None) == []
+
+    res = coordinator._get_validated_selected_blueprints("  path/to/bp.yaml  ")
+    assert res == ["path/to/bp.yaml"]
+    assert coordinator._get_validated_selected_blueprints("   ") == []
+    assert coordinator._get_validated_selected_blueprints(["a", " b ", None, ""]) == ["a", "b"]
+    assert coordinator._get_validated_selected_blueprints(("a", "b")) == ["a", "b"]
+
+    with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
+        assert coordinator._get_validated_selected_blueprints({"key": "value"}) == []
+        mock_logger.error.assert_called()
+        assert "mapping" in mock_logger.error.call_args[0][0]
+    with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
+        assert coordinator._get_validated_selected_blueprints(123) == []
+        mock_logger.error.assert_called()
+        assert "Invalid type" in mock_logger.error.call_args[0][0]
+
+
+def test_ensure_source_url_indented_key(coordinator):
+    """Test that indented blueprint keys do NOT trigger injection."""
+    source_url = "https://url.com/blueprint.yaml"
+    content = """
+not_blueprint:
+  something: else
+  blueprint:
+    nested: true
+"""
+    expected = coordinator._normalize_content(content)
+    assert coordinator._ensure_source_url(content, source_url) == expected

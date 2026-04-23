@@ -709,6 +709,7 @@ async def test_async_install_bypass_protection(coordinator):
         "rel_path": "test.yaml",
         "updatable": True,
         "source_url": "https://url.com",
+        "remote_hash": "hash2xxxxxxxxxxx",
     }
     coordinator.data[path] = info
 
@@ -746,6 +747,7 @@ async def test_async_install_unsafe_url_protection(coordinator):
         "rel_path": "test.yaml",
         "updatable": True,
         "source_url": "https://unsafe.com",
+        "remote_hash": "hash2xxxxxxxxxxx",
     }
     coordinator.data[path] = info
 

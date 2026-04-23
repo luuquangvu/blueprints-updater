@@ -124,7 +124,7 @@
     "content_missing": "Blueprint content is missing or could not be fetched",
     "git_diff_title": "Code Changes (Git Diff)",
     "semantic_sync_notice": "This blueprint is semantically identical, but requires a structural update to align with the new canonical formatting (e.g. newline normalization, metadata injection).",
-    "breaking_risks_title": "UPDATE RISK REPORT",
+    "breaking_risks_title": "[WARNING] POTENTIAL BREAKING CHANGES",
     "auto_update_blocked_by_breaking_change": "Auto-update blocked for {name} due to detected breaking changes",
     "risk_new_mandatory": "New mandatory input {input} added.",
     "risk_missing_input": "Entity {entity} is missing mandatory input {input} required by new version.",

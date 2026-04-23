@@ -4,6 +4,7 @@ from datetime import timedelta
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EVENT_CORE_CONFIG_UPDATE
@@ -146,6 +147,7 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
     mock_resp = MagicMock()
     mock_resp.is_redirect = False
     mock_resp.status_code = 200
+    mock_resp.url = httpx.URL("https://mock_url")
     mock_resp.headers = {"Content-Type": "application/json"}
     mock_resp.json = MagicMock(side_effect=ValueError("JSON fail"))
 

@@ -30,9 +30,6 @@
     - [Restoring a Backup](#restoring-a-backup)
   - [Advanced Compatibility Guard](#advanced-compatibility-guard)
   - [Refreshing the Blueprint List](#refreshing-the-blueprint-list)
-  - [Frequently Asked Questions (FAQ)](#frequently-asked-questions-faq)
-    - [Why is there an update immediately after a fresh installation?](#why-is-there-an-update-immediately-after-a-fresh-installation)
-    - [Why is an update offered if I installed a forked version of a blueprint?](#why-is-an-update-offered-if-i-installed-a-forked-version-of-a-blueprint)
   - [Requirements](#requirements)
   - [Code Quality \& Security](#code-quality--security)
   - [Contributing](#contributing)
@@ -141,8 +138,8 @@ When an update is detected, the system performs a multi-stage safety check:
 1. **Code Validation**: Automatically verifies the new blueprint's structure to ensure it complies with Home Assistant's rules.
 2. **Impact Analysis**: Simulates the update against your existing automations and scripts to see if anything will break.
 3. **Risk Alerts**: If a problem is found (such as a missing required setting), the update is flagged with a **"compatibility error"**.
-4. **Auto-Update Protection**: Blueprints at risk of causing errors are automatically blocked from auto-updating (**"blocked-auto-update"**) to safeguard your smart home from unexpected incidents.
-5. **Full Transparency**: For blocked updates, you can review the **"UPDATE RISK REPORT"** to see specific breaking changes (like missing mandatory inputs) and use the **"Git Diff"** section for a detailed code comparison before proceeding manually.
+4. **Auto-Update Protection**: Blueprints at risk of causing errors are automatically blocked from auto-updating to safeguard your smart home from unexpected incidents.
+5. **Full Transparency**: For blocked updates, you can review the **"[WARNING] POTENTIAL BREAKING CHANGES"** to see specific breaking changes (like missing mandatory inputs) and use the **"Git Diff"** section for a detailed code comparison before proceeding manually.
 
 ## Refreshing the Blueprint List
 
@@ -156,35 +153,13 @@ To apply changes instantly without waiting for the next scheduled background sca
 
 ---
 
-## Frequently Asked Questions (FAQ)
-
-### Why is there an update immediately after a fresh installation?
-
-You might notice that Blueprints Updater flags an update even for blueprints you have just installed. This happens because:
-
-1. **YAML Restructuring**: When you import a blueprint, Home Assistant often uses its own internal YAML parser to restructure the file format. This can lead to subtle formatting differences compared to the author's original file.
-2. **Original Fidelity**: This integration prioritizes maintaining the **original blueprint structure** exactly as intended by the author for maximum accuracy and stability.
-3. **Alignment**: The initial "update" you see is often just the system aligning your local version with the author's original source content to ensure long-term compatibility and clean tracking.
-
-### Why is an update offered if I installed a forked version of a blueprint?
-
-Sometimes authors of forked blueprints (improved or maintained versions of an original) keep the original `source_url` pointing to the upstream repository. Since the `source_url` is what Blueprints Updater tracks, it will look at the original repository for updates. If the content in the fork you installed differs from the original upstream repository, an update will be offered.
-
-- **Update Notification**: An update is displayed whenever the remote source differs from your local version.
-- **Auto-Update Behavior**: If the changes in the upstream repository are minor and do not pose a risk to your existing automations, the blueprint **might still auto-update** (if enabled).
-- **Auto-Update Protection**: The system only blocks updates and sends a **system notification** (along with a warning in the logs) if the **Advanced Compatibility Guard** detects a legitimate risk of breaking your existing automations or if a system error occurs during validation.
-- **Reviewing Changes**: To ensure you don't lose custom features or improvements provided by a fork, it is strongly recommended to use the **Git Diff** section to review pending updates before proceeding with an update.
-- **Blacklisting Updates**: If you prefer to stay on a specific forked version indefinitely and stop receiving update notifications for it, you can add that blueprint to the **Blacklist** (or exclude it from the **Whitelist**) in the integration's configuration.
-
----
-
 ## Requirements
 
 For a blueprint to be trackable, it **must** contain a valid `source_url` within its metadata:
 
 ```yaml
 blueprint:
-  name: "My Blueprint"
+  name: "Blueprint Name"
   source_url: https://github.com/user/repo/blob/main/blueprint.yaml
   # ...
 ```

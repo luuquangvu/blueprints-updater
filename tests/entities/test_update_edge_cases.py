@@ -38,7 +38,7 @@ async def test_update_entity_release_notes_risks(mock_coordinator):
         "name": "Test BP",
         "rel_path": path,
         "updatable": True,
-        "source_url": "http://example.com",
+        "source_url": "https://example.com",
         "local_hash": "12345678",
         "remote_hash": "87654321",
         "breaking_risks": [
@@ -141,8 +141,8 @@ async def test_extra_state_attributes(mock_coordinator):
         "rel_path": path,
         "last_error": "err_key|detail",
         "breaking_risks": ["risk1"],
+        "update_blocking_reason": "auto_update_blocked_by_breaking_change",
     }
-    info["update_blocking_reason"] = "auto_update_blocked_by_breaking_change"
     mock_coordinator.data = {path: info}
     entity = BlueprintUpdateEntity(mock_coordinator, path, info)
     entity._localized_error = "Translated Error"
