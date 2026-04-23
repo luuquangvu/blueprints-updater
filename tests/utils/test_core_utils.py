@@ -11,7 +11,9 @@ from custom_components.blueprints_updater.utils import (
     get_config_int,
     get_max_backups,
     get_update_interval,
+    redact_url,
     retry_async,
+    sanitize_error_detail,
 )
 
 
@@ -233,3 +235,28 @@ async def test_utils_behavior():
     with pytest.raises(RuntimeError, match="Fail"):
         await retry_async(max_retries=2, base_delay=0, exceptions=(RuntimeError,))(mock_func)()
     assert mock_calls == 3
+
+
+def test_redact_url():
+    """Test redact_url utility."""
+    assert redact_url(None) == "None"
+    assert redact_url("") == "None"
+    assert redact_url("invalid-url") == "invalid-url"
+    assert redact_url("https://user:pass@github.com/path") == "https://github.com/path"
+    assert redact_url("https://github.com/path?token=123") == "https://github.com/path"
+    assert redact_url("https://github.com/path#fragment") == "https://github.com/path"
+    assert redact_url("https://u:p@host.com/p?q=1#f") == "https://host.com/p"
+
+
+def test_sanitize_error_detail():
+    """Test sanitize_error_detail utility."""
+    assert sanitize_error_detail("normal error") == "normal error"
+    assert sanitize_error_detail("error | with | pipe") == "error / with / pipe"
+    assert (
+        sanitize_error_detail("failed at https://u:p@github.com/p?q=1")
+        == "failed at https://github.com/p"
+    )
+    long_msg = "a" * 200
+    sanitized = sanitize_error_detail(long_msg, max_length=50)
+    assert len(sanitized) <= 50
+    assert sanitized.endswith("...")

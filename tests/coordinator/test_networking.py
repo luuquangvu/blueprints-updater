@@ -36,6 +36,8 @@ async def test_async_fetch_content_pacing_logic(coordinator):
     mock_session = MagicMock(spec=httpx.AsyncClient)
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
+    mock_response.is_redirect = False
+    mock_response.url = httpx.URL("https://example.com/path")
     mock_response.text = "content"
     mock_response.headers = {"Content-Type": "text/yaml"}
     mock_response.raise_for_status = MagicMock()
@@ -71,6 +73,8 @@ async def test_async_fetch_content_pacing_logic_max(coordinator):
     mock_session = MagicMock(spec=httpx.AsyncClient)
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
+    mock_response.is_redirect = False
+    mock_response.url = httpx.URL("https://example.com/path")
     mock_response.text = "content"
     mock_response.headers = {"Content-Type": "text/yaml"}
     mock_response.raise_for_status = MagicMock()
@@ -125,6 +129,8 @@ async def test_async_fetch_content_pacing_synchronization(coordinator):
         ):
             mock_get.return_value = MagicMock(spec=httpx.Response)
             mock_get.return_value.status_code = 200
+            mock_get.return_value.is_redirect = False
+            mock_get.return_value.url = httpx.URL("https://example.com/path")
             mock_get.return_value.headers = {"ETag": "new", "Content-Type": "text/yaml"}
             mock_get.return_value.text = "blueprint:\n  name: Test"
             mock_get.return_value.raise_for_status = MagicMock()
@@ -213,6 +219,6 @@ async def test_execute_with_redirect_guard_final_https(coordinator):
 
     with (
         patch.object(coordinator, "_is_safe_url", return_value=True),
-        pytest.raises(httpx.HTTPError, match="Final destination must be HTTPS"),
+        pytest.raises(httpx.HTTPError, match="must be HTTPS"),
     ):
         await coordinator._execute_with_redirect_guard(mock_session, "http://start.com/bp.yaml", {})

@@ -1169,7 +1169,9 @@ async def test_async_update_blueprint_in_place_unsafe_url(coordinator):
     coordinator.data = {path: info}
     with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
         await coordinator._async_update_blueprint_in_place(MagicMock(), path, info, [], set())
-        mock_logger.warning.assert_called_with("Blocking update from untrusted URL: (redacted URL)")
+        mock_logger.warning.assert_called_with(
+            "Blocking update from untrusted URL: %s", "http://192.168.1.1/exploit"
+        )
 
 
 @pytest.mark.asyncio

@@ -4,9 +4,12 @@ import asyncio
 import inspect
 import logging
 import random
+import textwrap
 from collections.abc import Callable, Coroutine
 from functools import wraps
 from typing import Any, TypeVar
+
+import httpx
 
 from .const import (
     CONF_MAX_BACKUPS,
@@ -17,6 +20,7 @@ from .const import (
     MAX_UPDATE_INTERVAL_HOURS,
     MIN_BACKUPS,
     MIN_UPDATE_INTERVAL,
+    RE_URL_REDACTION,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -190,3 +194,30 @@ def get_max_backups(config: Any) -> int:
         min_val=MIN_BACKUPS,
         max_val=MAX_BACKUPS,
     )
+
+
+def redact_url(url: str | None) -> str:
+    """Redact sensitive parts of a URL (credentials, query, fragment)."""
+    if not url:
+        return "None"
+    try:
+        parsed = httpx.URL(url)
+        return str(parsed.copy_with(username=None, password=None, query=None, fragment=None))
+    except Exception:
+        return "[REDACTED/INVALID URL]"
+
+
+def sanitize_error_detail(detail: str, max_length: int = 120) -> str:
+    """Sanitize error detail to avoid delimiter clashes and overly long messages.
+
+    Args:
+        detail: The raw error message string.
+        max_length: Maximum allowed length for the sanitized string.
+
+    Returns:
+        The sanitized and potentially truncated error string.
+
+    """
+    cleaned = RE_URL_REDACTION.sub(lambda m: redact_url(m.group(0)), detail)
+    cleaned = cleaned.replace("|", "/")
+    return textwrap.shorten(cleaned, width=max_length, placeholder="...")
