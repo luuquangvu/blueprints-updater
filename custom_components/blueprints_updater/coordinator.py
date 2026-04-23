@@ -616,29 +616,52 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         curr_url = info.get("source_url")
 
         if prev_url and curr_url and prev_url != curr_url:
-            _LOGGER.info(
-                "Source URL changed for %s (%s -> %s); clearing remote cache",
-                path,
-                prev_url,
-                curr_url,
-            )
-            self._persisted_etags.pop(path, None)
-            self._persisted_hashes.pop(path, None)
-
-            self.hass.async_create_background_task(
-                self._async_save_metadata(force=True), name=f"{DOMAIN}_url_change_save"
-            )
-
-            return {
-                **prev,
-                "remote_hash": None,
-                "invalid_remote_hash": None,
-                "remote_content": None,
-                "last_error": None,
-                "etag": None,
-                "updatable": False,
-            }
+            return self._invalidate_blueprint_metadata(path, prev_url, curr_url, prev)
         return prev
+
+    def _invalidate_blueprint_metadata(
+        self, path: str, prev_url: str, curr_url: str, prev: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Invalidate all remote-derived metadata for a blueprint.
+
+        This is called when the source URL changes, ensuring that old ETags,
+        hashes, and content are cleared from both memory and disk.
+
+        Args:
+            path: Local path of the blueprint.
+            prev_url: The previous source URL.
+            curr_url: The new source URL.
+            prev: The current metadata dictionary to be invalidated.
+
+        Returns:
+            The invalidated metadata dictionary.
+
+        """
+        _LOGGER.info(
+            "Source URL changed for %s (%s -> %s); clearing remote cache",
+            path,
+            prev_url,
+            curr_url,
+        )
+        self._persisted_etags.pop(path, None)
+        self._persisted_hashes.pop(path, None)
+
+        invalidated = {
+            **prev,
+            "remote_hash": None,
+            "invalid_remote_hash": None,
+            "remote_content": None,
+            "last_error": None,
+            "etag": None,
+            "updatable": False,
+        }
+        self.data[path] = invalidated
+
+        self.hass.async_create_background_task(
+            self._async_save_metadata(force=True), name=f"{DOMAIN}_url_change_save"
+        )
+
+        return invalidated
 
     def _apply_ghost_update_detection(
         self, path: str, info: dict[str, Any], prev_data: dict[str, Any]

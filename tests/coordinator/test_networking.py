@@ -159,7 +159,10 @@ async def test_execute_with_redirect_guard_security(coordinator):
 
     mock_session.get = AsyncMock(return_value=mock_resp_redirect)
 
-    with pytest.raises(httpx.HTTPError, match="Too many redirects"):
+    with (
+        patch.object(coordinator, "_is_safe_url", return_value=True),
+        pytest.raises(httpx.HTTPError, match="Too many redirects"),
+    ):
         await coordinator._execute_with_redirect_guard(
             mock_session, "https://example.com/start", {}
         )
