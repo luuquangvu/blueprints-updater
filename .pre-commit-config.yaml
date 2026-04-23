@@ -5,45 +5,48 @@ repos:
         name: ruff
         entry: uv run ruff check --fix
         language: system
-        types: [python]
+        pass_filenames: false
+        always_run: true
 
       - id: ruff-format
         name: ruff-format
         entry: uv run ruff format
         language: system
-        types: [python]
+        pass_filenames: false
+        always_run: true
 
       - id: ty-check
         name: ty-check
         entry: uv run ty check
         language: system
-        types: [python]
         pass_filenames: false
+        always_run: true
 
       - id: pyright
         name: pyright
         entry: uv run pyright
         language: system
-        types: [python]
         pass_filenames: false
+        always_run: true
 
       - id: interrogate
         name: interrogate
         entry: uv run interrogate
         language: system
-        types: [python]
         pass_filenames: false
+        always_run: true
 
       - id: pytest
         name: pytest
         entry: uv run pytest
         language: system
-        types: [python]
         pass_filenames: false
+        always_run: true
         stages: [pre-push]
 
       - id: prettier
         name: prettier
-        entry: npx prettier --write
+        entry: npx prettier --write .
         language: system
-        types_or: [json, yaml, markdown, javascript, toml]
+        pass_filenames: false
+        always_run: true

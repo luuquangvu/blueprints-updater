@@ -119,6 +119,24 @@ def test_ensure_source_url(coordinator):
     assert coordinator._ensure_source_url(content_none, source_url) == expected_none
 
 
+@pytest.mark.parametrize(
+    "malformed_content",
+    [
+        "blueprint: null\nname: Test",
+        "blueprint: just a string\nname: Test",
+    ],
+)
+def test_ensure_source_url_malformed_blueprint_key(coordinator, malformed_content):
+    """Test ensuring source_url returns normalized original if blueprint key is malformed.
+
+    (Case where blueprint key is not a dict).
+    """
+    source_url = "https://example.com/test.yaml"
+    result = coordinator._ensure_source_url(malformed_content, source_url)
+    assert "source_url" not in result
+    assert result == coordinator._normalize_content(malformed_content)
+
+
 def test_ensure_source_url_non_string_content_logs_and_returns_empty(coordinator, caplog):
     """Non-string content should be logged and result in an empty string."""
     content = {"blueprint": {"name": "Test"}}

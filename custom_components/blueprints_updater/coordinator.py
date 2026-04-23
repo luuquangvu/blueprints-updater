@@ -2677,11 +2677,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 follow_redirects=False,
             )
 
-            if response.status_code == 304:
-                return response
-
             if not response.is_redirect:
-                response.raise_for_status()
                 if response.url.scheme != "https":
                     _LOGGER.error(
                         "Blocking unsafe final URL (non-HTTPS) for (redacted URL): %s",
@@ -2691,6 +2687,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         f"Security violation: Final destination must be HTTPS "
                         f"(got {response.url.scheme})"
                     )
+                if response.status_code == 304:
+                    return response
+                response.raise_for_status()
                 return response
 
             if redirect_count >= 20:
@@ -2891,7 +2890,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         blueprint = parsed["blueprint"]
         if not isinstance(blueprint, dict):
-            blueprint = parsed["blueprint"] = {}
+            return BlueprintUpdateCoordinator._normalize_content(content)
 
         source_url = source_url.strip()
         blueprint["source_url"] = source_url
