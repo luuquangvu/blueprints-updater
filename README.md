@@ -139,7 +139,7 @@ When an update is detected, the system performs a multi-stage safety check:
 2. **Impact Analysis**: Simulates the update against your existing automations and scripts to see if anything will break.
 3. **Risk Alerts**: If a problem is found (such as a missing required setting), the update is flagged with a **"compatibility error"**.
 4. **Auto-Update Protection**: Blueprints at risk of causing errors are automatically blocked from auto-updating to safeguard your smart home from unexpected incidents.
-5. **Full Transparency**: For blocked updates, you can review the **"POTENTIAL BREAKING CHANGES"** to see specific breaking changes (like missing mandatory inputs) and use the **"Git Diff"** section for a detailed code comparison before proceeding manually.
+5. **Full Transparency**: For blocked updates, you can review the **"[WARNING] POTENTIAL BREAKING CHANGES"** to see specific breaking changes (like missing mandatory inputs) and use the **"Git Diff"** section for a detailed code comparison before proceeding manually.
 
 ## Refreshing the Blueprint List
 
