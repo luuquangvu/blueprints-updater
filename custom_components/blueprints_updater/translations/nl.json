@@ -124,7 +124,7 @@
     "content_missing": "De inhoud van de blueprint ontbreekt of kon niet worden opgehaald.",
     "git_diff_title": "Codewijzigingen (Git Diff)",
     "semantic_sync_notice": "Deze blueprint is semantisch identiek, maar vereist een structurele update om in de pas te lopen met de nieuwe canonieke formattering (bijv. normalisatie van regeleinden, injectie van metadata).",
-    "breaking_risks_title": "⚠️ POTENTIËLE INCOMPATIBILITEITEN",
+    "breaking_risks_title": "[WAARSCHUWING] POTENTIËLE INCOMPATIBILITEITEN",
     "auto_update_blocked_by_breaking_change": "Automatische update geblokkeerd voor {name} vanwege potentiële incompatibiliteiten",
     "risk_new_mandatory": "Nieuwe verplichte invoer {input} toegevoegd.",
     "risk_missing_input": "Entiteit {entity} mist verplichte invoer {input} vereist door nieuwe versie.",

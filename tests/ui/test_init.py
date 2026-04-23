@@ -329,6 +329,7 @@ async def test_unload_entry(hass: HomeAssistant):
 
         assert entry.entry_id not in hass.data[DOMAIN].get("coordinators", {})
         assert mock_remove.called
+        coordinator_mock.async_shutdown.assert_awaited_once()
 
 
 @pytest.mark.asyncio

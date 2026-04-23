@@ -124,7 +124,7 @@
     "content_missing": "Brak zawartości Blueprinta lub nie można jej pobrać.",
     "git_diff_title": "Zmiany w kodzie (Git Diff)",
     "semantic_sync_notice": "Ten blueprint jest semantycznie identyczny, ale wymaga aktualizacji strukturalnej w celu dostosowania do nowego formatu kanonicznego (np. normalizacja znaków końca linii, wstrzykiwanie metadanych).",
-    "breaking_risks_title": "⚠️ POTENCJALNE ZMIANY ŁAMIĄCE KOMPATYBILNOŚĆ",
+    "breaking_risks_title": "[OSTRZEŻENIE] POTENCJALNE ZMIANY ŁAMIĄCE KOMPATYBILNOŚĆ",
     "auto_update_blocked_by_breaking_change": "Automatyczna aktualizacja zablokowana dla {name} z powodu wykrytych zmian łamiących kompatybilność",
     "risk_new_mandatory": "Dodano nowe wymagane pole {input}.",
     "risk_missing_input": "Encja {entity} nie posiada wymaganego pola {input}, które jest wymagane przez nową wersję.",

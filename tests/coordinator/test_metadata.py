@@ -212,7 +212,7 @@ def test_ensure_source_url_prioritizes_local(coordinator):
     ],
 )
 def test_normalization_comprehensive(coordinator, variant, input_content, expected_output):
-    """Test that normalization handle various encodings and formats consistently."""
+    """Test that normalization handles various encodings and formats consistently."""
     normalized = coordinator._normalize_content(input_content)
     assert normalized == expected_output, f"Failed for variant: {variant}"
 

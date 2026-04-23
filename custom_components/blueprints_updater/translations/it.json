@@ -124,7 +124,7 @@
     "content_missing": "Il contenuto del blueprint è mancante o non è stato possibile recuperarlo.",
     "git_diff_title": "Modifiche al codice (Git Diff)",
     "semantic_sync_notice": "Questo blueprint è semanticamente identico, ma richiede un aggiornamento strutturale per allinearsi al nuovo formato canonico (es. normalizzazione dei fine riga, inserimento di metadati).",
-    "breaking_risks_title": "⚠️ POTENZIALI INCOMPATIBILITÀ",
+    "breaking_risks_title": "[ATTENZIONE] POTENZIALI INCOMPATIBILITÀ",
     "auto_update_blocked_by_breaking_change": "Aggiornamento automatico bloccato per {name} a causa di potenziali incompatibilità rilevate",
     "risk_new_mandatory": "Nuovo input obbligatorio {input} aggiunto.",
     "risk_missing_input": "All'entità {entity} manca l'input obbligatorio {input} richiesto dalla nuova versione.",

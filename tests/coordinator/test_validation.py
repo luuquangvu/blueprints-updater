@@ -180,7 +180,7 @@ def test_is_safe_path(coordinator):
         side_effect=os.path.normpath,
     ):
         assert coordinator._is_safe_path("/config/blueprints/automation/test.yaml")
-        assert coordinator._is_safe_path("/config/blueprints/automation/test.yaml")
+        assert coordinator._is_safe_path("/config/blueprints/script/another.yaml")
         assert not coordinator._is_safe_path("/config/secrets.yaml")
         assert not coordinator._is_safe_path("/etc/passwd")
         assert not coordinator._is_safe_path("/config/blueprints/../secrets.yaml")
