@@ -930,7 +930,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         ):
             _LOGGER.warning(
                 "Remote content from %s is not a valid blueprint (missing 'blueprint' key)",
-                source_url,
+                redact_url(source_url),
             )
             return "invalid_blueprint"
 
@@ -940,14 +940,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 error_msg = "; ".join(errors)
                 _LOGGER.warning(
                     "Blueprint from %s is incompatible: %s",
-                    source_url,
+                    redact_url(source_url),
                     error_msg,
                 )
                 return f"incompatible|{sanitize_error_detail(error_msg)}"
         except InvalidBlueprint as err:
             _LOGGER.warning(
                 "Blueprint validation failed for %s: %s",
-                source_url,
+                redact_url(source_url),
                 err,
             )
             return f"validation_error|{sanitize_error_detail(str(err))}"
@@ -1118,7 +1118,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 await self.async_reload_services([domain])
 
             if self.data and path in self.data:
-                final_hash = remote_hash or self._hash_content(remote_content)
+                current = self.data[path]
+                cached_remote_hash = (
+                    current.get("remote_hash")
+                    if current.get("remote_content") == remote_content
+                    else None
+                )
+                final_hash = remote_hash or cached_remote_hash or self._hash_content(remote_content)
+                final_etag = etag if etag is not None else current.get("etag")
 
                 self.data[path].update(
                     {
@@ -1131,7 +1138,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "invalid_remote_hash": None,
                         "breaking_risks": [],
                         "update_blocking_reason": None,
-                        "etag": etag,
+                        "etag": final_etag,
                     }
                 )
                 self.async_set_updated_data(self.data)
@@ -3128,6 +3135,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return found_blueprints
 
         _LOGGER.debug("Scanning blueprints in: %s", blueprint_path)
+        real_blueprint_path = os.path.realpath(blueprint_path)
         selected_set = set(selected_blueprints)
 
         for domain in ALLOWED_RELOAD_DOMAINS:
@@ -3141,6 +3149,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         continue
 
                     full_path = os.path.join(root, file)
+                    real_full_path = os.path.realpath(full_path)
+                    try:
+                        if (
+                            os.path.commonpath([real_full_path, real_blueprint_path])
+                            != real_blueprint_path
+                        ):
+                            _LOGGER.warning(
+                                "Security alert: Ignoring blueprint symlink outside root: %s",
+                                full_path,
+                            )
+                            continue
+                    except (ValueError, OSError):
+                        _LOGGER.warning("Skipping blueprint with invalid path: %s", full_path)
+                        continue
+
                     rel_path = os.path.relpath(full_path, blueprint_path).replace("\\", "/")
 
                     if not BlueprintUpdateCoordinator._should_include_blueprint(

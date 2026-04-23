@@ -781,8 +781,6 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
         }
     }
 
-    expected_hash = coordinator._hash_content(raw_remote)
-
     mock_open_obj = mock_open()
     with (
         patch("builtins.open", mock_open_obj),
@@ -791,6 +789,7 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
     ):
         await coordinator.async_install_blueprint(path, raw_remote)
 
+    expected_hash = coordinator._hash_content(raw_remote)
     assert coordinator.data[path]["local_hash"] == expected_hash
     assert coordinator.data[path]["remote_hash"] == expected_hash
     assert not coordinator.data[path]["updatable"]
