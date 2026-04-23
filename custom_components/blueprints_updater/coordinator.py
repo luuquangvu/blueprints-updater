@@ -1908,6 +1908,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         local_hash = info.get("local_hash")
         remote_hash = info.get("remote_hash")
 
+        if remote_hash is None and info.get("updatable"):
+            _LOGGER.error(
+                "Internal error: Attempted to generate diff for updatable "
+                "blueprint with None remote_hash at %s",
+                path,
+            )
+            return None
+
         if (result := self.get_cached_git_diff(path, local_hash, remote_hash)) is not None:
             return result
 
@@ -2213,7 +2221,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             remote_content = self._ensure_source_url(remote_content, source_url)
             remote_hash = self._hash_content(remote_content, already_normalized=True)
             local_hash = info["local_hash"]
-            updatable = remote_hash != local_hash
+            updatable = bool(remote_hash and remote_hash != local_hash)
 
             blueprint_dict = yaml_util.parse_yaml(remote_content)
             last_error = self._validate_blueprint(blueprint_dict, source_url)
@@ -2365,87 +2373,134 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             True if processing for this blueprint should stop.
 
         """
+        if remote_hash is None:
+            _LOGGER.error(
+                "Internal error: Attempted auto-update with None remote_hash for %s", path
+            )
+            return False
+
         rel_path = info.get("rel_path")
         in_use_entities = self._get_entities_using_blueprint(rel_path) if rel_path else []
         guard_failed = any(risk.get("type") == BlueprintRiskType.SYSTEM_ERROR for risk in risks)
         is_breaking = bool(risks) and (guard_failed or bool(in_use_entities))
 
         if is_breaking:
-            _LOGGER.warning(
-                "Auto-update blocked for '%s' due to %d detected breaking changes.",
-                info["name"],
-                len(risks),
+            await self._async_handle_auto_update_blocked(
+                path, info, remote_hash, remote_content, new_etag, risks, guard_failed
             )
-            title_key = (
-                "auto_update_blocked_by_system_error"
-                if guard_failed
-                else "auto_update_blocked_by_breaking_change"
-            )
-            title = await self.async_translate(title_key, name=info["name"])
-            risk_summary = await self._get_risk_summary(risks)
-            message = await self.async_translate(
-                "breaking_risks_report", name=info["name"], risks=risk_summary
-            )
-            await self._async_send_auto_update_notification(
-                title,
-                message,
-                source_unique_id=slugify(rel_path) if rel_path else None,
-            )
-            if self.data and path in self.data:
-                blocking_reason = (
-                    BlueprintBlockingReason.SYSTEM_ERROR
-                    if guard_failed
-                    else BlueprintBlockingReason.BREAKING_CHANGE
-                )
-                self.data[path].update(
-                    {
-                        "updatable": True,
-                        "remote_hash": remote_hash,
-                        "remote_content": remote_content,
-                        "last_error": None,
-                        "invalid_remote_hash": None,
-                        "update_blocking_reason": blocking_reason,
-                        "etag": new_etag,
-                    }
-                )
             return True
 
         try:
             await self.async_install_blueprint(
                 path, remote_content, reload_services=False, backup=True
             )
-            if self.data and path in self.data:
-                self.data[path].update(
-                    {
-                        "remote_hash": remote_hash,
-                        "remote_content": None,
-                        "updatable": False,
-                        "local_hash": remote_hash,
-                        "last_error": None,
-                        "auto_update_last_error": None,
-                        "breaking_risks": [],
-                        "update_blocking_reason": None,
-                        "etag": new_etag,
-                    }
-                )
-            results_to_notify.append(info["name"])
-            updated_domains.add(info.get("domain", "automation"))
+            self._handle_auto_update_success(
+                path, info, remote_hash, new_etag, results_to_notify, updated_domains
+            )
             return True
         except Exception as err:
-            _LOGGER.exception("Auto-update failed for %s", path)
-            if self.data and path in self.data:
-                self.data[path].update(
-                    {
-                        "updatable": True,
-                        "remote_hash": remote_hash,
-                        "remote_content": remote_content,
-                        "invalid_remote_hash": None,
-                        "update_blocking_reason": BlueprintBlockingReason.SYSTEM_ERROR,
-                        "etag": new_etag,
-                        "auto_update_last_error": _sanitize_error_detail(str(err)),
-                    }
-                )
+            self._handle_auto_update_failure(path, remote_hash, remote_content, new_etag, err)
             return False
+
+    async def _async_handle_auto_update_blocked(
+        self,
+        path: str,
+        info: dict[str, Any],
+        remote_hash: str,
+        remote_content: str,
+        new_etag: str | None,
+        risks: list[StructuredRisk],
+        guard_failed: bool,
+    ) -> None:
+        """Handle notification and state when auto-update is blocked."""
+        _LOGGER.warning(
+            "Auto-update blocked for '%s' due to %d detected breaking changes.",
+            info["name"],
+            len(risks),
+        )
+        title_key = (
+            "auto_update_blocked_by_system_error"
+            if guard_failed
+            else "auto_update_blocked_by_breaking_change"
+        )
+        title = await self.async_translate(title_key, name=info["name"])
+        risk_summary = await self._get_risk_summary(risks)
+        message = await self.async_translate(
+            "breaking_risks_report", name=info["name"], risks=risk_summary
+        )
+        rel_path = info.get("rel_path")
+        await self._async_send_auto_update_notification(
+            title,
+            message,
+            source_unique_id=slugify(rel_path) if rel_path else None,
+        )
+        if self.data and path in self.data:
+            blocking_reason = (
+                BlueprintBlockingReason.SYSTEM_ERROR
+                if guard_failed
+                else BlueprintBlockingReason.BREAKING_CHANGE
+            )
+            self.data[path].update(
+                {
+                    "updatable": True,
+                    "remote_hash": remote_hash,
+                    "remote_content": remote_content,
+                    "last_error": None,
+                    "invalid_remote_hash": None,
+                    "update_blocking_reason": blocking_reason,
+                    "etag": new_etag,
+                }
+            )
+
+    def _handle_auto_update_success(
+        self,
+        path: str,
+        info: dict[str, Any],
+        remote_hash: str,
+        new_etag: str | None,
+        results_to_notify: list[str],
+        updated_domains: set[str],
+    ) -> None:
+        """Update state and notifications after successful auto-update."""
+        if self.data and path in self.data:
+            self.data[path].update(
+                {
+                    "remote_hash": remote_hash,
+                    "remote_content": None,
+                    "updatable": False,
+                    "local_hash": remote_hash,
+                    "last_error": None,
+                    "auto_update_last_error": None,
+                    "breaking_risks": [],
+                    "update_blocking_reason": None,
+                    "etag": new_etag,
+                }
+            )
+        results_to_notify.append(info["name"])
+        updated_domains.add(info.get("domain", "automation"))
+
+    def _handle_auto_update_failure(
+        self,
+        path: str,
+        remote_hash: str,
+        remote_content: str,
+        new_etag: str | None,
+        err: Exception,
+    ) -> None:
+        """Log failure and update state after failed auto-update attempt."""
+        _LOGGER.exception("Auto-update failed for %s", path)
+        if self.data and path in self.data:
+            self.data[path].update(
+                {
+                    "updatable": True,
+                    "remote_hash": remote_hash,
+                    "remote_content": remote_content,
+                    "invalid_remote_hash": None,
+                    "update_blocking_reason": BlueprintBlockingReason.SYSTEM_ERROR,
+                    "etag": new_etag,
+                    "auto_update_last_error": _sanitize_error_detail(str(err)),
+                }
+            )
 
     def _update_coordinator_status_data(
         self,
@@ -2483,6 +2538,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "update_blocking_reason": None,
             }
         else:
+            if updatable and remote_hash is None:
+                _LOGGER.error(
+                    "Internal error: Blueprint %s marked as updatable "
+                    "but received None remote_hash",
+                    path,
+                )
             update_data: dict[str, Any] = {
                 "last_error": last_error,
                 "etag": new_etag,
@@ -2788,6 +2849,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         Always uses structured YAML parsing to guarantee data integrity and
         consistency with Home Assistant's core blueprint handling.
+
+        Note: This method intentionally overwrites any existing `source_url`
+        in the blueprint metadata with the provided `source_url` to ensure
+        the integration tracks the authoritative source.
 
         Args:
             content: Raw YAML blueprint content.
