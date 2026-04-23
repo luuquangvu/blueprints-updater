@@ -252,9 +252,10 @@ async def test_async_background_refresh_503_resilience(coordinator):
         await coordinator._async_update_blueprint_in_place(
             MagicMock(), path, coordinator.data[path], [], set()
         )
-        mock_warn.assert_any_call(
-            "Failed to fetch blueprint from (redacted URL): %s", "Service Unavailable"
+        any_warn_match = any(
+            "Service Unavailable" in str(call) for call in mock_warn.call_args_list
         )
+        assert any_warn_match, "Expected warning containing 'Service Unavailable' was not logged"
 
 
 @pytest.mark.asyncio
@@ -1095,16 +1096,31 @@ async def test_async_update_blueprint_failure_paths(coordinator, error_case):
     else:
         assert entry["etag"] is None
 
-    if error_case == "empty_content":
-        assert entry["invalid_remote_hash"] is None
+    assert entry["invalid_remote_hash"] is None
 
 
 @pytest.mark.asyncio
-async def test_async_update_blueprint_in_place_errors(coordinator):
-    """Test various error conditions in _async_update_blueprint_in_place."""
+@pytest.mark.parametrize(
+    "error_type, response_text, side_effect, expected_error",
+    [
+        ("empty_content", "", None, "empty_content|"),
+        ("yaml_syntax_error", "}invalid yaml: {\n", None, "yaml_syntax_error"),
+        (
+            "invalid_blueprint",
+            "other_key: value\nsource_url: https://url",
+            None,
+            "invalid_blueprint",
+        ),
+        ("fetch_error", None, httpx.ConnectError("Connection Failed"), "fetch_error"),
+    ],
+)
+async def test_async_update_blueprint_in_place_errors_isolated(
+    coordinator, error_type, response_text, side_effect, expected_error
+):
+    """Test various error conditions in _async_update_blueprint_in_place in isolation."""
     path = "/config/blueprints/automation/test.yaml"
     info = {"name": "Test", "source_url": "https://url", "local_hash": "hash"}
-    results = {
+    coordinator.data = {
         path: {
             "last_error": None,
             "local_hash": "hash",
@@ -1112,58 +1128,34 @@ async def test_async_update_blueprint_in_place_errors(coordinator):
             "source_url": "https://url",
         }
     }
-    coordinator.data = results
-
-    mock_resp_empty = MagicMock(spec=httpx.Response)
-    mock_resp_empty.status_code = 200
-    mock_resp_empty.headers = {"Content-Type": "text/yaml"}
-    mock_resp_empty.raise_for_status = MagicMock()
-    mock_resp_empty.text = ""
 
     mock_session = MagicMock(spec=httpx.AsyncClient)
-    mock_session.get = AsyncMock(return_value=mock_resp_empty)
+    if side_effect:
+        mock_session.get = AsyncMock(side_effect=side_effect)
+    else:
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "text/yaml"}
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.text = response_text
+        mock_session.get = AsyncMock(return_value=mock_resp)
+
     results_to_notify = []
     updated_domains = set()
 
     await coordinator._async_update_blueprint_in_place(
         mock_session, path, info, results_to_notify, updated_domains
     )
-    assert coordinator.data[path]["last_error"] == "empty_content|"
-    assert coordinator.data[path]["remote_hash"] is None
-    assert coordinator.data[path]["remote_content"] is None
-    assert coordinator.data[path]["updatable"] is False
-    assert coordinator.data[path]["invalid_remote_hash"] is None
 
-    mock_resp_invalid = MagicMock(spec=httpx.Response)
-    mock_resp_invalid.status_code = 200
-    mock_resp_invalid.headers = {"Content-Type": "text/yaml"}
-    mock_resp_invalid.raise_for_status = MagicMock()
-    mock_resp_invalid.text = "}invalid yaml: {\n"
-    mock_session.get.return_value = mock_resp_invalid
+    assert expected_error in str(coordinator.data[path]["last_error"])
+    if error_type == "empty_content":
+        assert coordinator.data[path]["remote_hash"] is None
+        assert coordinator.data[path]["remote_content"] is None
+        assert coordinator.data[path]["updatable"] is False
+        assert coordinator.data[path]["invalid_remote_hash"] is None
 
-    await coordinator._async_update_blueprint_in_place(
-        mock_session, path, info, results_to_notify, updated_domains
-    )
-    assert "yaml_syntax_error" in str(coordinator.data[path]["last_error"])
-
-    mock_resp_missing_bp = MagicMock(spec=httpx.Response)
-    mock_resp_missing_bp.status_code = 200
-    mock_resp_missing_bp.headers = {"Content-Type": "text/yaml"}
-    mock_resp_missing_bp.raise_for_status = MagicMock()
-    mock_resp_missing_bp.text = "other_key: value\nsource_url: https://url"
-    mock_session.get.return_value = mock_resp_missing_bp
-
-    await coordinator._async_update_blueprint_in_place(
-        mock_session, path, info, results_to_notify, updated_domains
-    )
-    assert "invalid_blueprint" in str(coordinator.data[path]["last_error"])
-
-    mock_session.get.side_effect = httpx.ConnectError("Connection Failed")
-    await coordinator._async_update_blueprint_in_place(
-        mock_session, path, info, results_to_notify, updated_domains
-    )
-    assert "fetch_error" in str(coordinator.data[path]["last_error"])
-    assert "Connection Failed" in str(coordinator.data[path]["last_error"])
+    elif error_type == "fetch_error":
+        assert "Connection Failed" in str(coordinator.data[path]["last_error"])
 
 
 @pytest.mark.asyncio

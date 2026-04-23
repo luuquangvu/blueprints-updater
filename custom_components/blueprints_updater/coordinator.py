@@ -2659,6 +2659,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             if not response.is_redirect:
                 response.raise_for_status()
+                if response.url.scheme != "https":
+                    _LOGGER.error(
+                        "Blocking unsafe final URL (non-HTTPS) for (redacted URL): %s",
+                        response.url.scheme,
+                    )
+                    raise httpx.HTTPError(
+                        f"Security violation: Final destination must be HTTPS "
+                        f"(got {response.url.scheme})"
+                    )
                 return response
 
             if redirect_count >= 20:

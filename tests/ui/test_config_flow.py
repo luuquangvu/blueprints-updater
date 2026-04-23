@@ -190,7 +190,6 @@ async def test_options_flow_enhanced_coercion(hass: HomeAssistant):
 @pytest.mark.asyncio
 async def test_config_flow_scanning(hass: HomeAssistant):
     """Test config flow scanning."""
-    # Use absolute paths and realistic metadata
     base_path = os.path.abspath("blueprints")
     full_path = os.path.join(base_path, "automation/test.yaml")
 

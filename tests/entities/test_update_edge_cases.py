@@ -38,7 +38,7 @@ async def test_update_entity_release_notes_risks(mock_coordinator):
         "name": "Test BP",
         "rel_path": path,
         "updatable": True,
-        "source_url": "http://example.com",
+        "source_url": "https://example.com",
         "local_hash": "12345678",
         "remote_hash": "87654321",
         "breaking_risks": [

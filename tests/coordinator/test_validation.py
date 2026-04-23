@@ -172,18 +172,24 @@ async def test_async_validate_blueprint_consumers_malformed_path(coordinator):
     assert risks[0]["args"]["path"] == rel_path
 
 
-def test_is_safe_path(coordinator):
+def test_is_safe_path(hass, coordinator):
     """Test _is_safe_path logic."""
     coordinator._is_safe_path = BlueprintUpdateCoordinator._is_safe_path.__get__(coordinator)
+
+    base_config = "/home/hass/config"
+    blueprints_dir = os.path.join(base_config, "blueprints")
+
+    hass.config.path.side_effect = lambda *args: os.path.join(base_config, *args)
+
     with patch(
         "custom_components.blueprints_updater.coordinator.os.path.realpath",
         side_effect=os.path.normpath,
     ):
-        assert coordinator._is_safe_path("/config/blueprints/automation/test.yaml")
-        assert coordinator._is_safe_path("/config/blueprints/script/another.yaml")
-        assert not coordinator._is_safe_path("/config/secrets.yaml")
+        assert coordinator._is_safe_path(os.path.join(blueprints_dir, "automation/test.yaml"))
+        assert coordinator._is_safe_path(os.path.join(blueprints_dir, "script/another.yaml"))
+        assert not coordinator._is_safe_path(os.path.join(base_config, "secrets.yaml"))
         assert not coordinator._is_safe_path("/etc/passwd")
-        assert not coordinator._is_safe_path("/config/blueprints/../secrets.yaml")
+        assert not coordinator._is_safe_path(os.path.join(blueprints_dir, "../secrets.yaml"))
 
 
 @pytest.mark.asyncio
@@ -200,6 +206,8 @@ async def test_is_safe_url(coordinator):
         assert await coord._is_safe_url("https://community.home-assistant.io/t/topic/123")
         assert await coord._is_safe_url("https://gitlab.com/user/repo/-/raw/main/bp.yaml")
         assert await coord._is_safe_url("https://bitbucket.org/user/repo/raw/main/bp.yaml")
+
+        assert await coord._is_safe_url("http://github.com/somepath")
 
     with patch("socket.getaddrinfo", side_effect=socket.gaierror):
         assert not await coord._is_safe_url("http://localhost:8123")

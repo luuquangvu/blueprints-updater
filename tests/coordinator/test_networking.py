@@ -179,3 +179,37 @@ async def test_execute_with_redirect_guard_security(coordinator):
         await coordinator._execute_with_redirect_guard(
             mock_session, "https://example.com/start", {}
         )
+
+
+@pytest.mark.asyncio
+async def test_execute_with_redirect_guard_final_https(coordinator):
+    """Test that the redirect guard enforces HTTPS for the final destination."""
+    mock_session = MagicMock(spec=httpx.AsyncClient)
+
+    mock_resp_final_safe = MagicMock()
+    mock_resp_final_safe.status_code = 200
+    mock_resp_final_safe.is_redirect = False
+    mock_resp_final_safe.url = httpx.URL("https://safe.com/bp.yaml")
+    mock_resp_final_safe.raise_for_status = MagicMock()
+
+    mock_session.get = AsyncMock(return_value=mock_resp_final_safe)
+
+    with patch.object(coordinator, "_is_safe_url", return_value=True):
+        resp = await coordinator._execute_with_redirect_guard(
+            mock_session, "http://start.com/bp.yaml", {}
+        )
+        assert str(resp.url) == "https://safe.com/bp.yaml"
+
+    mock_resp_final_unsafe = MagicMock()
+    mock_resp_final_unsafe.status_code = 200
+    mock_resp_final_unsafe.is_redirect = False
+    mock_resp_final_unsafe.url = httpx.URL("http://unsafe.com/bp.yaml")
+    mock_resp_final_unsafe.raise_for_status = MagicMock()
+
+    mock_session.get = AsyncMock(return_value=mock_resp_final_unsafe)
+
+    with (
+        patch.object(coordinator, "_is_safe_url", return_value=True),
+        pytest.raises(httpx.HTTPError, match="Final destination must be HTTPS"),
+    ):
+        await coordinator._execute_with_redirect_guard(mock_session, "http://start.com/bp.yaml", {})

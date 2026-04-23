@@ -97,7 +97,19 @@ async def test_auto_update_proceeds_when_risks_and_no_consumers(
 
     async def mock_install(path, *args, **kwargs):
         if coordinator.data and path in coordinator.data:
-            coordinator.data[path].update({"updatable": False})
+            coordinator.data[path].update(
+                {
+                    "updatable": False,
+                    "local_hash": "new_hash",
+                    "remote_hash": "new_hash",
+                    "last_error": None,
+                    "auto_update_last_error": None,
+                    "remote_content": None,
+                    "invalid_remote_hash": None,
+                    "breaking_risks": [],
+                    "update_blocking_reason": None,
+                }
+            )
 
     with (
         patch.object(coordinator, "_get_entities_using_blueprint", return_value=[]),
