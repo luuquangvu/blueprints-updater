@@ -5,7 +5,7 @@ import contextlib
 import os
 from types import MappingProxyType
 from typing import Any, cast
-from unittest.mock import ANY, AsyncMock, MagicMock, call, mock_open, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
 from urllib.parse import urlparse
 
 import httpx
@@ -380,7 +380,7 @@ async def test_async_update_blueprint_unsafe_url_invalidates_cache(coordinator):
     assert coordinator.data[path]["etag"] is None
     assert coordinator.data[path]["remote_hash"] is None
     assert coordinator.data[path]["updatable"] is False
-    assert "unsafe_url" in coordinator.data[path]["last_error"]
+    assert coordinator.data[path]["last_error"].startswith("unsafe_url|")
 
 
 @pytest.mark.asyncio
@@ -661,8 +661,6 @@ async def test_async_install_blueprint(hass, coordinator):
 
     assert hass.services.async_call.call_count == 1
     hass.services.async_call.assert_any_call("automation", "reload")
-
-    assert call("template", "reload") not in hass.services.async_call.call_args_list
 
 
 @pytest.mark.asyncio
