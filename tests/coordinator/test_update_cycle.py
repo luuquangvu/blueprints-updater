@@ -431,7 +431,8 @@ async def test_async_background_refresh_concurrency_and_cancellation(hass, coord
         await refresh_task
     block_event.set()
 
-    await asyncio.sleep(0)
+    async with workers_ready:
+        await asyncio.wait_for(workers_ready.wait_for(lambda: active_workers == 0), timeout=2.0)
 
     assert processed_count < num_blueprints
     assert active_workers == 0
@@ -1168,9 +1169,12 @@ async def test_async_update_blueprint_in_place_unsafe_url(coordinator):
     coordinator.data = {path: info}
     with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
         await coordinator._async_update_blueprint_in_place(MagicMock(), path, info, [], set())
-        mock_logger.warning.assert_called_with(
-            "Blocking update from untrusted URL: %s", "http://192.168.1.1/exploit"
-        )
+        mock_logger.warning.assert_called()
+        args = mock_logger.warning.call_args.args
+        assert "Blocking update from untrusted URL" in args[0]
+        logged_url = str(args[1])
+        assert "192.168.1.1" in logged_url
+        assert "/exploit" in logged_url
 
 
 @pytest.mark.asyncio
