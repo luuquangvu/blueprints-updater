@@ -600,7 +600,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> dict[str, Any]:
         """Handle detected change in blueprint source URL.
 
-        If the URL changed, invalidate all remote-derived metadata to prevent stale state reuse.
+        If the URL changed, invalidate all remote-derived metadata and trigger
+        an immediate save to prevent stale state reuse after a restart.
 
         Args:
             path: Local path of the blueprint.
@@ -623,6 +624,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             self._persisted_etags.pop(path, None)
             self._persisted_hashes.pop(path, None)
+
+            self.hass.async_create_background_task(
+                self._async_save_metadata(force=True), name=f"{DOMAIN}_url_change_save"
+            )
+
             return {
                 **prev,
                 "remote_hash": None,
@@ -1036,6 +1042,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         remote_content: str,
         reload_services: bool = True,
         backup: bool = True,
+        remote_hash: str | None = None,
+        etag: str | None = None,
     ) -> None:
         """Install a blueprint to the local filesystem.
 
@@ -1044,6 +1052,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             remote_content: Raw YAML content to write.
             reload_services: Whether to reload HA services after writing.
             backup: Whether to create backup files of the old version.
+            remote_hash: Optional pre-computed hash of the remote content.
+            etag: Optional ETag associated with the remote content.
 
         """
         real_path = os.path.realpath(path)
@@ -1098,21 +1108,22 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 await self.async_reload_services([domain])
 
             if self.data and path in self.data:
-                new_hash = self._hash_content(remote_content)
+                final_hash = remote_hash or self._hash_content(remote_content)
 
                 self.data[path].update(
                     {
                         "updatable": False,
-                        "local_hash": new_hash,
-                        "remote_hash": new_hash,
+                        "local_hash": final_hash,
+                        "remote_hash": final_hash,
                         "last_error": None,
+                        "auto_update_last_error": None,
                         "remote_content": None,
                         "invalid_remote_hash": None,
                         "breaking_risks": [],
                         "update_blocking_reason": None,
+                        "etag": etag,
                     }
                 )
-
                 self.async_set_updated_data(self.data)
                 await self._async_save_metadata(force=True)
 
@@ -2392,14 +2403,30 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         try:
             await self.async_install_blueprint(
-                path, remote_content, reload_services=False, backup=True
+                path,
+                remote_content,
+                reload_services=False,
+                backup=True,
+                remote_hash=remote_hash,
+                etag=new_etag,
             )
-            self._handle_auto_update_success(
-                path, info, remote_hash, new_etag, results_to_notify, updated_domains
-            )
+            results_to_notify.append(info["name"])
+            updated_domains.add(info.get("domain", "automation"))
             return True
         except Exception as err:
-            self._handle_auto_update_failure(path, remote_hash, remote_content, new_etag, err)
+            _LOGGER.exception("Auto-update failed for %s", path)
+            if self.data and path in self.data:
+                self.data[path].update(
+                    {
+                        "updatable": True,
+                        "remote_hash": remote_hash,
+                        "remote_content": remote_content,
+                        "invalid_remote_hash": None,
+                        "update_blocking_reason": BlueprintBlockingReason.SYSTEM_ERROR,
+                        "etag": new_etag,
+                        "auto_update_last_error": _sanitize_error_detail(str(err)),
+                    }
+                )
             return False
 
     async def _async_handle_auto_update_blocked(
@@ -2449,56 +2476,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     "invalid_remote_hash": None,
                     "update_blocking_reason": blocking_reason,
                     "etag": new_etag,
-                }
-            )
-
-    def _handle_auto_update_success(
-        self,
-        path: str,
-        info: dict[str, Any],
-        remote_hash: str,
-        new_etag: str | None,
-        results_to_notify: list[str],
-        updated_domains: set[str],
-    ) -> None:
-        """Update state and notifications after successful auto-update."""
-        if self.data and path in self.data:
-            self.data[path].update(
-                {
-                    "remote_hash": remote_hash,
-                    "remote_content": None,
-                    "updatable": False,
-                    "local_hash": remote_hash,
-                    "last_error": None,
-                    "auto_update_last_error": None,
-                    "breaking_risks": [],
-                    "update_blocking_reason": None,
-                    "etag": new_etag,
-                }
-            )
-        results_to_notify.append(info["name"])
-        updated_domains.add(info.get("domain", "automation"))
-
-    def _handle_auto_update_failure(
-        self,
-        path: str,
-        remote_hash: str,
-        remote_content: str,
-        new_etag: str | None,
-        err: Exception,
-    ) -> None:
-        """Log failure and update state after failed auto-update attempt."""
-        _LOGGER.exception("Auto-update failed for %s", path)
-        if self.data and path in self.data:
-            self.data[path].update(
-                {
-                    "updatable": True,
-                    "remote_hash": remote_hash,
-                    "remote_content": remote_content,
-                    "invalid_remote_hash": None,
-                    "update_blocking_reason": BlueprintBlockingReason.SYSTEM_ERROR,
-                    "etag": new_etag,
-                    "auto_update_last_error": _sanitize_error_detail(str(err)),
                 }
             )
 

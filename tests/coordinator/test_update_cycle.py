@@ -293,7 +293,12 @@ async def test_async_update_data_auto_update(mock_translate, coordinator):
         await coordinator._async_background_refresh(coordinator.data)
 
     coordinator.async_install_blueprint.assert_awaited_once_with(
-        path, content, reload_services=False, backup=True
+        path,
+        content,
+        reload_services=False,
+        backup=True,
+        remote_hash=ANY,
+        etag="new_etag",
     )
 
 
