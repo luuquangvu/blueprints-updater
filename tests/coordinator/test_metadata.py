@@ -5,7 +5,9 @@ from unittest.mock import mock_open, patch
 
 import pytest
 import yaml
+from homeassistant.util import yaml as yaml_util
 
+import custom_components.blueprints_updater.coordinator as coord_mod
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
     GitDiffResult,
@@ -46,7 +48,6 @@ def test_ensure_source_url(coordinator):
 
     new_content = coordinator._ensure_source_url("blueprint:\n  name: Test", source_url)
     assert f"source_url: {source_url}" in new_content
-    import yaml
 
     parsed = yaml.safe_load(new_content)
     assert parsed["blueprint"]["source_url"] == source_url
@@ -108,7 +109,10 @@ def test_ensure_source_url(coordinator):
     )
     result_multi = coordinator._ensure_source_url(content_multi, source_url)
     assert f"source_url: {source_url}" in result_multi
-    assert "source_url:" in result_multi.split("description:")[0]
+    parsed_multi = yaml_util.parse_yaml(result_multi)
+    assert isinstance(parsed_multi, dict)
+    assert isinstance(parsed_multi["blueprint"], dict)
+    assert parsed_multi["blueprint"]["source_url"] == source_url
 
     content_none = "not_a_blueprint: true"
     expected_none = coordinator._normalize_content(content_none)
@@ -153,8 +157,6 @@ def test_ensure_source_url_yaml_dump_failure_falls_back_to_normalize_content(
     coordinator, monkeypatch, caplog
 ):
     """If yaml_util.dump raises, we should log and fall back to _normalize_content(content)."""
-    import custom_components.blueprints_updater.coordinator as coord_mod
-
     original_content = "blueprint:\n  name: Test"
     sentinel_result = "normalized-after-dump-failure"
 
@@ -298,8 +300,6 @@ def test_ensure_source_url_structured_modification(coordinator):
 
     result = coordinator._ensure_source_url(content, source_url)
     assert "source_url: https://example.com/bp.yaml" in result
-
-    from homeassistant.util import yaml as yaml_util
 
     parsed = yaml_util.parse_yaml(result)
     assert isinstance(parsed, dict)

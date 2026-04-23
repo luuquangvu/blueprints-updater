@@ -193,7 +193,7 @@ class BlueprintCoordinatorInternal(Protocol):
         ...
 
     @staticmethod
-    def _validate_blueprint(blueprint_dict: dict[str, Any], source_url: str) -> str | None:
+    def _validate_blueprint(data: Any, source_url: str) -> str | None:
         """Validate blueprint structure and return error tag if invalid."""
         ...
 
