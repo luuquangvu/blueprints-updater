@@ -94,10 +94,10 @@ def async_update_entities(
     entity_registry = er.async_get(hass)
 
     entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
-    known_ids: set[str] = set()
-    for info in coordinator.data.values():
-        rel_path = info["rel_path"]
-        known_ids.add(BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, rel_path))
+    known_ids = {
+        BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, info["rel_path"])
+        for info in coordinator.data.values()
+    }
 
     for entity_entry in entries:
         if entity_entry.domain != "update":

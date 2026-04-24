@@ -157,7 +157,7 @@ def get_config_bool(config: Any, key: str, default: bool) -> bool:
     if isinstance(val, bool):
         return val
     if isinstance(val, str):
-        return val.lower() in ("true", "yes", "on", "1")
+        return val.strip().lower() in ("true", "yes", "on", "1")
     return bool(val)
 
 
