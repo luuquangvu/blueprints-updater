@@ -7,7 +7,7 @@ import random
 import textwrap
 from collections.abc import Callable, Coroutine
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 import httpx
 
@@ -116,6 +116,81 @@ def retry_async(
     return decorator
 
 
+def get_config_value[T](config: Any, key: str, default: T) -> T:
+    """Get a value from config entry options strictly (no data fallback).
+
+    Args:
+        config: ConfigEntry, dict or None.
+        key: Configuration key.
+        default: Default value if not found.
+
+    Returns:
+        The configuration value.
+
+    """
+    if config is None:
+        return default
+
+    if hasattr(config, "options"):
+        val = config.options.get(key, default)
+    elif isinstance(config, dict):
+        val = config.get(key, default)
+    else:
+        val = default
+
+    return cast(T, val)
+
+
+def get_config_bool(config: Any, key: str, default: bool) -> bool:
+    """Get a boolean value from config entry options strictly (no data fallback).
+
+    Args:
+        config: ConfigEntry, dict or None.
+        key: Configuration key.
+        default: Default value if not found.
+
+    Returns:
+        The boolean value.
+
+    """
+    if config is None:
+        return default
+
+    if hasattr(config, "options"):
+        val = config.options.get(key, default)
+    elif isinstance(config, dict):
+        val = config.get(key, default)
+    else:
+        val = default
+
+    return bool(val)
+
+
+def get_config_str(config: Any, key: str, default: str) -> str:
+    """Get a string value from config entry options strictly (no data fallback).
+
+    Args:
+        config: ConfigEntry, dict or None.
+        key: Configuration key.
+        default: Default value if not found.
+
+    Returns:
+        The string value.
+
+    """
+    if config is None:
+        return default
+
+    if hasattr(config, "options"):
+        val = config.options.get(key, default)
+    elif isinstance(config, dict):
+        val = config.get(key, default)
+    else:
+        val = default
+
+    return str(val)
+
+
 def get_config_int(
     config: Any,
     key: str,
@@ -123,7 +198,7 @@ def get_config_int(
     min_val: int | None = None,
     max_val: int | None = None,
 ) -> int:
-    """Get an integer value from config entry options or data with clamping.
+    """Get an integer value from config entry options strictly (no data fallback).
 
     Args:
         config: ConfigEntry, dict or None.
@@ -140,7 +215,7 @@ def get_config_int(
         return default
 
     if hasattr(config, "options"):
-        val = config.options.get(key, config.data.get(key, default))
+        val = config.options.get(key, default)
     elif isinstance(config, dict):
         val = config.get(key, default)
     else:

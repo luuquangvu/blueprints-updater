@@ -60,6 +60,21 @@ def test_config_helpers_no_entry(hass):
     assert coordinator.is_cdn_enabled() is DEFAULT_USE_CDN
 
 
+def test_is_auto_update_enabled_ignores_legacy_data(hass):
+    """Test is_auto_update_enabled ignores values in config_entry.data.
+
+    This verifies the breaking change in v2.0.0 where legacy data fallback
+    was removed.
+    """
+    entry = MagicMock()
+    # Setting data to opposite of default to ensure we are testing the override
+    entry.data = {CONF_AUTO_UPDATE: not DEFAULT_AUTO_UPDATE}
+    entry.options = {}
+
+    coordinator = create_mock_coordinator(hass, entry)
+    assert coordinator.is_auto_update_enabled() is DEFAULT_AUTO_UPDATE
+
+
 def create_mock_coordinator(
     hass, entry: Any | None, interval: timedelta = timedelta(hours=24)
 ) -> BlueprintUpdateCoordinator:
@@ -103,19 +118,19 @@ def test_get_config_schema_entry_precedence(hass):
     assert get_schema_default(schema, CONF_USE_CDN) is True
 
 
-def test_get_config_schema_fallback_to_data(hass):
-    """Test that _get_config_schema falls back to data when options are missing."""
+def test_get_config_schema_ignores_legacy_data(hass):
+    """Test that _get_config_schema ignores data even when options are missing."""
     entry = MagicMock()
     entry.data = {
-        CONF_AUTO_UPDATE: False,
-        CONF_USE_CDN: False,
+        CONF_AUTO_UPDATE: not DEFAULT_AUTO_UPDATE,
+        CONF_USE_CDN: not DEFAULT_USE_CDN,
     }
     entry.options = {}
 
     schema = _get_config_schema(entry, [])
 
-    assert get_schema_default(schema, CONF_AUTO_UPDATE) is False
-    assert get_schema_default(schema, CONF_USE_CDN) is False
+    assert get_schema_default(schema, CONF_AUTO_UPDATE) is DEFAULT_AUTO_UPDATE
+    assert get_schema_default(schema, CONF_USE_CDN) is DEFAULT_USE_CDN
 
 
 def test_get_config_schema_initial_defaults(hass):

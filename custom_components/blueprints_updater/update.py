@@ -106,7 +106,7 @@ def async_update_entities(
         if entity_entry.unique_id in known_ids:
             continue
 
-        _LOGGER.debug("Removing orphaned registry entry for entity: %s", entity_entry.entity_id)
+        _LOGGER.info("Removing orphaned registry entry for entity: %s", entity_entry.entity_id)
         entity_registry.async_remove(entity_entry.entity_id)
         hass.states.async_remove(entity_entry.entity_id)
 

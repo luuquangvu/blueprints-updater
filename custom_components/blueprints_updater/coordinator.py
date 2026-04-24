@@ -72,6 +72,7 @@ from .const import (
 )
 from .providers import registry
 from .utils import (
+    get_config_bool,
     get_max_backups,
     redact_url,
     retry_async,
@@ -1528,7 +1529,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A list of unique structured risks.
 
         """
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[BlueprintRiskType, str]] = set()
         unique_risks: list[StructuredRisk] = []
         for risk in risks:
             if not isinstance(risk, dict) or "type" not in risk or "args" not in risk:
@@ -1950,10 +1951,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             Boolean indicating auto-update preference.
 
         """
-        if not self.config_entry:
-            return DEFAULT_AUTO_UPDATE
-
-        return self.config_entry.options.get(CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
+        return get_config_bool(self.config_entry, CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
 
     def is_cdn_enabled(self) -> bool:
         """Return whether jsDelivr CDN usage is enabled.
@@ -1962,10 +1960,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             Boolean indicating CDN preference.
 
         """
-        if not self.config_entry:
-            return DEFAULT_USE_CDN
-
-        return self.config_entry.options.get(CONF_USE_CDN, DEFAULT_USE_CDN)
+        return get_config_bool(self.config_entry, CONF_USE_CDN, DEFAULT_USE_CDN)
 
     def _update_error_state(
         self, path: str, error_type: str, detail: Any, clear_etag: bool = False
