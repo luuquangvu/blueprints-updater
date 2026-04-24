@@ -1,5 +1,6 @@
 """Blueprints Updater integration for Home Assistant."""
 
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -20,13 +21,14 @@ from homeassistant.helpers.selector import (
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
+from .const import DOMAIN, IntegrationService
 from .coordinator import BlueprintUpdateCoordinator
 from .utils import get_max_backups, get_update_interval
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.UPDATE]
+
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -101,8 +103,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.async_on_unload(entry.add_update_listener(async_update_options))
         blueprint_coordinator.setup_complete = True
         blueprint_coordinator.async_set_updated_data(blueprint_coordinator.data)
-    except Exception:
-        _LOGGER.debug("Setup failed for entry %s, performing rollback", entry.entry_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception as err:
+        _LOGGER.debug("Setup failed for entry %s, performing rollback: %s", entry.entry_id, err)
         coordinators.pop(entry.entry_id, None)
         if platforms_forwarded:
             await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
@@ -328,36 +332,35 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     registered_services = []
     try:
-        if not hass.services.has_service(DOMAIN, "reload"):
-            async_register_admin_service(hass, DOMAIN, "reload", async_reload_action_handler)
-            registered_services.append("reload")
+        services_to_register = {
+            IntegrationService.RELOAD: {
+                "handler": async_reload_action_handler,
+            },
+            IntegrationService.RESTORE_BLUEPRINT: {
+                "handler": async_restore_blueprint_handler,
+                "schema": restore_schema,
+                "supports_response": SupportsResponse.ONLY,
+            },
+            IntegrationService.UPDATE_ALL: {
+                "handler": async_update_all_handler,
+                "schema": vol.Schema({vol.Optional("backup", default=True): cv.boolean}),
+            },
+        }
 
-        if not hass.services.has_service(DOMAIN, "restore_blueprint"):
-            async_register_admin_service(
-                hass,
-                DOMAIN,
-                "restore_blueprint",
-                async_restore_blueprint_handler,
-                schema=restore_schema,
-                supports_response=SupportsResponse.ONLY,
-            )
-            registered_services.append("restore_blueprint")
-
-        if not hass.services.has_service(DOMAIN, "update_all"):
-            async_register_admin_service(
-                hass,
-                DOMAIN,
-                "update_all",
-                async_update_all_handler,
-                schema=vol.Schema(
-                    {
-                        vol.Optional("backup", default=True): cv.boolean,
-                    }
-                ),
-            )
-            registered_services.append("update_all")
-    except Exception:
-        _LOGGER.debug("Service registration failed, rolling back: %s", registered_services)
+        for service, config in services_to_register.items():
+            if not hass.services.has_service(DOMAIN, service):
+                kwargs = dict(config)
+                handler = kwargs.pop("handler")
+                async_register_admin_service(hass, DOMAIN, service, handler, **kwargs)
+                registered_services.append(service)
+    except asyncio.CancelledError:
+        raise
+    except Exception as err:
+        _LOGGER.debug(
+            "Service registration failed, rolling back: %s (Error: %s)",
+            registered_services,
+            err,
+        )
         for service in registered_services:
             hass.services.async_remove(DOMAIN, service)
         raise
@@ -406,7 +409,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not coordinators:
             domain_data.pop("translation_cache", None)
 
-            for service in ["reload", "restore_blueprint", "update_all"]:
+            for service in IntegrationService:
                 if hass.services.has_service(DOMAIN, service):
                     hass.services.async_remove(DOMAIN, service)
                 else:

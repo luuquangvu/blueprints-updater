@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -330,11 +330,13 @@ async def test_unload_entry(hass: HomeAssistant):
             return_value=coordinator_mock,
         ),
         patch.object(hass.services, "has_service", return_value=False),
-        patch.object(hass.services, "async_remove") as mock_remove,
     ):
         await async_setup_entry(hass, entry)
 
-        cast(MagicMock, hass.services.has_service).return_value = True
+    with (
+        patch.object(hass.services, "has_service", return_value=True),
+        patch.object(hass.services, "async_remove") as mock_remove,
+    ):
         await async_unload_entry(hass, entry)
 
         assert entry.entry_id not in hass.data[DOMAIN].get("coordinators", {})
@@ -347,7 +349,13 @@ async def test_unload_entry(hass: HomeAssistant):
         patch("custom_components.blueprints_updater.__init__._LOGGER") as mock_logger,
     ):
         await async_unload_entry(hass, entry)
-        assert mock_logger.debug.called
+        mock_logger.debug.assert_any_call(
+            "Expected %s.%s service to exist during unload, but it was "
+            "not found. This may indicate unexpected registration or "
+            "unload ordering.",
+            DOMAIN,
+            "reload",
+        )
 
 
 @pytest.mark.asyncio
