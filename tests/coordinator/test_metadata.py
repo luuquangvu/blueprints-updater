@@ -46,23 +46,30 @@ def test_ensure_source_url(coordinator):
     """Test ensuring source_url is present."""
     source_url = "https://github.com/user/repo/blob/main/test.yaml"
 
-    new_content = coordinator._ensure_source_url("blueprint:\n  name: Test", source_url)
+    new_content = coordinator._ensure_source_url(
+        "blueprint:\n  name: Test\n  domain: automation", source_url
+    )
     assert f"source_url: {source_url}" in new_content
 
     parsed = yaml.safe_load(new_content)
     assert parsed["blueprint"]["source_url"] == source_url
     assert parsed["blueprint"]["name"] == "Test"
+    assert parsed["blueprint"]["input"] == {}
 
-    content_with_url = f"blueprint:\n  name: Test\n  source_url: {source_url}"
+    content_with_url = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {source_url}"
     result = coordinator._ensure_source_url(content_with_url, source_url)
     assert f"source_url: {source_url}" in result
 
-    content_with_quotes = f"blueprint:\n  name: Test\n  source_url: '{source_url}'"
+    content_with_quotes = (
+        f"blueprint:\n  name: Test\n  domain: automation\n  source_url: '{source_url}'"
+    )
     result_quotes = coordinator._ensure_source_url(content_with_quotes, source_url)
     assert source_url in result_quotes
 
     different_url = "https://github.com/user/new-repo/blob/main/test.yaml"
-    content_different = f"blueprint:\n  name: Test\n  source_url: {different_url}"
+    content_different = (
+        f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {different_url}"
+    )
     result = coordinator._ensure_source_url(content_different, source_url)
     assert f"source_url: {source_url}" in result
     assert different_url not in result
@@ -77,7 +84,7 @@ def test_ensure_source_url(coordinator):
     assert f"source_url: {source_url}" in result_outside
     parsed_outside = yaml.safe_load(result_outside)
     assert parsed_outside["blueprint"]["source_url"] == source_url
-    assert parsed_outside["action"][0]["data"]["source_url"] == "https://api.example.com"
+    assert parsed_outside["actions"][0]["data"]["source_url"] == "https://api.example.com"
 
     content_nested_input = (
         "blueprint:\n  name: Test\n  domain: automation\n"
@@ -88,11 +95,11 @@ def test_ensure_source_url(coordinator):
     assert f"source_url: {source_url}" in result_nested
     assert result_nested.count("source_url") == 2
 
-    content_with_comment = "blueprint: # comment\n  name: Test"
+    content_with_comment = "blueprint: # comment\n  name: Test\n  domain: automation"
     result_comment = coordinator._ensure_source_url(content_with_comment, source_url)
     assert f"source_url: {source_url}" in result_comment
 
-    content_flow = "blueprint: { name: Test }"
+    content_flow = "blueprint: { name: Test, domain: automation }"
     result_flow = coordinator._ensure_source_url(content_flow, source_url)
     assert f"source_url: {source_url}" in result_flow
 
@@ -105,6 +112,7 @@ def test_ensure_source_url(coordinator):
         "# Some info: blueprint:\n"
         "blueprint:\n"
         "  name: Test\n"
+        "  domain: automation\n"
         "description: 'This is another blueprint: key in string'"
     )
     result_multi = coordinator._ensure_source_url(content_multi, source_url)
@@ -113,6 +121,7 @@ def test_ensure_source_url(coordinator):
     assert isinstance(parsed_multi, dict)
     assert isinstance(parsed_multi["blueprint"], dict)
     assert parsed_multi["blueprint"]["source_url"] == source_url
+    assert parsed_multi["blueprint"]["input"] == {}
 
     content_none = "not_a_blueprint: true"
     expected_none = coordinator._normalize_content(content_none)
@@ -462,3 +471,17 @@ def test_set_cached_git_diff(coordinator):
         "diff": "d1",
         "semantic_sync": False,
     }
+
+
+def test_ensure_source_url_script(coordinator):
+    """Test ensuring source_url for a script blueprint."""
+    source_url = "https://github.com/user/repo/blob/main/script.yaml"
+    content = "blueprint:\n  name: Test Script\n  domain: script"
+
+    new_content = coordinator._ensure_source_url(content, source_url)
+    assert f"source_url: {source_url}" in new_content
+
+    parsed = yaml.safe_load(new_content)
+    assert parsed["blueprint"]["source_url"] == source_url
+    assert parsed["blueprint"]["name"] == "Test Script"
+    assert parsed["blueprint"]["domain"] == "script"

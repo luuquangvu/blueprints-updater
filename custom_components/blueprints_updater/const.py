@@ -58,6 +58,14 @@ SPECIAL_USE_TLDS = {
 }
 
 
+class IntegrationService(StrEnum):
+    """Services provided by the integration."""
+
+    RELOAD = "reload"
+    RESTORE_BLUEPRINT = "restore_blueprint"
+    UPDATE_ALL = "update_all"
+
+
 class BlueprintRiskType(StrEnum):
     """Risk types for breaking change detection."""
 

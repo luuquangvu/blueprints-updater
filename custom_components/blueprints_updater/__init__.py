@@ -1,5 +1,6 @@
 """Blueprints Updater integration for Home Assistant."""
 
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -20,13 +21,14 @@ from homeassistant.helpers.selector import (
 from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
+from .const import DOMAIN, IntegrationService
 from .coordinator import BlueprintUpdateCoordinator
 from .utils import get_max_backups, get_update_interval
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.UPDATE]
+
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -58,7 +60,6 @@ async def async_setup(hass: HomeAssistant, _: ConfigType) -> bool:
 
     hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _clear_cache)
 
-    _async_register_services(hass)
     return True
 
 
@@ -91,15 +92,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await blueprint_coordinator.async_setup()
     await blueprint_coordinator.async_config_entry_first_refresh()
 
-    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})[entry.entry_id] = (
-        blueprint_coordinator
-    )
+    coordinators = hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})
+    coordinators[entry.entry_id] = blueprint_coordinator
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    entry.async_on_unload(entry.add_update_listener(async_update_options))
-    blueprint_coordinator.setup_complete = True
-    blueprint_coordinator.async_set_updated_data(blueprint_coordinator.data)
+    platforms_forwarded = False
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        platforms_forwarded = True
+        _async_register_services(hass)
+        entry.async_on_unload(entry.add_update_listener(async_update_options))
+        blueprint_coordinator.setup_complete = True
+        blueprint_coordinator.async_set_updated_data(blueprint_coordinator.data)
+    except asyncio.CancelledError:
+        raise
+    except Exception as err:
+        _LOGGER.debug("Setup failed for entry %s, performing rollback: %s", entry.entry_id, err)
+        coordinators.pop(entry.entry_id, None)
+        if platforms_forwarded:
+            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        raise
 
     return True
 
@@ -171,8 +182,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
         """Handle the reload action call."""
         for active_coordinator in _get_coordinators():
             await active_coordinator.async_request_refresh()
-
-    async_register_admin_service(hass, DOMAIN, "reload", async_reload_action_handler)
 
     async def async_restore_blueprint_handler(call: ServiceCall) -> dict:
         """Handle the restore blueprint action."""
@@ -255,15 +264,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
         }
     )
 
-    async_register_admin_service(
-        hass,
-        DOMAIN,
-        "restore_blueprint",
-        async_restore_blueprint_handler,
-        schema=restore_schema,
-        supports_response=SupportsResponse.ONLY,
-    )
-
     async def async_update_all_handler(call: ServiceCall) -> None:
         """Handle updating all available blueprints."""
         coordinators = _get_coordinators()
@@ -330,17 +330,40 @@ def _async_register_services(hass: HomeAssistant) -> None:
                     entry_id,
                 )
 
-    async_register_admin_service(
-        hass,
-        DOMAIN,
-        "update_all",
-        async_update_all_handler,
-        schema=vol.Schema(
-            {
-                vol.Optional("backup", default=True): cv.boolean,
-            }
-        ),
-    )
+    registered_services = []
+    try:
+        services_to_register = {
+            IntegrationService.RELOAD: {
+                "handler": async_reload_action_handler,
+            },
+            IntegrationService.RESTORE_BLUEPRINT: {
+                "handler": async_restore_blueprint_handler,
+                "schema": restore_schema,
+                "supports_response": SupportsResponse.ONLY,
+            },
+            IntegrationService.UPDATE_ALL: {
+                "handler": async_update_all_handler,
+                "schema": vol.Schema({vol.Optional("backup", default=True): cv.boolean}),
+            },
+        }
+
+        for service, config in services_to_register.items():
+            if not hass.services.has_service(DOMAIN, service):
+                kwargs = dict(config)
+                handler = kwargs.pop("handler")
+                async_register_admin_service(hass, DOMAIN, service, handler, **kwargs)
+                registered_services.append(service)
+    except asyncio.CancelledError:
+        raise
+    except Exception as err:
+        _LOGGER.debug(
+            "Service registration failed, rolling back: %s (Error: %s)",
+            registered_services,
+            err,
+        )
+        for service in registered_services:
+            hass.services.async_remove(DOMAIN, service)
+        raise
 
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -367,25 +390,35 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     Args:
         hass: HomeAssistant instance.
-        entry: Configuration entry to unload.
+        entry: Configuration entry.
 
     Returns:
         True if the entry was unloaded successfully.
 
     """
-    blueprint_coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN]["coordinators"][
-        entry.entry_id
-    ]
-    await blueprint_coordinator.async_shutdown()
+    if domain_data := hass.data.get(DOMAIN):
+        coordinators = domain_data.get("coordinators", {})
+        if blueprint_coordinator := coordinators.get(entry.entry_id):
+            await blueprint_coordinator.async_shutdown()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        hass.data[DOMAIN].get("coordinators", {}).pop(entry.entry_id, None)
+    if unload_ok and (domain_data := hass.data.get(DOMAIN)):
+        coordinators = domain_data.get("coordinators", {})
+        coordinators.pop(entry.entry_id, None)
 
-        if not hass.data[DOMAIN].get("coordinators"):
-            hass.data[DOMAIN].pop("translation_cache", None)
+        if not coordinators:
+            domain_data.pop("translation_cache", None)
 
-        if not any(hass.data[DOMAIN].values()):
-            for service in ["reload", "restore_blueprint", "update_all"]:
-                hass.services.async_remove(DOMAIN, service)
+            for service in IntegrationService:
+                if hass.services.has_service(DOMAIN, service):
+                    hass.services.async_remove(DOMAIN, service)
+                else:
+                    _LOGGER.debug(
+                        "Expected %s.%s service to exist during unload, but it was "
+                        "not found. This may indicate unexpected registration or "
+                        "unload ordering.",
+                        DOMAIN,
+                        service,
+                    )
+
     return unload_ok

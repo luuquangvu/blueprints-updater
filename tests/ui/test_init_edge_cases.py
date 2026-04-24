@@ -13,7 +13,12 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.blueprints_updater as bp_updater
-from custom_components.blueprints_updater import async_setup, async_setup_entry, async_unload_entry
+from custom_components.blueprints_updater import (
+    _async_register_services,
+    async_setup,
+    async_setup_entry,
+    async_unload_entry,
+)
 from custom_components.blueprints_updater.const import ALLOWED_RELOAD_DOMAINS, DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
@@ -62,6 +67,7 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
     with (
         patch(f"{init_path}.BlueprintUpdateCoordinator", return_value=coordinator),
         patch.object(bp_updater, "async_register_admin_service") as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
     ):
         await async_setup(hass, {})
 
@@ -113,13 +119,72 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
             await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
             mock_reload.assert_called_once()
 
+        hass.config_entries.async_forward_entry_setups.side_effect = None
         with (
             patch.object(
                 bp_updater, "async_register_admin_service", side_effect=Exception("Reg fail")
             ),
             pytest.raises(Exception, match="Reg fail"),
         ):
-            await async_setup(hass, {})
+            await async_setup_entry(hass, entry)
+
+
+@pytest.mark.asyncio
+async def test_reload_lifecycle_independent_of_setup(hass: HomeAssistant) -> None:
+    """Test that async_setup_entry registers services even if async_setup is skipped.
+
+    This mimics the real-world reload scenario where async_setup is only called
+    once during boot, but async_setup_entry is called again after an unload.
+    """
+    hass.data.clear()
+
+    entry = MagicMock()
+    entry.entry_id = "reload_test_entry"
+    entry.state = ConfigEntryState.SETUP_IN_PROGRESS
+    entry.domain = DOMAIN
+    entry.options = {}
+    entry.data = {}
+
+    coordinator = MagicMock()
+    coordinator.config_entry = entry
+    coordinator.async_setup = AsyncMock(side_effect=_async_none)
+    coordinator.async_config_entry_first_refresh = AsyncMock(side_effect=_async_none)
+    coordinator.async_shutdown = AsyncMock(side_effect=_async_none)
+    coordinator.data = {}
+
+    hass.config_entries = MagicMock()
+    hass.config_entries.async_forward_entry_setups = AsyncMock(side_effect=_async_none)
+    hass.config_entries.async_unload_platforms = AsyncMock(side_effect=_async_true)
+
+    init_path = "custom_components.blueprints_updater.__init__"
+    with (
+        patch(f"{init_path}.BlueprintUpdateCoordinator", return_value=coordinator),
+        patch.object(bp_updater, "async_register_admin_service") as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
+    ):
+        await async_setup_entry(hass, entry)
+
+        calls = [
+            call.args[2] if len(call.args) > 2 else call.kwargs.get("service")
+            for call in mock_register.call_args_list
+        ]
+        assert "reload" in calls
+        assert "update_all" in calls
+
+        cast(MagicMock, hass.services.has_service).return_value = True
+        with patch.object(hass.services, "async_remove") as mock_remove:
+            await async_unload_entry(hass, entry)
+            assert mock_remove.called
+        mock_register.reset_mock()
+        cast(MagicMock, hass.services.has_service).return_value = False
+        await async_setup_entry(hass, entry)
+
+        calls_after_reload = [
+            call.args[2] if len(call.args) > 2 else call.kwargs.get("service")
+            for call in mock_register.call_args_list
+        ]
+        assert "reload" in calls_after_reload
+        assert "update_all" in calls_after_reload
 
 
 @pytest.mark.asyncio
@@ -195,3 +260,127 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
     ):
         await coordinator.async_reload_services(None)
         assert mock_call.call_count == len(ALLOWED_RELOAD_DOMAINS)
+
+
+@pytest.mark.asyncio
+async def test_unload_failure_does_not_clear_services(hass: HomeAssistant) -> None:
+    """Test that a failed unload does not clear services or coordinators.
+
+    When hass.config_entries.async_unload_platforms returns False, async_unload_entry
+    should also return False and leave the integration's services and coordinators
+    intact to avoid ending up in a partially-unloaded state.
+    """
+    entry = MagicMock()
+    entry.entry_id = "unload_failure_entry"
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN].setdefault("coordinators", {"dummy": object()})
+
+    with (
+        patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            return_value=False,
+            new_callable=AsyncMock,
+        ) as mock_unload_platforms,
+        patch.object(hass.services, "has_service", return_value=True),
+        patch.object(hass.services, "async_remove") as mock_remove,
+    ):
+        result = await async_unload_entry(hass, entry)
+
+    assert result is False
+    assert hass.data[DOMAIN]["coordinators"]
+    mock_remove.assert_not_called()
+
+    mock_unload_platforms.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_service_registration_rollback(hass: HomeAssistant) -> None:
+    """Test that service registration rolls back if one fails."""
+    with (
+        patch.object(hass.services, "has_service", return_value=False),
+        patch.object(hass.services, "async_register") as mock_register,
+        patch.object(hass.services, "async_remove") as mock_remove,
+    ):
+        mock_register.side_effect = [None, Exception("Failed"), None]
+
+        with pytest.raises(Exception, match="Failed"):
+            _async_register_services(hass)
+
+        assert mock_register.call_count == 2
+        mock_remove.assert_called_once_with(DOMAIN, "reload")
+
+
+@pytest.mark.asyncio
+async def test_setup_entry_rollback(hass: HomeAssistant) -> None:
+    """Test that async_setup_entry rolls back on failure."""
+    entry = MagicMock()
+    entry.entry_id = "setup_rollback_entry"
+    entry.data = {}
+    entry.options = {}
+    entry.state = ConfigEntryState.SETUP_IN_PROGRESS
+
+    coordinator_mock = MagicMock()
+    coordinator_mock.async_setup = AsyncMock()
+    coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.data = {}
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.BlueprintUpdateCoordinator",
+            return_value=coordinator_mock,
+        ),
+        patch.object(hass.config_entries, "async_forward_entry_setups", new_callable=AsyncMock),
+        patch.object(
+            hass.config_entries, "async_unload_platforms", new_callable=AsyncMock
+        ) as mock_unload,
+        patch(
+            "custom_components.blueprints_updater._async_register_services",
+            side_effect=Exception("Setup Failed"),
+        ),
+    ):
+        with pytest.raises(Exception, match="Setup Failed"):
+            await async_setup_entry(hass, entry)
+
+        assert entry.entry_id not in hass.data.get(DOMAIN, {}).get("coordinators", {})
+        mock_unload.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_setup_entry_rollback_on_forward_failure(hass: HomeAssistant) -> None:
+    """Test that async_setup_entry rolls back correctly when forward_entry_setups fails."""
+    entry = MagicMock()
+    entry.entry_id = "forward_failure_entry"
+    entry.data = {}
+    entry.options = {}
+    entry.state = ConfigEntryState.SETUP_IN_PROGRESS
+
+    coordinator_mock = MagicMock()
+    coordinator_mock.async_setup = AsyncMock()
+    coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.data = {}
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.BlueprintUpdateCoordinator",
+            return_value=coordinator_mock,
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            side_effect=Exception("Forward Failed"),
+        ),
+        patch.object(
+            hass.config_entries, "async_unload_platforms", new_callable=AsyncMock
+        ) as mock_unload,
+        patch(
+            "custom_components.blueprints_updater._async_register_services",
+        ) as mock_register_services,
+    ):
+        with pytest.raises(Exception, match="Forward Failed"):
+            await async_setup_entry(hass, entry)
+
+        assert entry.entry_id not in hass.data.get(DOMAIN, {}).get("coordinators", {})
+        mock_unload.assert_not_called()
+        mock_register_services.assert_not_called()
