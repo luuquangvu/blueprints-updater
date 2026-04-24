@@ -1,6 +1,7 @@
 """Tests targeting edge cases and setup failures in the integration initialization."""
 
 from datetime import timedelta
+from http import HTTPStatus
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -146,7 +147,7 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
 
     mock_resp = MagicMock()
     mock_resp.is_redirect = False
-    mock_resp.status_code = 200
+    mock_resp.status_code = HTTPStatus.OK
     mock_resp.url = httpx.URL("https://mock_url")
     mock_resp.headers = {"Content-Type": "application/json"}
     mock_resp.json = MagicMock(side_effect=ValueError("JSON fail"))
