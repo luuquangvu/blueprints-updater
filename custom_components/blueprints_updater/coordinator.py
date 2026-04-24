@@ -20,11 +20,10 @@ from urllib.parse import urlparse
 
 import httpx
 import orjson
+import voluptuous as vol
 import yaml
 from homeassistant.components.automation import automations_with_blueprint
-from homeassistant.components.automation.config import (
-    AUTOMATION_BLUEPRINT_SCHEMA,
-)
+from homeassistant.components.automation.config import AUTOMATION_BLUEPRINT_SCHEMA
 from homeassistant.components.automation.config import (
     async_validate_config_item as async_validate_automation_config,
 )
@@ -2864,13 +2863,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         in the blueprint metadata with the provided `source_url` to ensure
         the integration tracks the authoritative source.
 
+        It also applies semantic normalization using Home Assistant's official
+        schemas (AUTOMATION_BLUEPRINT_SCHEMA or BLUEPRINT_SCHEMA). This ensures
+        that default values for selectors and structural expansions (like list
+        normalization) are applied consistently, matching how Home Assistant
+        Core saves blueprints to disk.
+
         Args:
             content: Raw YAML blueprint content.
             source_url: Target URL to enforce in the content.
 
         Returns:
             The YAML content with the target source_url guaranteed to be
-            present in the blueprint block, in canonical YAML form.
+            present in the blueprint block, in canonical normalized YAML form.
 
         """
         if not isinstance(content, str):
@@ -2890,12 +2895,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not isinstance(parsed, dict) or "blueprint" not in parsed:
             return BlueprintUpdateCoordinator._normalize_content(content)
 
-        blueprint = parsed["blueprint"]
-        if not isinstance(blueprint, dict):
+        blueprint_info = parsed["blueprint"]
+        if not isinstance(blueprint_info, dict):
             return BlueprintUpdateCoordinator._normalize_content(content)
 
         source_url = source_url.strip()
-        blueprint["source_url"] = source_url
+        blueprint_info["source_url"] = source_url
+
+        try:
+            domain = blueprint_info.get("domain", "automation")
+            schema = AUTOMATION_BLUEPRINT_SCHEMA if domain == "automation" else BLUEPRINT_SCHEMA
+            parsed = schema(parsed)
+        except (vol.Invalid, KeyError, TypeError, ValueError) as err:
+            _LOGGER.debug(
+                "Semantic normalization skipped for %s (using raw YAML): %s",
+                redact_url(source_url),
+                err,
+            )
 
         try:
             return yaml_util.dump(parsed)

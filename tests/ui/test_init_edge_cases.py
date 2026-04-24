@@ -62,6 +62,7 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
     with (
         patch(f"{init_path}.BlueprintUpdateCoordinator", return_value=coordinator),
         patch.object(bp_updater, "async_register_admin_service") as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
     ):
         await async_setup(hass, {})
 
@@ -113,13 +114,72 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
             await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
             mock_reload.assert_called_once()
 
+        hass.config_entries.async_forward_entry_setups.side_effect = None
         with (
             patch.object(
                 bp_updater, "async_register_admin_service", side_effect=Exception("Reg fail")
             ),
             pytest.raises(Exception, match="Reg fail"),
         ):
-            await async_setup(hass, {})
+            await async_setup_entry(hass, entry)
+
+
+@pytest.mark.asyncio
+async def test_reload_lifecycle_independent_of_setup(hass: HomeAssistant) -> None:
+    """Test that async_setup_entry registers services even if async_setup is skipped.
+
+    This mimics the real-world reload scenario where async_setup is only called
+    once during boot, but async_setup_entry is called again after an unload.
+    """
+    hass.data.clear()
+
+    entry = MagicMock()
+    entry.entry_id = "reload_test_entry"
+    entry.state = ConfigEntryState.SETUP_IN_PROGRESS
+    entry.domain = DOMAIN
+    entry.options = {}
+    entry.data = {}
+
+    coordinator = MagicMock()
+    coordinator.config_entry = entry
+    coordinator.async_setup = AsyncMock(side_effect=_async_none)
+    coordinator.async_config_entry_first_refresh = AsyncMock(side_effect=_async_none)
+    coordinator.async_shutdown = AsyncMock(side_effect=_async_none)
+    coordinator.data = {}
+
+    hass.config_entries = MagicMock()
+    hass.config_entries.async_forward_entry_setups = AsyncMock(side_effect=_async_none)
+    hass.config_entries.async_unload_platforms = AsyncMock(side_effect=_async_true)
+
+    init_path = "custom_components.blueprints_updater.__init__"
+    with (
+        patch(f"{init_path}.BlueprintUpdateCoordinator", return_value=coordinator),
+        patch.object(bp_updater, "async_register_admin_service") as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
+    ):
+        await async_setup_entry(hass, entry)
+
+        calls = [
+            call.args[2] if len(call.args) > 2 else call.kwargs.get("service")
+            for call in mock_register.call_args_list
+        ]
+        assert "reload" in calls
+        assert "update_all" in calls
+
+        cast(MagicMock, hass.services.has_service).return_value = True
+        with patch.object(hass.services, "async_remove") as mock_remove:
+            await async_unload_entry(hass, entry)
+            assert mock_remove.called
+        mock_register.reset_mock()
+        cast(MagicMock, hass.services.has_service).return_value = False
+        await async_setup_entry(hass, entry)
+
+        calls_after_reload = [
+            call.args[2] if len(call.args) > 2 else call.kwargs.get("service")
+            for call in mock_register.call_args_list
+        ]
+        assert "reload" in calls_after_reload
+        assert "update_all" in calls_after_reload
 
 
 @pytest.mark.asyncio

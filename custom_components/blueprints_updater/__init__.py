@@ -58,7 +58,6 @@ async def async_setup(hass: HomeAssistant, _: ConfigType) -> bool:
 
     hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _clear_cache)
 
-    _async_register_services(hass)
     return True
 
 
@@ -97,6 +96,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    _async_register_services(hass)
     entry.async_on_unload(entry.add_update_listener(async_update_options))
     blueprint_coordinator.setup_complete = True
     blueprint_coordinator.async_set_updated_data(blueprint_coordinator.data)
@@ -166,6 +166,9 @@ def _async_register_services(hass: HomeAssistant) -> None:
         except (KeyError, ValueError, IndexError) as err:
             _LOGGER.debug("Error formatting translation for %s: %s", key, err)
             return msg
+
+    if hass.data.get(DOMAIN, {}).get("services_registered"):
+        return
 
     async def async_reload_action_handler(_: ServiceCall) -> None:
         """Handle the reload action call."""
@@ -342,6 +345,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
         ),
     )
 
+    hass.data.setdefault(DOMAIN, {})["services_registered"] = True
+
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Update options for a config entry.
@@ -367,25 +372,37 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     Args:
         hass: HomeAssistant instance.
-        entry: Configuration entry to unload.
+        entry: Configuration entry.
 
     Returns:
         True if the entry was unloaded successfully.
 
     """
-    blueprint_coordinator: BlueprintUpdateCoordinator = hass.data[DOMAIN]["coordinators"][
-        entry.entry_id
-    ]
-    await blueprint_coordinator.async_shutdown()
+    if domain_data := hass.data.get(DOMAIN):
+        coordinators = domain_data.get("coordinators", {})
+        if blueprint_coordinator := coordinators.get(entry.entry_id):
+            await blueprint_coordinator.async_shutdown()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        hass.data[DOMAIN].get("coordinators", {}).pop(entry.entry_id, None)
+    if unload_ok and (domain_data := hass.data.get(DOMAIN)):
+        coordinators = domain_data.get("coordinators", {})
+        coordinators.pop(entry.entry_id, None)
 
-        if not hass.data[DOMAIN].get("coordinators"):
-            hass.data[DOMAIN].pop("translation_cache", None)
+        if not coordinators:
+            domain_data.pop("translation_cache", None)
 
-        if not any(hass.data[DOMAIN].values()):
             for service in ["reload", "restore_blueprint", "update_all"]:
-                hass.services.async_remove(DOMAIN, service)
+                if hass.services.has_service(DOMAIN, service):
+                    hass.services.async_remove(DOMAIN, service)
+                else:
+                    _LOGGER.debug(
+                        "Expected %s.%s service to exist during unload, but it was "
+                        "not found. This may indicate unexpected registration or "
+                        "unload ordering.",
+                        DOMAIN,
+                        service,
+                    )
+
+            domain_data["services_registered"] = False
+
     return unload_ok

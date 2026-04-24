@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -80,6 +80,7 @@ async def test_service_registration(hass: HomeAssistant):
         patch(
             "custom_components.blueprints_updater.__init__.async_register_admin_service"
         ) as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
     ):
         hass.config_entries = MagicMock()
         hass.config_entries.async_forward_entry_setups = AsyncMock()
@@ -93,6 +94,7 @@ async def test_service_registration(hass: HomeAssistant):
         assert "reload" in calls
         assert "restore_blueprint" in calls
         assert "update_all" in calls
+        assert hass.data[DOMAIN].get("services_registered") is True
 
         restore_call = next(
             call
@@ -136,6 +138,7 @@ async def test_service_handlers(hass: HomeAssistant):
         patch(
             "custom_components.blueprints_updater.__init__.async_register_admin_service"
         ) as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
     ):
         hass.config_entries = MagicMock()
         hass.config_entries.async_forward_entry_setups = AsyncMock()
@@ -201,6 +204,7 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
         patch(
             "custom_components.blueprints_updater.__init__.async_register_admin_service"
         ) as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
     ):
         mock_coordinator_class.generate_unique_id = BlueprintUpdateCoordinator.generate_unique_id
         mock_coordinator_class.generate_legacy_unique_id = (
@@ -322,14 +326,28 @@ async def test_unload_entry(hass: HomeAssistant):
             "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
             return_value=coordinator_mock,
         ),
+        patch.object(hass.services, "has_service", return_value=False),
         patch.object(hass.services, "async_remove") as mock_remove,
     ):
         await async_setup_entry(hass, entry)
+
+        cast(MagicMock, hass.services.has_service).return_value = True
         await async_unload_entry(hass, entry)
 
         assert entry.entry_id not in hass.data[DOMAIN].get("coordinators", {})
         assert mock_remove.called
+        assert hass.data[DOMAIN].get("services_registered") is False
         coordinator_mock.async_shutdown.assert_awaited_once()
+
+    hass.data[DOMAIN]["services_registered"] = True
+    hass.data[DOMAIN].setdefault("coordinators", {})[entry.entry_id] = coordinator_mock
+    with (
+        patch.object(hass.services, "has_service", return_value=False),
+        patch("custom_components.blueprints_updater.__init__._LOGGER") as mock_logger,
+    ):
+        await async_unload_entry(hass, entry)
+        assert mock_logger.warning.called
+        assert hass.data[DOMAIN].get("services_registered") is False
 
 
 @pytest.mark.asyncio
@@ -365,6 +383,7 @@ async def test_restore_handler_multi_coordinator_selection(hass: HomeAssistant):
         patch(
             "custom_components.blueprints_updater.__init__.async_register_admin_service"
         ) as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
         patch("homeassistant.helpers.entity_registry.async_get", return_value=mock_entity_registry),
     ):
         mock_coord_class.return_value = coordinator_one
@@ -454,6 +473,7 @@ async def test_async_update_all_handler_fetches_remote_content(hass: HomeAssista
         patch(
             "custom_components.blueprints_updater.__init__.async_register_admin_service"
         ) as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
     ):
         hass.config_entries = MagicMock()
         hass.config_entries.async_forward_entry_setups = AsyncMock()
@@ -519,6 +539,7 @@ async def test_async_update_all_handler_continues_on_failure(hass: HomeAssistant
         patch(
             "custom_components.blueprints_updater.__init__.async_register_admin_service"
         ) as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
     ):
         hass.config_entries = MagicMock()
         hass.config_entries.async_forward_entry_setups = AsyncMock()

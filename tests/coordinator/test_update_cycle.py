@@ -5,14 +5,13 @@ import contextlib
 import os
 from http import HTTPStatus
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
 from urllib.parse import urlparse
 
 import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.util import yaml as yaml_util
 
 from custom_components.blueprints_updater.const import (
     CONF_USE_CDN,
@@ -295,9 +294,10 @@ async def test_async_update_data_auto_update(mock_translate, coordinator):
         await coordinator._async_update_data()
         await coordinator._async_background_refresh(coordinator.data)
 
+    expected_content = coordinator._ensure_source_url(content, url)
     coordinator.async_install_blueprint.assert_awaited_once_with(
         path,
-        content,
+        expected_content,
         reload_services=False,
         backup=True,
         remote_hash=ANY,
@@ -488,7 +488,8 @@ async def test_ghost_update_prevention(coordinator):
     path = "/config/blueprints/automation/test.yaml"
     url = "https://github.com/user/repo/blob/main/test.yaml"
     content = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n"
-    local_hash = coordinator._hash_content(content)
+    normalized_content = coordinator._ensure_source_url(content, url)
+    local_hash = coordinator._hash_content(normalized_content, already_normalized=True)
 
     coordinator.data[path] = {
         "local_hash": local_hash,
@@ -525,8 +526,9 @@ async def test_yaml_normalization_ignores_comments(coordinator):
     url = "https://github.com/user/repo/blob/main/test.yaml"
     content = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n"
 
-    canonical_content = yaml_util.dump(cast(dict[str, Any], yaml_util.parse_yaml(content)))
-    local_hash = coordinator._hash_content(canonical_content)
+    # Use semantic normalization to get the expected local state
+    normalized_content = coordinator._ensure_source_url(content, url)
+    local_hash = coordinator._hash_content(normalized_content, already_normalized=True)
 
     coordinator.data[path] = {
         "local_hash": local_hash,
