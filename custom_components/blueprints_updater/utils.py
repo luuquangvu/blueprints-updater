@@ -153,17 +153,7 @@ def get_config_bool(config: Any, key: str, default: bool) -> bool:
         The boolean value.
 
     """
-    if config is None:
-        return default
-
-    if hasattr(config, "options"):
-        val = config.options.get(key, default)
-    elif isinstance(config, dict):
-        val = config.get(key, default)
-    else:
-        val = default
-
-    return bool(val)
+    return bool(get_config_value(config, key, default))
 
 
 def get_config_str(config: Any, key: str, default: str) -> str:
@@ -178,17 +168,7 @@ def get_config_str(config: Any, key: str, default: str) -> str:
         The string value.
 
     """
-    if config is None:
-        return default
-
-    if hasattr(config, "options"):
-        val = config.options.get(key, default)
-    elif isinstance(config, dict):
-        val = config.get(key, default)
-    else:
-        val = default
-
-    return str(val)
+    return str(get_config_value(config, key, default))
 
 
 def get_config_int(
@@ -211,15 +191,7 @@ def get_config_int(
         The coerced and clamped integer value.
 
     """
-    if config is None:
-        return default
-
-    if hasattr(config, "options"):
-        val = config.options.get(key, default)
-    elif isinstance(config, dict):
-        val = config.get(key, default)
-    else:
-        val = default
+    val = get_config_value(config, key, default)
 
     try:
         res = int(float(str(val).strip()))
