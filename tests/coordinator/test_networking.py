@@ -222,3 +222,50 @@ async def test_execute_with_redirect_guard_final_https(coordinator):
         pytest.raises(httpx.HTTPError, match="must be HTTPS"),
     ):
         await coordinator._execute_with_redirect_guard(mock_session, "http://start.com/bp.yaml", {})
+
+
+@pytest.mark.asyncio
+async def test_execute_with_redirect_guard_304_handling(coordinator):
+    """Test that 304 responses are handled correctly even if flagged as redirects."""
+    mock_session = MagicMock(spec=httpx.AsyncClient)
+
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.status_code = 304
+    mock_response.is_redirect = True
+    mock_response.url = httpx.URL("https://example.com/bp.yaml")
+    mock_response.headers = httpx.Headers({"ETag": "test-etag"})
+    mock_response.raise_for_status = MagicMock(
+        side_effect=httpx.HTTPStatusError(
+            "Redirect error", request=MagicMock(), response=mock_response
+        )
+    )
+
+    mock_session.get = AsyncMock(return_value=mock_response)
+
+    with patch.object(coordinator, "_is_safe_url", return_value=True):
+        resp = await coordinator._execute_with_redirect_guard(
+            mock_session, "https://example.com/bp.yaml", {}
+        )
+        assert resp.status_code == 304
+        mock_response.raise_for_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_with_redirect_guard_304_https_enforcement(coordinator):
+    """Test that 304 responses are still subject to HTTPS enforcement."""
+    mock_session = MagicMock(spec=httpx.AsyncClient)
+
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.status_code = 304
+    mock_response.is_redirect = True
+    mock_response.url = httpx.URL("http://unsafe.com/bp.yaml")
+
+    mock_session.get = AsyncMock(return_value=mock_response)
+
+    with (
+        patch.object(coordinator, "_is_safe_url", return_value=True),
+        pytest.raises(httpx.HTTPError, match="must be HTTPS"),
+    ):
+        await coordinator._execute_with_redirect_guard(
+            mock_session, "http://unsafe.com/bp.yaml", {}
+        )

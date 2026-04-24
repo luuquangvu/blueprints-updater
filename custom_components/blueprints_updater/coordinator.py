@@ -2654,6 +2654,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         safe-hostname allowlist. Raises httpx.HTTPError on too many redirects or
         security violations.
 
+        Note on 304 responses:
+        HTTP 304 Not Modified is technically in the 3xx Redirection class but
+        represents a terminal state (conditional success) rather than a resource
+        to be followed. This method treats 304 as a final response to ensure it
+        is subjected to HTTPS enforcement and to avoid HTTPStatusErrors that
+        some client versions raise for unhandled 3xx codes when
+        follow_redirects=False.
+
         Args:
             session: Async HTTP client.
             url: Original request URL.
@@ -2674,7 +2682,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 follow_redirects=False,
             )
 
-            if not response.is_redirect:
+            if response.status_code == 304 or not response.is_redirect:
                 if response.url.scheme != "https":
                     _LOGGER.error(
                         "Blocking unsafe final URL (non-HTTPS) for %s: %s",
@@ -2685,8 +2693,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         f"Security violation: Final destination for {redact_url(url)} "
                         f"must be HTTPS (got {response.url.scheme})"
                     )
+
                 if response.status_code == 304:
                     return response
+
                 response.raise_for_status()
                 return response
 
