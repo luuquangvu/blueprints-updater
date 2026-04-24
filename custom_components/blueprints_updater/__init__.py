@@ -90,16 +90,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await blueprint_coordinator.async_setup()
     await blueprint_coordinator.async_config_entry_first_refresh()
 
-    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})[entry.entry_id] = (
-        blueprint_coordinator
-    )
+    coordinators = hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})
+    coordinators[entry.entry_id] = blueprint_coordinator
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    _async_register_services(hass)
-    entry.async_on_unload(entry.add_update_listener(async_update_options))
-    blueprint_coordinator.setup_complete = True
-    blueprint_coordinator.async_set_updated_data(blueprint_coordinator.data)
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        _async_register_services(hass)
+        entry.async_on_unload(entry.add_update_listener(async_update_options))
+        blueprint_coordinator.setup_complete = True
+        blueprint_coordinator.async_set_updated_data(blueprint_coordinator.data)
+    except Exception:
+        _LOGGER.debug("Setup failed for entry %s, performing rollback", entry.entry_id)
+        coordinators.pop(entry.entry_id, None)
+        await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        raise
 
     return True
 
@@ -167,15 +171,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
             _LOGGER.debug("Error formatting translation for %s: %s", key, err)
             return msg
 
-    if hass.data.get(DOMAIN, {}).get("services_registered"):
+    if hass.services.has_service(DOMAIN, "reload"):
         return
 
     async def async_reload_action_handler(_: ServiceCall) -> None:
         """Handle the reload action call."""
         for active_coordinator in _get_coordinators():
             await active_coordinator.async_request_refresh()
-
-    async_register_admin_service(hass, DOMAIN, "reload", async_reload_action_handler)
 
     async def async_restore_blueprint_handler(call: ServiceCall) -> dict:
         """Handle the restore blueprint action."""
@@ -258,15 +260,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
         }
     )
 
-    async_register_admin_service(
-        hass,
-        DOMAIN,
-        "restore_blueprint",
-        async_restore_blueprint_handler,
-        schema=restore_schema,
-        supports_response=SupportsResponse.ONLY,
-    )
-
     async def async_update_all_handler(call: ServiceCall) -> None:
         """Handle updating all available blueprints."""
         coordinators = _get_coordinators()
@@ -333,19 +326,38 @@ def _async_register_services(hass: HomeAssistant) -> None:
                     entry_id,
                 )
 
-    async_register_admin_service(
-        hass,
-        DOMAIN,
-        "update_all",
-        async_update_all_handler,
-        schema=vol.Schema(
-            {
-                vol.Optional("backup", default=True): cv.boolean,
-            }
-        ),
-    )
+    registered_services = []
+    try:
+        async_register_admin_service(hass, DOMAIN, "reload", async_reload_action_handler)
+        registered_services.append("reload")
 
-    hass.data.setdefault(DOMAIN, {})["services_registered"] = True
+        async_register_admin_service(
+            hass,
+            DOMAIN,
+            "restore_blueprint",
+            async_restore_blueprint_handler,
+            schema=restore_schema,
+            supports_response=SupportsResponse.ONLY,
+        )
+        registered_services.append("restore_blueprint")
+
+        async_register_admin_service(
+            hass,
+            DOMAIN,
+            "update_all",
+            async_update_all_handler,
+            schema=vol.Schema(
+                {
+                    vol.Optional("backup", default=True): cv.boolean,
+                }
+            ),
+        )
+        registered_services.append("update_all")
+    except Exception:
+        _LOGGER.debug("Service registration failed, rolling back: %s", registered_services)
+        for service in registered_services:
+            hass.services.async_remove(DOMAIN, service)
+        raise
 
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -402,7 +414,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         DOMAIN,
                         service,
                     )
-
-            domain_data["services_registered"] = False
 
     return unload_ok

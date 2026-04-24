@@ -94,7 +94,6 @@ async def test_service_registration(hass: HomeAssistant):
         assert "reload" in calls
         assert "restore_blueprint" in calls
         assert "update_all" in calls
-        assert hass.data[DOMAIN].get("services_registered") is True
 
         restore_call = next(
             call
@@ -108,8 +107,12 @@ async def test_service_registration(hass: HomeAssistant):
             else restore_call.kwargs.get("schema")
         )
         assert schema is not None
-        schema({"entity_id": "update.test", "version": 1})
         schema({"entity_id": "update.test", "version": 4})
+
+        mock_register.reset_mock()
+        with patch.object(hass.services, "has_service", return_value=True):
+            await async_setup_entry(hass, entry)
+        mock_register.assert_not_called()
 
 
 async def test_service_handlers(hass: HomeAssistant):
@@ -336,10 +339,8 @@ async def test_unload_entry(hass: HomeAssistant):
 
         assert entry.entry_id not in hass.data[DOMAIN].get("coordinators", {})
         assert mock_remove.called
-        assert hass.data[DOMAIN].get("services_registered") is False
         coordinator_mock.async_shutdown.assert_awaited_once()
 
-    hass.data[DOMAIN]["services_registered"] = True
     hass.data[DOMAIN].setdefault("coordinators", {})[entry.entry_id] = coordinator_mock
     with (
         patch.object(hass.services, "has_service", return_value=False),
@@ -347,7 +348,6 @@ async def test_unload_entry(hass: HomeAssistant):
     ):
         await async_unload_entry(hass, entry)
         assert mock_logger.debug.called
-        assert hass.data[DOMAIN].get("services_registered") is False
 
 
 @pytest.mark.asyncio

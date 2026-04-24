@@ -471,3 +471,17 @@ def test_set_cached_git_diff(coordinator):
         "diff": "d1",
         "semantic_sync": False,
     }
+
+
+def test_ensure_source_url_script(coordinator):
+    """Test ensuring source_url for a script blueprint."""
+    source_url = "https://github.com/user/repo/blob/main/script.yaml"
+    content = "blueprint:\n  name: Test Script\n  domain: script"
+
+    new_content = coordinator._ensure_source_url(content, source_url)
+    assert f"source_url: {source_url}" in new_content
+
+    parsed = yaml.safe_load(new_content)
+    assert parsed["blueprint"]["source_url"] == source_url
+    assert parsed["blueprint"]["name"] == "Test Script"
+    assert parsed["blueprint"]["domain"] == "script"
