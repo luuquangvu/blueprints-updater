@@ -533,6 +533,7 @@ async def test_async_update_entities_orphan_cleanup(hass, caplog):
         await async_setup_entry(hass, entry, async_add_entities)
 
         mock_entity_registry.async_remove.assert_called_once_with("update.orphan")
+        mock_entity_registry.async_update_entity.assert_not_called()
         hass.states.async_remove.assert_called_once_with("update.orphan")
         assert "Removing orphaned registry entry for entity: update.orphan" in caplog.text
 
