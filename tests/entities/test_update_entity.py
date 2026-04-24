@@ -1,6 +1,7 @@
 """Tests for Blueprints Updater update entities."""
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
@@ -485,7 +486,7 @@ async def test_entity_skip_version(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_update_entities_orphan_cleanup(hass):
+async def test_async_update_entities_orphan_cleanup(hass, caplog):
     """Validate that entities with unknown unique_ids are removed as orphans."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
@@ -493,16 +494,12 @@ async def test_async_update_entities_orphan_cleanup(hass):
     coordinator = MagicMock(spec=BlueprintUpdateCoordinator)
     coordinator.config_entry = entry
     coordinator.data = {
-        "/config/blueprints/kept.yaml": {
+        "kept.yaml": {
             "rel_path": "kept.yaml",
             "name": "Kept",
             "local_hash": "hash",
         },
     }
-    coordinator.async_add_listener = MagicMock()
-
-    hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator}}}
-    hass.states = MagicMock()
 
     mock_entity_registry = MagicMock()
 
@@ -518,6 +515,9 @@ async def test_async_update_entities_orphan_cleanup(hass):
     orphan_entity.unique_id = "test_entry_orphan.yaml"
     orphan_entity.entity_id = "update.orphan"
 
+    hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator}}}
+    hass.states = MagicMock()
+
     with (
         patch(
             "custom_components.blueprints_updater.update.er.async_get",
@@ -527,13 +527,14 @@ async def test_async_update_entities_orphan_cleanup(hass):
             "custom_components.blueprints_updater.update.er.async_entries_for_config_entry",
             return_value=[known_entity, orphan_entity],
         ),
+        caplog.at_level(logging.INFO),
     ):
         async_add_entities = MagicMock()
         await async_setup_entry(hass, entry, async_add_entities)
 
-        mock_entity_registry.async_update_entity.assert_not_called()
         mock_entity_registry.async_remove.assert_called_once_with("update.orphan")
         hass.states.async_remove.assert_called_once_with("update.orphan")
+        assert "Removing orphaned registry entry for entity: update.orphan" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -667,6 +668,7 @@ async def test_entity_release_notes_git_diff_source_url_normalization(coordinato
     assert notes is not None
     assert "<summary>git_diff_title</summary>" not in notes
     assert "<details>" not in notes
+    assert "<summary>git_diff_title</summary>" not in notes
 
 
 @pytest.mark.asyncio

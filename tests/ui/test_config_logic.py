@@ -67,12 +67,25 @@ def test_is_auto_update_enabled_ignores_legacy_data(hass):
     was removed.
     """
     entry = MagicMock()
-    # Setting data to opposite of default to ensure we are testing the override
     entry.data = {CONF_AUTO_UPDATE: not DEFAULT_AUTO_UPDATE}
     entry.options = {}
 
     coordinator = create_mock_coordinator(hass, entry)
     assert coordinator.is_auto_update_enabled() is DEFAULT_AUTO_UPDATE
+
+
+def test_is_cdn_enabled_ignores_legacy_data(hass):
+    """Test is_cdn_enabled ignores values in config_entry.data.
+
+    This verifies the breaking change in v2.0.0 where legacy data fallback
+    was removed.
+    """
+    entry = MagicMock()
+    entry.data = {CONF_USE_CDN: not DEFAULT_USE_CDN}
+    entry.options = {}
+
+    coordinator = create_mock_coordinator(hass, entry)
+    assert coordinator.is_cdn_enabled() is DEFAULT_USE_CDN
 
 
 def create_mock_coordinator(

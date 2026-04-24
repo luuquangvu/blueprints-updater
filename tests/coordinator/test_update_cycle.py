@@ -530,8 +530,6 @@ async def test_yaml_normalization_ignores_comments(coordinator):
     path = "/config/blueprints/automation/test.yaml"
     url = "https://github.com/user/repo/blob/main/test.yaml"
     content = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n"
-
-    # Use semantic normalization to get the expected local state
     normalized_content = coordinator._ensure_source_url(content, url)
     local_hash = coordinator._hash_content(normalized_content, already_normalized=True)
 

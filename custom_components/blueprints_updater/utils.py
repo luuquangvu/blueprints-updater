@@ -153,7 +153,12 @@ def get_config_bool(config: Any, key: str, default: bool) -> bool:
         The boolean value.
 
     """
-    return bool(get_config_value(config, key, default))
+    val = get_config_value(config, key, default)
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() in ("true", "yes", "on", "1")
+    return bool(val)
 
 
 def get_config_str(config: Any, key: str, default: str) -> str:
