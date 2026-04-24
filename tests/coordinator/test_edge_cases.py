@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 from datetime import timedelta
+from http import HTTPStatus
 from types import MappingProxyType
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -174,7 +175,7 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
             active_requests -= 1
 
         mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
+        mock_response.status_code = HTTPStatus.OK
         mock_response.url = httpx.URL("https://mock_url")
         mock_response.text = "blueprint: name"
         mock_response.headers = {"Content-Type": "text/yaml"}
@@ -215,7 +216,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
     coordinator.data = {path: info}
 
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
+    mock_response.status_code = HTTPStatus.OK
     mock_response.url = httpx.URL(source_url)
     mock_response.headers = {"Content-Type": "application/json"}
     mock_response.text = '{"posts": [ {"cooked": "invalid"}'

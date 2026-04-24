@@ -221,3 +221,20 @@ def sanitize_error_detail(detail: str, max_length: int = 120) -> str:
     cleaned = RE_URL_REDACTION.sub(lambda m: redact_url(m.group(0)), detail)
     cleaned = cleaned.replace("|", "/")
     return textwrap.shorten(cleaned, width=max_length, placeholder="...")
+
+
+def verify_https_enforcement(response: httpx.Response, original_url: str) -> None:
+    """Verify that the response URL uses HTTPS scheme.
+
+    Raises httpx.HTTPError if the scheme is not https.
+    """
+    if response.url.scheme != "https":
+        _LOGGER.error(
+            "Blocking unsafe final URL (non-HTTPS) for %s: %s",
+            redact_url(original_url),
+            response.url.scheme,
+        )
+        raise httpx.HTTPError(
+            f"Security violation: Final destination for {redact_url(original_url)} "
+            f"must be HTTPS (got {response.url.scheme})"
+        )

@@ -14,6 +14,7 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from http import HTTPStatus
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
 
@@ -76,6 +77,7 @@ from .utils import (
     redact_url,
     retry_async,
     sanitize_error_detail,
+    verify_https_enforcement,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -2681,22 +2683,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 timeout=REQUEST_TIMEOUT,
                 follow_redirects=False,
             )
+            if response.status_code == HTTPStatus.NOT_MODIFIED:
+                verify_https_enforcement(response, url)
+                return response
 
-            if response.status_code == 304 or not response.is_redirect:
-                if response.url.scheme != "https":
-                    _LOGGER.error(
-                        "Blocking unsafe final URL (non-HTTPS) for %s: %s",
-                        redact_url(url),
-                        response.url.scheme,
-                    )
-                    raise httpx.HTTPError(
-                        f"Security violation: Final destination for {redact_url(url)} "
-                        f"must be HTTPS (got {response.url.scheme})"
-                    )
-
-                if response.status_code == 304:
-                    return response
-
+            if not response.is_redirect:
+                verify_https_enforcement(response, url)
                 response.raise_for_status()
                 return response
 
@@ -2741,7 +2733,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             Blueprint content string, or None for a 304 Not Modified response.
 
         """
-        if response.status_code == 304:
+        if response.status_code == HTTPStatus.NOT_MODIFIED:
             return None
 
         content_type = response.headers.get("Content-Type", "")

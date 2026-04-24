@@ -1,6 +1,7 @@
 """Tests for Blueprints Updater ETag logic."""
 
 from datetime import timedelta
+from http import HTTPStatus
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -76,7 +77,7 @@ async def test_304_response_preserves_updatable_status(
     }
 
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 304
+    mock_response.status_code = HTTPStatus.NOT_MODIFIED
     mock_response.url = httpx.URL("https://github.com/user/repo/test.yaml")
     mock_response.headers = httpx.Headers({"ETag": "etag_v2", "Content-Type": "text/yaml"})
     mock_response.raise_for_status = MagicMock(return_value=None)
@@ -162,7 +163,7 @@ async def test_etag_migration_forces_download(
     }
 
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
+    mock_response.status_code = HTTPStatus.OK
     mock_response.url = httpx.URL("https://github.com/user/repo/bp.yaml")
     mock_response.headers = httpx.Headers({"ETag": "new_etag", "Content-Type": "text/yaml"})
     mock_response.text = remote_content

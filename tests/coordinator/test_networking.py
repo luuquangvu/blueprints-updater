@@ -1,6 +1,7 @@
 """Tests for coordinator networking, fetching, and CDN logic."""
 
 import asyncio
+from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -35,7 +36,7 @@ async def test_async_fetch_content_pacing_logic(coordinator):
     """Test that _async_fetch_content respects MIN_SEND_INTERVAL pacing."""
     mock_session = MagicMock(spec=httpx.AsyncClient)
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
+    mock_response.status_code = HTTPStatus.OK
     mock_response.is_redirect = False
     mock_response.url = httpx.URL("https://example.com/path")
     mock_response.text = "content"
@@ -72,7 +73,7 @@ async def test_async_fetch_content_pacing_logic_max(coordinator):
     """Test that _async_fetch_content respects MAX_SEND_INTERVAL pacing."""
     mock_session = MagicMock(spec=httpx.AsyncClient)
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
+    mock_response.status_code = HTTPStatus.OK
     mock_response.is_redirect = False
     mock_response.url = httpx.URL("https://example.com/path")
     mock_response.text = "content"
@@ -128,7 +129,7 @@ async def test_async_fetch_content_pacing_synchronization(coordinator):
             patch.object(async_client, "get", new_callable=AsyncMock) as mock_get,
         ):
             mock_get.return_value = MagicMock(spec=httpx.Response)
-            mock_get.return_value.status_code = 200
+            mock_get.return_value.status_code = HTTPStatus.OK
             mock_get.return_value.is_redirect = False
             mock_get.return_value.url = httpx.URL("https://example.com/path")
             mock_get.return_value.headers = {"ETag": "new", "Content-Type": "text/yaml"}
@@ -158,7 +159,7 @@ async def test_execute_with_redirect_guard_security(coordinator):
     mock_session = MagicMock(spec=httpx.AsyncClient)
 
     mock_resp_redirect = MagicMock(spec=httpx.Response)
-    mock_resp_redirect.status_code = 302
+    mock_resp_redirect.status_code = HTTPStatus.FOUND
     mock_resp_redirect.is_redirect = True
     mock_resp_redirect.headers = {"Location": "https://example.com/next"}
     mock_resp_redirect.url = httpx.URL("https://example.com/start")
@@ -174,7 +175,7 @@ async def test_execute_with_redirect_guard_security(coordinator):
         )
 
     mock_resp_unsafe = MagicMock(spec=httpx.Response)
-    mock_resp_unsafe.status_code = 302
+    mock_resp_unsafe.status_code = HTTPStatus.FOUND
     mock_resp_unsafe.is_redirect = True
     mock_resp_unsafe.headers = {"Location": "http://unsafe.com"}
     mock_resp_unsafe.url = httpx.URL("https://example.com/start")
@@ -196,7 +197,7 @@ async def test_execute_with_redirect_guard_final_https(coordinator):
     mock_session = MagicMock(spec=httpx.AsyncClient)
 
     mock_resp_final_safe = MagicMock()
-    mock_resp_final_safe.status_code = 200
+    mock_resp_final_safe.status_code = HTTPStatus.OK
     mock_resp_final_safe.is_redirect = False
     mock_resp_final_safe.url = httpx.URL("https://safe.com/bp.yaml")
     mock_resp_final_safe.raise_for_status = MagicMock()
@@ -210,7 +211,7 @@ async def test_execute_with_redirect_guard_final_https(coordinator):
         assert str(resp.url) == "https://safe.com/bp.yaml"
 
     mock_resp_final_unsafe = MagicMock()
-    mock_resp_final_unsafe.status_code = 200
+    mock_resp_final_unsafe.status_code = HTTPStatus.OK
     mock_resp_final_unsafe.is_redirect = False
     mock_resp_final_unsafe.url = httpx.URL("http://unsafe.com/bp.yaml")
     mock_resp_final_unsafe.raise_for_status = MagicMock()
@@ -225,12 +226,34 @@ async def test_execute_with_redirect_guard_final_https(coordinator):
 
 
 @pytest.mark.asyncio
+async def test_execute_with_redirect_guard_304_non_redirect_handling(coordinator):
+    """Test that 304 responses are handled correctly even if not flagged as redirects."""
+    mock_session = MagicMock(spec=httpx.AsyncClient)
+
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.status_code = HTTPStatus.NOT_MODIFIED
+    mock_response.is_redirect = False
+    mock_response.url = httpx.URL("https://example.com/bp.yaml")
+    mock_response.headers = httpx.Headers({"ETag": "test-etag"})
+    mock_response.raise_for_status = MagicMock()
+
+    mock_session.get = AsyncMock(return_value=mock_response)
+
+    result = await coordinator._execute_with_redirect_guard(
+        mock_session, "https://example.com/bp.yaml", {}
+    )
+
+    mock_response.raise_for_status.assert_not_called()
+    assert result is mock_response
+
+
+@pytest.mark.asyncio
 async def test_execute_with_redirect_guard_304_handling(coordinator):
     """Test that 304 responses are handled correctly even if flagged as redirects."""
     mock_session = MagicMock(spec=httpx.AsyncClient)
 
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 304
+    mock_response.status_code = HTTPStatus.NOT_MODIFIED
     mock_response.is_redirect = True
     mock_response.url = httpx.URL("https://example.com/bp.yaml")
     mock_response.headers = httpx.Headers({"ETag": "test-etag"})
@@ -246,7 +269,7 @@ async def test_execute_with_redirect_guard_304_handling(coordinator):
         resp = await coordinator._execute_with_redirect_guard(
             mock_session, "https://example.com/bp.yaml", {}
         )
-        assert resp.status_code == 304
+        assert resp.status_code == HTTPStatus.NOT_MODIFIED
         mock_response.raise_for_status.assert_not_called()
 
 
@@ -256,7 +279,7 @@ async def test_execute_with_redirect_guard_304_https_enforcement(coordinator):
     mock_session = MagicMock(spec=httpx.AsyncClient)
 
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 304
+    mock_response.status_code = HTTPStatus.NOT_MODIFIED
     mock_response.is_redirect = True
     mock_response.url = httpx.URL("http://unsafe.com/bp.yaml")
 

@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import os
+from http import HTTPStatus
 from types import MappingProxyType
 from typing import Any, cast
 from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
@@ -168,7 +169,7 @@ async def test_async_fetch_blueprint_force(coordinator):
 
     mock_session = MagicMock(spec=httpx.AsyncClient)
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
+    mock_response.status_code = HTTPStatus.OK
     mock_response.text = f"blueprint:\n  name: New\n  domain: automation\n  source_url: {url}\n"
     mock_response.headers = httpx.Headers({"ETag": "new_etag", "Content-Type": "text/yaml"})
     mock_response.raise_for_status = MagicMock()
@@ -244,7 +245,7 @@ async def test_async_background_refresh_503_resilience(coordinator):
         side_effect=httpx.HTTPStatusError(
             "Service Unavailable",
             request=MagicMock(),
-            response=MagicMock(status_code=503),
+            response=MagicMock(status_code=HTTPStatus.SERVICE_UNAVAILABLE),
         )
     )
 
@@ -448,7 +449,7 @@ async def test_async_fetch_blueprint_regression_key_error_hash(coordinator):
 
     mock_session = MagicMock(spec=httpx.AsyncClient)
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
+    mock_response.status_code = HTTPStatus.OK
     mock_response.text = content
     mock_response.headers = httpx.Headers({"ETag": "etag", "Content-Type": "text/yaml"})
     mock_response.raise_for_status = MagicMock()
@@ -911,7 +912,7 @@ async def test_async_update_blueprint(coordinator):
     results: dict[str, Any] = {path: {"last_error": None, "local_hash": "old_hash"}}
 
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
+    mock_response.status_code = HTTPStatus.OK
     mock_response.headers = {"ETag": "new_etag", "Content-Type": "text/yaml"}
     mock_response.raise_for_status = MagicMock()
     mock_response.text = "blueprint:\n  name: Test"
@@ -963,11 +964,11 @@ async def test_async_update_blueprint_304_auto_update(coordinator):
     }
 
     mock_response_304 = MagicMock(spec=httpx.Response)
-    mock_response_304.status_code = 304
+    mock_response_304.status_code = HTTPStatus.NOT_MODIFIED
     mock_response_304.headers = {"ETag": "stored_etag"}
 
     mock_response_200 = MagicMock(spec=httpx.Response)
-    mock_response_200.status_code = 200
+    mock_response_200.status_code = HTTPStatus.OK
     mock_response_200.headers = {"ETag": "stored_etag", "Content-Type": "text/yaml"}
     mock_response_200.text = "blueprint:\n  name: Test\n  source_url: https://url/test.yaml"
     mock_response_200.raise_for_status = MagicMock()
@@ -1132,7 +1133,7 @@ async def test_async_update_blueprint_in_place_errors_isolated(
         mock_session.get = AsyncMock(side_effect=side_effect)
     else:
         mock_resp = MagicMock(spec=httpx.Response)
-        mock_resp.status_code = 200
+        mock_resp.status_code = HTTPStatus.OK
         mock_resp.url = httpx.URL("https://url")
         mock_resp.headers = {"Content-Type": "text/yaml"}
         mock_resp.raise_for_status = MagicMock()
@@ -1199,7 +1200,7 @@ async def test_async_update_blueprint_not_modified(coordinator):
     }
 
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 304
+    mock_response.status_code = HTTPStatus.NOT_MODIFIED
     mock_response.headers = {"ETag": "old_etag", "Content-Type": "text/yaml"}
     mock_response.raise_for_status = MagicMock()
 
