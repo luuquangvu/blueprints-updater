@@ -668,7 +668,6 @@ async def test_entity_release_notes_git_diff_source_url_normalization(coordinato
     assert notes is not None
     assert "<summary>git_diff_title</summary>" not in notes
     assert "<details>" not in notes
-    assert "<summary>git_diff_title</summary>" not in notes
 
 
 @pytest.mark.asyncio
