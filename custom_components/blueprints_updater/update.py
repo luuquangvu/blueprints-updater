@@ -94,34 +94,19 @@ def async_update_entities(
     entity_registry = er.async_get(hass)
 
     entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
-    new_id_to_path: dict[str, str] = {}
-    legacy_id_to_new_id: dict[str, str] = {}
-    for info in coordinator.data.values():
-        rel_path = info["rel_path"]
-        new_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, rel_path)
-        legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id(rel_path)
-        new_id_to_path[new_id] = rel_path
-        legacy_id_to_new_id[legacy_id] = new_id
+    known_ids = {
+        BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, info["rel_path"])
+        for info in coordinator.data.values()
+    }
 
     for entity_entry in entries:
         if entity_entry.domain != "update":
             continue
 
-        unique_id = entity_entry.unique_id
-        if unique_id in new_id_to_path:
+        if entity_entry.unique_id in known_ids:
             continue
 
-        if new_id := legacy_id_to_new_id.get(unique_id):
-            _LOGGER.info(
-                "Migrating legacy unique_id for %s: %s -> %s",
-                entity_entry.entity_id,
-                unique_id,
-                new_id,
-            )
-            entity_registry.async_update_entity(entity_entry.entity_id, new_unique_id=new_id)
-            continue
-
-        _LOGGER.debug("Removing orphaned registry entry for entity: %s", entity_entry.entity_id)
+        _LOGGER.info("Removing orphaned registry entry for entity: %s", entity_entry.entity_id)
         entity_registry.async_remove(entity_entry.entity_id)
         hass.states.async_remove(entity_entry.entity_id)
 

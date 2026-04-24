@@ -17,28 +17,24 @@ from custom_components.blueprints_updater.const import (
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("data", "options", "expected"),
+    ("options", "expected"),
     [
-        ({}, {}, DEFAULT_AUTO_UPDATE),
-        ({CONF_AUTO_UPDATE: False}, {}, False),
-        ({CONF_AUTO_UPDATE: True}, {}, True),
-        ({CONF_AUTO_UPDATE: False}, {CONF_AUTO_UPDATE: True}, True),
-        ({CONF_AUTO_UPDATE: True}, {CONF_AUTO_UPDATE: False}, False),
+        ({}, DEFAULT_AUTO_UPDATE),
+        ({CONF_AUTO_UPDATE: False}, False),
+        ({CONF_AUTO_UPDATE: True}, True),
     ],
 )
-async def test_is_auto_update_enabled_config_logic(hass, data, options, expected):
-    """Test is_auto_update_enabled respects default and config_entry precedence."""
+def test_is_auto_update_enabled_config_logic(hass, options, expected):
+    """Test is_auto_update_enabled respects default and options precedence."""
     entry = MagicMock()
-    entry.data = data
+    entry.data = {}
     entry.options = options
 
     coordinator = create_mock_coordinator(hass, entry)
     assert coordinator.is_auto_update_enabled() is expected
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("options", "expected"),
     [
@@ -47,7 +43,7 @@ async def test_is_auto_update_enabled_config_logic(hass, data, options, expected
         ({CONF_USE_CDN: True}, True),
     ],
 )
-async def test_is_cdn_enabled_config_logic(hass, options, expected):
+def test_is_cdn_enabled_config_logic(hass, options, expected):
     """Test is_cdn_enabled respects default and options."""
     entry = MagicMock()
     entry.data = {}
@@ -57,29 +53,38 @@ async def test_is_cdn_enabled_config_logic(hass, options, expected):
     assert coordinator.is_cdn_enabled() is expected
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("data", "expected"),
-    [
-        ({CONF_USE_CDN: False}, False),
-        ({CONF_USE_CDN: True}, True),
-    ],
-)
-async def test_is_cdn_enabled_fallback_logic(hass, data, expected):
-    """Test is_cdn_enabled falls back to data when options are missing it."""
-    entry = MagicMock()
-    entry.data = data
-    entry.options = {}
-
-    coordinator = create_mock_coordinator(hass, entry)
-    assert coordinator.is_cdn_enabled() is expected
-
-
-@pytest.mark.asyncio
-async def test_config_helpers_no_entry(hass):
+def test_config_helpers_no_entry(hass):
     """Test config helpers handle missing config_entry."""
     coordinator = create_mock_coordinator(hass, None)
     assert coordinator.is_auto_update_enabled() is DEFAULT_AUTO_UPDATE
+    assert coordinator.is_cdn_enabled() is DEFAULT_USE_CDN
+
+
+def test_is_auto_update_enabled_ignores_legacy_data(hass):
+    """Test is_auto_update_enabled ignores values in config_entry.data.
+
+    This verifies the breaking change in v2.0.0 where legacy data fallback
+    was removed.
+    """
+    entry = MagicMock()
+    entry.data = {CONF_AUTO_UPDATE: not DEFAULT_AUTO_UPDATE}
+    entry.options = {}
+
+    coordinator = create_mock_coordinator(hass, entry)
+    assert coordinator.is_auto_update_enabled() is DEFAULT_AUTO_UPDATE
+
+
+def test_is_cdn_enabled_ignores_legacy_data(hass):
+    """Test is_cdn_enabled ignores values in config_entry.data.
+
+    This verifies the breaking change in v2.0.0 where legacy data fallback
+    was removed.
+    """
+    entry = MagicMock()
+    entry.data = {CONF_USE_CDN: not DEFAULT_USE_CDN}
+    entry.options = {}
+
+    coordinator = create_mock_coordinator(hass, entry)
     assert coordinator.is_cdn_enabled() is DEFAULT_USE_CDN
 
 
@@ -108,8 +113,7 @@ def get_schema_default(schema: vol.Schema, key_name: str) -> Any:
     raise KeyError(f"Key {key_name} not found in schema")
 
 
-@pytest.mark.asyncio
-async def test_get_config_schema_entry_precedence(hass):
+def test_get_config_schema_entry_precedence(hass):
     """Test that _get_config_schema uses options over data for defaults."""
     entry = MagicMock()
     entry.data = {
@@ -127,24 +131,22 @@ async def test_get_config_schema_entry_precedence(hass):
     assert get_schema_default(schema, CONF_USE_CDN) is True
 
 
-@pytest.mark.asyncio
-async def test_get_config_schema_fallback_to_data(hass):
-    """Test that _get_config_schema falls back to data when options are missing."""
+def test_get_config_schema_ignores_legacy_data(hass):
+    """Test that _get_config_schema ignores data even when options are missing."""
     entry = MagicMock()
     entry.data = {
-        CONF_AUTO_UPDATE: False,
-        CONF_USE_CDN: False,
+        CONF_AUTO_UPDATE: not DEFAULT_AUTO_UPDATE,
+        CONF_USE_CDN: not DEFAULT_USE_CDN,
     }
     entry.options = {}
 
     schema = _get_config_schema(entry, [])
 
-    assert get_schema_default(schema, CONF_AUTO_UPDATE) is False
-    assert get_schema_default(schema, CONF_USE_CDN) is False
+    assert get_schema_default(schema, CONF_AUTO_UPDATE) is DEFAULT_AUTO_UPDATE
+    assert get_schema_default(schema, CONF_USE_CDN) is DEFAULT_USE_CDN
 
 
-@pytest.mark.asyncio
-async def test_get_config_schema_initial_defaults(hass):
+def test_get_config_schema_initial_defaults(hass):
     """Test that _get_config_schema falls back to system defaults for initial config."""
     schema = _get_config_schema({}, [])
 

@@ -132,7 +132,6 @@
     "risk_selector_mismatch": "Sai lệch kiểu selector cho {input}: từ {old_type} sang {new_type} (ảnh hưởng {count} thực thể).",
     "risk_validation_failed_blueprint": "Nội dung blueprint mới không hợp lệ: {error}",
     "risk_unknown": "Rủi ro không xác định",
-    "risk_legacy": "{message}",
     "risk_compatibility": "Lỗi tương thích cho {entity}: {error}",
     "risk_system_error": "Lỗi hệ thống: {error}",
     "breaking_risks_report": "Tự động cập nhật cho {name} đã bị chặn để đảm bảo an toàn. Các rủi ro phát hiện được:\n{risks}\n\nVui lòng xem xét và cài đặt thủ công nếu thấy đúng.",

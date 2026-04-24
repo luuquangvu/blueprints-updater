@@ -72,6 +72,7 @@ from .const import (
 )
 from .providers import registry
 from .utils import (
+    get_config_bool,
     get_max_backups,
     redact_url,
     retry_async,
@@ -138,19 +139,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         combined = f"{entry_id}_{rel_path}"
         return f"blueprint_{hashlib.sha256(combined.encode()).hexdigest()}"
-
-    @staticmethod
-    def generate_legacy_unique_id(rel_path: str) -> str:
-        """Generate a legacy unique ID from rel_path only.
-
-        Args:
-            rel_path: The blueprint's relative path.
-
-        Returns:
-            The legacy generated unique ID.
-
-        """
-        return f"blueprint_{hashlib.sha256(rel_path.encode()).hexdigest()}"
 
     config_entry: ConfigEntry
 
@@ -1011,17 +999,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if not os.path.isfile(file_path):
                 return
 
-            legacy_bak = f"{file_path}.bak"
-            try:
-                if os.path.isfile(legacy_bak):
-                    bak1 = f"{file_path}.bak.1"
-                    if not os.path.isfile(bak1):
-                        os.rename(legacy_bak, bak1)
-                    else:
-                        os.remove(legacy_bak)
-            except OSError as err:
-                _LOGGER.warning("Error migrating legacy backup %s: %s", legacy_bak, err)
-
             for i in range(max_bak, 0, -1):
                 src = f"{file_path}.bak.{i}"
                 dst = f"{file_path}.bak.{i + 1}"
@@ -1539,30 +1516,22 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return risks
 
     @staticmethod
-    def _dedupe_risks(risks: Iterable[StructuredRisk | str]) -> list[StructuredRisk]:
-        """De-duplicate risks and convert legacy string risks to structured format.
+    def _dedupe_risks(risks: Iterable[StructuredRisk]) -> list[StructuredRisk]:
+        """De-duplicate risks by type and arguments.
 
         This ensures that identical risks (by type and arguments) are only
         reported once, even if they originate from different detection passes.
 
         Args:
-            risks: An iterable of structured risks or bare error strings.
+            risks: An iterable of structured risks.
 
         Returns:
             A list of unique structured risks.
 
         """
-        seen = set()
-        unique_risks = []
+        seen: set[tuple[BlueprintRiskType, str]] = set()
+        unique_risks: list[StructuredRisk] = []
         for risk in risks:
-            if isinstance(risk, str):
-                if risk not in seen:
-                    seen.add(risk)
-                    unique_risks.append(
-                        {"type": BlueprintRiskType.LEGACY, "args": {"message": risk}}
-                    )
-                continue
-
             if not isinstance(risk, dict) or "type" not in risk or "args" not in risk:
                 _LOGGER.debug("Skipping malformed risk: %s", risk)
                 continue
@@ -1817,13 +1786,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             lines.append(f"- {msg}")
         return "\n".join(lines)
 
-    async def _get_risk_summary(self, risks: list[StructuredRisk]) -> str:
-        """Internal legacy shim for risk summarization.
-
-        Deprecated in favor of async_summarize_risks.
-        """
-        return await self.async_summarize_risks(risks)
-
     def _get_entities_using_blueprint(self, rel_path: str) -> list[str]:
         """Get entity IDs of automations and scripts using the given blueprint.
 
@@ -1983,20 +1945,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     def is_auto_update_enabled(self) -> bool:
         """Return whether auto-update is enabled.
 
-        Checks configuration options with fallback to internal data (legacy)
-        and finally the system default.
+        Checks configuration options and falls back to the system default.
 
         Returns:
             Boolean indicating auto-update preference.
 
         """
-        if not self.config_entry:
-            return DEFAULT_AUTO_UPDATE
-
-        return self.config_entry.options.get(
-            CONF_AUTO_UPDATE,
-            self.config_entry.data.get(CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE),
-        )
+        return get_config_bool(self.config_entry, CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
 
     def is_cdn_enabled(self) -> bool:
         """Return whether jsDelivr CDN usage is enabled.
@@ -2005,13 +1960,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             Boolean indicating CDN preference.
 
         """
-        if not self.config_entry:
-            return DEFAULT_USE_CDN
-
-        return self.config_entry.options.get(
-            CONF_USE_CDN,
-            self.config_entry.data.get(CONF_USE_CDN, DEFAULT_USE_CDN),
-        )
+        return get_config_bool(self.config_entry, CONF_USE_CDN, DEFAULT_USE_CDN)
 
     def _update_error_state(
         self, path: str, error_type: str, detail: Any, clear_etag: bool = False
@@ -2472,7 +2421,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             else "auto_update_blocked_by_breaking_change"
         )
         title = await self.async_translate(title_key, name=info["name"])
-        risk_summary = await self._get_risk_summary(risks)
+        risk_summary = await self.async_summarize_risks(risks)
         message = await self.async_translate(
             "breaking_risks_report", name=info["name"], risks=risk_summary
         )

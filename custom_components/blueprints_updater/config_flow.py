@@ -40,7 +40,13 @@ from .const import (
     MIN_UPDATE_INTERVAL,
 )
 from .coordinator import BlueprintUpdateCoordinator
-from .utils import get_max_backups, get_update_interval
+from .utils import (
+    get_config_bool,
+    get_config_str,
+    get_config_value,
+    get_max_backups,
+    get_update_interval,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,17 +91,10 @@ def _get_config_schema(
         A voluptuous Schema object.
 
     """
-    current_config: dict[str, Any] = {}
-    if config is not None:
-        if hasattr(config, "options"):
-            current_config = {**config.data, **config.options}
-        elif isinstance(config, dict):
-            current_config = config
-
-    auto_update = current_config.get(CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
-    use_cdn = current_config.get(CONF_USE_CDN, DEFAULT_USE_CDN)
-    filter_mode = current_config.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
-    selected_blueprints = current_config.get(CONF_SELECTED_BLUEPRINTS, [])
+    auto_update = get_config_bool(config, CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
+    use_cdn = get_config_bool(config, CONF_USE_CDN, DEFAULT_USE_CDN)
+    filter_mode = get_config_str(config, CONF_FILTER_MODE, FILTER_MODE_ALL)
+    selected_blueprints = get_config_value(config, CONF_SELECTED_BLUEPRINTS, [])
 
     return vol.Schema(
         {

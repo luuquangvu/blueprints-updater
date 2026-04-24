@@ -210,9 +210,6 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
         patch.object(hass.services, "has_service", return_value=False),
     ):
         mock_coordinator_class.generate_unique_id = BlueprintUpdateCoordinator.generate_unique_id
-        mock_coordinator_class.generate_legacy_unique_id = (
-            BlueprintUpdateCoordinator.generate_legacy_unique_id
-        )
         hass.config_entries = MagicMock()
         hass.config_entries.async_forward_entry_setups = AsyncMock()
         await async_setup(hass, {})
@@ -288,8 +285,6 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
                 )
             assert exc.value.translation_key == "invalid_version"
 
-            legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id("test.yaml")
-            good_entity.unique_id = legacy_id
             coordinator_mock.async_restore_blueprint = AsyncMock(
                 return_value={"success": True, "translation_key": "success"}
             )
@@ -618,3 +613,63 @@ async def test_init_unload_path(hass: HomeAssistant):
     assert await async_unload_entry(hass, entry) is True
     assert "test_entry" not in hass.data[DOMAIN]["coordinators"]
     mock_coord.async_shutdown.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_restore_blueprint_fails_with_legacy_id(hass: HomeAssistant):
+    """Ensure restore fails when only legacy-style unique IDs exist in the registry.
+
+    Legacy ID format was: f"{DOMAIN}-{blueprint_path}"
+    """
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.options = {}
+    entry.data = {}
+
+    coordinator_mock = MagicMock(spec=BlueprintUpdateCoordinator)
+    coordinator_mock.config_entry = entry
+    coordinator_mock.data = {"test.yaml": {"rel_path": "test.yaml", "updatable": True}}
+
+    _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.__init__.BlueprintUpdateCoordinator",
+            return_value=coordinator_mock,
+        ) as mock_coord_class,
+        patch(
+            "custom_components.blueprints_updater.__init__.async_register_admin_service"
+        ) as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
+        patch("homeassistant.helpers.entity_registry.async_get") as mock_er,
+    ):
+        mock_coord_class.generate_unique_id = BlueprintUpdateCoordinator.generate_unique_id
+        hass.config_entries = MagicMock()
+        hass.config_entries.async_forward_entry_setups = AsyncMock()
+        await async_setup(hass, {})
+        await async_setup_entry(hass, entry)
+
+        restore_handler = next(
+            (
+                call.args[3] if len(call.args) > 3 else call.kwargs.get("service_func")
+                for call in mock_register.call_args_list
+                if (len(call.args) > 2 and call.args[2] == "restore_blueprint")
+                or call.kwargs.get("service") == "restore_blueprint"
+            ),
+            None,
+        )
+
+        assert restore_handler is not None
+
+        good_entity = MagicMock()
+        good_entity.domain = "update"
+        good_entity.config_entry_id = entry.entry_id
+        good_entity.unique_id = f"{DOMAIN}-test.yaml"
+
+        mock_er.return_value.async_get.return_value = good_entity
+
+        with pytest.raises(ServiceValidationError) as exc:
+            await restore_handler(
+                ServiceCall(hass, DOMAIN, "restore_blueprint", {"entity_id": "update.test"})
+            )
+        assert exc.value.translation_key == "not_found"

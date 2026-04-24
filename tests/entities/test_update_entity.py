@@ -1,6 +1,7 @@
 """Tests for Blueprints Updater update entities."""
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
@@ -485,39 +486,37 @@ async def test_entity_skip_version(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_update_entities_migration(hass):
-    """Validate legacy rel_path IDs are migrated and unknown entities removed."""
+async def test_async_update_entities_orphan_cleanup(hass, caplog):
+    """Validate that entities with unknown unique_ids are removed as orphans."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
 
     coordinator = MagicMock(spec=BlueprintUpdateCoordinator)
     coordinator.config_entry = entry
     coordinator.data = {
-        "/config/blueprints/kept.yaml": {
+        "kept.yaml": {
             "rel_path": "kept.yaml",
             "name": "Kept",
             "local_hash": "hash",
         },
     }
-    coordinator.async_add_listener = MagicMock()
-
-    hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator}}}
-    hass.states = MagicMock()
 
     mock_entity_registry = MagicMock()
 
-    legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id("kept.yaml")
-    new_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, "kept.yaml")
+    known_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, "kept.yaml")
 
-    legacy_entity = MagicMock()
-    legacy_entity.domain = "update"
-    legacy_entity.unique_id = legacy_id
-    legacy_entity.entity_id = "update.kept"
+    known_entity = MagicMock()
+    known_entity.domain = "update"
+    known_entity.unique_id = known_id
+    known_entity.entity_id = "update.kept"
 
     orphan_entity = MagicMock()
     orphan_entity.domain = "update"
     orphan_entity.unique_id = "test_entry_orphan.yaml"
     orphan_entity.entity_id = "update.orphan"
+
+    hass.data = {DOMAIN: {"coordinators": {entry.entry_id: coordinator}}}
+    hass.states = MagicMock()
 
     with (
         patch(
@@ -526,17 +525,17 @@ async def test_async_update_entities_migration(hass):
         ),
         patch(
             "custom_components.blueprints_updater.update.er.async_entries_for_config_entry",
-            return_value=[legacy_entity, orphan_entity],
+            return_value=[known_entity, orphan_entity],
         ),
+        caplog.at_level(logging.INFO),
     ):
         async_add_entities = MagicMock()
         await async_setup_entry(hass, entry, async_add_entities)
 
-        mock_entity_registry.async_update_entity.assert_called_once_with(
-            "update.kept", new_unique_id=new_id
-        )
         mock_entity_registry.async_remove.assert_called_once_with("update.orphan")
+        mock_entity_registry.async_update_entity.assert_not_called()
         hass.states.async_remove.assert_called_once_with("update.orphan")
+        assert "Removing orphaned registry entry for entity: update.orphan" in caplog.text
 
 
 @pytest.mark.asyncio

@@ -33,8 +33,7 @@ def mock_coordinator(hass):
         return BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
 
 
-@pytest.mark.asyncio
-async def test_coordinator_data_initialized_to_empty_dict(hass, mock_coordinator):
+def test_coordinator_data_initialized_to_empty_dict(hass, mock_coordinator):
     """Confirm BlueprintUpdateCoordinator sets self.data to {} after initialization."""
     assert mock_coordinator.data == {}
 

@@ -337,27 +337,6 @@ async def test_backup_max_limit(coordinator, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_backup_migration_old_bak(coordinator, tmp_path):
-    """Test migration of old .bak format to .bak.1 on next backup."""
-    bp_file = tmp_path / "test.yaml"
-    bp_file.write_text("current")
-    (tmp_path / "test.yaml.bak").write_text("old_backup")
-
-    coordinator.config_entry = MagicMock()
-    coordinator.config_entry.options = MappingProxyType({"max_backups": 3})
-    coordinator.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
-
-    await coordinator.async_install_blueprint(
-        str(bp_file), "new_version", reload_services=False, backup=True
-    )
-
-    assert bp_file.read_text() == "new_version"
-    assert (tmp_path / "test.yaml.bak.1").read_text() == "current"
-    assert (tmp_path / "test.yaml.bak.2").read_text() == "old_backup"
-    assert not (tmp_path / "test.yaml.bak").exists()
-
-
-@pytest.mark.asyncio
 async def test_backup_rotation(coordinator, tmp_path):
     """Test that backups rotate correctly: .bak.1 is newest, .bak.3 is oldest."""
     bp_file = tmp_path / "test.yaml"

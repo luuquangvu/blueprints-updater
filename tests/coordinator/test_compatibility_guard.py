@@ -173,34 +173,6 @@ async def test_async_summarize_risks_formatting_and_translation_fallback(coordin
 
 
 @pytest.mark.asyncio
-async def test_get_risk_summary_shim(coordinator: BlueprintUpdateCoordinator, monkeypatch):
-    """Verify that the _get_risk_summary legacy shim correctly calls async_summarize_risks."""
-    translated_keys = []
-
-    async def fake_async_translate(key, **kwargs):
-        translated_keys.append(key)
-        return f"translated:{key}"
-
-    monkeypatch.setattr(coordinator, "async_translate", fake_async_translate)
-
-    risks: list[StructuredRisk] = cast(
-        list[StructuredRisk],
-        [
-            {"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": "input1"}},
-            {"type": "unknown_risk_type", "args": {"foo": "bar"}},
-        ],
-    )
-
-    summary = await coordinator._get_risk_summary(risks)
-
-    assert "- translated:risk_new_mandatory" in summary
-    assert "- translated:risk_unknown" in summary
-    assert "\n" in summary
-    assert any("risk_new_mandatory" in k for k in translated_keys)
-    assert any("risk_unknown" in k for k in translated_keys)
-
-
-@pytest.mark.asyncio
 async def test_auto_update_guard_blocks_on_system_error(coordinator: BlueprintUpdateCoordinator):
     """Auto-update is blocked when a system error risk is present, even without consumers."""
     blueprint_path = "automation/system_error.yaml"

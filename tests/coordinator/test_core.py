@@ -29,8 +29,7 @@ def test_coordinator_protocol_conformance(coordinator):
     assert isinstance(coordinator, BlueprintCoordinatorProtocol)
 
 
-@pytest.mark.asyncio
-async def test_coordinator_data_initialized_to_empty_dict(hass):
+def test_coordinator_data_initialized_to_empty_dict(hass):
     """Confirm BlueprintUpdateCoordinator sets self.data to {} after initialization."""
     entry = MagicMock()
     entry.options = MappingProxyType({})

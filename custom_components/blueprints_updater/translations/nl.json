@@ -132,7 +132,6 @@
     "risk_selector_mismatch": "Selector-type gewijzigd voor {input}: van {old_type} naar {new_type} (beïnvloedt {count} entiteiten).",
     "risk_validation_failed_blueprint": "Nieuwe blueprint inhoud is ongeldig: {error}",
     "risk_unknown": "Onbekende fout",
-    "risk_legacy": "{message}",
     "risk_compatibility": "Compatibiliteitsfout voor {entity}: {error}",
     "risk_system_error": "Systeemfout: {error}",
     "breaking_risks_report": "Automatische update voor {name} is uit voorzorg geblokkeerd. Gedetecteerde risico's:\n{risks}\n\nControleer dit en installeer handmatig als het correct is.",

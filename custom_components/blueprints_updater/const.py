@@ -69,7 +69,6 @@ class IntegrationService(StrEnum):
 class BlueprintRiskType(StrEnum):
     """Risk types for breaking change detection."""
 
-    LEGACY = "legacy_risk"
     NEW_MANDATORY = "new_mandatory"
     MISSING_INPUT = "missing_input"
     REMOVED_INPUT = "removed_input"
@@ -87,7 +86,6 @@ class BlueprintBlockingReason(StrEnum):
 
 
 RISK_TYPE_TRANSLATIONS = {
-    BlueprintRiskType.LEGACY: "risk_legacy",
     BlueprintRiskType.NEW_MANDATORY: "risk_new_mandatory",
     BlueprintRiskType.MISSING_INPUT: "risk_missing_input",
     BlueprintRiskType.REMOVED_INPUT: "risk_removed_input",

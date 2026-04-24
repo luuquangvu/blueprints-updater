@@ -8,7 +8,10 @@ import pytest
 
 from custom_components.blueprints_updater.const import CONF_MAX_BACKUPS, CONF_UPDATE_INTERVAL
 from custom_components.blueprints_updater.utils import (
+    get_config_bool,
     get_config_int,
+    get_config_str,
+    get_config_value,
     get_max_backups,
     get_update_interval,
     redact_url,
@@ -180,6 +183,50 @@ def test_get_config_int():
 
     config.options = {"key": " 12.7 "}
     assert get_config_int(config, "key", 5) == 12
+
+
+def test_get_config_bool():
+    """Test get_config_bool helper."""
+    config = MagicMock()
+    config.options = {"key": True}
+    assert get_config_bool(config, "key", False) is True
+    assert get_config_bool(config, "missing", False) is False
+    assert get_config_bool(None, "key", True) is True
+
+    config.options = {"key": 0}
+    assert get_config_bool(config, "key", True) is False
+
+    assert get_config_bool({"key": "anything"}, "key", False) is False
+
+    assert get_config_str({"key": 123}, "key", "default") == "123"
+
+
+def test_get_config_bool_string_handling():
+    """Test get_config_bool handles string boolean values correctly."""
+    assert get_config_bool({"key": "true"}, "key", False) is True
+    assert get_config_bool({"key": "TRUE"}, "key", False) is True
+    assert get_config_bool({"key": "yes"}, "key", False) is True
+    assert get_config_bool({"key": "on"}, "key", False) is True
+    assert get_config_bool({"key": "1"}, "key", False) is True
+    assert get_config_bool({"key": "false"}, "key", True) is False
+    assert get_config_bool({"key": "0"}, "key", True) is False
+    assert get_config_bool({"key": "anything else"}, "key", True) is False
+
+
+def test_get_config_value():
+    """Test get_config_value helper."""
+    config = MagicMock()
+    config.options = {"key": [1, 2, 3]}
+    assert get_config_value(config, "key", []) == [1, 2, 3]
+    assert get_config_value(config, "missing", ["default"]) == ["default"]
+    assert get_config_value(None, "key", ["none"]) == ["none"]
+
+    assert get_config_value({"key": {"a": 1}}, "key", {}) == {"a": 1}
+
+    config_with_both = MagicMock()
+    config_with_both.options = {"key": "from_options"}
+    config_with_both.data = {"key": "from_data"}
+    assert get_config_value(config_with_both, "key", "default") == "from_options"
 
 
 def test_get_update_interval():
