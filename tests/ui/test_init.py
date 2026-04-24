@@ -285,9 +285,6 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
                 )
             assert exc.value.translation_key == "invalid_version"
 
-            good_entity.unique_id = BlueprintUpdateCoordinator.generate_unique_id(
-                "test_entry", "test.yaml"
-            )
             coordinator_mock.async_restore_blueprint = AsyncMock(
                 return_value={"success": True, "translation_key": "success"}
             )
