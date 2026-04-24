@@ -2908,7 +2908,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             parsed = schema(parsed)
         except (vol.Invalid, KeyError, TypeError, ValueError) as err:
             _LOGGER.debug(
-                "Semantic normalization skipped for %s (using raw YAML): %s",
+                "Semantic normalization skipped for %s (falling back to canonical YAML): %s",
                 redact_url(source_url),
                 err,
             )

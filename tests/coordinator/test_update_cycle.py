@@ -487,9 +487,14 @@ async def test_ghost_update_prevention(coordinator):
     """Test that updates are rejected if remote content matches local file but not remote_hash."""
     path = "/config/blueprints/automation/test.yaml"
     url = "https://github.com/user/repo/blob/main/test.yaml"
-    content = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n"
+    content = (
+        f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n  input: {{}}\n"
+    )
     normalized_content = coordinator._ensure_source_url(content, url)
     local_hash = coordinator._hash_content(normalized_content, already_normalized=True)
+
+    raw_hash = coordinator._hash_content(content)
+    assert raw_hash == local_hash
 
     coordinator.data[path] = {
         "local_hash": local_hash,

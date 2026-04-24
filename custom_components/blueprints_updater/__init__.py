@@ -93,8 +93,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinators = hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})
     coordinators[entry.entry_id] = blueprint_coordinator
 
+    platforms_forwarded = False
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        platforms_forwarded = True
         _async_register_services(hass)
         entry.async_on_unload(entry.add_update_listener(async_update_options))
         blueprint_coordinator.setup_complete = True
@@ -102,7 +104,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception:
         _LOGGER.debug("Setup failed for entry %s, performing rollback", entry.entry_id)
         coordinators.pop(entry.entry_id, None)
-        await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        if platforms_forwarded:
+            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
         raise
 
     return True
@@ -170,9 +173,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
         except (KeyError, ValueError, IndexError) as err:
             _LOGGER.debug("Error formatting translation for %s: %s", key, err)
             return msg
-
-    if hass.services.has_service(DOMAIN, "reload"):
-        return
 
     async def async_reload_action_handler(_: ServiceCall) -> None:
         """Handle the reload action call."""
@@ -328,31 +328,34 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     registered_services = []
     try:
-        async_register_admin_service(hass, DOMAIN, "reload", async_reload_action_handler)
-        registered_services.append("reload")
+        if not hass.services.has_service(DOMAIN, "reload"):
+            async_register_admin_service(hass, DOMAIN, "reload", async_reload_action_handler)
+            registered_services.append("reload")
 
-        async_register_admin_service(
-            hass,
-            DOMAIN,
-            "restore_blueprint",
-            async_restore_blueprint_handler,
-            schema=restore_schema,
-            supports_response=SupportsResponse.ONLY,
-        )
-        registered_services.append("restore_blueprint")
+        if not hass.services.has_service(DOMAIN, "restore_blueprint"):
+            async_register_admin_service(
+                hass,
+                DOMAIN,
+                "restore_blueprint",
+                async_restore_blueprint_handler,
+                schema=restore_schema,
+                supports_response=SupportsResponse.ONLY,
+            )
+            registered_services.append("restore_blueprint")
 
-        async_register_admin_service(
-            hass,
-            DOMAIN,
-            "update_all",
-            async_update_all_handler,
-            schema=vol.Schema(
-                {
-                    vol.Optional("backup", default=True): cv.boolean,
-                }
-            ),
-        )
-        registered_services.append("update_all")
+        if not hass.services.has_service(DOMAIN, "update_all"):
+            async_register_admin_service(
+                hass,
+                DOMAIN,
+                "update_all",
+                async_update_all_handler,
+                schema=vol.Schema(
+                    {
+                        vol.Optional("backup", default=True): cv.boolean,
+                    }
+                ),
+            )
+            registered_services.append("update_all")
     except Exception:
         _LOGGER.debug("Service registration failed, rolling back: %s", registered_services)
         for service in registered_services:

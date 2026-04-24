@@ -345,3 +345,42 @@ async def test_setup_entry_rollback(hass: HomeAssistant) -> None:
 
         assert entry.entry_id not in hass.data.get(DOMAIN, {}).get("coordinators", {})
         mock_unload.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_setup_entry_rollback_on_forward_failure(hass: HomeAssistant) -> None:
+    """Test that async_setup_entry rolls back correctly when forward_entry_setups fails."""
+    entry = MagicMock()
+    entry.entry_id = "forward_failure_entry"
+    entry.data = {}
+    entry.options = {}
+    entry.state = ConfigEntryState.SETUP_IN_PROGRESS
+
+    coordinator_mock = MagicMock()
+    coordinator_mock.async_setup = AsyncMock()
+    coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.data = {}
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.BlueprintUpdateCoordinator",
+            return_value=coordinator_mock,
+        ),
+        patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
+            side_effect=Exception("Forward Failed"),
+        ),
+        patch.object(
+            hass.config_entries, "async_unload_platforms", new_callable=AsyncMock
+        ) as mock_unload,
+        patch(
+            "custom_components.blueprints_updater._async_register_services",
+        ) as mock_register_services,
+    ):
+        with pytest.raises(Exception, match="Forward Failed"):
+            await async_setup_entry(hass, entry)
+
+        assert entry.entry_id not in hass.data.get(DOMAIN, {}).get("coordinators", {})
+        mock_unload.assert_not_called()
+        mock_register_services.assert_not_called()
