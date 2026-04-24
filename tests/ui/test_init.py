@@ -346,7 +346,7 @@ async def test_unload_entry(hass: HomeAssistant):
         patch("custom_components.blueprints_updater.__init__._LOGGER") as mock_logger,
     ):
         await async_unload_entry(hass, entry)
-        assert mock_logger.warning.called
+        assert mock_logger.debug.called
         assert hass.data[DOMAIN].get("services_registered") is False
 
 
