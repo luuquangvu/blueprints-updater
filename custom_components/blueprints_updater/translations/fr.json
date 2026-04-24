@@ -132,7 +132,6 @@
     "risk_selector_mismatch": "Type de sélecteur modifié pour {input} : de {old_type} à {new_type} (affecte {count} entités).",
     "risk_validation_failed_blueprint": "Le nouveau contenu du blueprint est invalide : {error}",
     "risk_unknown": "Erreur inconnue",
-    "risk_legacy": "{message}",
     "risk_compatibility": "Erreur de compatibilité pour {entity} : {error}",
     "risk_system_error": "Erreur système : {error}",
     "breaking_risks_report": "La mise à jour automatique pour {name} a été bloquée par précaution. Risques détectés :\n{risks}\n\nVeuillez vérifier et installer manuellement si c'est correct.",

@@ -132,7 +132,6 @@
     "risk_selector_mismatch": "Тип селектора изменен для {input}: с {old_type} на {new_type} (влияет на {count} сущностей).",
     "risk_validation_failed_blueprint": "Новое содержимое чертежа недействительно: {error}",
     "risk_unknown": "Неизвестная ошибка",
-    "risk_legacy": "{message}",
     "risk_compatibility": "Ошибка совместимости для {entity}: {error}",
     "risk_system_error": "Системная ошибка: {error}",
     "breaking_risks_report": "Автоматическое обновление {name} было заблокировано в целях предосторожности. Обнаруженные риски:\n{risks}\n\nПожалуйста, проверьте и установите вручную, если всё верно.",

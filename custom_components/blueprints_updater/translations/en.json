@@ -132,7 +132,6 @@
     "risk_selector_mismatch": "Selector type changed for {input}: from {old_type} to {new_type} (affects {count} entities).",
     "risk_validation_failed_blueprint": "New blueprint content is invalid: {error}",
     "risk_unknown": "Unknown risk",
-    "risk_legacy": "{message}",
     "risk_compatibility": "Compatibility Error for {entity}: {error}",
     "risk_system_error": "System error: {error}",
     "breaking_risks_report": "Auto-update for {name} was blocked as a precaution. Detected risks:\n{risks}\n\nPlease review and install manually if correct.",

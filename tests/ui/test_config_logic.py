@@ -19,19 +19,17 @@ from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoor
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("data", "options", "expected"),
+    ("options", "expected"),
     [
-        ({}, {}, DEFAULT_AUTO_UPDATE),
-        ({CONF_AUTO_UPDATE: False}, {}, False),
-        ({CONF_AUTO_UPDATE: True}, {}, True),
-        ({CONF_AUTO_UPDATE: False}, {CONF_AUTO_UPDATE: True}, True),
-        ({CONF_AUTO_UPDATE: True}, {CONF_AUTO_UPDATE: False}, False),
+        ({}, DEFAULT_AUTO_UPDATE),
+        ({CONF_AUTO_UPDATE: False}, False),
+        ({CONF_AUTO_UPDATE: True}, True),
     ],
 )
-async def test_is_auto_update_enabled_config_logic(hass, data, options, expected):
-    """Test is_auto_update_enabled respects default and config_entry precedence."""
+async def test_is_auto_update_enabled_config_logic(hass, options, expected):
+    """Test is_auto_update_enabled respects default and options precedence."""
     entry = MagicMock()
-    entry.data = data
+    entry.data = {}
     entry.options = options
 
     coordinator = create_mock_coordinator(hass, entry)
@@ -52,24 +50,6 @@ async def test_is_cdn_enabled_config_logic(hass, options, expected):
     entry = MagicMock()
     entry.data = {}
     entry.options = options
-
-    coordinator = create_mock_coordinator(hass, entry)
-    assert coordinator.is_cdn_enabled() is expected
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("data", "expected"),
-    [
-        ({CONF_USE_CDN: False}, False),
-        ({CONF_USE_CDN: True}, True),
-    ],
-)
-async def test_is_cdn_enabled_fallback_logic(hass, data, expected):
-    """Test is_cdn_enabled falls back to data when options are missing it."""
-    entry = MagicMock()
-    entry.data = data
-    entry.options = {}
 
     coordinator = create_mock_coordinator(hass, entry)
     assert coordinator.is_cdn_enabled() is expected

@@ -132,7 +132,6 @@
     "risk_selector_mismatch": "Tipo de seletor alterado para {input}: de {old_type} para {new_type} (afeta {count} entidades).",
     "risk_validation_failed_blueprint": "O novo conteúdo do blueprint é inválido: {error}",
     "risk_unknown": "Erro desconhecido",
-    "risk_legacy": "{message}",
     "risk_compatibility": "Erro de compatibilidade para {entity}: {error}",
     "risk_system_error": "Erro do sistema: {error}",
     "breaking_risks_report": "A atualização automática para {name} foi bloqueada por precaução. Riscos detetados:\n{risks}\n\nPor favor, reveja e instale manualmente se estiver correto.",

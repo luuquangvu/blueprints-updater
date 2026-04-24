@@ -210,9 +210,6 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
         patch.object(hass.services, "has_service", return_value=False),
     ):
         mock_coordinator_class.generate_unique_id = BlueprintUpdateCoordinator.generate_unique_id
-        mock_coordinator_class.generate_legacy_unique_id = (
-            BlueprintUpdateCoordinator.generate_legacy_unique_id
-        )
         hass.config_entries = MagicMock()
         hass.config_entries.async_forward_entry_setups = AsyncMock()
         await async_setup(hass, {})
@@ -288,8 +285,9 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
                 )
             assert exc.value.translation_key == "invalid_version"
 
-            legacy_id = BlueprintUpdateCoordinator.generate_legacy_unique_id("test.yaml")
-            good_entity.unique_id = legacy_id
+            good_entity.unique_id = BlueprintUpdateCoordinator.generate_unique_id(
+                "test_entry", "test.yaml"
+            )
             coordinator_mock.async_restore_blueprint = AsyncMock(
                 return_value={"success": True, "translation_key": "success"}
             )
