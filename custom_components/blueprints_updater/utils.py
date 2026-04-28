@@ -1,5 +1,7 @@
 """Utility functions for Blueprints Updater."""
 
+from __future__ import annotations
+
 import asyncio
 import inspect
 import logging

@@ -360,8 +360,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     continue
 
                 abs_path = (Path(root) / rel_path_obj).resolve()
-                if abs_path.is_file():
-                    filtered[rel_path] = data
+                if os.path.isfile(abs_path):
+                    real_path = os.path.realpath(str(abs_path))
+                    real_root = os.path.realpath(root)
+                    if os.path.commonpath([real_path, real_root]) == real_root:
+                        filtered[rel_path] = data
+                    else:
+                        _LOGGER.warning("Blueprint path outside root: %s", abs_path)
             except (ValueError, OSError, TypeError):
                 continue
         return filtered
@@ -873,9 +878,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             "Saving metadata for %d blueprints to storage",
             len(final_metadata),
         )
-        self._persisted_metadata = final_metadata
         try:
             await self._store.async_save({"metadata": final_metadata})
+            self._persisted_metadata = final_metadata
         except Exception:
             _LOGGER.exception("Failed to save metadata to storage")
 
@@ -1314,6 +1319,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
                 domain = "automation"
                 if self.data and real_path in self.data:
+                    self.data[real_path]["etag"] = None
+                    self.data[real_path]["remote_hash"] = None
                     domain = self.data[real_path].get("domain", "automation")
                 await self.async_reload_services([domain])
                 await self.async_request_refresh()

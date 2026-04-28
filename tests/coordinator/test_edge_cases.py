@@ -99,7 +99,7 @@ async def test_prune_stale_metadata(coordinator):
     coordinator.data = {"path1": {"rel_path": "path1", "source_url": "u"}}
 
     with (
-        patch("os.path.isfile", side_effect=lambda x: x == "path1"),
+        patch("os.path.isfile", side_effect=lambda x: str(x).replace("\\", "/").endswith("path1")),
         patch.object(coordinator, "_async_save_metadata", new_callable=AsyncMock) as mock_save,
         patch.object(
             coordinator.hass,
@@ -114,6 +114,9 @@ async def test_prune_stale_metadata(coordinator):
         mock_save.assert_awaited_once_with(force=True)
 
     assert "path2" not in coordinator._persisted_metadata
+    assert "path1" in coordinator._persisted_metadata
+    assert coordinator._persisted_metadata["path1"]["etag"] == "etag1"
+    assert "path1" in coordinator.data
 
 
 @pytest.mark.asyncio
