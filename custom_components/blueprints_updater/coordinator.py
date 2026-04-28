@@ -63,6 +63,7 @@ from .const import (
     MAX_CONCURRENT_REQUESTS,
     MAX_RETRIES,
     MAX_SEND_INTERVAL,
+    METADATA_STORAGE_FIELDS,
     MIN_SEND_INTERVAL,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
@@ -218,8 +219,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         validated_metadata: dict[str, dict[str, Any]] = {}
         for rel_path, entry in metadata.items():
-            if isinstance(rel_path, str) and isinstance(entry, dict):
-                validated_metadata[rel_path] = entry
+            if isinstance(rel_path, str) and (
+                validated := BlueprintUpdateCoordinator._validate_metadata_entry(entry)
+            ):
+                validated_metadata[rel_path] = validated
             else:
                 _LOGGER.warning("Skipping malformed metadata entry for %s", rel_path)
 
@@ -370,6 +373,29 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             except (ValueError, OSError, TypeError):
                 continue
         return filtered
+
+    @staticmethod
+    def _validate_metadata_entry(entry: Any) -> dict[str, Any] | None:
+        """Validate and normalize a single metadata entry.
+
+        Args:
+            entry: Raw entry from storage.
+
+        Returns:
+            A cleaned metadata dictionary if valid, else None.
+
+        """
+        if not isinstance(entry, dict):
+            return None
+
+        validated: dict[str, Any] = {}
+        for field in METADATA_STORAGE_FIELDS:
+            val = entry.get(field)
+            if val is None or isinstance(val, str):
+                validated[field] = val
+            else:
+                return None
+        return validated
 
     async def _async_prune_stale_metadata(self, scanned_paths: set[str]) -> None:
         """Remove metadata for blueprints that no longer exist on disk.
@@ -900,7 +926,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         We explicitly check known fields instead of relying on truthiness of all values,
         so that future falsy-but-meaningful values (e.g. 0 or False) are not discarded.
         """
-        return bool(entry.get("etag") or entry.get("remote_hash") or entry.get("source_url"))
+        return any(entry.get(field) for field in METADATA_STORAGE_FIELDS)
 
     async def _async_handle_notifications(
         self, auto_updated_names: list[str], domains: set[str] | None = None
