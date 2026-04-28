@@ -243,8 +243,8 @@ def test_normalization_comprehensive(coordinator, variant, input_content, expect
     normalized = coordinator._normalize_content(input_content)
     assert normalized == expected_output, f"Failed for variant: {variant}"
 
-    hash1 = coordinator._hash_content(input_content)
-    hash2 = coordinator._hash_content(normalized, already_normalized=True)
+    hash1 = coordinator._hash_content(input_content, "https://example.com")
+    hash2 = coordinator._hash_content(normalized, "https://example.com")
     assert hash1 == hash2, f"Hash mismatch for variant: {variant}"
 
 
@@ -254,7 +254,9 @@ def test_normalization_idempotency(coordinator):
     first = coordinator._normalize_content(content)
     second = coordinator._normalize_content(first)
     assert first == second
-    assert coordinator._hash_content(first) == coordinator._hash_content(second)
+    assert coordinator._hash_content(first, "https://example.com") == coordinator._hash_content(
+        second, "https://example.com"
+    )
 
 
 def test_ensure_source_url_stability(coordinator):
@@ -336,12 +338,12 @@ def test_ensure_source_url_structured_modification(coordinator):
 
 
 def test_hash_content_determinism(coordinator):
-    """Test that hashing is deterministic regardless of the already_normalized flag."""
+    """Test that hashing is deterministic."""
     content = "\ufeffblueprint:\r\n  name: Test\n"
-    hash1 = coordinator._hash_content(content)
+    hash1 = coordinator._hash_content(content, "https://example.com")
 
     normalized = coordinator._normalize_content(content)
-    hash2 = coordinator._hash_content(normalized, already_normalized=True)
+    hash2 = coordinator._hash_content(normalized, "https://example.com")
 
     assert hash1 == hash2
     assert "\ufeff" not in normalized
@@ -485,3 +487,62 @@ def test_ensure_source_url_script(coordinator):
     assert parsed["blueprint"]["source_url"] == source_url
     assert parsed["blueprint"]["name"] == "Test Script"
     assert parsed["blueprint"]["domain"] == "script"
+
+
+def test_deterministic_yaml_hashing(coordinator):
+    """Test that YAML hashing is deterministic between Local and Remote versions.
+
+    Verify that a Local version (with injected defaults) and a Remote version
+    (without them) result in the same hash after semantic normalization.
+    """
+    source_url = "https://github.com/user/test"
+    content_v1 = (
+        "blueprint:\n  name: T\n  domain: automation\n  input:\n    t:\n"
+        "      name: T\n      selector:\n        text:\n"
+        "          multiline: false\n          multiple: false"
+    )
+    content_v2 = (
+        "blueprint:\n  name: T\n  domain: automation\n  input:\n    t:\n"
+        "      name: T\n      selector:\n        text: {}"
+    )
+
+    hash1 = coordinator._hash_content(content_v1, source_url)
+    hash2 = coordinator._hash_content(content_v2, source_url)
+
+    assert hash1 == hash2
+
+    norm = coordinator._ensure_source_url(content_v2, source_url)
+    assert "multiline: false\n          multiple: false" in norm
+
+
+def test_yaml_order_preservation(coordinator):
+    """Test that original key order is preserved for non-schema keys.
+
+    Verify that an original order like input_z before input_a is maintained
+    after normalization.
+    """
+    source_url = "https://github.com/user/test"
+    content = """
+blueprint:
+  name: Test
+  domain: automation
+  input:
+    input_z:
+      name: Z
+    input_a:
+      name: A
+"""
+    normalized = coordinator._ensure_source_url(content, source_url)
+
+    z_pos = normalized.find("input_z")
+    a_pos = normalized.find("input_a")
+    assert z_pos < a_pos
+    assert "input_z" in normalized
+    assert "input_a" in normalized
+
+
+def test_hash_content_no_semantic(coordinator):
+    """Test that hash_content returns a consistent-length SHA-256 hex digest."""
+    content = "blueprint:\n  name: Test"
+    hash1 = coordinator._hash_content(content, "https://example.com")
+    assert len(hash1) == 64

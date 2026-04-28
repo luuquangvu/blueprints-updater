@@ -52,8 +52,9 @@ async def test_304_response_preserves_updatable_status(
     local_content = "blueprint:\n  name: Old"
     remote_content = "blueprint:\n  name: New"
 
-    local_hash = coordinator._hash_content(local_content)
-    remote_hash = coordinator._hash_content(remote_content)
+    url = "https://github.com/user/repo/test.yaml"
+    local_hash = coordinator._hash_content(local_content, url)
+    remote_hash = coordinator._hash_content(remote_content, url)
 
     info = {
         "name": "Test",
@@ -108,8 +109,10 @@ async def test_persistence_of_remote_hashes(
 
     coordinator.data = {
         path: {
+            "rel_path": "test.yaml",
             "remote_hash": remote_hash,
             "etag": etag,
+            "source_url": "https://url",
         }
     }
 
@@ -122,18 +125,17 @@ async def test_persistence_of_remote_hashes(
         await coordinator._async_save_metadata()
 
     save_args = mock_store.async_save.call_args[0][0]
-    assert save_args["etags"][path] == etag
-    assert save_args["remote_hashes"][path] == remote_hash
+    assert save_args["metadata"]["test.yaml"]["etag"] == etag
+    assert save_args["metadata"]["test.yaml"]["remote_hash"] == remote_hash
 
-    coordinator._persisted_etags = {}
-    coordinator._persisted_hashes = {}
+    coordinator._persisted_metadata = {}
     mock_store.async_load = AsyncMock(return_value=save_args)
 
     await coordinator.async_setup()
 
     mock_store.async_load.assert_awaited_once()
-    assert coordinator._persisted_etags[path] == etag
-    assert coordinator._persisted_hashes[path] == remote_hash
+    assert coordinator._persisted_metadata["test.yaml"]["etag"] == etag
+    assert coordinator._persisted_metadata["test.yaml"]["remote_hash"] == remote_hash
 
 
 @pytest.mark.asyncio
@@ -150,8 +152,7 @@ async def test_etag_migration_forces_download(
         "source_url": "https://github.com/user/repo/bp.yaml",
         "local_hash": "stale_hash",
     }
-    remote_content_with_url = coordinator._ensure_source_url(remote_content, info["source_url"])
-    remote_hash = coordinator._hash_content(remote_content_with_url)
+    remote_hash = coordinator._hash_content(remote_content, info["source_url"])
 
     coordinator.data = {
         path: {
@@ -190,21 +191,26 @@ async def test_etag_migration_forces_download(
 async def test_async_save_metadata_preserves_persisted_entries_for_existing_files(coordinator):
     """Test that persisted entries for existing files are preserved even if not in current scan."""
     existing_path = "/config/blueprints/existing.yaml"
-    orphaned_path = "/config/blueprints/orphaned.yaml"
 
-    coordinator._persisted_etags = {
-        existing_path: "etag-existing",
-        orphaned_path: "etag-orphaned",
-    }
-    coordinator._persisted_hashes = {
-        existing_path: "hash-existing",
-        orphaned_path: "hash-orphaned",
+    coordinator._persisted_metadata = {
+        "existing.yaml": {
+            "etag": "etag-existing",
+            "remote_hash": "hash-existing",
+            "source_url": "https://url",
+        },
+        "orphaned.yaml": {
+            "etag": "etag-orphaned",
+            "remote_hash": "hash-orphaned",
+            "source_url": "https://url",
+        },
     }
 
     coordinator.data = {
         existing_path: {
+            "rel_path": "existing.yaml",
             "etag": "etag-new",
             "remote_hash": "hash-new",
+            "source_url": "https://url",
         }
     }
 
@@ -212,18 +218,21 @@ async def test_async_save_metadata_preserves_persisted_entries_for_existing_file
     mock_store.async_save = AsyncMock(return_value=None)
     coordinator._store = mock_store
 
-    with patch(
-        "custom_components.blueprints_updater.coordinator.os.path.isfile",
-        side_effect=lambda p: p in (existing_path, orphaned_path),
+    with patch.object(
+        coordinator,
+        "_filter_existing_metadata",
+        side_effect=lambda root, meta: {
+            k: v for k, v in meta.items() if k in ("existing.yaml", "orphaned.yaml")
+        },
     ):
         await coordinator._async_save_metadata()
 
     mock_store.async_save.assert_awaited_once()
     save_args = mock_store.async_save.call_args[0][0]
-    assert save_args["etags"][existing_path] == "etag-new"
-    assert save_args["remote_hashes"][existing_path] == "hash-new"
-    assert save_args["etags"][orphaned_path] == "etag-orphaned"
-    assert save_args["remote_hashes"][orphaned_path] == "hash-orphaned"
+    assert save_args["metadata"]["existing.yaml"]["etag"] == "etag-new"
+    assert save_args["metadata"]["existing.yaml"]["remote_hash"] == "hash-new"
+    assert save_args["metadata"]["orphaned.yaml"]["etag"] == "etag-orphaned"
+    assert save_args["metadata"]["orphaned.yaml"]["remote_hash"] == "hash-orphaned"
 
 
 @pytest.mark.asyncio
@@ -233,12 +242,15 @@ async def test_async_save_metadata_force_true_persists_even_when_unchanged(coord
     etag = "etag-123"
     file_hash = "hash-123"
 
-    coordinator._persisted_etags = {path: etag}
-    coordinator._persisted_hashes = {path: file_hash}
+    coordinator._persisted_metadata = {
+        "test.yaml": {"etag": etag, "remote_hash": file_hash, "source_url": "https://url"}
+    }
     coordinator.data = {
         path: {
+            "rel_path": "test.yaml",
             "etag": etag,
             "remote_hash": file_hash,
+            "source_url": "https://url",
         }
     }
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, cast
 
 import voluptuous as vol
@@ -41,6 +40,7 @@ from .const import (
 )
 from .coordinator import BlueprintUpdateCoordinator
 from .utils import (
+    get_blueprint_rel_path,
     get_config_bool,
     get_config_str,
     get_config_value,
@@ -64,15 +64,15 @@ async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, An
     blueprints = await hass.async_add_executor_job(
         BlueprintUpdateCoordinator.scan_blueprints, hass, FILTER_MODE_ALL, []
     )
-    options = [
-        {
-            "value": (
-                rel_path := os.path.relpath(path, hass.config.path("blueprints")).replace("\\", "/")
-            ),
-            "label": f"{info['name']} [{rel_path}]",
-        }
-        for path, info in blueprints.items()
-    ]
+    options: list[dict[str, Any]] = []
+    for path, info in blueprints.items():
+        if rel_path := info.get("rel_path") or get_blueprint_rel_path(hass, path):
+            options.append(
+                {
+                    "value": rel_path,
+                    "label": f"{info['name']} [{rel_path}]",
+                }
+            )
     options.sort(key=lambda x: x["label"])
     return options
 

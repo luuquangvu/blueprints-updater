@@ -11,6 +11,7 @@ import random
 import shutil
 import socket
 import time
+from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
@@ -47,6 +48,7 @@ from homeassistant.util.ssl import SSL_ALPN_HTTP11_HTTP2
 
 from .const import (
     ALLOWED_RELOAD_DOMAINS,
+    BLUEPRINTS_DATA_DIR,
     CONF_AUTO_UPDATE,
     CONF_FILTER_MODE,
     CONF_SELECTED_BLUEPRINTS,
@@ -60,6 +62,7 @@ from .const import (
     MAX_CONCURRENT_REQUESTS,
     MAX_RETRIES,
     MAX_SEND_INTERVAL,
+    METADATA_STORAGE_FIELDS,
     MIN_SEND_INTERVAL,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
@@ -72,6 +75,7 @@ from .const import (
 )
 from .providers import registry
 from .utils import (
+    get_blueprint_rel_path,
     get_config_bool,
     get_max_backups,
     redact_url,
@@ -178,8 +182,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._last_request_time = 0.0
         self._pacing_lock = asyncio.Lock()
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY_DATA)
-        self._persisted_etags: dict[str, str] = {}
-        self._persisted_hashes: dict[str, str] = {}
+        self._persisted_metadata: dict[str, dict[str, Any]] = {}
         self._safe_hostname_cache: dict[str, bool] = {}
         self._safe_hostname_lock = asyncio.Lock()
         self._blueprint_validate_lock = asyncio.Lock()
@@ -199,62 +202,35 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     async def async_setup(self) -> None:
         """Load persisted data from storage.
 
-        This method reads the stored ETags and remote hashes from the
-        local filesystem to restore the state between restarts.
+        This method reads the stored metadata from the local filesystem
+        to restore the state between restarts.
         """
         storage_data = await self._store.async_load()
-        if storage_data and isinstance(storage_data, dict):
-            persisted_etags = storage_data.get("etags") or {}
-            persisted_hashes = storage_data.get("remote_hashes") or {}
-
-            if not isinstance(persisted_etags, dict):
-                _LOGGER.warning(
-                    "Ignoring invalid persisted etags in storage; expected dict, got %s",
-                    type(persisted_etags).__name__,
-                )
-                persisted_etags = {}
-            else:
-                valid_etags = {
-                    k: v
-                    for k, v in persisted_etags.items()
-                    if isinstance(k, str) and isinstance(v, str)
-                }
-                if len(valid_etags) != len(persisted_etags):
-                    _LOGGER.warning(
-                        "Dropped %d invalid ETag entries from storage (non-string keys or values)",
-                        len(persisted_etags) - len(valid_etags),
-                    )
-                persisted_etags = valid_etags
-
-            if not isinstance(persisted_hashes, dict):
-                _LOGGER.warning(
-                    "Ignoring invalid persisted remote_hashes in storage; expected dict, got %s",
-                    type(persisted_hashes).__name__,
-                )
-                persisted_hashes = {}
-            else:
-                valid_hashes = {
-                    k: v
-                    for k, v in persisted_hashes.items()
-                    if isinstance(k, str) and isinstance(v, str)
-                }
-                if len(valid_hashes) != len(persisted_hashes):
-                    _LOGGER.warning(
-                        "Dropped %d invalid remote hash entries from storage",
-                        len(persisted_hashes) - len(valid_hashes),
-                    )
-                persisted_hashes = valid_hashes
-
-            self._persisted_etags = persisted_etags
-            self._persisted_hashes = persisted_hashes
-
-            _LOGGER.debug(
-                "Loaded %d persisted ETags and %d remote hashes",
-                len(self._persisted_etags),
-                len(self._persisted_hashes),
-            )
-
         self.setup_complete = True
+
+        if not storage_data or not isinstance(storage_data, dict):
+            return
+
+        metadata = storage_data.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            _LOGGER.warning("Malformed metadata storage found, starting fresh")
+            metadata = {}
+
+        validated_metadata: dict[str, dict[str, Any]] = {}
+        for rel_path, entry in metadata.items():
+            if isinstance(rel_path, str) and (
+                validated := BlueprintUpdateCoordinator._validate_metadata_entry(entry)
+            ):
+                validated_metadata[rel_path] = validated
+            else:
+                _LOGGER.warning("Skipping malformed metadata entry for %s", rel_path)
+
+        self._persisted_metadata = validated_metadata
+
+        _LOGGER.debug(
+            "Loaded metadata for %d blueprints from storage",
+            len(self._persisted_metadata),
+        )
 
     async def async_translate(self, key: str, category: str = "common", **kwargs: Any) -> str:
         """Translate a key using the current language and category.
@@ -361,39 +337,59 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
         return filter_mode, selected_blueprints
 
-    @staticmethod
     def _filter_existing_metadata(
-        paths: set[str], etags_map: dict[str, str], hashes_map: dict[str, str]
-    ) -> tuple[dict[str, str], dict[str, str]]:
-        """Filter metadata maps to only include paths that exist on disk.
+        self, root: str, metadata: dict[str, dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        """Filter metadata to only include paths that exist on disk.
 
         This is a synchronous method intended to be run in an executor.
 
         Args:
-            paths: Set of paths to verify.
-            etags_map: Map of path to ETag.
-            hashes_map: Map of path to remote hash.
+            root: Absolute path to the blueprints directory.
+            metadata: Map of relative path to metadata dictionary.
 
         Returns:
-            A tuple of (filtered_etags, filtered_hashes).
+            A filtered metadata dictionary.
 
         """
-        valid_set = {p for p in paths if os.path.isfile(p)}
-        return (
-            {p: e for p, e in etags_map.items() if p in valid_set},
-            {p: h for p, h in hashes_map.items() if p in valid_set},
-        )
+        filtered: dict[str, dict[str, Any]] = {}
+        for rel_path, data in metadata.items():
+            abs_path = os.path.join(root, rel_path)
+            if get_blueprint_rel_path(self.hass, abs_path) == rel_path:
+                filtered[rel_path] = data
+            else:
+                _LOGGER.warning("Invalid or unsafe blueprint path filtered: %s", rel_path)
+        return filtered
+
+    @staticmethod
+    def _validate_metadata_entry(entry: Any) -> dict[str, Any] | None:
+        """Validate and normalize a single metadata entry.
+
+        Args:
+            entry: Raw entry from storage.
+
+        Returns:
+            A cleaned metadata dictionary if valid, else None.
+
+        """
+        if not isinstance(entry, dict):
+            return None
+
+        validated: dict[str, Any] = {}
+        for field in METADATA_STORAGE_FIELDS:
+            val = entry.get(field)
+            if val is None or isinstance(val, str):
+                validated[field] = val
+            else:
+                return None
+        return validated
 
     async def _async_prune_stale_metadata(self, scanned_paths: set[str]) -> None:
         """Remove metadata for blueprints that no longer exist on disk.
 
-        This method synchronizes in-memory ETag and Hash caches with the
-        latest scan results. We preserve metadata for any path that
-        either returned in the current scan or still exists as a file on
-        the disk. This ensures that metadata for valid blueprints is not
-        purged if they are temporarily filtered out of the scan results
-        due to user configuration changes (e.g., filter mode or selection),
-        providing a more stable cache and better UX.
+        This method synchronizes in-memory metadata with the latest scan
+        results. We preserve metadata for any path that either returned
+        in the current scan or still exists as a file on the disk.
 
         To prevent blocking the event loop, file existence checks are
         performed in the executor.
@@ -403,33 +399,38 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 the latest scan.
 
         """
-        old_count = len(self._persisted_etags) + len(self._persisted_hashes)
+        old_count = len(self._persisted_metadata)
+        blueprints_root = self.hass.config.path(BLUEPRINTS_DATA_DIR)
 
-        all_metadata_paths = set(self._persisted_etags.keys()) | set(self._persisted_hashes.keys())
+        scanned_rel_paths: set[str] = set()
+        for path in scanned_paths:
+            try:
+                if rel := get_blueprint_rel_path(self.hass, path):
+                    scanned_rel_paths.add(rel)
+            except (ValueError, TypeError, OSError):
+                continue
 
-        if paths_to_verify := all_metadata_paths - scanned_paths:
-            existing_etags, existing_hashes = await self.hass.async_add_executor_job(
-                self._filter_existing_metadata,
-                paths_to_verify,
-                self._persisted_etags,
-                self._persisted_hashes,
+        if candidate_rel_paths := set(self._persisted_metadata.keys()) - scanned_rel_paths:
+            metadata_to_check = {
+                k: v for k, v in self._persisted_metadata.items() if k in candidate_rel_paths
+            }
+            valid_metadata = await self.hass.async_add_executor_job(
+                self._filter_existing_metadata, blueprints_root, metadata_to_check
             )
-            existing_paths = set(existing_etags.keys()) | set(existing_hashes.keys())
-        else:
-            existing_paths = set()
 
-        valid_paths = scanned_paths | existing_paths
+            removed_rel_paths = candidate_rel_paths - set(valid_metadata.keys())
 
-        self._persisted_etags = {
-            path: etag for path, etag in self._persisted_etags.items() if path in valid_paths
-        }
-        self._persisted_hashes = {
-            path: r_hash for path, r_hash in self._persisted_hashes.items() if path in valid_paths
-        }
+            self._persisted_metadata = {
+                k: v for k, v in self._persisted_metadata.items() if k not in removed_rel_paths
+            }
 
-        if (len(self._persisted_etags) + len(self._persisted_hashes)) < old_count:
+            if removed_rel_paths:
+                for rel in removed_rel_paths:
+                    abs_path = os.path.join(blueprints_root, rel)
+                    self.data.pop(abs_path, None)
+
+        if len(self._persisted_metadata) < old_count:
             _LOGGER.debug("Pruned stale blueprint metadata from memory, triggering save")
-            self.data = {path: info for path, info in self.data.items() if path in valid_paths}
             self.hass.async_create_background_task(
                 self._async_save_metadata(force=True), name=f"{DOMAIN}_prune_save"
             )
@@ -451,24 +452,26 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         await self._async_prune_stale_metadata(set(blueprints.keys()))
-        return {
-            path: {
+        results = {}
+        for path, info in blueprints.items():
+            rel_path = info["rel_path"]
+            persisted = self._persisted_metadata.get(rel_path) or {}
+
+            results[path] = {
                 "name": info["name"],
-                "rel_path": info["rel_path"],
+                "rel_path": rel_path,
                 "domain": info["domain"],
                 "source_url": info["source_url"],
                 "local_hash": info["local_hash"],
                 "updatable": False,
-                "remote_hash": None
-                if self._first_update_done
-                else self._persisted_hashes.get(path),
+                "remote_hash": None if self._first_update_done else persisted.get("remote_hash"),
                 "invalid_remote_hash": None,
                 "remote_content": None,
                 "last_error": None,
-                "etag": None if self._first_update_done else self._persisted_etags.get(path),
+                "etag": None if self._first_update_done else persisted.get("etag"),
+                "persisted_source_url": persisted.get("source_url"),
             }
-            for path, info in blueprints.items()
-        }
+        return results
 
     def _merge_previous_data(self, results: dict[str, dict[str, Any]]) -> None:
         """Merge previous scan metadata and detect synchronization issues.
@@ -485,10 +488,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         if not self.data:
             for info in results.values():
-                if info.get("remote_hash"):
-                    is_mismatch = info["local_hash"] != info["remote_hash"]
+                if remote_hash := info.get("remote_hash"):
+                    prev_url = info.get("persisted_source_url")
+                    is_url_change = prev_url and prev_url != info.get("source_url")
+                    is_mismatch = info["local_hash"] != remote_hash
+
                     info["updatable"] = is_mismatch
-                    if is_mismatch:
+                    if is_url_change or is_mismatch:
                         info["etag"] = None
             return
 
@@ -534,12 +540,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             filter_mode,
         )
 
-        blueprints = await self.hass.async_add_executor_job(
-            self.scan_blueprints,
-            self.hass,
-            filter_mode,
-            selected,
-        )
+        try:
+            blueprints = await self.hass.async_add_executor_job(
+                self.scan_blueprints,
+                self.hass,
+                filter_mode,
+                selected,
+            )
+        except Exception as err:
+            _LOGGER.exception("Blueprint scan failed: %s", err)
+            raise HomeAssistantError(f"Blueprint scan failed: {err}") from err
 
         results = await self._async_initialize_results(blueprints)
         self._merge_previous_data(results)
@@ -551,25 +561,28 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         _LOGGER.debug("Instant setup complete with %d blueprints", len(results))
         return results
 
-    def _is_semantically_equal(
-        self, content: Any, target_hash: Any, already_normalized: bool = False
-    ) -> bool:
+    def _is_semantically_equal(self, content: str, target_hash: str, source_url: str) -> bool:
         """Check if content is semantically equal to a target hash.
 
-        Normalization is applied to content before hashing if needed.
-
         Args:
-            content: Raw content string to verify.
-            target_hash: The hash to compare against.
-            already_normalized: If True, skip normalization (optimization).
+            content: Raw or normalized YAML content to compare.
+            target_hash: Hash of the target blueprint (from normalized YAML).
+            source_url: The source URL to use for identity-aware hashing.
 
         Returns:
-            True if normalized content hash matches target_hash.
+            True if the content matches the target hash, False otherwise.
 
         """
-        if not content or not isinstance(content, str):
+        if not isinstance(content, str) or not isinstance(target_hash, str):
             return False
-        return self._hash_content(content, already_normalized=already_normalized) == target_hash
+
+        try:
+            content_hash = self._hash_content(content, source_url)
+        except (ValueError, TypeError, yaml.YAMLError) as err:
+            _LOGGER.debug("Semantic comparison failed: %s", err)
+            return False
+
+        return content_hash == target_hash
 
     def _handle_source_url_change(
         self, path: str, info: dict[str, Any], prev: dict[str, Any]
@@ -619,8 +632,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             redact_url(prev_url),
             redact_url(curr_url),
         )
-        self._persisted_etags.pop(path, None)
-        self._persisted_hashes.pop(path, None)
+        if not (rel_path := prev.get("rel_path")):
+            rel_path = get_blueprint_rel_path(self.hass, path)
+
+        if rel_path:
+            self._persisted_metadata.pop(rel_path, None)
 
         invalidated = {
             **prev,
@@ -683,7 +699,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             True if the cached remote content matches the local hash.
 
         """
-        return self._is_semantically_equal(prev_data.get("remote_content"), current_local_hash)
+        remote_content = prev_data.get("remote_content")
+        source_url = prev_data.get("source_url")
+        if (
+            not isinstance(remote_content, str)
+            or not isinstance(current_local_hash, str)
+            or not isinstance(source_url, str)
+        ):
+            return False
+        return self._is_semantically_equal(remote_content, current_local_hash, source_url)
 
     def _start_background_refresh(self, blueprints: dict[str, Any]) -> None:
         """Start the background remote refresh task if not already running.
@@ -757,10 +781,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                             self.async_set_updated_data(self.data)
                         except asyncio.CancelledError:
                             raise
-                        except Exception as err:
-                            _LOGGER.exception(
-                                "Error in background worker for %s: %s", blueprint_path, err
-                            )
+                        except Exception:
+                            _LOGGER.exception("Error in background worker for %s", blueprint_path)
                         finally:
                             queue.task_done()
 
@@ -814,46 +836,50 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not self.setup_complete:
             return
 
-        merged_etags: dict[str, str] = {}
-        merged_hashes: dict[str, str] = {}
-        all_metadata_paths = set(self._persisted_etags.keys()) | set(self._persisted_hashes.keys())
-        all_candidate_paths = all_metadata_paths | set(self.data.keys())
+        final_metadata: dict[str, dict[str, Any]] = {}
+        all_rel_paths = set(self._persisted_metadata.keys())
+        for _, info in self.data.items():
+            if rel_path := info.get("rel_path"):
+                all_rel_paths.add(rel_path)
 
-        for path in all_candidate_paths:
-            if path in self.data:
-                etag = self.data[path].get("etag")
-                r_hash = self.data[path].get("remote_hash")
-            else:
-                etag = self._persisted_etags.get(path)
-                r_hash = self._persisted_hashes.get(path)
+        blueprints_root = self.hass.config.path(BLUEPRINTS_DATA_DIR)
+        current_data_map = {i["rel_path"]: i for i in self.data.values() if i.get("rel_path")}
+        candidate_metadata = {rel: self._persisted_metadata.get(rel, {}) for rel in all_rel_paths}
 
-            if etag:
-                merged_etags[path] = etag
-            if r_hash:
-                merged_hashes[path] = r_hash
+        for rel_path in all_rel_paths:
+            existing = dict(candidate_metadata.get(rel_path, {}))
+            if info := current_data_map.get(rel_path):
+                existing |= {
+                    "remote_hash": info.get("remote_hash"),
+                    "etag": info.get("etag"),
+                    "source_url": info.get("source_url"),
+                }
+            candidate_metadata[rel_path] = existing
 
-        if not skip_filter and all_candidate_paths:
-            final_etags, final_hashes = await self.hass.async_add_executor_job(
-                self._filter_existing_metadata, all_candidate_paths, merged_etags, merged_hashes
+        if not skip_filter:
+            valid_metadata = await self.hass.async_add_executor_job(
+                self._filter_existing_metadata, blueprints_root, candidate_metadata
             )
+            final_metadata = {
+                k: v for k, v in valid_metadata.items() if self._has_meaningful_metadata(v)
+            }
         else:
-            final_etags, final_hashes = merged_etags, merged_hashes
+            final_metadata = {
+                k: v for k, v in candidate_metadata.items() if self._has_meaningful_metadata(v)
+            }
 
-        if (
-            not force
-            and final_etags == self._persisted_etags
-            and final_hashes == self._persisted_hashes
-        ):
+        if not force and final_metadata == self._persisted_metadata:
             return
 
         _LOGGER.debug(
-            "Saving %d ETags and %d remote hashes to storage (merged)",
-            len(final_etags),
-            len(final_hashes),
+            "Saving metadata for %d blueprints to storage",
+            len(final_metadata),
         )
-        self._persisted_etags = final_etags
-        self._persisted_hashes = final_hashes
-        await self._store.async_save({"etags": final_etags, "remote_hashes": final_hashes})
+        try:
+            await self._store.async_save({"metadata": final_metadata})
+            self._persisted_metadata = final_metadata
+        except Exception:
+            _LOGGER.exception("Failed to save metadata to storage")
 
     async def async_shutdown(self) -> None:
         """Shutdown the coordinator and cancel tasks."""
@@ -863,6 +889,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             with contextlib.suppress(asyncio.CancelledError):
                 await self._background_task
             self._background_task = None
+
+    @staticmethod
+    def _has_meaningful_metadata(entry: dict[str, Any]) -> bool:
+        """Return True if this metadata entry has any meaningful value set.
+
+        We explicitly check known fields instead of relying on truthiness of all values,
+        so that future falsy-but-meaningful values (e.g. 0 or False) are not discarded.
+        """
+        return any(entry.get(field) for field in METADATA_STORAGE_FIELDS)
 
     async def _async_handle_notifications(
         self, auto_updated_names: list[str], domains: set[str] | None = None
@@ -996,7 +1031,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         try:
-            if not os.path.isfile(file_path):
+            file_exists = os.path.isfile(file_path)
+            if not file_exists:
                 return
 
             for i in range(max_bak, 0, -1):
@@ -1102,7 +1138,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     if current.get("remote_content") == remote_content
                     else None
                 )
-                final_hash = remote_hash or cached_remote_hash or self._hash_content(remote_content)
+                final_hash = (
+                    remote_hash
+                    or cached_remote_hash
+                    or self._hash_content(remote_content, current.get("source_url", ""))
+                )
                 final_etag = etag if etag is not None else current.get("etag")
 
                 self.data[path].update(
@@ -1123,8 +1163,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 await self._async_save_metadata(force=True)
 
             _LOGGER.info("Blueprint at %s updated successfully", real_path)
-        except Exception as err:
-            _LOGGER.error("Failed to update blueprint at %s: %s", path, err)
+        except Exception:
+            _LOGGER.exception("Failed to update blueprint at %s", path)
             raise
 
     async def _is_safe_url(self, url: str) -> bool:
@@ -1222,7 +1262,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             True if the path is safely contained within blueprints folder.
 
         """
-        blueprint_path = self.hass.config.path("blueprints")
+        blueprint_path = self.hass.config.path(BLUEPRINTS_DATA_DIR)
         try:
             real_path = os.path.realpath(path)
             real_blueprints = os.path.realpath(blueprint_path)
@@ -1260,38 +1300,30 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return {"success": False, "translation_key": "system_error"}
 
         try:
-
-            def _restore_file(file_path: str, ver: int, max_bak: int) -> tuple[bool, str]:
-                """Local helper for _restore_file."""
-                bak_path = f"{file_path}.bak.{ver}"
-                if ver == 1 and not os.path.isfile(bak_path):
-                    old_bak = f"{file_path}.bak"
-                    if os.path.isfile(old_bak):
-                        bak_path = old_bak
-
-                if not os.path.isfile(bak_path):
-                    return False, "missing_backup"
-
-                with open(bak_path, encoding="utf-8") as f:
-                    content = f.read()
-
-                tmp_path = f"{file_path}.tmp"
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-
-                self._rotate_backups(file_path, max_bak)
-                os.replace(tmp_path, file_path)
-                return True, "success"
-
             success, message = await self.hass.async_add_executor_job(
-                _restore_file, real_path, version, max_backups
+                BlueprintUpdateCoordinator._execute_restore_file,
+                real_path,
+                version,
+                max_backups,
             )
 
             if success:
+                rel_path = get_blueprint_rel_path(self.hass, real_path)
+                if rel_path and rel_path in self._persisted_metadata:
+                    entry = self._persisted_metadata[rel_path]
+                    entry["etag"] = None
+                    entry["remote_hash"] = None
+
                 domain = "automation"
-                if self.data and path in self.data:
-                    domain = self.data[path].get("domain", "automation")
+                if self.data and real_path in self.data:
+                    self.data[real_path]["etag"] = None
+                    self.data[real_path]["remote_hash"] = None
+                    domain = self.data[real_path].get("domain", "automation")
                 await self.async_reload_services([domain])
+                self.hass.async_create_background_task(
+                    self._async_save_metadata(force=True),
+                    "blueprints_updater_save_after_restore",
+                )
                 await self.async_request_refresh()
 
             return {
@@ -1299,7 +1331,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "translation_key": message,
             }
         except Exception as err:
-            _LOGGER.error("Failed to restore blueprint at %s: %s", real_path, err)
+            _LOGGER.exception("Failed to restore blueprint at %s", real_path)
             return {
                 "success": False,
                 "translation_key": "system_error",
@@ -1375,7 +1407,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _process_inputs(inputs)
             return schema, None
         except HomeAssistantError as err:
-            _LOGGER.warning("Failed to extract inputs schema from blueprint: %s", err)
+            _LOGGER.warning("Failed to extract inputs schema from blueprint")
+            _LOGGER.debug("Failed to extract inputs schema from blueprint: %s", err)
             return {}, str(err)
 
     def _get_entities_configs(self, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -1929,15 +1962,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             diff_text = await self.hass.async_add_executor_job(
                 self._read_and_diff, path, remote_content, info.get("source_url", "")
             )
-        except OSError as err:
-            _LOGGER.warning("I/O error generating diff for %s: %s", path, err)
+        except OSError:
+            _LOGGER.warning("I/O error generating diff for %s", path)
             return None
-        except Exception as err:
-            _LOGGER.error("Unexpected error generating diff for %s: %s", path, err, exc_info=True)
+        except Exception:
+            _LOGGER.exception("Unexpected error generating diff for %s", path)
             return None
 
-        is_semantic_sync = not (diff_text or "").strip() and self._is_semantically_equal(
-            remote_content, local_hash, already_normalized=True
+        is_semantic_sync = (
+            not (diff_text or "").strip()
+            and isinstance(remote_content, str)
+            and isinstance(local_hash, str)
+            and isinstance(info.get("source_url"), str)
+            and self._is_semantically_equal(
+                remote_content, local_hash, cast(str, info.get("source_url"))
+            )
         )
         self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "", is_semantic_sync)
         return GitDiffResult(diff_text=diff_text or "", is_semantic_sync=is_semantic_sync)
@@ -2199,7 +2238,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         try:
             remote_content = self._ensure_source_url(remote_content, source_url)
-            remote_hash = self._hash_content(remote_content, already_normalized=True)
+            remote_hash = self._hash_content(remote_content, source_url, already_normalized=True)
             local_hash = info["local_hash"]
             updatable = bool(remote_hash and remote_hash != local_hash)
 
@@ -2277,7 +2316,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             ]
 
         if not last_error and self.data and path in self.data:
-            local_file = self.hass.config.path("blueprints", rel_path)
+            local_file = self.hass.config.path(BLUEPRINTS_DATA_DIR, rel_path)
             try:
                 entity_ids = self._get_entities_using_blueprint_list(rel_path)
                 full_configs = self._get_entities_configs(entity_ids)
@@ -2780,26 +2819,38 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content.replace("\r\n", "\n").replace("\r", "\n")
 
     @staticmethod
-    def _hash_content(content: str, already_normalized: bool = False) -> str:
-        """Centralized helper to compute a SHA256 hash with normalization.
+    def _hash_content(
+        content: str, source_url: str | None = None, already_normalized: bool = False
+    ) -> str:
+        """Calculate a deterministic SHA-256 hash of normalized content.
 
-        This ensures that we always apply transport-level normalization
-        before computing the hash, preventing inconsistencies between
-        different parts of the coordinator.
+        This method supports both plain normalization (content only) and
+        semantic normalization (content + source location tracking).
+
+        If a source_url is provided, it is injected into the blueprint's
+        metadata before hashing. This ensures the identity (logic + source)
+        is preserved. If source_url is None or empty, only plain YAML
+        normalization is performed.
 
         Args:
-            content: Raw YAML content to hash.
-            already_normalized: If True, skip normalization (optimization).
+            content: The raw YAML string to hash.
+            source_url: Optional source URL to trigger identity-aware hashing.
+            already_normalized: If True, bypass normalization steps and hash raw content.
 
         Returns:
-            The hex digest of the normalized content's hash.
+            The SHA-256 hex digest of the normalized content.
 
         """
         if already_normalized:
-            normalized = content
-        else:
-            normalized = BlueprintUpdateCoordinator._normalize_content(content)
-        return hashlib.sha256(normalized.encode()).hexdigest()
+            return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+        if not source_url:
+            return hashlib.sha256(
+                BlueprintUpdateCoordinator._normalize_content(content).encode("utf-8")
+            ).hexdigest()
+
+        normalized = BlueprintUpdateCoordinator._ensure_source_url(content, source_url)
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _ensure_source_url(content: str, source_url: str) -> str:
@@ -2851,10 +2902,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         source_url = source_url.strip()
         blueprint_info["source_url"] = source_url
 
+        target_data = parsed
         try:
             domain = blueprint_info.get("domain", "automation")
             schema = AUTOMATION_BLUEPRINT_SCHEMA if domain == "automation" else BLUEPRINT_SCHEMA
-            parsed = schema(parsed)
+            normalized = schema(parsed)
+            target_data = BlueprintUpdateCoordinator._stabilize_yaml_structure(parsed, normalized)
         except (vol.Invalid, KeyError, TypeError, ValueError) as err:
             _LOGGER.debug(
                 "Semantic normalization skipped for %s (falling back to canonical YAML): %s",
@@ -2863,10 +2916,58 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
 
         try:
-            return yaml_util.dump(parsed)
+            return yaml_util.dump(target_data)
         except (yaml.YAMLError, TypeError, ValueError) as err:
             _LOGGER.warning("YAML canonicalization failed for %s: %s", redact_url(source_url), err)
             return BlueprintUpdateCoordinator._normalize_content(content)
+
+    @staticmethod
+    def _stabilize_yaml_structure(original: Any, normalized: Any) -> Any:
+        """Stabilize YAML structure by merging normalized data into original order.
+
+        Args:
+            original: The original OrderedDict from parsing.
+            normalized: The dictionary returned by the schema.
+
+        Returns:
+            A new OrderedDict with preserved order and deterministic new keys.
+
+        """
+        if original is not None and not (
+            isinstance(original, type(normalized)) or isinstance(normalized, type(original))
+        ):
+            return normalized
+
+        if isinstance(normalized, dict):
+            res = OrderedDict()
+            orig_dict = original if isinstance(original, dict) else {}
+
+            for key in orig_dict:
+                if key in normalized:
+                    res[key] = BlueprintUpdateCoordinator._stabilize_yaml_structure(
+                        orig_dict[key], normalized[key]
+                    )
+
+            new_keys = sorted(k for k in normalized if k not in res)
+            for key in new_keys:
+                res[key] = BlueprintUpdateCoordinator._stabilize_yaml_structure(
+                    None, normalized[key]
+                )
+
+            return res
+
+        if isinstance(normalized, list):
+            res_list = []
+            orig_list = original if isinstance(original, list) else []
+
+            for i, item in enumerate(normalized):
+                orig_item = orig_list[i] if i < len(orig_list) else None
+                res_list.append(
+                    BlueprintUpdateCoordinator._stabilize_yaml_structure(orig_item, item)
+                )
+            return res_list
+
+        return normalized
 
     @staticmethod
     def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
@@ -3002,7 +3103,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         try:
             blueprint_dict = yaml_util.parse_yaml(content)
         except HomeAssistantError as err:
-            _LOGGER.warning("Failed to parse blueprint at %s: %s", path, err)
+            _LOGGER.warning("Failed to parse blueprint at %s", path)
+            _LOGGER.debug("Blueprint parse error at %s: %s", path, err)
             return None
 
         if not isinstance(blueprint_dict, dict):
@@ -3061,14 +3163,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if len(parts) >= 2 and parts[0] in ALLOWED_RELOAD_DOMAINS:
                 domain = parts[0]
 
-        normalized_content = BlueprintUpdateCoordinator._ensure_source_url(content, source_url)
         return {
             "name": name,
             "domain": domain,
             "source_url": source_url.strip(),
-            "local_hash": BlueprintUpdateCoordinator._hash_content(
-                normalized_content, already_normalized=True
-            ),
+            "local_hash": BlueprintUpdateCoordinator._hash_content(content, source_url),
         }
 
     @staticmethod
@@ -3094,7 +3193,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         selected_blueprints: list[str],
     ) -> dict[str, BlueprintMetadata]:
         """Scan the blueprints directory for YAML files with source_url."""
-        blueprint_path: str = hass.config.path("blueprints")
+        blueprint_path: str = hass.config.path(BLUEPRINTS_DATA_DIR)
         found_blueprints = {}
 
         if not os.path.isdir(blueprint_path):
@@ -3131,26 +3230,51 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         _LOGGER.warning("Skipping blueprint with invalid path: %s", full_path)
                         continue
 
-                    rel_path = os.path.relpath(full_path, blueprint_path).replace("\\", "/")
+                    if rel_path := get_blueprint_rel_path(hass, full_path):
+                        try:
+                            with open(full_path, encoding="utf-8") as f:
+                                content = f.read()
 
-                    if not BlueprintUpdateCoordinator._should_include_blueprint(
-                        rel_path, filter_mode, selected_set
-                    ):
-                        continue
+                            if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
+                                full_path, content, rel_path
+                            ):
+                                if not BlueprintUpdateCoordinator._should_include_blueprint(
+                                    rel_path, filter_mode, selected_set
+                                ):
+                                    continue
+                                found_blueprints[full_path] = {
+                                    **parsed_data,
+                                    "rel_path": rel_path,
+                                }
 
-                    try:
-                        with open(full_path, encoding="utf-8") as f:
-                            content = f.read()
-
-                        if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
-                            full_path, content, rel_path
-                        ):
-                            found_blueprints[full_path] = {
-                                **parsed_data,
-                                "rel_path": rel_path,
-                            }
-
-                    except OSError as err:
-                        _LOGGER.error("Error reading blueprint at %s: %s", full_path, err)
+                        except OSError:
+                            _LOGGER.exception("Error reading blueprint at %s", full_path)
 
         return found_blueprints
+
+    @staticmethod
+    def _execute_restore_file(real_path: str, version: int, max_backups: int) -> tuple[bool, str]:
+        """Atomic filesystem operation for restoration (runs in executor)."""
+        bak_path = f"{real_path}.bak.{version}"
+        if version == 1 and not os.path.isfile(bak_path):
+            legacy_name = f".{os.path.basename(real_path)}.bak"
+            legacy_bak = os.path.join(os.path.dirname(real_path), legacy_name)
+            if os.path.isfile(legacy_bak):
+                bak_path = legacy_bak
+
+        if not os.path.isfile(bak_path):
+            return False, "missing_backup"
+
+        try:
+            with open(bak_path, encoding="utf-8") as f:
+                content = f.read()
+            tmp_path = f"{real_path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            BlueprintUpdateCoordinator._rotate_backups(real_path, max_backups)
+            os.replace(tmp_path, real_path)
+            return True, "success"
+        except (OSError, ValueError) as err:
+            _LOGGER.exception("Filesystem error during blueprint restoration: %s", err)
+            return False, "system_error"

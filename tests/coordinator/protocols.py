@@ -109,13 +109,12 @@ class BlueprintCoordinatorInternal(Protocol):
 
     _listeners: dict[Any, Any]
     _store: Any
-    _persisted_etags: dict[str, str]
-    _persisted_hashes: dict[str, str]
+    _persisted_metadata: dict[str, dict[str, Any]]
     _last_request_time: float
     _background_task: Any
 
     @staticmethod
-    def _hash_content(content: str, already_normalized: bool = False) -> str:
+    def _hash_content(content: str, source_url: str | None = None) -> str:
         """Compute SHA256 hash of content."""
         ...
 

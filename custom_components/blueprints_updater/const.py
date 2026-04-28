@@ -4,6 +4,7 @@ import re
 from enum import StrEnum
 
 DOMAIN = "blueprints_updater"
+BLUEPRINTS_DATA_DIR = "blueprints"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_FILTER_MODE = "filter_mode"
 CONF_SELECTED_BLUEPRINTS = "selected_blueprints"
@@ -28,6 +29,7 @@ MAX_UPDATE_INTERVAL_HOURS = 720
 
 STORAGE_VERSION = 1
 STORAGE_KEY_DATA = f"{DOMAIN}_data"
+METADATA_STORAGE_FIELDS = ("etag", "remote_hash", "source_url")
 
 DOMAIN_GITHUB = "github.com"
 DOMAIN_GITHUB_RAW = "raw.githubusercontent.com"

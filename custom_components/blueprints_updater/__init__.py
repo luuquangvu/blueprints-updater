@@ -308,11 +308,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
                                 path, remote_content, reload_services=False, backup=backup_pref
                             )
                             processed_count += 1
-                    except Exception as err:
+                    except Exception:
                         _LOGGER.exception(
-                            "Failed to update blueprint path %s: %s",
+                            "Failed to update blueprint path %s",
                             path,
-                            err,
                         )
                         continue
 
@@ -331,27 +330,35 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     registered_services = []
     try:
-        services_to_register = {
-            IntegrationService.RELOAD: {
-                "handler": async_reload_action_handler,
-            },
-            IntegrationService.RESTORE_BLUEPRINT: {
-                "handler": async_restore_blueprint_handler,
-                "schema": restore_schema,
-                "supports_response": SupportsResponse.ONLY,
-            },
-            IntegrationService.UPDATE_ALL: {
-                "handler": async_update_all_handler,
-                "schema": vol.Schema({vol.Optional("backup", default=True): cv.boolean}),
-            },
-        }
+        if not hass.services.has_service(DOMAIN, IntegrationService.RELOAD):
+            async_register_admin_service(
+                hass,
+                DOMAIN,
+                IntegrationService.RELOAD,
+                async_reload_action_handler,
+            )
+            registered_services.append(IntegrationService.RELOAD)
 
-        for service, config in services_to_register.items():
-            if not hass.services.has_service(DOMAIN, service):
-                kwargs = dict(config)
-                handler = kwargs.pop("handler")
-                async_register_admin_service(hass, DOMAIN, service, handler, **kwargs)
-                registered_services.append(service)
+        if not hass.services.has_service(DOMAIN, IntegrationService.RESTORE_BLUEPRINT):
+            async_register_admin_service(
+                hass,
+                DOMAIN,
+                IntegrationService.RESTORE_BLUEPRINT,
+                async_restore_blueprint_handler,
+                schema=restore_schema,
+                supports_response=SupportsResponse.ONLY,
+            )
+            registered_services.append(IntegrationService.RESTORE_BLUEPRINT)
+
+        if not hass.services.has_service(DOMAIN, IntegrationService.UPDATE_ALL):
+            async_register_admin_service(
+                hass,
+                DOMAIN,
+                IntegrationService.UPDATE_ALL,
+                async_update_all_handler,
+                schema=vol.Schema({vol.Optional("backup", default=True): cv.boolean}),
+            )
+            registered_services.append(IntegrationService.UPDATE_ALL)
     except asyncio.CancelledError:
         raise
     except Exception as err:

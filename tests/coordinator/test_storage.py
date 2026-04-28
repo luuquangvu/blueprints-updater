@@ -13,36 +13,39 @@ from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoor
 @pytest.mark.asyncio
 async def test_prune_preserves_hashes_only_metadata(coordinator):
     """Test that blueprints with only a hash (and no ETag) are not pruned if they exist."""
-    path = "/config/blueprints/automation/hash_only.yaml"
-    coordinator._persisted_etags = {}
-    coordinator._persisted_hashes = {path: "some_hash"}
+    coordinator._persisted_metadata = {"automation/hash_only.yaml": {"remote_hash": "some_hash"}}
 
     with (
-        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+        patch.object(coordinator, "_filter_existing_metadata", side_effect=lambda root, meta: meta),
         patch.object(coordinator, "_async_save_metadata") as mock_save,
     ):
         await coordinator._async_prune_stale_metadata(set())
 
-    assert path in coordinator._persisted_hashes
-    assert coordinator._persisted_hashes[path] == "some_hash"
+    assert "automation/hash_only.yaml" in coordinator._persisted_metadata
+    assert (
+        coordinator._persisted_metadata["automation/hash_only.yaml"]["remote_hash"] == "some_hash"
+    )
     mock_save.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_async_prune_stale_metadata_triggers_save(coordinator):
     """Test that pruning stale metadata triggers a background save operation."""
-    path = "/config/blueprints/automation/stale.yaml"
-    coordinator._persisted_hashes = {path: "some_hash"}
+    coordinator._persisted_metadata = {"automation/stale.yaml": {"remote_hash": "some_hash"}}
 
     with (
         patch(
             "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
         ),
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            side_effect=lambda hass, path: None,
+        ),
         patch.object(coordinator, "_async_save_metadata") as mock_save,
     ):
         await coordinator._async_prune_stale_metadata(set())
 
-    assert path not in coordinator._persisted_hashes
+    assert "automation/stale.yaml" not in coordinator._persisted_metadata
     mock_save.assert_called_once_with(force=True)
 
 
@@ -50,14 +53,15 @@ async def test_async_prune_stale_metadata_triggers_save(coordinator):
 async def test_save_metadata_honors_cleared_in_memory_state(coordinator):
     """Test that clearing an ETag in-memory correctly results in it being removed from save."""
     path = "/config/blueprints/automation/test.yaml"
-    coordinator._persisted_etags = {path: "old_etag"}
-    coordinator._persisted_hashes = {path: "old_hash"}
+    coordinator._persisted_metadata = {
+        "automation/test.yaml": {"etag": "old_etag", "remote_hash": "old_hash"}
+    }
 
     coordinator.data = {
         path: {
             "name": "Test",
             "rel_path": "automation/test.yaml",
-            "source_url": "https://url.com",
+            "source_url": None,
             "etag": None,
             "remote_hash": None,
         }
@@ -71,20 +75,19 @@ async def test_save_metadata_honors_cleared_in_memory_state(coordinator):
 
         mock_save.assert_called_once()
         save_data = mock_save.call_args[0][0]
-        saved_etags = save_data["etags"]
-        saved_hashes = save_data["remote_hashes"]
-        assert path not in saved_etags
-        assert path not in saved_hashes
+        saved_metadata = save_data["metadata"]
+        assert "automation/test.yaml" not in saved_metadata
 
 
 @pytest.mark.asyncio
 async def test_metadata_pruning(coordinator):
     """Test that stale metadata is pruned during update."""
     path_valid = "/config/blueprints/automation/valid.yaml"
-    path_stale = "/config/blueprints/automation/stale.yaml"
 
-    coordinator._persisted_etags = {path_valid: "etag1", path_stale: "etag2"}
-    coordinator._persisted_hashes = {path_valid: "hash1", path_stale: "hash2"}
+    coordinator._persisted_metadata = {
+        "automation/valid.yaml": {"etag": "etag1", "remote_hash": "hash1"},
+        "automation/stale.yaml": {"etag": "etag2", "remote_hash": "hash2"},
+    }
 
     blueprints = {
         path_valid: {
@@ -99,13 +102,19 @@ async def test_metadata_pruning(coordinator):
     with (
         patch.object(coordinator, "scan_blueprints", return_value=blueprints),
         patch.object(coordinator, "_start_background_refresh"),
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            side_effect=lambda hass, path: (
+                "automation/valid.yaml"
+                if "valid.yaml" in path
+                else os.path.basename(path).replace("\\", "/")
+            ),
+        ),
     ):
         await coordinator._async_update_data()
 
-    assert path_valid in coordinator._persisted_etags
-    assert path_stale not in coordinator._persisted_etags
-    assert path_valid in coordinator._persisted_hashes
-    assert path_stale not in coordinator._persisted_hashes
+    assert "automation/valid.yaml" in coordinator._persisted_metadata
+    assert "automation/stale.yaml" not in coordinator._persisted_metadata
 
 
 @pytest.mark.asyncio
@@ -113,33 +122,32 @@ async def test_async_save_metadata_empty_data(coordinator):
     """Test that saving metadata with empty data clears the store."""
     coordinator.data = {}
     coordinator.setup_complete = True
-    coordinator._persisted_etags = {"stale": "etag"}
-    coordinator._persisted_hashes = {"stale": "hash"}
+    coordinator._persisted_metadata = {"stale": {"etag": "etag", "remote_hash": "hash"}}
 
     with (
+        patch.object(coordinator, "_filter_existing_metadata", return_value={}),
         patch.object(coordinator._store, "async_save", new_callable=AsyncMock) as mock_save,
-        patch(
-            "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
-        ),
     ):
         await coordinator._async_save_metadata()
 
-    mock_save.assert_called_once_with({"etags": {}, "remote_hashes": {}})
-    assert not coordinator._persisted_etags
-    assert not coordinator._persisted_hashes
+    mock_save.assert_called_once_with({"metadata": {}})
+    assert not coordinator._persisted_metadata
 
 
 @pytest.mark.asyncio
 async def test_prune_metadata_persistence(coordinator):
     """Test that stale metadata is pruned from memory and persisted to disk."""
     path_exist = "/config/blueprints/automation/exist.yaml"
-    path_stale = "/config/blueprints/automation/stale.yaml"
 
-    coordinator._persisted_etags = {path_exist: "e1", path_stale: "e2"}
-    coordinator._persisted_hashes = {path_exist: "h1", path_stale: "h2"}
+    coordinator._persisted_metadata = {
+        "automation/exist.yaml": {"etag": "e1", "remote_hash": "h1"},
+        "automation/stale.yaml": {"etag": "e2", "remote_hash": "h2"},
+    }
     coordinator.setup_complete = True
 
-    coordinator.data = {path_exist: {"etag": "e1", "remote_hash": "h1"}}
+    coordinator.data = {
+        path_exist: {"rel_path": "automation/exist.yaml", "etag": "e1", "remote_hash": "h1"}
+    }
 
     tasks = []
 
@@ -153,9 +161,12 @@ async def test_prune_metadata_persistence(coordinator):
             coordinator.hass, "async_create_background_task", side_effect=create_background_task
         ),
         patch.object(coordinator._store, "async_save", new_callable=AsyncMock) as mock_save,
-        patch(
-            "custom_components.blueprints_updater.coordinator.os.path.isfile",
-            side_effect=lambda p: p in {path_exist},
+        patch.object(
+            coordinator,
+            "_filter_existing_metadata",
+            side_effect=lambda root, meta: {
+                k: v for k, v in meta.items() if k == "automation/exist.yaml"
+            },
         ),
     ):
         await coordinator._async_prune_stale_metadata({path_exist})
@@ -163,15 +174,12 @@ async def test_prune_metadata_persistence(coordinator):
         if tasks:
             await asyncio.gather(*tasks)
 
-    assert path_stale not in coordinator._persisted_etags
-    assert path_stale not in coordinator._persisted_hashes
-    assert path_exist in coordinator._persisted_etags
+    assert "automation/stale.yaml" not in coordinator._persisted_metadata
+    assert "automation/exist.yaml" in coordinator._persisted_metadata
     assert mock_save.called, "async_save was not called"
     saved_data = mock_save.call_args[0][0]
-    assert path_stale not in saved_data["etags"]
-    assert saved_data["etags"][path_exist] == "e1"
-    assert path_stale not in saved_data["remote_hashes"]
-    assert saved_data["remote_hashes"][path_exist] == "h1"
+    assert "automation/stale.yaml" not in saved_data["metadata"]
+    assert saved_data["metadata"]["automation/exist.yaml"]["etag"] == "e1"
 
 
 @pytest.mark.asyncio
@@ -180,7 +188,9 @@ async def test_cold_start_rehydration(coordinator):
     path = "/config/blueprints/automation/test.yaml"
     local_hash = "current_hash"
     coordinator.data = {}
-    coordinator._persisted_hashes = {path: local_hash}
+    coordinator._persisted_metadata = {
+        "automation/test.yaml": {"remote_hash": local_hash, "source_url": "https://url"}
+    }
     coordinator._first_update_done = False
 
     blueprints = {
@@ -211,8 +221,9 @@ async def test_etag_invalidation_on_mismatch(coordinator):
     local_hash = "current_hash"
     remote_hash = "stale_hash"
     coordinator.data = {}
-    coordinator._persisted_hashes = {path: remote_hash}
-    coordinator._persisted_etags = {path: "stale_etag"}
+    coordinator._persisted_metadata = {
+        "automation/test.yaml": {"remote_hash": remote_hash, "etag": "stale_etag"}
+    }
     coordinator._first_update_done = False
 
     blueprints = {
@@ -241,8 +252,13 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator):
     """Test that persisted hashes/ETags are only used for the very first update."""
     path = "/config/blueprints/automation/test.yaml"
     initial_hash = "initial_hash"
-    coordinator._persisted_hashes = {path: initial_hash}
-    coordinator._persisted_etags = {path: "initial_etag"}
+    coordinator._persisted_metadata = {
+        "automation/test.yaml": {
+            "remote_hash": initial_hash,
+            "etag": "initial_etag",
+            "source_url": "https://url",
+        }
+    }
     coordinator._first_update_done = False
 
     blueprints = {
@@ -263,8 +279,10 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator):
     coordinator.data = first_results
     assert coordinator._first_update_done
 
-    coordinator._persisted_hashes[path] = "stale_hash"
-    coordinator._persisted_etags[path] = "stale_etag"
+    coordinator._persisted_metadata["automation/test.yaml"] = {
+        "remote_hash": "stale_hash",
+        "etag": "stale_etag",
+    }
 
     with (
         patch.object(coordinator, "scan_blueprints", return_value=blueprints),

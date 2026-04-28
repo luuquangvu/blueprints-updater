@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import os
 from datetime import timedelta
 from http import HTTPStatus
 from types import MappingProxyType
@@ -92,17 +93,23 @@ async def test_merge_previous_data_edge_cases(coordinator):
 @pytest.mark.asyncio
 async def test_prune_stale_metadata(coordinator):
     """Test pruning logic for stale metadata."""
-    coordinator._persisted_etags = {"path1": "etag1", "path2": "etag2"}
-    coordinator._persisted_hashes = {"path1": "hash1", "path2": "hash2"}
-    coordinator.data = {"path1": {}}
+    coordinator._persisted_metadata = {
+        "path1": {"etag": "etag1", "remote_hash": "hash1", "source_url": "u"},
+        "path2": {"etag": "etag2", "remote_hash": "hash2", "source_url": "u"},
+    }
+    coordinator.data = {"path1": {"rel_path": "path1", "source_url": "u"}}
 
     with (
-        patch("os.path.isfile", side_effect=lambda x: x == "path1"),
+        patch("os.path.isfile", side_effect=lambda x: str(x).replace("\\", "/").endswith("path1")),
         patch.object(coordinator, "_async_save_metadata", new_callable=AsyncMock) as mock_save,
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            side_effect=lambda hass, path: os.path.basename(path) if os.path.isfile(path) else None,
+        ),
         patch.object(
             coordinator.hass,
             "async_create_background_task",
-            side_effect=lambda coro, name=None: coro,
+            side_effect=lambda coro, name=None: asyncio.create_task(coro),
         ) as mock_bg,
     ):
         await coordinator._async_prune_stale_metadata({"path1"})
@@ -111,8 +118,10 @@ async def test_prune_stale_metadata(coordinator):
                 await call.args[0]
         mock_save.assert_awaited_once_with(force=True)
 
-    assert "path2" not in coordinator._persisted_etags
-    assert "path2" not in coordinator._persisted_hashes
+    assert "path2" not in coordinator._persisted_metadata
+    assert "path1" in coordinator._persisted_metadata
+    assert coordinator._persisted_metadata["path1"]["etag"] == "etag1"
+    assert "path1" in coordinator.data
 
 
 @pytest.mark.asyncio
