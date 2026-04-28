@@ -206,6 +206,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         to restore the state between restarts.
         """
         storage_data = await self._store.async_load()
+        self.setup_complete = True
+
         if not storage_data or not isinstance(storage_data, dict):
             return
 
@@ -222,7 +224,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 _LOGGER.warning("Skipping malformed metadata entry for %s", rel_path)
 
         self._persisted_metadata = validated_metadata
-        self.setup_complete = True
 
         _LOGGER.debug(
             "Loaded metadata for %d blueprints from storage",
@@ -383,9 +384,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         old_count = len(self._persisted_metadata)
         blueprints_root = self.hass.config.path(BLUEPRINTS_DATA_DIR)
 
-        scanned_rel_paths = {
-            rel for path in scanned_paths if (rel := get_blueprint_rel_path(self.hass, path))
-        }
+        scanned_rel_paths: set[str] = set()
+        for path in scanned_paths:
+            try:
+                if rel := get_blueprint_rel_path(self.hass, path):
+                    scanned_rel_paths.add(rel)
+            except (ValueError, TypeError, OSError):
+                continue
 
         if candidate_rel_paths := set(self._persisted_metadata.keys()) - scanned_rel_paths:
             metadata_to_check = {
@@ -829,9 +834,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         blueprints_root = self.hass.config.path(BLUEPRINTS_DATA_DIR)
         current_data_map = {i["rel_path"]: i for i in self.data.values() if i.get("rel_path")}
 
+        candidate_paths = [os.path.join(blueprints_root, p) for p in all_rel_paths]
+        if not skip_filter:
+            valid_paths = await self.hass.async_add_executor_job(
+                lambda: [p for p in candidate_paths if os.path.isfile(p)]
+            )
+            candidate_paths = set(valid_paths)
+        else:
+            candidate_paths = set(candidate_paths)
+
         for rel_path in all_rel_paths:
             abs_path = os.path.join(blueprints_root, rel_path)
-            if not skip_filter and not os.path.isfile(abs_path):
+            if not skip_filter and abs_path not in candidate_paths:
                 continue
 
             existing = dict(self._persisted_metadata.get(rel_path, {}))
@@ -1015,7 +1029,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         try:
-            if not os.path.isfile(file_path):
+            file_exists = os.path.isfile(file_path)
+            if not file_exists:
                 return
 
             for i in range(max_bak, 0, -1):
@@ -1283,37 +1298,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return {"success": False, "translation_key": "system_error"}
 
         try:
-
-            def _restore_file(file_path: str, ver: int, max_bak: int) -> tuple[bool, str]:
-                """Local helper for _restore_file."""
-                bak_path = f"{file_path}.bak.{ver}"
-                if ver == 1 and not os.path.isfile(bak_path):
-                    old_bak = f"{file_path}.bak"
-                    if os.path.isfile(old_bak):
-                        bak_path = old_bak
-
-                if not os.path.isfile(bak_path):
-                    return False, "missing_backup"
-
-                with open(bak_path, encoding="utf-8") as f:
-                    content = f.read()
-
-                tmp_path = f"{file_path}.tmp"
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-
-                self._rotate_backups(file_path, max_bak)
-                os.replace(tmp_path, file_path)
-                return True, "success"
-
             success, message = await self.hass.async_add_executor_job(
-                _restore_file, real_path, version, max_backups
+                BlueprintUpdateCoordinator._execute_restore_file,
+                real_path,
+                version,
+                max_backups,
             )
 
             if success:
+                rel_path = get_blueprint_rel_path(self.hass, real_path)
+                if rel_path and rel_path in self._persisted_metadata:
+                    entry = self._persisted_metadata[rel_path]
+                    entry["etag"] = None
+                    entry["remote_hash"] = None
+
                 domain = "automation"
-                if self.data and path in self.data:
-                    domain = self.data[path].get("domain", "automation")
+                if self.data and real_path in self.data:
+                    domain = self.data[real_path].get("domain", "automation")
                 await self.async_reload_services([domain])
                 await self.async_request_refresh()
 
@@ -2078,7 +2079,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         Args:
             session: Async HTTP client session.
-            path: Current blueprint metadata.
+            path: Local path of the blueprint.
             info: Current blueprint metadata.
             results_to_notify: List of names for notification.
             updated_domains: Set of domains affected.
@@ -2228,8 +2229,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         try:
-            remote_content = self._ensure_source_url(remote_content, source_url)
             remote_hash = self._hash_content(remote_content, source_url)
+            remote_content = self._ensure_source_url(remote_content, source_url)
             local_hash = info["local_hash"]
             updatable = bool(remote_hash and remote_hash != local_hash)
 
@@ -2810,29 +2811,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content.replace("\r\n", "\n").replace("\r", "\n")
 
     @staticmethod
-    def _hash_content(content: str, source_url: str) -> str:
+    def _hash_content(content: str, source_url: str | None = None) -> str:
         """Calculate a deterministic SHA-256 hash of normalized content.
 
-        This method intentionally injects the source_url before hashing to
-        ensure that the blueprint's identity (content + source location)
-        is preserved. This allows identical content from different sources
-        to be tracked separately and ensures consistency between local
-        blueprints (which are always labeled by HA Core) and remote versions.
+        This method supports both plain normalization (content only) and
+        semantic normalization (content + source location tracking).
 
-        Note: Callers should use this method when a stable, identity-aware
-        hash is needed for comparison with storage or remote manifests.
-        For purely content-based checks without source tracking, use
-        _normalize_content before hashing manually.
-
-        If a source_url is provided, semantic normalization is applied first
-        to ensure consistency with Home Assistant's internal blueprint handling.
+        If a source_url is provided, it is injected into the blueprint's
+        metadata before hashing. This ensures the identity (logic + source)
+        is preserved. If source_url is None or empty, only plain YAML
+        normalization is performed.
 
         Args:
-            content: The string to hash.
-            source_url: Optional source URL to trigger semantic normalization.
+            content: The raw YAML string to hash.
+            source_url: Optional source URL to trigger identity-aware hashing.
 
         Returns:
-            The calculated hex hash.
+            The SHA-256 hex digest of the normalized content.
 
         """
         if not source_url:
@@ -3242,3 +3237,29 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                             _LOGGER.exception("Error reading blueprint at %s", full_path)
 
         return found_blueprints
+
+    @staticmethod
+    def _execute_restore_file(real_path: str, version: int, max_backups: int) -> tuple[bool, str]:
+        """Atomic filesystem operation for restoration (runs in executor)."""
+        bak_path = f"{real_path}.bak.{version}"
+        if version == 1 and not os.path.isfile(bak_path):
+            legacy_name = f".{os.path.basename(real_path)}.bak"
+            legacy_bak = os.path.join(os.path.dirname(real_path), legacy_name)
+            if os.path.isfile(legacy_bak):
+                bak_path = legacy_bak
+
+        if not os.path.isfile(bak_path):
+            return False, "missing_backup"
+
+        try:
+            with open(bak_path, encoding="utf-8") as f:
+                content = f.read()
+            tmp_path = f"{real_path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            BlueprintUpdateCoordinator._rotate_backups(real_path, max_backups)
+            os.replace(tmp_path, real_path)
+            return True, "success"
+        except (OSError, ValueError):
+            return False, "system_error"

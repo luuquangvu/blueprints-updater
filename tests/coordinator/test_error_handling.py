@@ -122,10 +122,10 @@ async def test_invalidate_metadata(coordinator):
 async def test_prune_stale_metadata_exception(coordinator):
     """Test _async_prune_stale_metadata handles path errors."""
     with patch(
-        "custom_components.blueprints_updater.coordinator.os.path.relpath",
+        "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
         side_effect=ValueError("Bad path"),
     ):
-        await coordinator._async_prune_stale_metadata(["/some/path"])
+        await coordinator._async_prune_stale_metadata({"/some/path"})
 
 
 @pytest.mark.asyncio

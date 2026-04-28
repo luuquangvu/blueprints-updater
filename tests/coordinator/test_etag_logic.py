@@ -152,8 +152,7 @@ async def test_etag_migration_forces_download(
         "source_url": "https://github.com/user/repo/bp.yaml",
         "local_hash": "stale_hash",
     }
-    remote_content_with_url = coordinator._ensure_source_url(remote_content, info["source_url"])
-    remote_hash = coordinator._hash_content(remote_content_with_url, info["source_url"])
+    remote_hash = coordinator._hash_content(remote_content, info["source_url"])
 
     coordinator.data = {
         path: {
