@@ -1,6 +1,7 @@
 """Tests for path manipulation and safety helpers in utils.py."""
 
 import logging
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -67,8 +68,13 @@ def test_get_blueprint_rel_path_with_hass(hass, tmp_path: Path, caplog) -> None:
         assert "escapes" in caplog.text.lower()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows-only test")
 def test_get_relative_path_normalizes_windows_separators(hass, tmp_path: Path) -> None:
-    """Windows-style separators are normalized to forward slashes."""
+    """Windows-style separators are normalized to forward slashes.
+
+    This test only runs on Windows because it relies on OS-native path handling
+    of backslashes to verify the integration's normalization logic.
+    """
     blueprints_root = tmp_path / "blueprints"
     file_path = _make_tree(blueprints_root, "foo/bar.yaml")
 
