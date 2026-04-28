@@ -492,9 +492,9 @@ async def test_ghost_update_prevention(coordinator):
         f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n  input: {{}}\n"
     )
     normalized_content = coordinator._ensure_source_url(content, url)
-    local_hash = coordinator._hash_content(normalized_content)
+    local_hash = coordinator._hash_content(normalized_content, url)
 
-    raw_hash = coordinator._hash_content(content)
+    raw_hash = coordinator._hash_content(content, url)
     assert raw_hash == local_hash
 
     coordinator.data[path] = {
@@ -533,7 +533,7 @@ async def test_yaml_normalization_ignores_comments(coordinator):
     url = "https://github.com/user/repo/blob/main/test.yaml"
     content = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n"
     normalized_content = coordinator._ensure_source_url(content, url)
-    local_hash = coordinator._hash_content(normalized_content)
+    local_hash = coordinator._hash_content(normalized_content, url)
 
     coordinator.data[path] = {
         "local_hash": local_hash,
@@ -791,6 +791,7 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
             "remote_content": "old_remote",
             "updatable": True,
             "rel_path": "automation/test.yaml",
+            "source_url": "https://github.com/user/repo/blob/main/test.yaml",
         }
     }
 
@@ -802,7 +803,9 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
     ):
         await coordinator.async_install_blueprint(path, raw_remote)
 
-    expected_hash = coordinator._hash_content(raw_remote)
+    expected_hash = coordinator._hash_content(
+        raw_remote, "https://github.com/user/repo/blob/main/test.yaml"
+    )
     assert coordinator.data[path]["local_hash"] == expected_hash
     assert coordinator.data[path]["remote_hash"] == expected_hash
     assert not coordinator.data[path]["updatable"]
@@ -823,8 +826,9 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
 async def test_async_install_blueprint_state_synchronization(coordinator):
     """Test that self.data is updated immediately after async_install_blueprint."""
     path = "/config/blueprints/automation/test.yaml"
-    remote_content = "blueprint:\n  name: New Version\n  source_url: https://url\n"
-    new_hash = coordinator._hash_content(remote_content)
+    url = "https://url"
+    remote_content = f"blueprint:\n  name: New Version\n  source_url: {url}\n"
+    new_hash = coordinator._hash_content(remote_content, url)
 
     coordinator.data = {
         path: {
@@ -833,6 +837,7 @@ async def test_async_install_blueprint_state_synchronization(coordinator):
             "local_hash": "old_hash",
             "remote_hash": new_hash,
             "updatable": True,
+            "source_url": url,
         }
     }
 

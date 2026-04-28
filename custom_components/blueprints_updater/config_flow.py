@@ -64,13 +64,19 @@ async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, An
     blueprints = await hass.async_add_executor_job(
         BlueprintUpdateCoordinator.scan_blueprints, hass, FILTER_MODE_ALL, []
     )
-    options = [
-        {
-            "value": (rel_path := info.get("rel_path") or get_relative_path(hass, path)),
-            "label": f"{info['name']} [{rel_path}]",
-        }
-        for path, info in blueprints.items()
-    ]
+    options: list[dict[str, Any]] = []
+    for path, info in blueprints.items():
+        try:
+            rel_path = info.get("rel_path") or get_relative_path(hass, path)
+            options.append(
+                {
+                    "value": rel_path,
+                    "label": f"{info['name']} [{rel_path}]",
+                }
+            )
+        except (ValueError, TypeError, OSError) as err:
+            _LOGGER.warning("Skipping invalid blueprint path %s: %s", path, err)
+            continue
     options.sort(key=lambda x: x["label"])
     return options
 

@@ -52,8 +52,9 @@ async def test_304_response_preserves_updatable_status(
     local_content = "blueprint:\n  name: Old"
     remote_content = "blueprint:\n  name: New"
 
-    local_hash = coordinator._hash_content(local_content)
-    remote_hash = coordinator._hash_content(remote_content)
+    url = "https://github.com/user/repo/test.yaml"
+    local_hash = coordinator._hash_content(local_content, url)
+    remote_hash = coordinator._hash_content(remote_content, url)
 
     info = {
         "name": "Test",
@@ -152,7 +153,7 @@ async def test_etag_migration_forces_download(
         "local_hash": "stale_hash",
     }
     remote_content_with_url = coordinator._ensure_source_url(remote_content, info["source_url"])
-    remote_hash = coordinator._hash_content(remote_content_with_url)
+    remote_hash = coordinator._hash_content(remote_content_with_url, info["source_url"])
 
     coordinator.data = {
         path: {

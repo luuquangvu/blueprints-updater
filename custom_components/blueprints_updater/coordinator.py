@@ -16,6 +16,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from http import HTTPStatus
+from pathlib import Path
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
 
@@ -349,11 +350,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A filtered metadata dictionary.
 
         """
-        return {
-            rel_path: data
-            for rel_path, data in metadata.items()
-            if os.path.isfile(os.path.join(root, rel_path))
-        }
+        filtered: dict[str, dict[str, Any]] = {}
+        for rel_path, data in metadata.items():
+            try:
+                rel_path_obj = Path(rel_path)
+                if rel_path_obj.is_absolute() or ".." in rel_path_obj.parts:
+                    _LOGGER.warning("Invalid blueprint metadata path: %s", rel_path)
+                    continue
+
+                abs_path = (Path(root) / rel_path_obj).resolve()
+                if abs_path.is_file():
+                    filtered[rel_path] = data
+            except (ValueError, OSError, TypeError):
+                continue
+        return filtered
 
     async def _async_prune_stale_metadata(self, scanned_paths: set[str]) -> None:
         """Remove metadata for blueprints that no longer exist on disk.
@@ -533,7 +543,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         _LOGGER.debug("Instant setup complete with %d blueprints", len(results))
         return results
 
-    def _is_semantically_equal(self, content: str, target_hash: str) -> bool:
+    def _is_semantically_equal(self, content: str, target_hash: str, source_url: str) -> bool:
         """Check if content is semantically equal to a target hash.
 
         The method assumes `content` and `target_hash` are normalized YAML strings.
@@ -541,6 +551,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         Args:
             content: Normalized YAML content to compare.
             target_hash: Hash of the target blueprint (from normalized YAML).
+            source_url: The source URL to use for identity-aware hashing.
 
         Returns:
             True if the content matches the target hash, False otherwise.
@@ -555,7 +566,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
 
         try:
-            content_hash = self._hash_content(content)
+            content_hash = self._hash_content(content, source_url)
         except (ValueError, TypeError, yaml.YAMLError) as err:
             _LOGGER.debug("Semantic comparison failed: %s", err)
             return False
@@ -682,9 +693,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         remote_content = prev_data.get("remote_content")
-        if not isinstance(remote_content, str) or not isinstance(current_local_hash, str):
+        source_url = prev_data.get("source_url")
+        if (
+            not isinstance(remote_content, str)
+            or not isinstance(current_local_hash, str)
+            or not isinstance(source_url, str)
+        ):
             return False
-        return self._is_semantically_equal(remote_content, current_local_hash)
+        return self._is_semantically_equal(remote_content, current_local_hash, source_url)
 
     def _start_background_refresh(self, blueprints: dict[str, Any]) -> None:
         """Start the background remote refresh task if not already running.
@@ -1114,7 +1130,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     if current.get("remote_content") == remote_content
                     else None
                 )
-                final_hash = remote_hash or cached_remote_hash or self._hash_content(remote_content)
+                final_hash = (
+                    remote_hash
+                    or cached_remote_hash
+                    or self._hash_content(remote_content, current.get("source_url", ""))
+                )
                 final_etag = etag if etag is not None else current.get("etag")
 
                 self.data[path].update(
@@ -1953,7 +1973,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             not (diff_text or "").strip()
             and isinstance(remote_content, str)
             and isinstance(local_hash, str)
-            and self._is_semantically_equal(remote_content, local_hash)
+            and isinstance(info.get("source_url"), str)
+            and self._is_semantically_equal(
+                remote_content, local_hash, cast(str, info.get("source_url"))
+            )
         )
         self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "", is_semantic_sync)
         return GitDiffResult(diff_text=diff_text or "", is_semantic_sync=is_semantic_sync)
@@ -2215,7 +2238,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         try:
             remote_content = self._ensure_source_url(remote_content, source_url)
-            remote_hash = self._hash_content(remote_content)
+            remote_hash = self._hash_content(remote_content, source_url)
             local_hash = info["local_hash"]
             updatable = bool(remote_hash and remote_hash != local_hash)
 
@@ -2796,7 +2819,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content.replace("\r\n", "\n").replace("\r", "\n")
 
     @staticmethod
-    def _hash_content(content: str, source_url: str | None = None) -> str:
+    def _hash_content(content: str, source_url: str) -> str:
         """Calculate a deterministic SHA-256 hash of normalized content.
 
         This method intentionally injects the source_url before hashing to

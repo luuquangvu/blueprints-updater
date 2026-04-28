@@ -243,8 +243,8 @@ def test_normalization_comprehensive(coordinator, variant, input_content, expect
     normalized = coordinator._normalize_content(input_content)
     assert normalized == expected_output, f"Failed for variant: {variant}"
 
-    hash1 = coordinator._hash_content(input_content)
-    hash2 = coordinator._hash_content(normalized)
+    hash1 = coordinator._hash_content(input_content, "https://example.com")
+    hash2 = coordinator._hash_content(normalized, "https://example.com")
     assert hash1 == hash2, f"Hash mismatch for variant: {variant}"
 
 
@@ -254,7 +254,9 @@ def test_normalization_idempotency(coordinator):
     first = coordinator._normalize_content(content)
     second = coordinator._normalize_content(first)
     assert first == second
-    assert coordinator._hash_content(first) == coordinator._hash_content(second)
+    assert coordinator._hash_content(first, "https://example.com") == coordinator._hash_content(
+        second, "https://example.com"
+    )
 
 
 def test_ensure_source_url_stability(coordinator):
@@ -338,10 +340,10 @@ def test_ensure_source_url_structured_modification(coordinator):
 def test_hash_content_determinism(coordinator):
     """Test that hashing is deterministic."""
     content = "\ufeffblueprint:\r\n  name: Test\n"
-    hash1 = coordinator._hash_content(content)
+    hash1 = coordinator._hash_content(content, "https://example.com")
 
     normalized = coordinator._normalize_content(content)
-    hash2 = coordinator._hash_content(normalized)
+    hash2 = coordinator._hash_content(normalized, "https://example.com")
 
     assert hash1 == hash2
     assert "\ufeff" not in normalized
@@ -542,5 +544,5 @@ blueprint:
 def test_hash_content_no_semantic(coordinator):
     """Test that hash_content behaves as before when no source_url is provided."""
     content = "blueprint:\n  name: Test"
-    hash1 = coordinator._hash_content(content)
+    hash1 = coordinator._hash_content(content, "https://example.com")
     assert len(hash1) == 64
