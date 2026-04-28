@@ -75,9 +75,9 @@ from .const import (
 )
 from .providers import registry
 from .utils import (
+    get_blueprint_rel_path,
     get_config_bool,
     get_max_backups,
-    get_relative_path,
     redact_url,
     retry_async,
     sanitize_error_detail,
@@ -383,14 +383,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         old_count = len(self._persisted_metadata)
         blueprints_root = self.hass.config.path(BLUEPRINTS_DATA_DIR)
 
-        scanned_rel_paths = set()
-        for path in scanned_paths:
-            try:
-                rel = get_relative_path(self.hass, path)
-                if not rel.startswith(".."):
-                    scanned_rel_paths.add(rel)
-            except (ValueError, TypeError):
-                continue
+        scanned_rel_paths = {
+            rel for path in scanned_paths if (rel := get_blueprint_rel_path(self.hass, path))
+        }
 
         if candidate_rel_paths := set(self._persisted_metadata.keys()) - scanned_rel_paths:
             metadata_to_check = {
@@ -622,11 +617,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             redact_url(curr_url),
         )
         if not (rel_path := prev.get("rel_path")):
-            try:
-                rel_path = get_relative_path(self.hass, path)
-            except (ValueError, TypeError):
-                _LOGGER.debug("Could not determine rel_path for metadata invalidation of %s", path)
-                rel_path = None
+            rel_path = get_blueprint_rel_path(self.hass, path)
 
         if rel_path:
             self._persisted_metadata.pop(rel_path, None)
@@ -2087,7 +2078,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         Args:
             session: Async HTTP client session.
-            path: Local path of the blueprint.
+            path: Current blueprint metadata.
             info: Current blueprint metadata.
             results_to_notify: List of names for notification.
             updated_domains: Set of domains affected.
@@ -2828,6 +2819,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         to be tracked separately and ensures consistency between local
         blueprints (which are always labeled by HA Core) and remote versions.
 
+        Note: Callers should use this method when a stable, identity-aware
+        hash is needed for comparison with storage or remote manifests.
+        For purely content-based checks without source tracking, use
+        _normalize_content before hashing manually.
+
         If a source_url is provided, semantic normalization is applied first
         to ensure consistency with Home Assistant's internal blueprint handling.
 
@@ -3097,8 +3093,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Extract the 'blueprint' metadata block from YAML content."""
         try:
             blueprint_dict = yaml_util.parse_yaml(content)
-        except HomeAssistantError:
+        except HomeAssistantError as err:
             _LOGGER.warning("Failed to parse blueprint at %s", path)
+            _LOGGER.debug("Blueprint parse error at %s: %s", path, err)
             return None
 
         if not isinstance(blueprint_dict, dict):
@@ -3224,26 +3221,24 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         _LOGGER.warning("Skipping blueprint with invalid path: %s", full_path)
                         continue
 
-                    rel_path = get_relative_path(hass, full_path)
+                    if rel_path := get_blueprint_rel_path(hass, full_path):
+                        try:
+                            with open(full_path, encoding="utf-8") as f:
+                                content = f.read()
 
-                    if not BlueprintUpdateCoordinator._should_include_blueprint(
-                        rel_path, filter_mode, selected_set
-                    ):
-                        continue
+                            if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
+                                full_path, content, rel_path
+                            ):
+                                if not BlueprintUpdateCoordinator._should_include_blueprint(
+                                    rel_path, filter_mode, selected_set
+                                ):
+                                    continue
+                                found_blueprints[full_path] = {
+                                    **parsed_data,
+                                    "rel_path": rel_path,
+                                }
 
-                    try:
-                        with open(full_path, encoding="utf-8") as f:
-                            content = f.read()
-
-                        if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
-                            full_path, content, rel_path
-                        ):
-                            found_blueprints[full_path] = {
-                                **parsed_data,
-                                "rel_path": rel_path,
-                            }
-
-                    except OSError:
-                        _LOGGER.exception("Error reading blueprint at %s", full_path)
+                        except OSError:
+                            _LOGGER.exception("Error reading blueprint at %s", full_path)
 
         return found_blueprints

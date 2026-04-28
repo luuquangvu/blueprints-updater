@@ -27,6 +27,7 @@ async def test_async_setup_entry_update(hass):
             "curr_version": "1.0",
             "remote_version": "1.1",
             "local_hash": "hash12345678",
+            "remote_hash": "remot12345678",
         }
     }
     coordinator.data = data

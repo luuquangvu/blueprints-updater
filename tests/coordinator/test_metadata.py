@@ -542,7 +542,7 @@ blueprint:
 
 
 def test_hash_content_no_semantic(coordinator):
-    """Test that hash_content behaves as before when no source_url is provided."""
+    """Test that hash_content returns a consistent-length SHA-256 hex digest."""
     content = "blueprint:\n  name: Test"
     hash1 = coordinator._hash_content(content, "https://example.com")
     assert len(hash1) == 64

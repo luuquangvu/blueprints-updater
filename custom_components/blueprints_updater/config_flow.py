@@ -40,11 +40,11 @@ from .const import (
 )
 from .coordinator import BlueprintUpdateCoordinator
 from .utils import (
+    get_blueprint_rel_path,
     get_config_bool,
     get_config_str,
     get_config_value,
     get_max_backups,
-    get_relative_path,
     get_update_interval,
 )
 
@@ -66,17 +66,13 @@ async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, An
     )
     options: list[dict[str, Any]] = []
     for path, info in blueprints.items():
-        try:
-            rel_path = info.get("rel_path") or get_relative_path(hass, path)
+        if rel_path := info.get("rel_path") or get_blueprint_rel_path(hass, path):
             options.append(
                 {
                     "value": rel_path,
                     "label": f"{info['name']} [{rel_path}]",
                 }
             )
-        except (ValueError, TypeError, OSError) as err:
-            _LOGGER.warning("Skipping invalid blueprint path %s: %s", path, err)
-            continue
     options.sort(key=lambda x: x["label"])
     return options
 

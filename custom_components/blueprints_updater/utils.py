@@ -316,9 +316,32 @@ def get_relative_path(hass: HomeAssistant, path: str) -> str:
     real_path = os.path.realpath(path)
 
     try:
-        if os.path.commonpath([real_path, real_root]) != real_root:
-            raise ValueError(f"Path escapes blueprints root: {path}")
+        common = os.path.commonpath([real_path, real_root])
     except (ValueError, OSError) as err:
         raise ValueError(f"Invalid or unsafe path: {path}") from err
 
+    if common != real_root:
+        raise ValueError(f"Path escapes blueprints root: {path}")
+
     return os.path.relpath(real_path, real_root).replace("\\", "/")
+
+
+def get_blueprint_rel_path(hass: HomeAssistant, path: str) -> str | None:
+    """Get a relative path for a blueprint with centralized error handling.
+
+    This helper wraps get_relative_path to provide a consistent way of
+    handling invalid or unsafe paths across the integration.
+
+    Args:
+        hass: HomeAssistant instance.
+        path: Absolute path to the blueprint.
+
+    Returns:
+        The relative path string if valid, None if the path is invalid or unsafe.
+
+    """
+    try:
+        return get_relative_path(hass, path)
+    except (ValueError, TypeError, OSError) as err:
+        _LOGGER.debug("Skipping invalid blueprint path %s: %s", path, err)
+        return None

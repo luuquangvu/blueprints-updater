@@ -84,7 +84,10 @@ async def test_blueprint_installation_security_and_errors(coordinator):
 async def test_async_fetch_content_failures(coordinator):
     """Test failures during remote content fetching."""
     mock_session = MagicMock()
-    mock_session.get = AsyncMock(side_effect=httpx.RequestError("Network Down"))
+    mock_request = MagicMock()
+    mock_session.get = AsyncMock(
+        side_effect=httpx.RequestError("Network Down", request=mock_request)
+    )
 
     with (
         patch("custom_components.blueprints_updater.coordinator._LOGGER.debug"),
