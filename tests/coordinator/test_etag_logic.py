@@ -191,7 +191,6 @@ async def test_etag_migration_forces_download(
 async def test_async_save_metadata_preserves_persisted_entries_for_existing_files(coordinator):
     """Test that persisted entries for existing files are preserved even if not in current scan."""
     existing_path = "/config/blueprints/existing.yaml"
-    orphaned_path = "/config/blueprints/orphaned.yaml"
 
     coordinator._persisted_metadata = {
         "existing.yaml": {
@@ -219,9 +218,12 @@ async def test_async_save_metadata_preserves_persisted_entries_for_existing_file
     mock_store.async_save = AsyncMock(return_value=None)
     coordinator._store = mock_store
 
-    with patch(
-        "custom_components.blueprints_updater.coordinator.os.path.isfile",
-        side_effect=lambda p: p.replace("\\", "/") in (existing_path, orphaned_path),
+    with patch.object(
+        coordinator,
+        "_filter_existing_metadata",
+        side_effect=lambda root, meta: {
+            k: v for k, v in meta.items() if k in ("existing.yaml", "orphaned.yaml")
+        },
     ):
         await coordinator._async_save_metadata()
 

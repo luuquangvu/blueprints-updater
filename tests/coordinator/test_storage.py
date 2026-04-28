@@ -16,7 +16,7 @@ async def test_prune_preserves_hashes_only_metadata(coordinator):
     coordinator._persisted_metadata = {"automation/hash_only.yaml": {"remote_hash": "some_hash"}}
 
     with (
-        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+        patch.object(coordinator, "_filter_existing_metadata", side_effect=lambda root, meta: meta),
         patch.object(coordinator, "_async_save_metadata") as mock_save,
     ):
         await coordinator._async_prune_stale_metadata(set())
@@ -113,10 +113,8 @@ async def test_async_save_metadata_empty_data(coordinator):
     coordinator._persisted_metadata = {"stale": {"etag": "etag", "remote_hash": "hash"}}
 
     with (
+        patch.object(coordinator, "_filter_existing_metadata", return_value={}),
         patch.object(coordinator._store, "async_save", new_callable=AsyncMock) as mock_save,
-        patch(
-            "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
-        ),
     ):
         await coordinator._async_save_metadata()
 
@@ -151,9 +149,12 @@ async def test_prune_metadata_persistence(coordinator):
             coordinator.hass, "async_create_background_task", side_effect=create_background_task
         ),
         patch.object(coordinator._store, "async_save", new_callable=AsyncMock) as mock_save,
-        patch(
-            "custom_components.blueprints_updater.coordinator.os.path.isfile",
-            side_effect=lambda p: p.replace("\\", "/") in {path_exist},
+        patch.object(
+            coordinator,
+            "_filter_existing_metadata",
+            side_effect=lambda root, meta: {
+                k: v for k, v in meta.items() if k == "automation/exist.yaml"
+            },
         ),
     ):
         await coordinator._async_prune_stale_metadata({path_exist})

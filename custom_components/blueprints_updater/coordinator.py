@@ -577,24 +577,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     def _is_semantically_equal(self, content: str, target_hash: str, source_url: str) -> bool:
         """Check if content is semantically equal to a target hash.
 
-        The method assumes `content` and `target_hash` are normalized YAML strings.
-
         Args:
-            content: Normalized YAML content to compare.
+            content: Raw or normalized YAML content to compare.
             target_hash: Hash of the target blueprint (from normalized YAML).
             source_url: The source URL to use for identity-aware hashing.
 
         Returns:
             True if the content matches the target hash, False otherwise.
 
-        Raises:
-            TypeError: If `content` or `target_hash` are not strings.
-
         """
         if not isinstance(content, str) or not isinstance(target_hash, str):
-            raise TypeError(
-                f"_is_semantically_equal expects `str`, got {type(content)} and {type(target_hash)}"
-            )
+            return False
 
         try:
             content_hash = self._hash_content(content, source_url)
@@ -864,38 +857,29 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         blueprints_root = self.hass.config.path(BLUEPRINTS_DATA_DIR)
         current_data_map = {i["rel_path"]: i for i in self.data.values() if i.get("rel_path")}
-
-        candidate_paths = [os.path.join(blueprints_root, p) for p in all_rel_paths]
-        if not skip_filter:
-            valid_paths = await self.hass.async_add_executor_job(
-                lambda: [p for p in candidate_paths if os.path.isfile(p)]
-            )
-            candidate_paths = set(valid_paths)
-        else:
-            candidate_paths = set(candidate_paths)
+        candidate_metadata = {rel: self._persisted_metadata.get(rel, {}) for rel in all_rel_paths}
 
         for rel_path in all_rel_paths:
-            abs_path = os.path.join(blueprints_root, rel_path)
-            if not skip_filter and abs_path not in candidate_paths:
-                continue
-
-            existing = dict(self._persisted_metadata.get(rel_path, {}))
-
+            existing = dict(candidate_metadata.get(rel_path, {}))
             if info := current_data_map.get(rel_path):
                 existing |= {
                     "remote_hash": info.get("remote_hash"),
                     "etag": info.get("etag"),
                     "source_url": info.get("source_url"),
                 }
-                final_metadata[rel_path] = existing
-            elif existing:
-                final_metadata[rel_path] = existing
+            candidate_metadata[rel_path] = existing
 
-        final_metadata = {
-            key: value
-            for key, value in final_metadata.items()
-            if BlueprintUpdateCoordinator._has_meaningful_metadata(value)
-        }
+        if not skip_filter:
+            valid_metadata = await self.hass.async_add_executor_job(
+                self._filter_existing_metadata, blueprints_root, candidate_metadata
+            )
+            final_metadata = {
+                k: v for k, v in valid_metadata.items() if self._has_meaningful_metadata(v)
+            }
+        else:
+            final_metadata = {
+                k: v for k, v in candidate_metadata.items() if self._has_meaningful_metadata(v)
+            }
 
         if not force and final_metadata == self._persisted_metadata:
             return
@@ -2262,8 +2246,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         try:
-            remote_hash = self._hash_content(remote_content, source_url)
             remote_content = self._ensure_source_url(remote_content, source_url)
+            remote_hash = self._hash_content(remote_content, source_url, already_normalized=True)
             local_hash = info["local_hash"]
             updatable = bool(remote_hash and remote_hash != local_hash)
 
@@ -2844,7 +2828,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content.replace("\r\n", "\n").replace("\r", "\n")
 
     @staticmethod
-    def _hash_content(content: str, source_url: str | None = None) -> str:
+    def _hash_content(
+        content: str, source_url: str | None = None, already_normalized: bool = False
+    ) -> str:
         """Calculate a deterministic SHA-256 hash of normalized content.
 
         This method supports both plain normalization (content only) and
@@ -2858,11 +2844,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         Args:
             content: The raw YAML string to hash.
             source_url: Optional source URL to trigger identity-aware hashing.
+            already_normalized: If True, bypass normalization steps and hash raw content.
 
         Returns:
             The SHA-256 hex digest of the normalized content.
 
         """
+        if already_normalized:
+            return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
         if not source_url:
             return hashlib.sha256(
                 BlueprintUpdateCoordinator._normalize_content(content).encode("utf-8")
@@ -3294,5 +3284,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             BlueprintUpdateCoordinator._rotate_backups(real_path, max_backups)
             os.replace(tmp_path, real_path)
             return True, "success"
-        except (OSError, ValueError):
+        except (OSError, ValueError) as err:
+            _LOGGER.exception("Filesystem error during blueprint restoration: %s", err)
             return False, "system_error"
