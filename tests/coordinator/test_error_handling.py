@@ -1,5 +1,6 @@
 """Tests for coordinator error handling and edge cases."""
 
+import os
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import httpx
@@ -13,11 +14,17 @@ async def test_metadata_persistence_failures(coordinator):
     coordinator.setup_complete = True
     coordinator.data = {"p1": {"rel_path": "a.yaml", "etag": "e"}}
 
-    mock_store = MagicMock()
+    mock_store = AsyncMock()
     coordinator._store = mock_store
 
-    with patch(
-        "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
+        ),
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            return_value=None,
+        ),
     ):
         await coordinator._async_save_metadata()
         mock_store.async_save.assert_not_called()
@@ -25,6 +32,10 @@ async def test_metadata_persistence_failures(coordinator):
     mock_store.async_save = AsyncMock(side_effect=Exception("Disk full"))
     with (
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            side_effect=lambda hass, path: os.path.basename(path) if os.path.isfile(path) else None,
+        ),
         patch("custom_components.blueprints_updater.coordinator._LOGGER.exception") as mock_error,
     ):
         await coordinator._async_save_metadata(force=True)

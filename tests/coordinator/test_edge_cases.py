@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import os
 from datetime import timedelta
 from http import HTTPStatus
 from types import MappingProxyType
@@ -101,10 +102,14 @@ async def test_prune_stale_metadata(coordinator):
     with (
         patch("os.path.isfile", side_effect=lambda x: str(x).replace("\\", "/").endswith("path1")),
         patch.object(coordinator, "_async_save_metadata", new_callable=AsyncMock) as mock_save,
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            side_effect=lambda hass, path: os.path.basename(path) if os.path.isfile(path) else None,
+        ),
         patch.object(
             coordinator.hass,
             "async_create_background_task",
-            side_effect=lambda coro, name=None: coro,
+            side_effect=lambda coro, name=None: asyncio.create_task(coro),
         ) as mock_bg,
     ):
         await coordinator._async_prune_stale_metadata({"path1"})

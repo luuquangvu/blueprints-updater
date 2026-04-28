@@ -16,7 +16,6 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from http import HTTPStatus
-from pathlib import Path
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
 
@@ -338,9 +337,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
         return filter_mode, selected_blueprints
 
-    @staticmethod
     def _filter_existing_metadata(
-        root: str, metadata: dict[str, dict[str, Any]]
+        self, root: str, metadata: dict[str, dict[str, Any]]
     ) -> dict[str, dict[str, Any]]:
         """Filter metadata to only include paths that exist on disk.
 
@@ -356,22 +354,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         filtered: dict[str, dict[str, Any]] = {}
         for rel_path, data in metadata.items():
-            try:
-                rel_path_obj = Path(rel_path)
-                if rel_path_obj.is_absolute() or ".." in rel_path_obj.parts:
-                    _LOGGER.warning("Invalid blueprint metadata path: %s", rel_path)
-                    continue
-
-                abs_path = (Path(root) / rel_path_obj).resolve()
-                if os.path.isfile(abs_path):
-                    real_path = os.path.realpath(str(abs_path))
-                    real_root = os.path.realpath(root)
-                    if os.path.commonpath([real_path, real_root]) == real_root:
-                        filtered[rel_path] = data
-                    else:
-                        _LOGGER.warning("Blueprint path outside root: %s", abs_path)
-            except (ValueError, OSError, TypeError):
-                continue
+            abs_path = os.path.join(root, rel_path)
+            if get_blueprint_rel_path(self.hass, abs_path) == rel_path:
+                filtered[rel_path] = data
+            else:
+                _LOGGER.warning("Invalid or unsafe blueprint path filtered: %s", rel_path)
         return filtered
 
     @staticmethod
@@ -1333,6 +1320,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     self.data[real_path]["remote_hash"] = None
                     domain = self.data[real_path].get("domain", "automation")
                 await self.async_reload_services([domain])
+                self.hass.async_create_background_task(
+                    self._async_save_metadata(force=True),
+                    "blueprints_updater_save_after_restore",
+                )
                 await self.async_request_refresh()
 
             return {

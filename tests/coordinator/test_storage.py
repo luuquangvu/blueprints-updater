@@ -37,6 +37,10 @@ async def test_async_prune_stale_metadata_triggers_save(coordinator):
         patch(
             "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
         ),
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            side_effect=lambda hass, path: None,
+        ),
         patch.object(coordinator, "_async_save_metadata") as mock_save,
     ):
         await coordinator._async_prune_stale_metadata(set())
@@ -98,6 +102,14 @@ async def test_metadata_pruning(coordinator):
     with (
         patch.object(coordinator, "scan_blueprints", return_value=blueprints),
         patch.object(coordinator, "_start_background_refresh"),
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            side_effect=lambda hass, path: (
+                "automation/valid.yaml"
+                if "valid.yaml" in path
+                else os.path.basename(path).replace("\\", "/")
+            ),
+        ),
     ):
         await coordinator._async_update_data()
 
