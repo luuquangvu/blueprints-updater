@@ -11,5 +11,5 @@
   "issue_tracker": "https://github.com/luuquangvu/blueprints-updater/issues",
   "requirements": ["h2>=4,<5"],
   "single_config_entry": true,
-  "version": "2.0.0"
+  "version": "2.1.0"
 }
