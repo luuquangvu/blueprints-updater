@@ -308,11 +308,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
                                 path, remote_content, reload_services=False, backup=backup_pref
                             )
                             processed_count += 1
-                    except Exception as err:
+                    except Exception:
                         _LOGGER.exception(
-                            "Failed to update blueprint path %s: %s",
+                            "Failed to update blueprint path %s",
                             path,
-                            err,
                         )
                         continue
 

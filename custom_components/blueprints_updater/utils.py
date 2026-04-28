@@ -3,15 +3,20 @@
 import asyncio
 import inspect
 import logging
+import os
 import random
 import textwrap
 from collections.abc import Callable, Coroutine
 from functools import wraps
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import httpx
 
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
+
 from .const import (
+    BLUEPRINTS_DATA_DIR,
     CONF_MAX_BACKUPS,
     CONF_UPDATE_INTERVAL,
     DEFAULT_MAX_BACKUPS,
@@ -290,3 +295,30 @@ def verify_https_enforcement(response: httpx.Response, original_url: str) -> Non
             f"Security violation: Final destination for {redact_url(original_url)} "
             f"must be HTTPS (got {response.url.scheme})"
         )
+
+
+def get_relative_path(hass: HomeAssistant, path: str) -> str:
+    """Calculate normalized relative path from blueprints root.
+
+    This ensures that paths are always forward-slash separated even on Windows,
+    providing consistency across the integration.
+
+    Args:
+        hass: HomeAssistant instance.
+        path: Absolute path to the blueprint.
+
+    Returns:
+        The normalized relative path string.
+
+    """
+    root = hass.config.path(BLUEPRINTS_DATA_DIR)
+    real_root = os.path.realpath(root)
+    real_path = os.path.realpath(path)
+
+    try:
+        if os.path.commonpath([real_path, real_root]) != real_root:
+            raise ValueError(f"Path escapes blueprints root: {path}")
+    except (ValueError, OSError) as err:
+        raise ValueError(f"Invalid or unsafe path: {path}") from err
+
+    return os.path.relpath(real_path, real_root).replace("\\", "/")

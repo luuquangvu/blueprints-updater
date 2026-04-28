@@ -44,8 +44,9 @@ async def test_async_prune_stale_metadata_empty_data(hass, mock_coordinator):
     coordinator = mock_coordinator
     coordinator.data = {}
 
-    coordinator._persisted_etags = {"stale_path": "etag"}
-    coordinator._persisted_hashes = {"stale_path": "hash"}
+    coordinator._persisted_metadata = {
+        "stale_path": {"etag": "etag", "remote_hash": "hash", "source_url": "u"}
+    }
 
     with (
         patch(
@@ -57,8 +58,7 @@ async def test_async_prune_stale_metadata_empty_data(hass, mock_coordinator):
         mock_save.assert_called_once_with(force=True)
 
     assert not coordinator.data
-    assert not coordinator._persisted_etags
-    assert not coordinator._persisted_hashes
+    assert not coordinator._persisted_metadata
 
 
 @pytest.mark.asyncio

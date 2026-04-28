@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, cast
 
 import voluptuous as vol
@@ -45,6 +44,7 @@ from .utils import (
     get_config_str,
     get_config_value,
     get_max_backups,
+    get_relative_path,
     get_update_interval,
 )
 
@@ -66,9 +66,7 @@ async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, An
     )
     options = [
         {
-            "value": (
-                rel_path := os.path.relpath(path, hass.config.path("blueprints")).replace("\\", "/")
-            ),
+            "value": (rel_path := info.get("rel_path") or get_relative_path(hass, path)),
             "label": f"{info['name']} [{rel_path}]",
         }
         for path, info in blueprints.items()

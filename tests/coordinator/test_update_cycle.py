@@ -370,6 +370,7 @@ async def test_async_update_blueprint_unsafe_url_invalidates_cache(coordinator):
         "etag": "old_etag",
         "remote_hash": "old_hash",
         "updatable": True,
+        "rel_path": "automation/test.yaml",
     }
 
     coordinator._is_safe_url = AsyncMock(return_value=False)
@@ -491,7 +492,7 @@ async def test_ghost_update_prevention(coordinator):
         f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n  input: {{}}\n"
     )
     normalized_content = coordinator._ensure_source_url(content, url)
-    local_hash = coordinator._hash_content(normalized_content, already_normalized=True)
+    local_hash = coordinator._hash_content(normalized_content)
 
     raw_hash = coordinator._hash_content(content)
     assert raw_hash == local_hash
@@ -500,6 +501,7 @@ async def test_ghost_update_prevention(coordinator):
         "local_hash": local_hash,
         "remote_hash": "different_hash",
         "updatable": True,
+        "rel_path": "automation/test.yaml",
     }
 
     results_to_notify = []
@@ -531,7 +533,7 @@ async def test_yaml_normalization_ignores_comments(coordinator):
     url = "https://github.com/user/repo/blob/main/test.yaml"
     content = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n"
     normalized_content = coordinator._ensure_source_url(content, url)
-    local_hash = coordinator._hash_content(normalized_content, already_normalized=True)
+    local_hash = coordinator._hash_content(normalized_content)
 
     coordinator.data[path] = {
         "local_hash": local_hash,
@@ -551,10 +553,16 @@ async def test_yaml_normalization_ignores_comments(coordinator):
 async def test_handle_source_url_change_clears_metadata(coordinator):
     """Test that changing source_url clears old ETags and remote hashes."""
     path = "automation/test.yaml"
-    coordinator._persisted_etags = {path: "old_etag"}
-    coordinator._persisted_hashes = {path: "old_hash"}
+    coordinator._persisted_metadata = {
+        path: {
+            "etag": "old_etag",
+            "remote_hash": "old_hash",
+            "source_url": "https://example.com/old.yaml",
+        }
+    }
     coordinator.data = {
         path: {
+            "rel_path": path,
             "source_url": "https://example.com/old.yaml",
             "etag": "old_etag",
             "remote_hash": "old_hash",
@@ -566,8 +574,7 @@ async def test_handle_source_url_change_clears_metadata(coordinator):
 
     assert result.get("etag") is None
     assert result.get("remote_hash") is None
-    assert path not in coordinator._persisted_etags
-    assert path not in coordinator._persisted_hashes
+    assert path not in coordinator._persisted_metadata
 
 
 @pytest.mark.asyncio
@@ -783,6 +790,7 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
             "last_error": "error",
             "remote_content": "old_remote",
             "updatable": True,
+            "rel_path": "automation/test.yaml",
         }
     }
 
@@ -900,7 +908,7 @@ async def test_async_install_blueprint_yaml_error_logging(coordinator):
     ):
         await coordinator.async_install_blueprint(path, content, reload_services=True)
 
-    mock_logger.warning.assert_called_with("Failed to parse blueprint at %s: %s", path, ANY)
+    mock_logger.warning.assert_called_with("Failed to parse blueprint at %s", path)
 
 
 @pytest.mark.asyncio

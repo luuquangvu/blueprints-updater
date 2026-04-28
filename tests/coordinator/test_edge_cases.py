@@ -92,9 +92,11 @@ async def test_merge_previous_data_edge_cases(coordinator):
 @pytest.mark.asyncio
 async def test_prune_stale_metadata(coordinator):
     """Test pruning logic for stale metadata."""
-    coordinator._persisted_etags = {"path1": "etag1", "path2": "etag2"}
-    coordinator._persisted_hashes = {"path1": "hash1", "path2": "hash2"}
-    coordinator.data = {"path1": {}}
+    coordinator._persisted_metadata = {
+        "path1": {"etag": "etag1", "remote_hash": "hash1", "source_url": "u"},
+        "path2": {"etag": "etag2", "remote_hash": "hash2", "source_url": "u"},
+    }
+    coordinator.data = {"path1": {"rel_path": "path1", "source_url": "u"}}
 
     with (
         patch("os.path.isfile", side_effect=lambda x: x == "path1"),
@@ -111,8 +113,7 @@ async def test_prune_stale_metadata(coordinator):
                 await call.args[0]
         mock_save.assert_awaited_once_with(force=True)
 
-    assert "path2" not in coordinator._persisted_etags
-    assert "path2" not in coordinator._persisted_hashes
+    assert "path2" not in coordinator._persisted_metadata
 
 
 @pytest.mark.asyncio
