@@ -5,9 +5,12 @@ title: "[Feature]: "
 body:
   - type: markdown
     attributes:
-      value: >
-        Thanks for suggesting a new feature!
-        We love hearing ideas on how to make Blueprint Updater even better.
+      value: |
+        ### Feature Request
+        ---
+        > [!TIP]
+        > **Thank you for suggesting a new feature.**
+        > We value your input and ideas on how to improve the Blueprint Updater.
   - type: checkboxes
     id: checks
     attributes:
