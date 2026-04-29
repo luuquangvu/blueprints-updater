@@ -6,9 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        ### Bug Report
-        ---
-        > [!IMPORTANT]
+        > [!NOTE]
         > **Thank you for reporting this issue.**
         > Please provide as much detail as possible to help us identify and resolve the problem efficiently.
   - type: checkboxes
@@ -31,7 +29,7 @@ body:
   - type: dropdown
     id: installation_method
     attributes:
-      label: Home Assistant Installation Method
+      label: Installation Method
       description: How is your Home Assistant installed?
       options:
         - Home Assistant OS

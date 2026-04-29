@@ -6,9 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        ### Feature Request
-        ---
-        > [!TIP]
+        > [!NOTE]
         > **Thank you for suggesting a new feature.**
         > We value your input and ideas on how to improve the Blueprint Updater.
   - type: checkboxes
