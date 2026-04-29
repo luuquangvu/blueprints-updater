@@ -55,7 +55,7 @@ jobs:
           export CURRENT_ANY="${CURRENT_ANY:-0.0.0}"
           export ALL_TAGS=$(git tag --list || true)
 
-          NEW_VERSION=$(uv run --with packaging python tools/calculate_version.py) || {
+          NEW_VERSION=$(uv run tools/calculate_version.py) || {
               echo "Error: Version calculation failed"
               exit 1
           }
@@ -70,8 +70,7 @@ jobs:
           echo "TAG_NAME=$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Update versions
-        run: |
-          uv run --with tomlkit python tools/update_project_metadata.py
+        run: uv run tools/update_project_metadata.py
 
       - name: Format files
         run: npx prettier --write custom_components/blueprints_updater/manifest.json pyproject.toml

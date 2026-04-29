@@ -1,0 +1,64 @@
+name: Bug Report
+description: File a bug report to help us improve.
+labels: ["bug"]
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Thanks for taking the time to fill out this bug report!
+        Please provide as much information as possible to help us identify and fix the issue.
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant Version
+      description: The version of Home Assistant you are running.
+      placeholder: e.g. 2026.4.4
+    validations:
+      required: true
+  - type: textarea
+    id: blueprint_links
+    attributes:
+      label: Blueprint Links
+      description: List blueprint links that cause issues (one per line). If none, leave empty.
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Describe the steps to reproduce the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste relevant logs here. If none, leave empty.
+      render: text
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Optional. Add screenshots to help explain your problem.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I have searched existing [issues](https://github.com/luuquangvu/blueprints-updater/issues?q=is%3Aissue).
+          required: true
+        - label: I have updated to the [latest version](https://github.com/luuquangvu/blueprints-updater/releases/latest).
+          required: true
