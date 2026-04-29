@@ -16,11 +16,25 @@ body:
       placeholder: e.g. 2026.4.4
     validations:
       required: true
+  - type: dropdown
+    id: installation_method
+    attributes:
+      label: Home Assistant Installation Method
+      description: How is your Home Assistant installed?
+      options:
+        - Home Assistant OS
+        - Home Assistant Container
+        - Other / Unknown
+    validations:
+      required: true
   - type: textarea
     id: blueprint_links
     attributes:
       label: Blueprint Links
       description: List blueprint links that cause issues (one per line). If none, leave empty.
+      placeholder: |
+        https://github.com/user/repo/blueprint1.yaml
+        https://github.com/user/repo/blueprint2.yaml
   - type: textarea
     id: steps_to_reproduce
     attributes:
