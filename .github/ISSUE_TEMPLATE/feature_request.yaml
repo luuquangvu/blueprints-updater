@@ -1,0 +1,43 @@
+name: Feature Request
+description: Suggest an idea for this project.
+labels: ["enhancement"]
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Thanks for suggesting a new feature!
+        We love hearing ideas on how to make Blueprint Updater even better.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have searched existing [issues](https://github.com/luuquangvu/blueprints-updater/issues?q=is%3Aissue) to ensure this feature hasn't been requested before
+          required: true
+  - type: textarea
+    id: problem_summary
+    attributes:
+      label: Problem Summary
+      description: Describe the problem you're trying to solve.
+      placeholder: "Ex. I'm always frustrated when..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution you'd like.
+      placeholder: "A clear and concise description of what you want to happen..."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Describe any alternative solutions or features you've considered.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Add any other context or screenshots about the feature request here.
