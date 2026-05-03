@@ -7,6 +7,7 @@ import inspect
 import logging
 from functools import cached_property
 from typing import Any, ClassVar
+from urllib.parse import quote
 
 from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.script import scripts_with_blueprint
@@ -251,8 +252,9 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             )
 
         if total_usage > 0:
+            encoded_bp_id = quote(bp_id)
             notes += "\n\n" + await self.coordinator.async_translate(
-                "usage_warning", count=total_usage, domain=domain
+                "usage_warning", count=total_usage, domain=domain, bp_id=encoded_bp_id
             )
 
         breaking_risks: list[StructuredRisk] = info.get("breaking_risks", [])

@@ -109,7 +109,7 @@
     "update_available_short": "Aggiornamento disponibile",
     "update_available": "Aggiornamento disponibile da {source_url}",
     "update_safety_message": "Suggerimento: Si consiglia di abilitare l'opzione di backup prima di installare gli aggiornamenti.",
-    "usage_warning": "Attenzione: questo aggiornamento interesserà {count} {domain} in esecuzione.",
+    "usage_warning": "Attenzione: questo aggiornamento interesserà [{count} {domain} in esecuzione](/config/{domain}/dashboard?blueprint={bp_id}).",
     "up_to_date": "Aggiornato",
     "install_error": "Impossibile installare il blueprint: {error}. Il file remoto contiene errori e non può essere applicato in sicurezza.",
     "invalid_blueprint": "Blueprint non valido: Chiave radice 'blueprint' mancante",

@@ -109,7 +109,7 @@
     "update_available_short": "Mise à jour disponible",
     "update_available": "Mise à jour disponible depuis {source_url}",
     "update_safety_message": "Conseil : Il est recommandé d'activer l'option de sauvegarde avant d'installer des mises à jour.",
-    "usage_warning": "Attention : Cette mise à jour affectera {count} {domain} en cours d'exécution.",
+    "usage_warning": "Attention : Cette mise à jour affectera [{count} {domain} en cours d'exécution](/config/{domain}/dashboard?blueprint={bp_id}).",
     "up_to_date": "À jour",
     "install_error": "Impossible d'installer le blueprint : {error}. Le fichier distant contient des erreurs et ne peut pas être appliqué en toute sécurité.",
     "invalid_blueprint": "Blueprint non valide : Clé racine 'blueprint' manquante",
