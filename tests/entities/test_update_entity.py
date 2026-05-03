@@ -376,6 +376,9 @@ async def test_entity_release_summary_with_usage(coordinator):
         assert notes is not None
         assert "/config/automation/dashboard?blueprint=test.yaml" in notes
         assert "2 running automation(s)" in notes
+        assert (
+            "[2 running automation(s)](/config/automation/dashboard?blueprint=test.yaml)" in notes
+        )
 
     info_script = {
         "name": "Test Script",
@@ -402,15 +405,16 @@ async def test_entity_release_summary_with_usage(coordinator):
         assert notes is not None
         assert "/config/script/dashboard?blueprint=test2.yaml" in notes
         assert "1 running script(s)" in notes
+        assert "[1 running script(s)](/config/script/dashboard?blueprint=test2.yaml)" in notes
 
 
 @pytest.mark.asyncio
 async def test_entity_release_notes_encoding(coordinator):
     """Test that blueprint IDs with special characters are correctly encoded in release notes."""
-    path = "/config/blueprints/automation/my folder/test #1.yaml"
+    path = "/config/blueprints/automation/my folder/test ü#1.yaml"
     info = {
         "name": "Test Encoding",
-        "rel_path": "automation/my folder/test #1.yaml",
+        "rel_path": "automation/my folder/test ü#1.yaml",
         "updatable": True,
         "remote_content": "",
     }
@@ -426,7 +430,9 @@ async def test_entity_release_notes_encoding(coordinator):
         notes = await entity.async_release_notes()
         assert notes is not None
 
-        expected_id = quote("my folder/test #1.yaml", safe="")
+        assert "blueprint=my folder/test ü#1.yaml" not in notes
+
+        expected_id = quote("my folder/test ü#1.yaml", safe="")
         assert f"blueprint={expected_id}" in notes
         assert "1 running automation(s)" in notes
 
