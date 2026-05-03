@@ -109,7 +109,7 @@
     "update_available_short": "Update beschikbaar",
     "update_available": "Update beschikbaar van {source_url}",
     "update_safety_message": "Tip: Het wordt aanbevolen om de back-upoptie in te schakelen voordat u updates installeert.",
-    "usage_warning": "Waarschuwing: Deze update heeft invloed op {count} actieve {domain}.",
+    "usage_warning": "Waarschuwing: Deze update heeft invloed op [{count} actieve {domain}](/config/{domain}/dashboard?blueprint={bp_id}).",
     "up_to_date": "Bijgewerkt",
     "install_error": "Kan blueprint niet installeren: {error}. Het externe bestand bevat fouten en kan niet veilig worden toegepast.",
     "invalid_blueprint": "Ongeldige blueprint: Root-sleutel 'blueprint' ontbreekt",

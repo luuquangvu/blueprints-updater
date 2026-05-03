@@ -109,7 +109,7 @@
     "update_available_short": "有可用更新",
     "update_available": "可从 {source_url} 获取更新",
     "update_safety_message": "安全提示：建议在安装更新前启用备份选项，以确保您在需要时恢复内容。",
-    "usage_warning": "警告：此更新将影响 {count} 个正在运行的 {domain}。",
+    "usage_warning": "警告：此更新将影响 [{count} 个正在运行的 {domain}](/config/{domain}/dashboard?blueprint={bp_id})。",
     "up_to_date": "已是最新",
     "install_error": "无法安装蓝图：{error}。远程文件有错误，无法安全应用。",
     "invalid_blueprint": "无效蓝图：缺少 'blueprint' 根键",

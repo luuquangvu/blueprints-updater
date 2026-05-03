@@ -109,7 +109,7 @@
     "update_available_short": "Actualización disponible",
     "update_available": "Actualización disponible desde {source_url}",
     "update_safety_message": "Consejo: Se recomienda activar la opción de copia de seguridad antes de instalar actualizaciones.",
-    "usage_warning": "Advertencia: esta actualización afectará a {count} {domain} en ejecución.",
+    "usage_warning": "Advertencia: esta actualización afectará a [{count} {domain} en ejecución](/config/{domain}/dashboard?blueprint={bp_id}).",
     "up_to_date": "Actualizado",
     "install_error": "No se puede instalar el blueprint: {error}. El archivo remoto tiene errores y no se puede aplicar de forma segura.",
     "invalid_blueprint": "Blueprint no válido: Falta la clave raíz 'blueprint'",
