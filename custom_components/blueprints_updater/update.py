@@ -252,7 +252,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             )
 
         if total_usage > 0:
-            encoded_bp_id = quote(bp_id)
+            encoded_bp_id = quote(bp_id, safe="")
             notes += "\n\n" + await self.coordinator.async_translate(
                 "usage_warning", count=total_usage, domain=domain, bp_id=encoded_bp_id
             )

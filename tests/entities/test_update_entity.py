@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from urllib.parse import quote
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -373,10 +374,8 @@ async def test_entity_release_summary_with_usage(coordinator):
         assert entity_auto.release_summary == "Update available"
         notes = await entity_auto.async_release_notes()
         assert notes is not None
-        assert (
-            "affect [2 running automation(s)](/config/automation/dashboard?blueprint=test.yaml)"
-            in notes
-        )
+        assert "/config/automation/dashboard?blueprint=test.yaml" in notes
+        assert "2 running automation(s)" in notes
 
     info_script = {
         "name": "Test Script",
@@ -401,9 +400,35 @@ async def test_entity_release_summary_with_usage(coordinator):
         assert entity_script.release_summary == "Update available"
         notes = await entity_script.async_release_notes()
         assert notes is not None
-        assert (
-            "affect [1 running script(s)](/config/script/dashboard?blueprint=test2.yaml)" in notes
-        )
+        assert "/config/script/dashboard?blueprint=test2.yaml" in notes
+        assert "1 running script(s)" in notes
+
+
+@pytest.mark.asyncio
+async def test_entity_release_notes_encoding(coordinator):
+    """Test that blueprint IDs with special characters are correctly encoded in release notes."""
+    path = "/config/blueprints/automation/my folder/test #1.yaml"
+    info = {
+        "name": "Test Encoding",
+        "rel_path": "automation/my folder/test #1.yaml",
+        "updatable": True,
+        "remote_content": "",
+    }
+    coordinator.data[path] = info
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    with (
+        patch.object(update_module, "automations_with_blueprint", return_value=["auto1"]),
+        patch.object(entity, "async_write_ha_state"),
+    ):
+        await entity._async_localize_strings()
+        notes = await entity.async_release_notes()
+        assert notes is not None
+
+        expected_id = quote("my folder/test #1.yaml", safe="")
+        assert f"blueprint={expected_id}" in notes
+        assert "1 running automation(s)" in notes
 
 
 @pytest.mark.asyncio
