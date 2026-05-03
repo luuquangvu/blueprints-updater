@@ -165,8 +165,9 @@ def coordinator():
                 "before installing updates to ensure you can revert if needed."
             ),
             "usage_warning": (
-                f"Warning: This update will affect {kwargs.get('count')} "
-                f"running {kwargs.get('domain')}(s)."
+                f"Warning: This update will affect [{kwargs.get('count')} "
+                f"running {kwargs.get('domain')}(s)](/config/{kwargs.get('domain')}/"
+                f"dashboard?blueprint={kwargs.get('bp_id')})."
             ),
             "install_error": (
                 f"Cannot install blueprint: {kwargs.get('error')}. "
@@ -372,7 +373,10 @@ async def test_entity_release_summary_with_usage(coordinator):
         assert entity_auto.release_summary == "Update available"
         notes = await entity_auto.async_release_notes()
         assert notes is not None
-        assert "affect 2 running automation(s)" in notes
+        assert (
+            "affect [2 running automation(s)](/config/automation/dashboard?blueprint=test.yaml)"
+            in notes
+        )
 
     info_script = {
         "name": "Test Script",
@@ -397,7 +401,9 @@ async def test_entity_release_summary_with_usage(coordinator):
         assert entity_script.release_summary == "Update available"
         notes = await entity_script.async_release_notes()
         assert notes is not None
-        assert "affect 1 running script(s)" in notes
+        assert (
+            "affect [1 running script(s)](/config/script/dashboard?blueprint=test2.yaml)" in notes
+        )
 
 
 @pytest.mark.asyncio
