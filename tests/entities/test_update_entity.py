@@ -410,7 +410,7 @@ async def test_entity_release_summary_with_usage(coordinator):
 
 @pytest.mark.asyncio
 async def test_entity_release_notes_encoding(coordinator):
-    """Test that blueprint IDs with special characters are correctly encoded in release notes."""
+    """Test that automation blueprint IDs with special characters are encoded in release notes."""
     path = "/config/blueprints/automation/my folder/test ü#1.yaml"
     info = {
         "name": "Test Encoding",
@@ -439,6 +439,37 @@ async def test_entity_release_notes_encoding(coordinator):
             in notes
         )
         assert "1 running automation(s)" in notes
+
+
+@pytest.mark.asyncio
+async def test_script_release_notes_encoding(coordinator):
+    """Test that script blueprint IDs with special characters are encoded in release notes."""
+    blueprint_id = "my folder/test ü#1.yaml"
+    path = f"/config/blueprints/script/{blueprint_id}"
+    info = {
+        "name": "Test Script Encoding",
+        "rel_path": f"script/{blueprint_id}",
+        "updatable": True,
+        "remote_content": "",
+    }
+    coordinator.data[path] = info
+    entity = BlueprintUpdateEntity(coordinator, path, info)
+    entity.hass = coordinator.hass
+
+    with (
+        patch.object(update_module, "scripts_with_blueprint", return_value=["script1"]),
+        patch.object(entity, "async_write_ha_state"),
+    ):
+        await entity._async_localize_strings()
+        notes = await entity.async_release_notes()
+        assert notes is not None
+
+        assert f"blueprint={blueprint_id}" not in notes
+
+        encoded_id = quote(blueprint_id, safe="")
+        assert f"blueprint={encoded_id}" in notes
+        assert f"[1 running script(s)](/config/script/dashboard?blueprint={encoded_id})" in notes
+        assert "1 running script(s)" in notes
 
 
 @pytest.mark.asyncio
