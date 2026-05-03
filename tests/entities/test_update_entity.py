@@ -434,6 +434,10 @@ async def test_entity_release_notes_encoding(coordinator):
 
         expected_id = quote("my folder/test ü#1.yaml", safe="")
         assert f"blueprint={expected_id}" in notes
+        assert (
+            f"[1 running automation(s)](/config/automation/dashboard?blueprint={expected_id})"
+            in notes
+        )
         assert "1 running automation(s)" in notes
 
 
