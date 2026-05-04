@@ -25,8 +25,8 @@ def mock_storage():
 
 
 @pytest.fixture
-def hass():
-    """Mock HomeAssistant."""
+def _mock_hass():
+    """Mock HomeAssistant fixture for unit tests."""
     hass_mock = MagicMock(spec=HomeAssistant)
     hass_mock.config = MagicMock()
     hass_mock.config.path.return_value = "/config/blueprints"

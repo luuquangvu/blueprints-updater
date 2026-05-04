@@ -23,6 +23,5 @@ COPY --from=python_builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 COPY . .
-RUN chmod +x tools/validate.sh
 
-CMD ["./tools/validate.sh"]
+CMD ["uv", "run", "tools/validate.py"]
