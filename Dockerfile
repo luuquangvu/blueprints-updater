@@ -1,6 +1,7 @@
 FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim as python_builder
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 

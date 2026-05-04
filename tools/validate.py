@@ -34,7 +34,7 @@ ALLOWED_TOOLS = {
 }
 
 
-def is_inside_docker() -> bool:
+def _check_container() -> bool:
     """Check if running inside a Docker or OCI container."""
     if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
         return True
@@ -43,9 +43,12 @@ def is_inside_docker() -> bool:
         open("/proc/1/cgroup", encoding="utf-8") as f,
     ):
         content = f.read()
-        if "docker" in content or "containerd" in content or "kubepods" in content:
+        if any(x in content for x in ("docker", "containerd", "kubepods")):
             return True
     return False
+
+
+IS_INSIDE_CONTAINER = _check_container()
 
 
 def run_command(cmd: list[str], env_extra: dict | None = None) -> int:
@@ -54,7 +57,7 @@ def run_command(cmd: list[str], env_extra: dict | None = None) -> int:
     if env_extra:
         env |= env_extra
 
-    if is_inside_docker():
+    if IS_INSIDE_CONTAINER:
         env["UV_LINK_MODE"] = "copy"
 
     result = subprocess.run(cmd, env=env)
@@ -63,12 +66,17 @@ def run_command(cmd: list[str], env_extra: dict | None = None) -> int:
 
 def run_pipeline() -> None:
     """Execute the full validation pipeline."""
-    if os.name == "nt" and not is_inside_docker():
+    if os.name == "nt" and not IS_INSIDE_CONTAINER:
         print("Windows host detected. Routing full pipeline through Docker...")
-        subprocess.run(
-            ["docker", "compose", "run", "--rm", "validate", "uv", "run", "tools/validate.py"],
-            check=True,
-        )
+        try:
+            subprocess.run(
+                ["docker", "compose", "run", "--rm", "validate", "uv", "run", "tools/validate.py"],
+                check=True,
+            )
+        except FileNotFoundError:
+            print("\nERROR: Docker is required to run the validation pipeline on Windows.")
+            print("Please ensure Docker Desktop is installed and 'docker' is in your PATH.")
+            sys.exit(1)
         return
 
     print("Starting Unified Validation Pipeline")
@@ -94,7 +102,6 @@ def proxy_single_command(args: list[str]) -> None:
         return
 
     base_cmd = args[0]
-
     if base_cmd == "uv" and len(args) > 2 and args[1] == "run":
         check_cmd = args[2]
     elif base_cmd == "npx" and len(args) > 1:
@@ -108,10 +115,15 @@ def proxy_single_command(args: list[str]) -> None:
         print(f"Allowed: {', '.join(sorted(ALLOWED_TOOLS))}")
         sys.exit(1)
 
-    if os.name == "nt" and not is_inside_docker():
+    if os.name == "nt" and not IS_INSIDE_CONTAINER:
         print(f"Windows host detected. Proxying to Docker: {' '.join(args)}")
         cmd = ["docker", "compose", "run", "--rm", "validate", *args]
-        subprocess.run(cmd, check=True)
+        try:
+            subprocess.run(cmd, check=True)
+        except FileNotFoundError:
+            print("\nERROR: Docker is required to run validation on Windows.")
+            print("Please ensure Docker Desktop is installed and 'docker' is in your PATH.")
+            sys.exit(1)
     else:
         exit_code = run_command(args)
         sys.exit(exit_code)
