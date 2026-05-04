@@ -1,0 +1,8 @@
+services:
+  validate:
+    build: .
+    image: blueprints-updater-validator
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.venv

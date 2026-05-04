@@ -38,7 +38,7 @@ repos:
 
       - id: pytest
         name: pytest
-        entry: uv run pytest
+        entry: docker compose run --rm validate pytest
         language: system
         pass_filenames: false
         always_run: true

@@ -1,0 +1,10 @@
+.git
+.venv
+.idea
+.vscode
+__pycache__
+.pytest_cache
+.ruff_cache
+node_modules
+scratch
+.coverage

@@ -11,7 +11,7 @@ dev = [
   "homeassistant>=2026.4",
   "interrogate",
   "packaging",
-  "pre-commit",
+  "prek",
   "pyright",
   "pytest>=9",
   "pytest-asyncio",
