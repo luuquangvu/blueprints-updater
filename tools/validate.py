@@ -10,28 +10,16 @@ import contextlib
 import os
 import subprocess
 import sys
-from typing import Any
 
-VALIDATION_STEPS: list[dict[str, Any]] = [
-    {"name": "Ruff Format", "cmd": ["uv", "run", "ruff", "format"]},
-    {"name": "Ruff Check", "cmd": ["uv", "run", "ruff", "check", "--fix"]},
-    {"name": "Ty Check", "cmd": ["uv", "run", "ty", "check"]},
-    {"name": "Pyright", "cmd": ["uv", "run", "pyright"]},
-    {"name": "Interrogate", "cmd": ["uv", "run", "interrogate"]},
-    {"name": "Pytest", "cmd": ["uv", "run", "pytest"]},
-    {"name": "Prettier", "cmd": ["npx", "prettier", "--write", "."]},
+PIPELINE_ORDER = [
+    ["uv", "run", "ruff", "format"],
+    ["uv", "run", "ruff", "check", "--fix"],
+    ["uv", "run", "ty", "check"],
+    ["uv", "run", "pyright"],
+    ["uv", "run", "interrogate"],
+    ["uv", "run", "pytest"],
+    ["npx", "prettier", "--write", "."],
 ]
-
-ALLOWED_TOOLS = {
-    "uv",
-    "npx",
-    "pytest",
-    "ruff",
-    "ty",
-    "pyright",
-    "interrogate",
-    "prettier",
-}
 
 
 def _check_container() -> bool:
@@ -51,115 +39,105 @@ def _check_container() -> bool:
 IS_INSIDE_CONTAINER = _check_container()
 
 
-def run_command(cmd: list[str], env_extra: dict | None = None) -> int:
-    """Run a shell command safely and return its exit code."""
+def execute(cmd: list[str], env: dict | None = None) -> int | None:
+    """Unified execution dispatcher using structural pattern matching."""
     if not cmd:
         return 0
+    if env is None:
+        env = os.environ.copy()
 
-    executable = cmd[0]
-    if executable not in ALLOWED_TOOLS:
-        _handle_disallowed_command(executable)
+    match cmd:
+        # --- Ruff Patterns ---
+        case ["uv", "run", "ruff", *extra]:
+            return subprocess.run(["uv", "run", "ruff", *extra], env=env, shell=False).returncode
+        case ["ruff", *extra]:
+            return subprocess.run(["ruff", *extra], env=env, shell=False).returncode
 
-    env = os.environ.copy()
-    if env_extra:
-        env |= env_extra
+        # --- Ty Patterns ---
+        case ["uv", "run", "ty", "check", *extra]:
+            return subprocess.run(
+                ["uv", "run", "ty", "check", *extra], env=env, shell=False
+            ).returncode
+        case ["ty", *extra]:
+            return subprocess.run(["ty", *extra], env=env, shell=False).returncode
 
-    if executable == "uv":
-        return subprocess.run(["uv", *cmd[1:]], env=env, shell=False).returncode
-    if executable == "npx":
-        return subprocess.run(["npx", *cmd[1:]], env=env, shell=False).returncode
-    if executable == "pytest":
-        return subprocess.run(["pytest", *cmd[1:]], env=env, shell=False).returncode
-    if executable == "ruff":
-        return subprocess.run(["ruff", *cmd[1:]], env=env, shell=False).returncode
-    if executable == "ty":
-        return subprocess.run(["ty", *cmd[1:]], env=env, shell=False).returncode
-    if executable == "pyright":
-        return subprocess.run(["pyright", *cmd[1:]], env=env, shell=False).returncode
-    if executable == "interrogate":
-        return subprocess.run(["interrogate", *cmd[1:]], env=env, shell=False).returncode
-    if executable == "prettier":
-        return subprocess.run(["prettier", *cmd[1:]], env=env, shell=False).returncode
+        # --- Pyright Patterns ---
+        case ["uv", "run", "pyright", *extra]:
+            return subprocess.run(["uv", "run", "pyright", *extra], env=env, shell=False).returncode
+        case ["pyright", *extra]:
+            return subprocess.run(["pyright", *extra], env=env, shell=False).returncode
 
-    return subprocess.run([executable, *cmd[1:]], env=env, shell=False).returncode
+        # --- Interrogate Patterns ---
+        case ["uv", "run", "interrogate", *extra]:
+            return subprocess.run(
+                ["uv", "run", "interrogate", *extra], env=env, shell=False
+            ).returncode
+        case ["interrogate", *extra]:
+            return subprocess.run(["interrogate", *extra], env=env, shell=False).returncode
+
+        # --- Pytest Patterns ---
+        case ["uv", "run", "pytest", *extra]:
+            return subprocess.run(["uv", "run", "pytest", *extra], env=env, shell=False).returncode
+        case ["pytest", *extra]:
+            return subprocess.run(["pytest", *extra], env=env, shell=False).returncode
+
+        # --- Prettier Patterns ---
+        case ["npx", "prettier", *extra]:
+            return subprocess.run(["npx", "prettier", *extra], env=env, shell=False).returncode
+        case ["prettier", *extra]:
+            return subprocess.run(["prettier", *extra], env=env, shell=False).returncode
+
+        case _:
+            return None
 
 
 def run_pipeline() -> None:
     """Execute the full validation pipeline."""
     if os.name == "nt" and not IS_INSIDE_CONTAINER:
-        _run_in_docker(["uv", "run", "tools/validate.py"])
+        _run_via_docker([])
         return
 
     print("Starting Unified Validation Pipeline")
     print("-" * 40)
 
-    for step in VALIDATION_STEPS:
-        print(f"\n>>> STEP: {step['name']}")
-        cmd_to_run: list[str] = step["cmd"]
-        exit_code = run_command(cmd_to_run)
-
+    for cmd in PIPELINE_ORDER:
+        print(f"\n>>> STEP: {' '.join(cmd)}")
+        exit_code = execute(cmd)
         if exit_code != 0:
-            print(f"\nFAILED: {step['name']} (Exit code: {exit_code})")
-            sys.exit(exit_code)
+            print(f"\nFAILED: {' '.join(cmd)} (Exit code: {exit_code})")
+            sys.exit(exit_code or 1)
 
     print("\n" + "=" * 40)
     print("ALL VALIDATION STEPS PASSED SUCCESSFULLY!")
     print("=" * 40)
 
 
-def _handle_disallowed_command(arg0: str) -> None:
-    """Handle disallowed command attempts by printing error and exiting."""
-    print(f"Error: Command '{arg0}' is not allowed.")
-    print("Only specific validation tools are permitted through this proxy.")
-    print(f"Allowed: {', '.join(sorted(ALLOWED_TOOLS))}")
+def _handle_disallowed_command(cmd: list[str]) -> None:
+    """Handle disallowed command attempts."""
+    print(f"Error: Command '{' '.join(cmd)}' is not allowed.")
+    print("This proxy only allows specific validation tools (Ruff, Ty, Pyright, etc.).")
     sys.exit(1)
 
 
-def proxy_single_command(args: list[str]) -> None:
-    """Proxy a single command to the correct environment with security checks."""
-    if not args:
-        return
-
-    base_cmd = args[0]
-    if base_cmd == "npx":
-        if len(args) < 2:
-            _handle_disallowed_command(base_cmd)
-        check_cmd = args[1]
-    elif base_cmd == "uv":
-        if len(args) < 3 or args[1] != "run":
-            _handle_disallowed_command(base_cmd)
-        check_cmd = args[2]
-    else:
-        check_cmd = base_cmd
-
-    if check_cmd not in ALLOWED_TOOLS:
-        _handle_disallowed_command(check_cmd)
-
-    if os.name == "nt" and not IS_INSIDE_CONTAINER:
-        _run_in_docker(args)
-    else:
-        exit_code = run_command(args)
-        sys.exit(exit_code)
-
-
-def _run_in_docker(args: list[str]) -> None:
+def _run_via_docker(args: list[str]) -> None:
     """Run a command inside the Docker validator container."""
-    print(f"Windows host detected. Proxying to Docker: {' '.join(args)}")
+    msg = (
+        f"Proxying to Docker: {' '.join(args)}"
+        if args
+        else "Routing full pipeline through Docker..."
+    )
+    print(f"Windows host detected. {msg}")
 
     try:
+        docker_cmd = ["docker", "compose", "run", "--rm"]
         if not sys.stdin.isatty():
-            subprocess.run(
-                ["docker", "compose", "run", "--rm", "-T", "validate", *args],
-                check=True,
-            )
-        else:
-            subprocess.run(
-                ["docker", "compose", "run", "--rm", "validate", *args],
-                check=True,
-            )
+            docker_cmd.append("-T")
+        docker_cmd.append("validate")
+
+        final_args = ["uv", "run", "tools/validate.py", *args]
+        subprocess.run(docker_cmd + final_args, check=True)
     except FileNotFoundError:
-        print("\nERROR: Docker is required to run validation on Windows.")
-        print("Please ensure Docker Desktop is installed and 'docker' is in your PATH.")
+        print("\nERROR: Docker is required.")
         sys.exit(1)
 
 
@@ -171,7 +149,14 @@ def main() -> None:
         if not args:
             run_pipeline()
         else:
-            proxy_single_command(args)
+            exit_code = execute(args)
+            if exit_code is None:
+                _handle_disallowed_command(args)
+
+            if os.name == "nt" and not IS_INSIDE_CONTAINER:
+                _run_via_docker(args)
+            else:
+                sys.exit(exit_code)
     except subprocess.CalledProcessError as e:
         sys.exit(e.returncode)
     except KeyboardInterrupt:
