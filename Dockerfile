@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim as python_builder
+FROM ghcr.io/astral-sh/uv:trixie-slim AS python_builder
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_CACHE_DIR=/tmp/uv-cache
@@ -10,14 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
-FROM node:24-slim as node_builder
+FROM node:lts-trixie-slim AS node_builder
 
 WORKDIR /opt
 
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim
+FROM ghcr.io/astral-sh/uv:trixie-slim
 
 RUN groupadd -g 10001 appgroup && \
     useradd -u 10001 -g appgroup -m appuser
