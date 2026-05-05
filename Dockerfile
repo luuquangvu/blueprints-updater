@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:trixie-slim AS python_builder
+FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim AS python_builder
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_CACHE_DIR=/tmp/uv-cache
@@ -17,7 +17,7 @@ WORKDIR /opt
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM ghcr.io/astral-sh/uv:trixie-slim
+FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim
 
 RUN groupadd -g 10001 appgroup && \
     useradd -u 10001 -g appgroup -m appuser
