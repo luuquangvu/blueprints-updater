@@ -65,26 +65,23 @@ def run_command(cmd: list[str], env_extra: dict | None = None) -> int:
         env |= env_extra
 
     if executable == "uv":
-        full_cmd = ["uv", *cmd[1:]]
-    elif executable == "npx":
-        full_cmd = ["npx", *cmd[1:]]
-    elif executable == "pytest":
-        full_cmd = ["pytest", *cmd[1:]]
-    elif executable == "ruff":
-        full_cmd = ["ruff", *cmd[1:]]
-    elif executable == "ty":
-        full_cmd = ["ty", *cmd[1:]]
-    elif executable == "pyright":
-        full_cmd = ["pyright", *cmd[1:]]
-    elif executable == "interrogate":
-        full_cmd = ["interrogate", *cmd[1:]]
-    elif executable == "prettier":
-        full_cmd = ["prettier", *cmd[1:]]
-    else:
-        full_cmd = [executable, *cmd[1:]]
+        return subprocess.run(["uv", *cmd[1:]], env=env, shell=False).returncode
+    if executable == "npx":
+        return subprocess.run(["npx", *cmd[1:]], env=env, shell=False).returncode
+    if executable == "pytest":
+        return subprocess.run(["pytest", *cmd[1:]], env=env, shell=False).returncode
+    if executable == "ruff":
+        return subprocess.run(["ruff", *cmd[1:]], env=env, shell=False).returncode
+    if executable == "ty":
+        return subprocess.run(["ty", *cmd[1:]], env=env, shell=False).returncode
+    if executable == "pyright":
+        return subprocess.run(["pyright", *cmd[1:]], env=env, shell=False).returncode
+    if executable == "interrogate":
+        return subprocess.run(["interrogate", *cmd[1:]], env=env, shell=False).returncode
+    if executable == "prettier":
+        return subprocess.run(["prettier", *cmd[1:]], env=env, shell=False).returncode
 
-    result = subprocess.run(full_cmd, env=env, shell=False)
-    return result.returncode
+    return subprocess.run([executable, *cmd[1:]], env=env, shell=False).returncode
 
 
 def run_pipeline() -> None:
@@ -148,14 +145,18 @@ def proxy_single_command(args: list[str]) -> None:
 def _run_in_docker(args: list[str]) -> None:
     """Run a command inside the Docker validator container."""
     print(f"Windows host detected. Proxying to Docker: {' '.join(args)}")
-    docker_cmd = ["docker", "compose", "run", "--rm"]
-    if not sys.stdin.isatty():
-        docker_cmd.append("-T")
-    docker_cmd.extend(["validate"])
-    docker_cmd.extend(args)
 
     try:
-        subprocess.run(docker_cmd, check=True)
+        if not sys.stdin.isatty():
+            subprocess.run(
+                ["docker", "compose", "run", "--rm", "-T", "validate", *args],
+                check=True,
+            )
+        else:
+            subprocess.run(
+                ["docker", "compose", "run", "--rm", "validate", *args],
+                check=True,
+            )
     except FileNotFoundError:
         print("\nERROR: Docker is required to run validation on Windows.")
         print("Please ensure Docker Desktop is installed and 'docker' is in your PATH.")
