@@ -11,6 +11,10 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim
+
+RUN groupadd -g 10001 appgroup && \
+    useradd -u 10001 -g appgroup -m appuser
+
 WORKDIR /app
 
 COPY --from=node_builder /usr/local/bin/node /usr/local/bin/node
@@ -19,10 +23,14 @@ COPY --from=node_builder /app/node_modules /app/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-COPY --from=python_builder /app/.venv /app/.venv
+COPY --from=python_builder --chown=appuser:appgroup /app/.venv /app/.venv
 
-ENV PATH="/app/.venv/bin:$PATH"
+ENV UV_CACHE_DIR=/tmp/uv-cache \
+    UV_LINK_MODE=copy \
+    PATH="/app/.venv/bin:$PATH"
 
-COPY . .
+COPY --chown=appuser:appgroup . .
+
+USER appuser
 
 CMD ["uv", "run", "tools/validate.py"]

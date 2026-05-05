@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import httpx
-import respx
 from homeassistant.components.update import SERVICE_INSTALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -13,7 +12,6 @@ from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
-@respx.mock
 async def test_setup_integration(hass: HomeAssistant) -> None:
     """Test setting up the integration."""
     entry = MockConfigEntry(
@@ -36,7 +34,6 @@ async def test_setup_integration(hass: HomeAssistant) -> None:
     assert entry.entry_id not in hass.data[DOMAIN]["coordinators"]
 
 
-@respx.mock
 async def test_full_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
     """Test the full lifecycle from discovery to update via entity service."""
     blueprints_dir = Path(hass.config.path("blueprints"))
@@ -61,11 +58,8 @@ async def test_full_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-
     coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
-    if coordinator._background_task:
-        await coordinator._background_task
-        await hass.async_block_till_done()
+    await coordinator.async_wait_until_done()
 
     ent_reg = er.async_get(hass)
 

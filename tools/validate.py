@@ -57,9 +57,6 @@ def run_command(cmd: list[str], env_extra: dict | None = None) -> int:
     if env_extra:
         env |= env_extra
 
-    if IS_INSIDE_CONTAINER:
-        env["UV_LINK_MODE"] = "copy"
-
     result = subprocess.run(cmd, env=env)
     return result.returncode
 
@@ -96,25 +93,33 @@ def run_pipeline() -> None:
     print("=" * 40)
 
 
+def _handle_disallowed_command(arg0: str) -> None:
+    """Handle disallowed command attempts by printing error and exiting."""
+    print(f"Error: Command '{arg0}' is not allowed.")
+    print("Only specific validation tools are permitted through this proxy.")
+    print(f"Allowed: {', '.join(sorted(ALLOWED_TOOLS))}")
+    sys.exit(1)
+
+
 def proxy_single_command(args: list[str]) -> None:
     """Proxy a single command to the correct environment with security checks."""
     if not args:
         return
 
     base_cmd = args[0]
-    if base_cmd == "uv" and len(args) > 2 and args[1] == "run":
-        check_cmd = args[2]
-    elif base_cmd == "npx" and len(args) > 1:
+    if base_cmd == "npx":
+        if len(args) < 2:
+            _handle_disallowed_command(base_cmd)
         check_cmd = args[1]
+    elif base_cmd == "uv":
+        if len(args) < 3 or args[1] != "run":
+            _handle_disallowed_command(base_cmd)
+        check_cmd = args[2]
     else:
         check_cmd = base_cmd
 
     if check_cmd not in ALLOWED_TOOLS:
-        print(f"Error: Command '{check_cmd}' is not allowed.")
-        print("Only specific validation tools are permitted through this proxy.")
-        print(f"Allowed: {', '.join(sorted(ALLOWED_TOOLS))}")
-        sys.exit(1)
-
+        _handle_disallowed_command(check_cmd)
     if os.name == "nt" and not IS_INSIDE_CONTAINER:
         print(f"Windows host detected. Proxying to Docker: {' '.join(args)}")
         cmd = ["docker", "compose", "run", "--rm", "validate", *args]

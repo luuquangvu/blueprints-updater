@@ -1,9 +1,52 @@
 repos:
   - repo: local
     hooks:
+      - id: ruff-format
+        name: ruff-format
+        entry: uv run ruff format
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: ruff-check
+        name: ruff-check
+        entry: uv run ruff check --fix
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: ty-check
+        name: ty-check
+        entry: uv run ty check
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: pyright
+        name: pyright
+        entry: uv run pyright
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: interrogate
+        name: interrogate
+        entry: uv run interrogate
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: prettier
+        name: prettier
+        entry: npx prettier --write .
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: validation-pipeline
         name: validation-pipeline
         entry: uv run tools/validate.py
         language: system
         pass_filenames: false
         always_run: true
+        stages: [pre-push]

@@ -4,7 +4,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import httpx
-import respx
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -22,7 +21,6 @@ def _create_blueprint(hass: HomeAssistant, rel_path: str, content: str) -> str:
     return str(full_path)
 
 
-@respx.mock
 async def test_reload_service(hass: HomeAssistant) -> None:
     """Test the reload service."""
     entry = MockConfigEntry(
@@ -50,7 +48,6 @@ async def test_reload_service(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
 
 
-@respx.mock
 async def test_update_all_service(hass: HomeAssistant, respx_mock) -> None:
     """Test the update_all service."""
     content = "blueprint:\n  name: Test\n  domain: automation\n  source_url: https://raw.githubusercontent.com/user/repo/main/test.yaml\n"
@@ -72,9 +69,7 @@ async def test_update_all_service(hass: HomeAssistant, respx_mock) -> None:
     await hass.async_block_till_done()
 
     coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
-    if coordinator._background_task:
-        await coordinator._background_task
-        await hass.async_block_till_done()
+    await coordinator.async_wait_until_done()
 
     blueprint_path = str(Path(hass.config.path("blueprints")) / "automation/test.yaml")
     assert coordinator.data[blueprint_path]["updatable"] is True
@@ -95,8 +90,7 @@ async def test_update_all_service(hass: HomeAssistant, respx_mock) -> None:
     await hass.async_block_till_done()
 
 
-@respx.mock
-async def test_restore_blueprint_service(hass: HomeAssistant) -> None:
+async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> None:
     """Test the restore_blueprint service."""
     rel_path = "automation/restore.yaml"
     content = "blueprint:\n  name: Original\n  domain: automation\n  source_url: https://example.com/bp.yaml\n"
@@ -125,9 +119,7 @@ async def test_restore_blueprint_service(hass: HomeAssistant) -> None:
 
     assert entity_id is not None
 
-    if coordinator._background_task:
-        await coordinator._background_task
-        await hass.async_block_till_done()
+    await coordinator.async_wait_until_done()
 
     response = await hass.services.async_call(
         DOMAIN,
