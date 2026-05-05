@@ -149,14 +149,15 @@ def main() -> None:
         if not args:
             run_pipeline()
         else:
+            if os.name == "nt" and not IS_INSIDE_CONTAINER:
+                _run_via_docker(args)
+                return
+
             exit_code = execute(args)
             if exit_code is None:
                 _handle_disallowed_command(args)
 
-            if os.name == "nt" and not IS_INSIDE_CONTAINER:
-                _run_via_docker(args)
-            else:
-                sys.exit(exit_code)
+            sys.exit(exit_code)
     except subprocess.CalledProcessError as e:
         sys.exit(e.returncode)
     except KeyboardInterrupt:
