@@ -122,7 +122,8 @@ def proxy_single_command(args: list[str]) -> None:
         _handle_disallowed_command(check_cmd)
     if os.name == "nt" and not IS_INSIDE_CONTAINER:
         print(f"Windows host detected. Proxying to Docker: {' '.join(args)}")
-        cmd = ["docker", "compose", "run", "--rm", "validate", *args]
+        tty_flag = [] if sys.stdin.isatty() else ["-T"]
+        cmd = ["docker", "compose", "run", "--rm", *tty_flag, "validate", *args]
         try:
             subprocess.run(cmd, check=True)
         except FileNotFoundError:
