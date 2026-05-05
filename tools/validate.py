@@ -129,37 +129,22 @@ def _run_via_docker(args: list[str]) -> None:
     print(f"Windows host detected. {msg}")
 
     try:
-        if not sys.stdin.isatty():
-            subprocess.run(
-                [
-                    "docker",
-                    "compose",
-                    "run",
-                    "--rm",
-                    "-T",
-                    "validate",
-                    "uv",
-                    "run",
-                    "tools/validate.py",
-                    *args,
-                ],
-                check=True,
-            )
-        else:
-            subprocess.run(
-                [
-                    "docker",
-                    "compose",
-                    "run",
-                    "--rm",
-                    "validate",
-                    "uv",
-                    "run",
-                    "tools/validate.py",
-                    *args,
-                ],
-                check=True,
-            )
+        tty_args = [] if sys.stdin.isatty() else ["-T"]
+        subprocess.run(
+            [
+                "docker",
+                "compose",
+                "run",
+                "--rm",
+                *tty_args,
+                "validate",
+                "uv",
+                "run",
+                "tools/validate.py",
+                *args,
+            ],
+            check=True,
+        )
     except FileNotFoundError:
         print("\nERROR: Docker is required.")
         sys.exit(1)
