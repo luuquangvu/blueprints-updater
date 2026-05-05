@@ -115,11 +115,10 @@ async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> Non
     ent_reg = er.async_get(hass)
 
     unique_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, rel_path)
-    entity_id = ent_reg.async_get_entity_id("update", DOMAIN, unique_id)
-
-    assert entity_id is not None
-
     await coordinator.async_wait_until_done()
+
+    entity_id = ent_reg.async_get_entity_id("update", DOMAIN, unique_id)
+    assert entity_id is not None
 
     response = await hass.services.async_call(
         DOMAIN,
