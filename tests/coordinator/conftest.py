@@ -11,9 +11,13 @@ from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
 )
 
-from .protocols import (
-    BlueprintCoordinatorProtocol,
-)
+from .protocols import BlueprintCoordinatorProtocol
+
+
+@pytest.fixture
+def hass(_mock_hass):
+    """Aliasing _mock_hass to hass for unit tests."""
+    return _mock_hass
 
 
 @pytest.fixture

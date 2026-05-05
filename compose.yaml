@@ -1,0 +1,6 @@
+services:
+  validate:
+    build: .
+    image: blueprints-updater-validator
+    volumes:
+      - .:/app

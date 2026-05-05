@@ -190,6 +190,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if self.config_entry:
             self.config_entry.async_on_unload(self._async_cancel_background_task)
 
+    async def async_wait_until_done(self) -> None:
+        """Wait for any pending background refresh tasks to complete."""
+        if self._background_task and not self._background_task.done():
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._background_task
+
     def clear_translations(self) -> None:
         """Clear the internal translation cache.
 
