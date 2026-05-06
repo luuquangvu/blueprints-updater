@@ -34,6 +34,7 @@
   - [Code Quality \& Security](#code-quality--security)
   - [Contributing](#contributing)
   - [License](#license)
+  - [Support the Project](#support-the-project)
 
 ---
 
@@ -195,3 +196,9 @@ Contributions are what make the open-source community such an amazing place to l
 ## License
 
 Distributed under the **MIT License**. See [LICENSE](LICENSE) for more information.
+
+## Support the Project
+
+If you find this project helpful, any contribution is always appreciated and serves as a meaningful encouragement to help sustain its development.
+
+[![Donate via PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?style=for-the-badge&logo=paypal)](https://www.paypal.me/luuquangvu89)
