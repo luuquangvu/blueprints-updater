@@ -212,3 +212,37 @@ async def test_config_flow_scanning(hass: HomeAssistant):
         assert len(options) == 1
         assert options[0]["value"] == "automation/test.yaml"
         assert options[0]["label"] == "Test BP [automation/test.yaml]"
+
+
+@pytest.mark.asyncio
+async def test_config_flow_scanning_fallback(hass: HomeAssistant):
+    """Test config flow scanning with relative_path fallback."""
+    base_path = os.path.abspath("blueprints")
+    full_path = os.path.join(base_path, "automation/fallback.yaml")
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator.scan_blueprints"
+        ) as mock_scan,
+        patch(
+            "custom_components.blueprints_updater.config_flow.get_blueprint_relative_path",
+            return_value="automation/fallback.yaml",
+        ) as mock_fallback,
+        patch.object(hass.config, "path", return_value=base_path),
+    ):
+        mock_scan.return_value = {
+            full_path: {
+                "name": "Fallback BP",
+                "domain": "automation",
+                "local_hash": "hash456",
+            }
+        }
+        options = await _async_get_blueprint_options(hass)
+        assert len(options) == 1
+        assert options[0]["value"] == "automation/fallback.yaml"
+        assert options[0]["label"] == "Fallback BP [automation/fallback.yaml]"
+        mock_fallback.assert_called_once_with(hass, full_path)
+
+        mock_fallback.return_value = None
+        options = await _async_get_blueprint_options(hass)
+        assert len(options) == 0
