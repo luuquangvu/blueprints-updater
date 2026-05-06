@@ -19,8 +19,8 @@ async def test_detect_risks_system_error_on_exception(hass):
         coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
 
     path = "/config/blueprints/automation/test.yaml"
-    rel_path = "automation/test.yaml"
-    info = {"rel_path": rel_path, "name": "Test Blueprint"}
+    relative_path = "automation/test.yaml"
+    info = {"relative_path": relative_path, "name": "Test Blueprint"}
     coordinator.data = {path: info}
 
     remote_content = "blueprint:\n  name: New\n  domain: automation\n"
@@ -37,12 +37,12 @@ async def test_detect_risks_system_error_on_exception(hass):
     assert len(risks) == 1
     assert risks[0]["type"] == "system_error"
     assert risks[0]["args"]["error"] == "Test Exception"
-    assert risks[0]["args"]["path"] == rel_path
+    assert risks[0]["args"]["path"] == relative_path
 
 
 @pytest.mark.asyncio
-async def test_detect_risks_missing_rel_path(hass):
-    """Test that missing rel_path results in a system_error risk."""
+async def test_detect_risks_missing_relative_path(hass):
+    """Test that missing relative_path results in a system_error risk."""
     entry = MagicMock()
     entry.domain = DOMAIN
     with patch.object(DataUpdateCoordinator, "__init__", return_value=None):

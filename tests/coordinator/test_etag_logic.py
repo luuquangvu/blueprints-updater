@@ -58,7 +58,7 @@ async def test_304_response_preserves_updatable_status(
 
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "relative_path": "test.yaml",
         "domain": "automation",
         "source_url": "https://github.com/user/repo/test.yaml",
         "local_hash": local_hash,
@@ -67,7 +67,7 @@ async def test_304_response_preserves_updatable_status(
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "relative_path": "test.yaml",
             "domain": "automation",
             "source_url": "https://github.com/user/repo/test.yaml",
             "local_hash": local_hash,
@@ -109,7 +109,7 @@ async def test_persistence_of_remote_hashes(
 
     coordinator.data = {
         path: {
-            "rel_path": "test.yaml",
+            "relative_path": "test.yaml",
             "remote_hash": remote_hash,
             "etag": etag,
             "source_url": "https://url",
@@ -147,7 +147,7 @@ async def test_etag_migration_forces_download(
     remote_content = "blueprint:\n  name: fresh\n  domain: automation"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "relative_path": "test.yaml",
         "domain": "automation",
         "source_url": "https://github.com/user/repo/bp.yaml",
         "local_hash": "stale_hash",
@@ -207,7 +207,7 @@ async def test_async_save_metadata_preserves_persisted_entries_for_existing_file
 
     coordinator.data = {
         existing_path: {
-            "rel_path": "existing.yaml",
+            "relative_path": "existing.yaml",
             "etag": "etag-new",
             "remote_hash": "hash-new",
             "source_url": "https://url",
@@ -247,7 +247,7 @@ async def test_async_save_metadata_force_true_persists_even_when_unchanged(coord
     }
     coordinator.data = {
         path: {
-            "rel_path": "test.yaml",
+            "relative_path": "test.yaml",
             "etag": etag,
             "remote_hash": file_hash,
             "source_url": "https://url",

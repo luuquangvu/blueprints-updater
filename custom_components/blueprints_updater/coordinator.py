@@ -75,7 +75,7 @@ from .const import (
 )
 from .providers import registry
 from .utils import (
-    get_blueprint_rel_path,
+    get_blueprint_relative_path,
     get_config_bool,
     get_max_backups,
     redact_url,
@@ -115,7 +115,7 @@ class ParsedBlueprintData(TypedDict):
 class BlueprintMetadata(ParsedBlueprintData):
     """Augmented blueprint data from file scanning."""
 
-    rel_path: str
+    relative_path: str
 
 
 @dataclass(frozen=True)
@@ -130,18 +130,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     """Class to manage fetching blueprint updates."""
 
     @staticmethod
-    def generate_unique_id(entry_id: str, rel_path: str) -> str:
+    def generate_unique_id(entry_id: str, relative_path: str) -> str:
         """Generate a deterministic unique ID from an entry ID and a blueprint's relative path.
 
         Args:
             entry_id: The config entry ID.
-            rel_path: The blueprint's relative path.
+            relative_path: The blueprint's relative path.
 
         Returns:
             The generated unique ID.
 
         """
-        combined = f"{entry_id}_{rel_path}"
+        combined = f"{entry_id}_{relative_path}"
         return f"blueprint_{hashlib.sha256(combined.encode()).hexdigest()}"
 
     config_entry: ConfigEntry
@@ -223,13 +223,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             metadata = {}
 
         validated_metadata: dict[str, dict[str, Any]] = {}
-        for rel_path, entry in metadata.items():
-            if isinstance(rel_path, str) and (
+        for relative_path, entry in metadata.items():
+            if isinstance(relative_path, str) and (
                 validated := BlueprintUpdateCoordinator._validate_metadata_entry(entry)
             ):
-                validated_metadata[rel_path] = validated
+                validated_metadata[relative_path] = validated
             else:
-                _LOGGER.warning("Skipping malformed metadata entry for %s", rel_path)
+                _LOGGER.warning("Skipping malformed metadata entry for %s", relative_path)
 
         self._persisted_metadata = validated_metadata
 
@@ -359,12 +359,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         filtered: dict[str, dict[str, Any]] = {}
-        for rel_path, data in metadata.items():
-            abs_path = os.path.join(root, rel_path)
-            if get_blueprint_rel_path(self.hass, abs_path) == rel_path:
-                filtered[rel_path] = data
+        for relative_path, data in metadata.items():
+            abs_path = os.path.join(root, relative_path)
+            if get_blueprint_relative_path(self.hass, abs_path) == relative_path:
+                filtered[relative_path] = data
             else:
-                _LOGGER.warning("Invalid or unsafe blueprint path filtered: %s", rel_path)
+                _LOGGER.warning("Invalid or unsafe blueprint path filtered: %s", relative_path)
         return filtered
 
     @staticmethod
@@ -408,30 +408,33 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         old_count = len(self._persisted_metadata)
         blueprints_root = self.hass.config.path(BLUEPRINTS_DATA_DIR)
 
-        scanned_rel_paths: set[str] = set()
+        scanned_relative_paths: set[str] = set()
         for path in scanned_paths:
             try:
-                if rel := get_blueprint_rel_path(self.hass, path):
-                    scanned_rel_paths.add(rel)
+                if rel := get_blueprint_relative_path(self.hass, path):
+                    scanned_relative_paths.add(rel)
             except (ValueError, TypeError, OSError):
                 continue
 
-        if candidate_rel_paths := set(self._persisted_metadata.keys()) - scanned_rel_paths:
+        if (
+            candidate_relative_paths := set(self._persisted_metadata.keys())
+            - scanned_relative_paths
+        ):
             metadata_to_check = {
-                k: v for k, v in self._persisted_metadata.items() if k in candidate_rel_paths
+                k: v for k, v in self._persisted_metadata.items() if k in candidate_relative_paths
             }
             valid_metadata = await self.hass.async_add_executor_job(
                 self._filter_existing_metadata, blueprints_root, metadata_to_check
             )
 
-            removed_rel_paths = candidate_rel_paths - set(valid_metadata.keys())
+            removed_relative_paths = candidate_relative_paths - set(valid_metadata.keys())
 
             self._persisted_metadata = {
-                k: v for k, v in self._persisted_metadata.items() if k not in removed_rel_paths
+                k: v for k, v in self._persisted_metadata.items() if k not in removed_relative_paths
             }
 
-            if removed_rel_paths:
-                for rel in removed_rel_paths:
+            if removed_relative_paths:
+                for rel in removed_relative_paths:
                     abs_path = os.path.join(blueprints_root, rel)
                     self.data.pop(abs_path, None)
 
@@ -460,12 +463,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         await self._async_prune_stale_metadata(set(blueprints.keys()))
         results = {}
         for path, info in blueprints.items():
-            rel_path = info["rel_path"]
-            persisted = self._persisted_metadata.get(rel_path) or {}
+            relative_path = info["relative_path"]
+            persisted = self._persisted_metadata.get(relative_path) or {}
 
             results[path] = {
                 "name": info["name"],
-                "rel_path": rel_path,
+                "relative_path": relative_path,
                 "domain": info["domain"],
                 "source_url": info["source_url"],
                 "local_hash": info["local_hash"],
@@ -638,11 +641,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             redact_url(prev_url),
             redact_url(curr_url),
         )
-        if not (rel_path := prev.get("rel_path")):
-            rel_path = get_blueprint_rel_path(self.hass, path)
+        if not (relative_path := prev.get("relative_path")):
+            relative_path = get_blueprint_relative_path(self.hass, path)
 
-        if rel_path:
-            self._persisted_metadata.pop(rel_path, None)
+        if relative_path:
+            self._persisted_metadata.pop(relative_path, None)
 
         invalidated = {
             **prev,
@@ -843,24 +846,28 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return
 
         final_metadata: dict[str, dict[str, Any]] = {}
-        all_rel_paths = set(self._persisted_metadata.keys())
+        all_relative_paths = set(self._persisted_metadata.keys())
         for _, info in self.data.items():
-            if rel_path := info.get("rel_path"):
-                all_rel_paths.add(rel_path)
+            if relative_path := info.get("relative_path"):
+                all_relative_paths.add(relative_path)
 
         blueprints_root = self.hass.config.path(BLUEPRINTS_DATA_DIR)
-        current_data_map = {i["rel_path"]: i for i in self.data.values() if i.get("rel_path")}
-        candidate_metadata = {rel: self._persisted_metadata.get(rel, {}) for rel in all_rel_paths}
+        current_data_map = {
+            i["relative_path"]: i for i in self.data.values() if i.get("relative_path")
+        }
+        candidate_metadata = {
+            rel: self._persisted_metadata.get(rel, {}) for rel in all_relative_paths
+        }
 
-        for rel_path in all_rel_paths:
-            existing = dict(candidate_metadata.get(rel_path, {}))
-            if info := current_data_map.get(rel_path):
+        for relative_path in all_relative_paths:
+            existing = dict(candidate_metadata.get(relative_path, {}))
+            if info := current_data_map.get(relative_path):
                 existing |= {
                     "remote_hash": info.get("remote_hash"),
                     "etag": info.get("etag"),
                     "source_url": info.get("source_url"),
                 }
-            candidate_metadata[rel_path] = existing
+            candidate_metadata[relative_path] = existing
 
         if not skip_filter:
             valid_metadata = await self.hass.async_add_executor_job(
@@ -1314,9 +1321,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
 
             if success:
-                rel_path = get_blueprint_rel_path(self.hass, real_path)
-                if rel_path and rel_path in self._persisted_metadata:
-                    entry = self._persisted_metadata[rel_path]
+                relative_path = get_blueprint_relative_path(self.hass, real_path)
+                if relative_path and relative_path in self._persisted_metadata:
+                    entry = self._persisted_metadata[relative_path]
                     entry["etag"] = None
                     entry["remote_hash"] = None
 
@@ -1626,19 +1633,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         return self._dedupe_risks(risks)
 
-    def _get_entities_using_blueprint_list(self, rel_path: str) -> list[str]:
+    def _get_entities_using_blueprint_list(self, relative_path: str) -> list[str]:
         """Internal helper to get entities using a specific blueprint.
 
         Args:
-            rel_path: Relative path of the blueprint.
+            relative_path: Relative path of the blueprint.
 
         Returns:
             List of entity IDs.
 
         """
-        parts = rel_path.split("/", 1)
+        parts = relative_path.split("/", 1)
         domain = parts[0] if len(parts) > 1 else None
-        bp_id = parts[-1] if len(parts) > 1 else rel_path
+        bp_id = parts[-1] if len(parts) > 1 else relative_path
 
         result: list[str] = []
         if domain in (None, "automation"):
@@ -1679,7 +1686,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     async def _async_validate_blueprint_consumers(
         self,
-        rel_path: str,
+        relative_path: str,
         blueprint_content: str,
         configs: dict[str, dict[str, Any]],
     ) -> list[StructuredRisk]:
@@ -1689,7 +1696,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         injecting the content into the blueprint cache.
 
         Args:
-            rel_path: Relative path of the blueprint.
+            relative_path: Relative path of the blueprint.
             blueprint_content: Raw YAML content for validation.
             configs: Current configurations of all affected entities.
 
@@ -1704,20 +1711,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 return [
                     {
                         "type": BlueprintRiskType.VALIDATION_FAILED,
-                        "args": {"error": f"{rel_path}: Not a dictionary"},
+                        "args": {"error": f"{relative_path}: Not a dictionary"},
                     }
                 ]
 
-            parts = rel_path.split("/", 1)
+            parts = relative_path.split("/", 1)
             if len(parts) < 2:
                 return [
                     {
                         "type": BlueprintRiskType.SYSTEM_ERROR,
                         "args": {
                             "error": (
-                                f"Malformed blueprint path: missing domain folder in '{rel_path}'"
+                                f"Malformed blueprint path: missing domain "
+                                f"folder in '{relative_path}'"
                             ),
-                            "path": rel_path,
+                            "path": relative_path,
                         },
                     }
                 ]
@@ -1726,7 +1734,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             schema = AUTOMATION_BLUEPRINT_SCHEMA if domain == "automation" else BLUEPRINT_SCHEMA
 
             blueprint_obj = Blueprint(
-                blueprint_dict, expected_domain=domain, path=rel_path, schema=schema
+                blueprint_dict, expected_domain=domain, path=relative_path, schema=schema
             )
         except HomeAssistantError as err:
             return [
@@ -1737,11 +1745,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             ]
         except Exception as err:
             safe_error = sanitize_error_detail(str(err))
-            _LOGGER.exception("Unexpected error during blueprint validation for %s", rel_path)
+            _LOGGER.exception("Unexpected error during blueprint validation for %s", relative_path)
             return [
                 {
                     "type": BlueprintRiskType.SYSTEM_ERROR,
-                    "args": {"error": safe_error, "path": rel_path},
+                    "args": {"error": safe_error, "path": relative_path},
                 }
             ]
 
@@ -1754,7 +1762,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     "type": BlueprintRiskType.SYSTEM_ERROR,
                     "args": {
                         "error": f"Blueprint hub for domain '{domain}' is not available",
-                        "path": rel_path,
+                        "path": relative_path,
                     },
                 }
             ]
@@ -1825,17 +1833,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             lines.append(f"- {msg}")
         return "\n".join(lines)
 
-    def _get_entities_using_blueprint(self, rel_path: str) -> list[str]:
+    def _get_entities_using_blueprint(self, relative_path: str) -> list[str]:
         """Get entity IDs of automations and scripts using the given blueprint.
 
         Args:
-            rel_path: Relative path of the blueprint.
+            relative_path: Relative path of the blueprint.
 
         Returns:
             A list of entity ID strings.
 
         """
-        return self._get_entities_using_blueprint_list(rel_path)
+        return self._get_entities_using_blueprint_list(relative_path)
 
     def set_cached_git_diff(
         self,
@@ -2309,8 +2317,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         risks = []
-        rel_path = info.get("rel_path")
-        if not rel_path:
+        relative_path = info.get("relative_path")
+        if not relative_path:
             _LOGGER.warning(
                 "Missing relative path for blueprint at %s, skipping risk detection", path
             )
@@ -2322,9 +2330,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             ]
 
         if not last_error and self.data and path in self.data:
-            local_file = self.hass.config.path(BLUEPRINTS_DATA_DIR, rel_path)
+            local_file = self.hass.config.path(BLUEPRINTS_DATA_DIR, relative_path)
             try:
-                entity_ids = self._get_entities_using_blueprint_list(rel_path)
+                entity_ids = self._get_entities_using_blueprint_list(relative_path)
                 full_configs = self._get_entities_configs(entity_ids)
                 configs = {
                     eid: cfg.get("use_blueprint", {}).get("input", {})
@@ -2338,35 +2346,38 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     risks = self._detect_breaking_changes(old_content, remote_content, configs)
 
                 compatibility_risks = await self._async_validate_blueprint_consumers(
-                    rel_path, remote_content, full_configs
+                    relative_path, remote_content, full_configs
                 )
                 risks.extend(compatibility_risks)
 
             except (OSError, HomeAssistantError) as err:
                 safe_error = sanitize_error_detail(str(err))
                 _LOGGER.warning(
-                    "Failed to check breaking changes for %s (%s): %s", path, rel_path, safe_error
+                    "Failed to check breaking changes for %s (%s): %s",
+                    path,
+                    relative_path,
+                    safe_error,
                 )
                 risks.append(
                     {
                         "type": BlueprintRiskType.SYSTEM_ERROR,
                         "args": {
                             "error": safe_error,
-                            "path": rel_path,
+                            "path": relative_path,
                         },
                     }
                 )
             except Exception as err:
                 safe_error = sanitize_error_detail(str(err))
                 _LOGGER.exception(
-                    "Unexpected error checking breaking changes for %s (%s)", path, rel_path
+                    "Unexpected error checking breaking changes for %s (%s)", path, relative_path
                 )
                 risks.append(
                     {
                         "type": BlueprintRiskType.SYSTEM_ERROR,
                         "args": {
                             "error": safe_error,
-                            "path": rel_path,
+                            "path": relative_path,
                         },
                     }
                 )
@@ -2405,8 +2416,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             return False
 
-        rel_path = info.get("rel_path")
-        in_use_entities = self._get_entities_using_blueprint(rel_path) if rel_path else []
+        relative_path = info.get("relative_path")
+        in_use_entities = self._get_entities_using_blueprint(relative_path) if relative_path else []
         guard_failed = any(risk.get("type") == BlueprintRiskType.SYSTEM_ERROR for risk in risks)
         is_breaking = bool(risks) and (guard_failed or bool(in_use_entities))
 
@@ -2470,11 +2481,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         message = await self.async_translate(
             "breaking_risks_report", name=info["name"], risks=risk_summary
         )
-        rel_path = info.get("rel_path")
+        relative_path = info.get("relative_path")
         await self._async_send_auto_update_notification(
             title,
             message,
-            source_unique_id=slugify(rel_path) if rel_path else None,
+            source_unique_id=slugify(relative_path) if relative_path else None,
         )
         if self.data and path in self.data:
             blocking_reason = (
@@ -3032,13 +3043,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return "automation"
 
     @staticmethod
-    def _should_include_blueprint(rel_path: str, filter_mode: str, selected_set: set[str]) -> bool:
+    def _should_include_blueprint(
+        relative_path: str, filter_mode: str, selected_set: set[str]
+    ) -> bool:
         """Check if a blueprint should be included based on filtering rules."""
         if filter_mode == FILTER_MODE_BLACKLIST:
-            return rel_path not in selected_set
+            return relative_path not in selected_set
 
         if filter_mode == FILTER_MODE_WHITELIST:
-            return rel_path in selected_set
+            return relative_path in selected_set
 
         return True
 
@@ -3141,7 +3154,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _parse_blueprint_data(
-        path: str, content: str, rel_path: str | None = None
+        path: str, content: str, relative_path: str | None = None
     ) -> ParsedBlueprintData | None:
         """Parse raw YAML content and extract blueprint metadata if valid."""
         bp_info = BlueprintUpdateCoordinator._get_blueprint_block(path, content)
@@ -3164,8 +3177,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
         domain = BlueprintUpdateCoordinator._normalize_domain(bp_info.get("domain"))
 
-        if domain == "automation" and rel_path:
-            parts = rel_path.split("/")
+        if domain == "automation" and relative_path:
+            parts = relative_path.split("/")
             if len(parts) >= 2 and parts[0] in ALLOWED_RELOAD_DOMAINS:
                 domain = parts[0]
 
@@ -3236,21 +3249,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         _LOGGER.warning("Skipping blueprint with invalid path: %s", full_path)
                         continue
 
-                    if rel_path := get_blueprint_rel_path(hass, full_path):
+                    if relative_path := get_blueprint_relative_path(hass, full_path):
                         try:
                             with open(full_path, encoding="utf-8") as f:
                                 content = f.read()
 
                             if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
-                                full_path, content, rel_path
+                                full_path, content, relative_path
                             ):
                                 if not BlueprintUpdateCoordinator._should_include_blueprint(
-                                    rel_path, filter_mode, selected_set
+                                    relative_path, filter_mode, selected_set
                                 ):
                                     continue
                                 found_blueprints[full_path] = {
                                     **parsed_data,
-                                    "rel_path": rel_path,
+                                    "relative_path": relative_path,
                                 }
 
                         except OSError:

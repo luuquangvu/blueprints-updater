@@ -57,7 +57,7 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
     coordinator.async_fetch_blueprint = AsyncMock(side_effect=_async_none)
     coordinator.async_install_blueprint = AsyncMock(side_effect=_async_none)
     coordinator.async_shutdown = AsyncMock(side_effect=_async_none)
-    coordinator.data = {"test.yaml": {"rel_path": "test.yaml", "updatable": True}}
+    coordinator.data = {"test.yaml": {"relative_path": "test.yaml", "updatable": True}}
 
     hass.config_entries = MagicMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock(side_effect=_async_none)
@@ -106,11 +106,15 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
         hass.data[DOMAIN]["coordinators"] = {"entry": coordinator}
         await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
 
-        coordinator.data = {"test.yaml": {"rel_path": "test.yaml", "updatable": True}}
+        coordinator.data = {"test.yaml": {"relative_path": "test.yaml", "updatable": True}}
         coordinator.config_entry = None
         await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
         coordinator.data = {
-            "test.yaml": {"rel_path": "test.yaml", "updatable": True, "remote_content": "new_bp:"}
+            "test.yaml": {
+                "relative_path": "test.yaml",
+                "updatable": True,
+                "remote_content": "new_bp:",
+            }
         }
         coordinator.config_entry = entry
         with patch.object(
@@ -195,7 +199,7 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
     with patch("homeassistant.helpers.frame.report_usage"):
         coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=1))
 
-    coordinator.data = {"p": {"local_hash": "abc", "rel_path": "path"}}
+    coordinator.data = {"p": {"local_hash": "abc", "relative_path": "path"}}
 
     res: list[str] = []
     dom: set[str] = set()

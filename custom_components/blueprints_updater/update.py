@@ -96,7 +96,7 @@ def async_update_entities(
 
     entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
     known_ids = {
-        BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, info["rel_path"])
+        BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, info["relative_path"])
         for info in coordinator.data.values()
     }
 
@@ -163,7 +163,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         self._path = path
         self._attr_name = info["name"]
         self._attr_unique_id = BlueprintUpdateCoordinator.generate_unique_id(
-            coordinator.config_entry.entry_id, info["rel_path"]
+            coordinator.config_entry.entry_id, info["relative_path"]
         )
         self._attr_title = info["name"]
         self._attr_release_url = info.get("source_url")
@@ -231,10 +231,9 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         notes = await self.coordinator.async_translate(
             "update_available", source_url=info.get("source_url", "<unknown>")
         )
-        rel_path = info.get("rel_path", "")
-        parts = rel_path.split("/", 1)
-        domain = parts[0]
-        bp_id = parts[-1] if len(parts) > 1 else rel_path
+        relative_path = info.get("relative_path", "")
+        domain = info.get("domain") or relative_path.split("/", 1)[0]
+        bp_id = relative_path.split("/", 1)[-1] if "/" in relative_path else relative_path
 
         total_usage = 0
         try:
@@ -315,8 +314,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             info = self.coordinator.data[self._path]
             if domain := info.get("domain"):
                 attrs["domain"] = domain
-            if rel_path := info.get("rel_path"):
-                attrs["relative_path"] = rel_path
+            if relative_path := info.get("relative_path"):
+                attrs["relative_path"] = relative_path
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
             if blocking := info.get("update_blocking_reason"):

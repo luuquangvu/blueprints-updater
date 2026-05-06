@@ -205,7 +205,7 @@ async def test_config_flow_scanning(hass: HomeAssistant):
                 "domain": "automation",
                 "source_url": "https://example.com/test.yaml",
                 "local_hash": "hash123",
-                "rel_path": "automation/test.yaml",
+                "relative_path": "automation/test.yaml",
             }
         }
         options = await _async_get_blueprint_options(hass)

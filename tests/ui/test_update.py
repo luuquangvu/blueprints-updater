@@ -22,7 +22,7 @@ async def test_async_setup_entry_update(hass):
     data = {
         "automation/test.yaml": {
             "name": "Test BP",
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "updatable": True,
             "curr_version": "1.0",
             "remote_version": "1.1",
@@ -47,7 +47,7 @@ def test_update_entity_properties():
     coordinator.config_entry.entry_id = "test_entry"
     info = {
         "name": "Test BP",
-        "rel_path": "automation/test.yaml",
+        "relative_path": "automation/test.yaml",
         "updatable": True,
         "curr_version": "1.0",
         "remote_version": "1.1",

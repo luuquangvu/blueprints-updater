@@ -33,9 +33,12 @@ def run_pipeline() -> None:
         print(f"\n>>> STEP: {' '.join(cmd)}")
         try:
             subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"\nFAILED: {' '.join(cmd)} (Exit code: {e.returncode})")
-            sys.exit(e.returncode)
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            ret_code = e.returncode if isinstance(e, subprocess.CalledProcessError) else 1
+            print(f"\nFAILED: {' '.join(cmd)} (Exit code: {ret_code})")
+            if isinstance(e, FileNotFoundError):
+                print(f"Error: Command not found. Please ensure '{cmd[0]}' is installed.")
+            sys.exit(ret_code)
 
     print("\n" + "=" * 40)
     print("ALL VALIDATION STEPS PASSED SUCCESSFULLY")

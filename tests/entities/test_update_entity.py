@@ -68,7 +68,7 @@ async def test_update_entities_lifecycle(hass):
     coordinator.data = {
         "/config/blueprints/test1.yaml": {
             "name": "Test 1",
-            "rel_path": "test1.yaml",
+            "relative_path": "test1.yaml",
             "source_url": "https://url1.com",
             "local_hash": "hash1",
         }
@@ -107,7 +107,7 @@ async def test_update_entities_lifecycle(hass):
 
         coordinator.data["/config/blueprints/test2.yaml"] = {
             "name": "Test 2",
-            "rel_path": "test2.yaml",
+            "relative_path": "test2.yaml",
             "source_url": "https://url2.com",
             "local_hash": "hash2",
         }
@@ -141,7 +141,7 @@ def coordinator():
     comp.data = {
         "/config/blueprints/test.yaml": {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "relative_path": "test.yaml",
             "source_url": "https://url.com",
             "local_hash": "hash1xxxxxxxxxxx",
             "remote_hash": "hash2xxxxxxxxxxx",
@@ -225,7 +225,7 @@ async def test_entity_properties(coordinator):
     entity_missing = BlueprintUpdateEntity(
         coordinator,
         "/missing.yaml",
-        {"name": "Missing", "rel_path": "missing", "source_url": "https://url.com"},
+        {"name": "Missing", "relative_path": "missing", "source_url": "https://url.com"},
     )
     entity_missing.hass = coordinator.hass
     entity_missing.entity_id = "update.missing"
@@ -358,7 +358,7 @@ async def test_entity_release_summary_with_usage(coordinator):
     """Test release summary includes usage warning."""
     info_auto = {
         "name": "Test Auto",
-        "rel_path": "automation/test.yaml",
+        "relative_path": "automation/test.yaml",
         "source_url": "https://url.com",
         "updatable": True,
     }
@@ -387,7 +387,7 @@ async def test_entity_release_summary_with_usage(coordinator):
 
     info_script = {
         "name": "Test Script",
-        "rel_path": "script/test2.yaml",
+        "relative_path": "script/test2.yaml",
         "source_url": "https://url.com",
         "updatable": True,
     }
@@ -419,7 +419,7 @@ async def test_entity_release_notes_encoding(coordinator):
     path = "/config/blueprints/automation/my folder/test ü#1.yaml"
     info = {
         "name": "Test Encoding",
-        "rel_path": "automation/my folder/test ü#1.yaml",
+        "relative_path": "automation/my folder/test ü#1.yaml",
         "updatable": True,
         "remote_content": "",
     }
@@ -453,7 +453,7 @@ async def test_script_release_notes_encoding(coordinator):
     path = f"/config/blueprints/script/{blueprint_id}"
     info = {
         "name": "Test Script Encoding",
-        "rel_path": f"script/{blueprint_id}",
+        "relative_path": f"script/{blueprint_id}",
         "updatable": True,
         "remote_content": "",
     }
@@ -483,7 +483,7 @@ async def test_entity_release_notes_usage_error_handled(coordinator):
     path = "/config/blueprints/automation/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "automation/test.yaml",
+        "relative_path": "automation/test.yaml",
         "updatable": True,
         "remote_content": "",
     }
@@ -509,7 +509,7 @@ async def test_entity_release_notes_usage_error_unhandled(coordinator):
     path = "/config/blueprints/automation/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "automation/test.yaml",
+        "relative_path": "automation/test.yaml",
         "updatable": True,
         "remote_content": "",
     }
@@ -532,7 +532,7 @@ async def test_entity_skip_version(coordinator):
         "blueprint_with_update.yaml",
         {
             "name": "Update Blueprint",
-            "rel_path": "blueprint_with_update.yaml",
+            "relative_path": "blueprint_with_update.yaml",
         },
     )
 
@@ -572,7 +572,7 @@ async def test_async_update_entities_orphan_cleanup(hass, caplog):
     coordinator.config_entry = entry
     coordinator.data = {
         "kept.yaml": {
-            "rel_path": "kept.yaml",
+            "relative_path": "kept.yaml",
             "name": "Kept",
             "local_hash": "hash",
         },
@@ -659,7 +659,7 @@ async def test_entity_release_notes_git_diff(coordinator):
     path = "/config/blueprints/automation/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "automation/test.yaml",
+        "relative_path": "automation/test.yaml",
         "updatable": True,
         "source_url": "https://url.com",
     }
@@ -696,7 +696,7 @@ async def test_entity_release_notes_git_diff_missing_remote(coordinator):
     path = "/config/blueprints/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "relative_path": "test.yaml",
         "updatable": True,
         "source_url": "https://url.com",
     }
@@ -723,7 +723,7 @@ async def test_entity_release_notes_git_diff_source_url_normalization(coordinato
     path = "/config/blueprints/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "relative_path": "test.yaml",
         "updatable": True,
         "source_url": "https://url.com",
     }
@@ -754,7 +754,7 @@ async def test_entity_release_notes_git_diff_cached(coordinator):
     path = "/config/blueprints/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "relative_path": "test.yaml",
         "updatable": True,
         "source_url": "https://url.com",
     }
@@ -782,7 +782,7 @@ async def test_async_install_bypass_protection(coordinator):
     path = "/config/blueprints/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "relative_path": "test.yaml",
         "updatable": True,
         "source_url": "https://url.com",
         "remote_hash": "hash2xxxxxxxxxxx",
@@ -820,7 +820,7 @@ async def test_async_install_unsafe_url_protection(coordinator):
     path = "/config/blueprints/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "relative_path": "test.yaml",
         "updatable": True,
         "source_url": "https://unsafe.com",
         "remote_hash": "hash2xxxxxxxxxxx",
@@ -851,7 +851,7 @@ async def test_entity_release_notes_git_diff_with_backticks(coordinator):
     path = "/config/blueprints/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "relative_path": "test.yaml",
         "updatable": True,
         "source_url": "https://url.com",
     }
@@ -878,7 +878,7 @@ async def test_entity_release_notes_semantic_sync_notice(coordinator):
     path = "/config/blueprints/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "test.yaml",
+        "relative_path": "test.yaml",
         "updatable": True,
         "source_url": "https://url.com",
     }

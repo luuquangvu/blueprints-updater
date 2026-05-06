@@ -37,8 +37,8 @@ async def test_setup_integration(hass: HomeAssistant) -> None:
 async def test_full_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
     """Test the full lifecycle from discovery to update via entity service."""
     blueprints_dir = Path(hass.config.path("blueprints"))
-    rel_path = "automation/lifecycle.yaml"
-    bp_path = blueprints_dir / rel_path
+    relative_path = "automation/lifecycle.yaml"
+    bp_path = blueprints_dir / relative_path
     bp_path.parent.mkdir(parents=True, exist_ok=True)
 
     content = "blueprint:\n  name: Life\n  domain: automation\n  source_url: https://example.com/life.yaml\n"
@@ -63,7 +63,7 @@ async def test_full_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
 
     ent_reg = er.async_get(hass)
 
-    unique_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, rel_path)
+    unique_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, relative_path)
     entity_id = ent_reg.async_get_entity_id("update", DOMAIN, unique_id)
 
     assert entity_id is not None

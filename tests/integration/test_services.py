@@ -12,10 +12,10 @@ from custom_components.blueprints_updater.const import DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
-def _create_blueprint(hass: HomeAssistant, rel_path: str, content: str) -> str:
+def _create_blueprint(hass: HomeAssistant, relative_path: str, content: str) -> str:
     """Helper to create a blueprint file in the HA config directory."""
     blueprints_dir = Path(hass.config.path("blueprints"))
-    full_path = blueprints_dir / rel_path
+    full_path = blueprints_dir / relative_path
     full_path.parent.mkdir(parents=True, exist_ok=True)
     full_path.write_text(content, encoding="utf-8")
     return str(full_path)
@@ -92,9 +92,9 @@ async def test_update_all_service(hass: HomeAssistant, respx_mock) -> None:
 
 async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> None:
     """Test the restore_blueprint service."""
-    rel_path = "automation/restore.yaml"
+    relative_path = "automation/restore.yaml"
     content = "blueprint:\n  name: Original\n  domain: automation\n  source_url: https://example.com/bp.yaml\n"
-    bp_path = _create_blueprint(hass, rel_path, content)
+    bp_path = _create_blueprint(hass, relative_path, content)
 
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -114,7 +114,7 @@ async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> Non
 
     ent_reg = er.async_get(hass)
 
-    unique_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, rel_path)
+    unique_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, relative_path)
     await coordinator.async_wait_until_done()
 
     entity_id = ent_reg.async_get_entity_id("update", DOMAIN, unique_id)

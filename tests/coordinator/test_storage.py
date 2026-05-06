@@ -38,7 +38,7 @@ async def test_async_prune_stale_metadata_triggers_save(coordinator):
             "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
         ),
         patch(
-            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            "custom_components.blueprints_updater.coordinator.get_blueprint_relative_path",
             side_effect=lambda hass, path: None,
         ),
         patch.object(coordinator, "_async_save_metadata") as mock_save,
@@ -60,7 +60,7 @@ async def test_save_metadata_honors_cleared_in_memory_state(coordinator):
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "source_url": None,
             "etag": None,
             "remote_hash": None,
@@ -92,7 +92,7 @@ async def test_metadata_pruning(coordinator):
     blueprints = {
         path_valid: {
             "name": "Valid",
-            "rel_path": "automation/valid.yaml",
+            "relative_path": "automation/valid.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": "hash1",
@@ -103,7 +103,7 @@ async def test_metadata_pruning(coordinator):
         patch.object(coordinator, "scan_blueprints", return_value=blueprints),
         patch.object(coordinator, "_start_background_refresh"),
         patch(
-            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            "custom_components.blueprints_updater.coordinator.get_blueprint_relative_path",
             side_effect=lambda hass, path: (
                 "automation/valid.yaml"
                 if "valid.yaml" in path
@@ -146,7 +146,7 @@ async def test_prune_metadata_persistence(coordinator):
     coordinator.setup_complete = True
 
     coordinator.data = {
-        path_exist: {"rel_path": "automation/exist.yaml", "etag": "e1", "remote_hash": "h1"}
+        path_exist: {"relative_path": "automation/exist.yaml", "etag": "e1", "remote_hash": "h1"}
     }
 
     tasks = []
@@ -196,7 +196,7 @@ async def test_cold_start_rehydration(coordinator):
     blueprints = {
         path: {
             "name": "Test",
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": local_hash,
@@ -229,7 +229,7 @@ async def test_etag_invalidation_on_mismatch(coordinator):
     blueprints = {
         path: {
             "name": "Test",
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": local_hash,
@@ -264,7 +264,7 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator):
     blueprints = {
         path: {
             "name": "Test",
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": initial_hash,
@@ -314,7 +314,7 @@ async def test_metadata_preservation_during_scan(coordinator):
     blueprints = {
         path: {
             "name": "Test",
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": "https://url",
             "local_hash": local_hash,

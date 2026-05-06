@@ -44,7 +44,7 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
     Ensures that the hub content is injected for validation and always restored to
     its original content (or removed if new) regardless of validation outcome.
     """
-    rel_path = "automation/test.yaml"
+    relative_path = "automation/test.yaml"
     content = "blueprint:\n  name: test\n  domain: automation\n"
 
     mock_hub = MagicMock()
@@ -54,7 +54,10 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
     hass.data["blueprint"] = {"automation": mock_hub}
 
     configs: dict[str, dict[str, Any]] = {
-        "automation.test": {"alias": "Existing", "use_blueprint": {"path": rel_path, "input": {}}}
+        "automation.test": {
+            "alias": "Existing",
+            "use_blueprint": {"path": relative_path, "input": {}},
+        }
     }
     with patch(
         "custom_components.blueprints_updater.coordinator.async_validate_automation_config",
@@ -67,7 +70,9 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
 
         mock_validate.side_effect = check_during_validation
 
-        risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
+        risks = await coordinator._async_validate_blueprint_consumers(
+            relative_path, content, configs
+        )
         assert risks == []
         mock_validate.assert_awaited_once_with(
             hass,
@@ -82,7 +87,9 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
         "custom_components.blueprints_updater.coordinator.async_validate_automation_config",
         AsyncMock(side_effect=HomeAssistantError("Validation failed")),
     ):
-        risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
+        risks = await coordinator._async_validate_blueprint_consumers(
+            relative_path, content, configs
+        )
         assert len(risks) == 1
         assert "Validation failed" in risks[0]["args"]["error"]
         assert "test.yaml" not in mock_hub._blueprints
@@ -94,7 +101,11 @@ async def test_process_blueprint_content_error_handling(coordinator):
 
     Covers invalid blueprint handling, YAML syntax errors, and schema validation error handling.
     """
-    info: dict[str, Any] = {"rel_path": "test.yaml", "name": "Test BP", "local_hash": "old_hash"}
+    info: dict[str, Any] = {
+        "relative_path": "test.yaml",
+        "name": "Test BP",
+        "local_hash": "old_hash",
+    }
 
     path1 = "automation/invalid.yaml"
     coordinator.data[path1] = dict(info)
@@ -135,12 +146,12 @@ async def test_async_validate_blueprint_consumers_unexpected_error(hass, coordin
 
     Ensures that the catch-all Exception block handles internal logic failure gracefully.
     """
-    rel_path = "automation/test.yaml"
+    relative_path = "automation/test.yaml"
     content = "blueprint:\n  name: test\n  domain: automation\n"
     configs: dict[str, dict[str, Any]] = {
         "automation.test": {
             "alias": "Existing",
-            "use_blueprint": {"path": rel_path, "input": {}},
+            "use_blueprint": {"path": relative_path, "input": {}},
         }
     }
 
@@ -148,7 +159,9 @@ async def test_async_validate_blueprint_consumers_unexpected_error(hass, coordin
         "custom_components.blueprints_updater.coordinator.yaml_util.parse_yaml",
         side_effect=RuntimeError("Unexpected internal failure"),
     ):
-        risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
+        risks = await coordinator._async_validate_blueprint_consumers(
+            relative_path, content, configs
+        )
         assert len(risks) == 1
         assert risks[0]["type"] == BlueprintRiskType.SYSTEM_ERROR
         assert "Unexpected internal failure" in risks[0]["args"]["error"]
@@ -156,20 +169,20 @@ async def test_async_validate_blueprint_consumers_unexpected_error(hass, coordin
 
 @pytest.mark.asyncio
 async def test_async_validate_blueprint_consumers_malformed_path(coordinator):
-    """Verify that a rel_path without a domain folder returns a SYSTEM_ERROR.
+    """Verify that a relative_path without a domain folder returns a SYSTEM_ERROR.
 
     Ensures that we don't silently skip validation or misparse filenames as domains.
     """
-    rel_path = "invalid_path.yaml"
+    relative_path = "invalid_path.yaml"
     content = "blueprint:\n  name: test\n  domain: automation\n"
     configs: dict[str, dict[str, Any]] = {}
 
-    risks = await coordinator._async_validate_blueprint_consumers(rel_path, content, configs)
+    risks = await coordinator._async_validate_blueprint_consumers(relative_path, content, configs)
 
     assert len(risks) == 1
     assert risks[0]["type"] == BlueprintRiskType.SYSTEM_ERROR
     assert "Malformed blueprint path" in risks[0]["args"]["error"]
-    assert risks[0]["args"]["path"] == rel_path
+    assert risks[0]["args"]["path"] == relative_path
 
 
 def test_is_safe_path(hass, coordinator):

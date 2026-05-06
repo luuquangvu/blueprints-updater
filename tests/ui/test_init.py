@@ -259,7 +259,7 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
                 )
             assert exc.value.translation_key == "not_found"
 
-            coordinator_mock.data = {"test.yaml": {"rel_path": "test.yaml", "updatable": True}}
+            coordinator_mock.data = {"test.yaml": {"relative_path": "test.yaml", "updatable": True}}
             good_entity.unique_id = BlueprintUpdateCoordinator.generate_unique_id(
                 "test_entry", "test.yaml"
             )
@@ -417,7 +417,7 @@ async def test_restore_handler_multi_coordinator_selection(hass: HomeAssistant):
         )
         mock_entity_registry.async_get.return_value = entity_entry
 
-        coordinator_two.data = {"two.yaml": {"rel_path": "two.yaml"}}
+        coordinator_two.data = {"two.yaml": {"relative_path": "two.yaml"}}
         coordinator_two.async_restore_blueprint = AsyncMock(
             return_value={"success": True, "message": "Success"}
         )
@@ -450,7 +450,7 @@ async def test_async_update_all_handler_fetches_remote_content(hass: HomeAssista
     coordinator.config_entry = entry
     coordinator.data = {
         "test.yaml": {
-            "rel_path": "test.yaml",
+            "relative_path": "test.yaml",
             "updatable": True,
             "remote_content": None,
         }
@@ -461,7 +461,7 @@ async def test_async_update_all_handler_fetches_remote_content(hass: HomeAssista
     mock_coordinator = MagicMock()
     mock_coordinator.data = {
         "test.yaml": {
-            "rel_path": "test.yaml",
+            "relative_path": "test.yaml",
             "updatable": True,
             "remote_content": None,
         }
@@ -516,13 +516,13 @@ async def test_async_update_all_handler_continues_on_failure(hass: HomeAssistant
     mock_coordinator.config_entry = entry
     mock_coordinator.data = {
         "fail.yaml": {
-            "rel_path": "fail.yaml",
+            "relative_path": "fail.yaml",
             "updatable": True,
             "remote_content": "...",
             "last_error": None,
         },
         "success.yaml": {
-            "rel_path": "success.yaml",
+            "relative_path": "success.yaml",
             "updatable": True,
             "remote_content": "...",
             "last_error": None,
@@ -628,7 +628,7 @@ async def test_restore_blueprint_fails_with_legacy_id(hass: HomeAssistant):
 
     coordinator_mock = MagicMock(spec=BlueprintUpdateCoordinator)
     coordinator_mock.config_entry = entry
-    coordinator_mock.data = {"test.yaml": {"rel_path": "test.yaml", "updatable": True}}
+    coordinator_mock.data = {"test.yaml": {"relative_path": "test.yaml", "updatable": True}}
 
     _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
 

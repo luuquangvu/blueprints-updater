@@ -92,7 +92,7 @@ async def test_entity_localized_error(hass, coordinator):
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "relative_path": "test.yaml",
             "updatable": True,
             "last_error": "yaml_syntax_error|Line 5",
             "local_hash": "old",
