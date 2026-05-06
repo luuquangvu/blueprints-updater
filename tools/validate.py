@@ -1,7 +1,7 @@
-"""Unified Linux-only validation script.
+"""Unified POSIX-only validation script.
 
 This script manages the validation pipeline (Ruff, Ty, Pyright, Interrogate, Prettier, Pytest).
-It is optimized for Linux/WSL environments.
+It is optimized for Linux, WSL, and macOS environments.
 """
 
 import os
@@ -12,7 +12,7 @@ import sys
 def run_pipeline() -> None:
     """Execute the full validation pipeline."""
     if os.name != "posix":
-        print("Error: This script is only supported on Linux/WSL (POSIX systems).")
+        print("Error: This script is only supported on POSIX systems (Linux, WSL, macOS).")
         sys.exit(1)
 
     print("\n" + "=" * 40)
@@ -51,11 +51,11 @@ def run_pipeline() -> None:
                 else str(cmd_val)
             )
         else:
-            cmd_str = "Unknown command"
+            cmd_str = getattr(e, "filename", "Unknown command")
 
         print(f"\nFAILED: {cmd_str} (Exit code: {ret_code})")
         if isinstance(e, FileNotFoundError):
-            print("Error: Command not found. Please ensure all dependencies are installed.")
+            print(f"Error: '{cmd_str}' not found. Please ensure all dependencies are installed.")
         sys.exit(ret_code)
 
     print("\n" + "=" * 40)

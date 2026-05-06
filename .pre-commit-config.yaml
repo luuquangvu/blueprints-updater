@@ -7,7 +7,6 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
 
       - id: ruff-check
         name: ruff-check
@@ -15,7 +14,6 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
 
       - id: ty-check
         name: ty-check
@@ -23,7 +21,6 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
 
       - id: pyright
         name: pyright
@@ -31,7 +28,6 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
 
       - id: interrogate
         name: interrogate
@@ -39,7 +35,6 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
 
       - id: prettier
         name: prettier
@@ -47,7 +42,6 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        stages: [pre-commit]
 
       - id: pytest
         name: pytest
