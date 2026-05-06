@@ -5,19 +5,8 @@ It is optimized for Linux/WSL environments.
 """
 
 import os
-import shlex
 import subprocess
 import sys
-
-VALIDATION_PIPELINE = [
-    ["uv", "run", "ruff", "format"],
-    ["uv", "run", "ruff", "check", "--fix"],
-    ["uv", "run", "ty", "check"],
-    ["uv", "run", "pyright"],
-    ["uv", "run", "interrogate"],
-    ["npx", "prettier", "--write", "."],
-    ["uv", "run", "pytest"],
-]
 
 
 def run_pipeline() -> None:
@@ -30,17 +19,44 @@ def run_pipeline() -> None:
     print("STARTING UNIFIED VALIDATION PIPELINE")
     print("=" * 40 + "\n")
 
-    for cmd in VALIDATION_PIPELINE:
-        full_cmd = shlex.join(cmd)
-        print(f"\n>>> STEP: {full_cmd}")
-        try:
-            subprocess.run(full_cmd, shell=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            ret_code = e.returncode if isinstance(e, subprocess.CalledProcessError) else 1
-            print(f"\nFAILED: {' '.join(cmd)} (Exit code: {ret_code})")
-            if isinstance(e, FileNotFoundError):
-                print(f"Error: Command not found. Please ensure '{cmd[0]}' is installed.")
-            sys.exit(ret_code)
+    try:
+        print("\n>>> STEP: uv run ruff format")
+        subprocess.run(["uv", "run", "ruff", "format"], check=True)
+
+        print("\n>>> STEP: uv run ruff check --fix")
+        subprocess.run(["uv", "run", "ruff", "check", "--fix"], check=True)
+
+        print("\n>>> STEP: uv run ty check")
+        subprocess.run(["uv", "run", "ty", "check"], check=True)
+
+        print("\n>>> STEP: uv run pyright")
+        subprocess.run(["uv", "run", "pyright"], check=True)
+
+        print("\n>>> STEP: uv run interrogate")
+        subprocess.run(["uv", "run", "interrogate"], check=True)
+
+        print("\n>>> STEP: npx prettier --write .")
+        subprocess.run(["npx", "prettier", "--write", "."], check=True)
+
+        print("\n>>> STEP: uv run pytest")
+        subprocess.run(["uv", "run", "pytest"], check=True)
+
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        ret_code = getattr(e, "returncode", 1)
+        if isinstance(e, subprocess.CalledProcessError):
+            cmd_val = e.cmd
+            cmd_str = (
+                " ".join(str(arg) for arg in cmd_val)
+                if isinstance(cmd_val, (list, tuple))
+                else str(cmd_val)
+            )
+        else:
+            cmd_str = "Unknown command"
+
+        print(f"\nFAILED: {cmd_str} (Exit code: {ret_code})")
+        if isinstance(e, FileNotFoundError):
+            print("Error: Command not found. Please ensure all dependencies are installed.")
+        sys.exit(ret_code)
 
     print("\n" + "=" * 40)
     print("ALL VALIDATION STEPS PASSED SUCCESSFULLY")
