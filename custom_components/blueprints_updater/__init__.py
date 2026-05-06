@@ -215,8 +215,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
         target_path = None
         for path, info in active_coordinator.data.items():
+            relative_path = info.get("relative_path")
+            if not relative_path:
+                _LOGGER.debug("Skipping blueprint without relative_path: %s", path)
+                continue
+
             expected_id = BlueprintUpdateCoordinator.generate_unique_id(
-                active_coordinator.config_entry.entry_id, info["relative_path"]
+                active_coordinator.config_entry.entry_id, relative_path
             )
             if entity_entry.unique_id == expected_id:
                 target_path = path
