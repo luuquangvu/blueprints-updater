@@ -49,9 +49,9 @@ repos:
         always_run: true
         stages: [pre-commit]
 
-      - id: validation-pipeline
-        name: validation-pipeline
-        entry: uv run tools/validate.py
+      - id: pytest
+        name: pytest
+        entry: uv run pytest
         language: system
         pass_filenames: false
         always_run: true
