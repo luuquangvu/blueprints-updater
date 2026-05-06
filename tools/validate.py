@@ -5,6 +5,7 @@ It is optimized for Linux/WSL environments.
 """
 
 import os
+import shlex
 import subprocess
 import sys
 
@@ -30,9 +31,10 @@ def run_pipeline() -> None:
     print("=" * 40 + "\n")
 
     for cmd in VALIDATION_PIPELINE:
-        print(f"\n>>> STEP: {' '.join(cmd)}")
+        full_cmd = shlex.join(cmd)
+        print(f"\n>>> STEP: {full_cmd}")
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(full_cmd, shell=True, check=True)
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             ret_code = e.returncode if isinstance(e, subprocess.CalledProcessError) else 1
             print(f"\nFAILED: {' '.join(cmd)} (Exit code: {ret_code})")
