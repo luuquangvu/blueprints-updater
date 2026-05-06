@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 
-PIPELINE_ORDER = [
+VALIDATION_PIPELINE = [
     ["uv", "run", "ruff", "format"],
     ["uv", "run", "ruff", "check", "--fix"],
     ["uv", "run", "ty", "check"],
@@ -29,7 +29,7 @@ def run_pipeline() -> None:
     print("STARTING UNIFIED VALIDATION PIPELINE")
     print("=" * 40 + "\n")
 
-    for cmd in PIPELINE_ORDER:
+    for cmd in VALIDATION_PIPELINE:
         print(f"\n>>> STEP: {' '.join(cmd)}")
         try:
             subprocess.run(cmd, check=True)
