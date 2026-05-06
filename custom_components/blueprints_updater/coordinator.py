@@ -469,7 +469,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             results[path] = {
                 "name": info["name"],
                 "relative_path": relative_path,
-                "domain": info["domain"],
+                "domain": self._normalize_domain(info["domain"]),
                 "source_url": info["source_url"],
                 "local_hash": info["local_hash"],
                 "updatable": False,

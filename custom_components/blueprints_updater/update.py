@@ -196,7 +196,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
     def domain(self) -> str:
         """Return the domain of the blueprint (e.g. automation, script)."""
         info = self.coordinator.data.get(self._path, {})
-        return info.get("domain") or info.get("relative_path", "").split("/", 1)[0]
+        raw_domain = info.get("domain") or self.relative_path.split("/", 1)[0]
+        return self.coordinator._normalize_domain(raw_domain)
 
     @property
     def relative_path(self) -> str:
