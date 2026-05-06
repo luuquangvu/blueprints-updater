@@ -113,6 +113,7 @@ async def test_entity_localized_error(hass, coordinator):
         return_value=translations,
     ):
         assert entity.extra_state_attributes == {
+            "domain": "test.yaml",
             "last_error": "yaml_syntax_error|Line 5",
             "relative_path": "test.yaml",
         }
@@ -120,6 +121,7 @@ async def test_entity_localized_error(hass, coordinator):
         with patch.object(entity, "async_write_ha_state"):
             await entity._async_localize_strings()
         assert entity.extra_state_attributes == {
+            "domain": "test.yaml",
             "last_error": "Lỗi cú pháp: Line 5",
             "relative_path": "test.yaml",
         }

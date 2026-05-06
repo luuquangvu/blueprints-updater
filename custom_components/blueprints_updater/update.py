@@ -192,6 +192,23 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         """
         return self.coordinator.is_auto_update_enabled()
 
+    @property
+    def domain(self) -> str:
+        """Return the domain of the blueprint (e.g. automation, script)."""
+        info = self.coordinator.data.get(self._path, {})
+        return info.get("domain") or info.get("relative_path", "").split("/", 1)[0]
+
+    @property
+    def relative_path(self) -> str:
+        """Return the relative path of the blueprint."""
+        return self.coordinator.data.get(self._path, {}).get("relative_path", "")
+
+    @property
+    def blueprint_id(self) -> str:
+        """Return the internal ID of the blueprint (path without domain)."""
+        relative_path = self.relative_path
+        return relative_path.split("/", 1)[-1] if "/" in relative_path else relative_path
+
     @cached_property
     def installed_version(self) -> str | None:
         """Version of the blueprint currently installed on the local system.
@@ -231,9 +248,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         notes = await self.coordinator.async_translate(
             "update_available", source_url=info.get("source_url", "<unknown>")
         )
-        relative_path = info.get("relative_path", "")
-        domain = info.get("domain") or relative_path.split("/", 1)[0]
-        bp_id = relative_path.split("/", 1)[-1] if "/" in relative_path else relative_path
+        domain = self.domain
+        bp_id = self.blueprint_id
 
         total_usage = 0
         try:
@@ -312,10 +328,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         attrs = {}
         if self._path in self.coordinator.data:
             info = self.coordinator.data[self._path]
-            if domain := info.get("domain"):
-                attrs["domain"] = domain
-            if relative_path := info.get("relative_path"):
-                attrs["relative_path"] = relative_path
+            attrs["domain"] = self.domain
+            attrs["relative_path"] = self.relative_path
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
             if blocking := info.get("update_blocking_reason"):
