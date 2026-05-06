@@ -2,6 +2,11 @@
 
 This script manages the validation pipeline (Ruff, Ty, Pyright, Interrogate, Prettier, Pytest).
 It is optimized for Linux, WSL, and macOS environments.
+
+SECURITY NOTE:
+Commands are intentionally hardcoded as explicit list literals in each subprocess.run call
+to satisfy static analysis security audits. This prevents false positives related
+to command injection that occur when iterating over dynamic command sequences.
 """
 
 import os
@@ -10,7 +15,12 @@ import sys
 
 
 def run_pipeline() -> None:
-    """Execute the full validation pipeline."""
+    """Execute the full validation pipeline.
+
+    Each step is explicitly defined to ensure security scanners can verify
+    the static nature of the commands being executed, avoiding dynamic
+    variable execution in subprocess calls.
+    """
     if os.name != "posix":
         print("Error: This script is only supported on POSIX systems (Linux, WSL, macOS).")
         sys.exit(1)
@@ -19,28 +29,44 @@ def run_pipeline() -> None:
     print("STARTING UNIFIED VALIDATION PIPELINE")
     print("=" * 40 + "\n")
 
-    pipeline: list[list[str]] = [
-        ["uv", "run", "ruff", "format"],
-        ["uv", "run", "ruff", "check", "--fix"],
-        ["uv", "run", "ty", "check"],
-        ["uv", "run", "pyright"],
-        ["uv", "run", "interrogate"],
-        ["npx", "prettier", "--write", "."],
-        ["uv", "run", "pytest"],
-    ]
+    try:
+        print("\n>>> STEP: uv run ruff format")
+        subprocess.run(["uv", "run", "ruff", "format"], check=True)
 
-    for cmd in pipeline:
-        cmd_str = " ".join(cmd)
-        print(f"\n>>> STEP: {cmd_str}")
-        try:
-            subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"\nFAILED: {cmd_str} (Exit code: {e.returncode})")
-            sys.exit(e.returncode)
-        except FileNotFoundError:
-            print(f"\nFAILED: {cmd_str} (executable not found: {cmd[0]})")
-            print(f"Error: '{cmd[0]}' not found. Please ensure all dependencies are installed.")
-            sys.exit(1)
+        print("\n>>> STEP: uv run ruff check --fix")
+        subprocess.run(["uv", "run", "ruff", "check", "--fix"], check=True)
+
+        print("\n>>> STEP: uv run ty check")
+        subprocess.run(["uv", "run", "ty", "check"], check=True)
+
+        print("\n>>> STEP: uv run pyright")
+        subprocess.run(["uv", "run", "pyright"], check=True)
+
+        print("\n>>> STEP: uv run interrogate")
+        subprocess.run(["uv", "run", "interrogate"], check=True)
+
+        print("\n>>> STEP: npx prettier --write .")
+        subprocess.run(["npx", "prettier", "--write", "."], check=True)
+
+        print("\n>>> STEP: uv run pytest")
+        subprocess.run(["uv", "run", "pytest"], check=True)
+
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        ret_code = getattr(e, "returncode", 1)
+        if isinstance(e, subprocess.CalledProcessError):
+            cmd_val = e.cmd
+            cmd_str = (
+                " ".join(str(arg) for arg in cmd_val)
+                if isinstance(cmd_val, (list, tuple))
+                else str(cmd_val)
+            )
+        else:
+            cmd_str = getattr(e, "filename", "Unknown command")
+
+        print(f"\nFAILED: {cmd_str} (Exit code: {ret_code})")
+        if isinstance(e, FileNotFoundError):
+            print(f"Error: '{cmd_str}' not found. Please ensure all dependencies are installed.")
+        sys.exit(ret_code)
 
     print("\n" + "=" * 40)
     print("ALL VALIDATION STEPS PASSED SUCCESSFULLY")
