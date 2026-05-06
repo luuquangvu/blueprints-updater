@@ -313,6 +313,10 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         attrs = {}
         if self._path in self.coordinator.data:
             info = self.coordinator.data[self._path]
+            if domain := info.get("domain"):
+                attrs["domain"] = domain
+            if rel_path := info.get("rel_path"):
+                attrs["relative_path"] = rel_path
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
             if blocking := info.get("update_blocking_reason"):

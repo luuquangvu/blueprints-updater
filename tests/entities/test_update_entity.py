@@ -148,6 +148,7 @@ def coordinator():
             "updatable": True,
             "last_error": None,
             "remote_content": "blueprint:\n  name: Test",
+            "domain": "automation",
         }
     }
     comp.config_entry = MagicMock()
@@ -219,7 +220,7 @@ async def test_entity_properties(coordinator):
         "Safety Tip: It is recommended to enable the backup option "
         "before installing updates to ensure you can revert if needed."
     )
-    assert entity.extra_state_attributes == {}
+    assert entity.extra_state_attributes == {"domain": "automation", "relative_path": "test.yaml"}
 
     entity_missing = BlueprintUpdateEntity(
         coordinator,
@@ -237,7 +238,11 @@ async def test_entity_properties(coordinator):
 
     coordinator.data["/config/blueprints/test.yaml"]["last_error"] = "Fetch Error"
     await await_scheduled_update(entity, coordinator)
-    assert entity.extra_state_attributes == {"last_error": "Fetch Error"}
+    assert entity.extra_state_attributes == {
+        "last_error": "Fetch Error",
+        "domain": "automation",
+        "relative_path": "test.yaml",
+    }
 
     path = "/config/blueprints/test.yaml"
     old_local_hash = coordinator.data[path]["local_hash"]
