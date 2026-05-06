@@ -328,7 +328,7 @@ def get_relative_path(hass: HomeAssistant, path: str) -> str:
     return os.path.relpath(real_path, real_root).replace("\\", "/")
 
 
-def get_blueprint_rel_path(hass: HomeAssistant, path: str) -> str | None:
+def get_blueprint_relative_path(hass: HomeAssistant, path: str) -> str | None:
     """Get a relative path for a blueprint with centralized error handling.
 
     This helper wraps get_relative_path to provide a consistent way of

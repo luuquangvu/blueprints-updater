@@ -46,7 +46,7 @@ def _prepare_blueprint_entry(coordinator: BlueprintUpdateCoordinator, blueprint_
         "breaking_risks": [],
         "update_blocking_reason": None,
         "name": "Test Blueprint",
-        "rel_path": blueprint_path,
+        "relative_path": blueprint_path,
     }
 
 

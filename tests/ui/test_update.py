@@ -19,10 +19,14 @@ async def test_async_setup_entry_update(hass):
     config_entry.entry_id = "test_entry"
 
     coordinator = MagicMock()
+    coordinator._normalize_domain = lambda d: (
+        d if d in ["automation", "script", "template"] else "automation"
+    )
     data = {
         "automation/test.yaml": {
             "name": "Test BP",
-            "rel_path": "automation/test.yaml",
+            "domain": "automation",
+            "relative_path": "automation/test.yaml",
             "updatable": True,
             "curr_version": "1.0",
             "remote_version": "1.1",
@@ -44,10 +48,14 @@ async def test_async_setup_entry_update(hass):
 def test_update_entity_properties():
     """Test properties of BlueprintUpdateEntity."""
     coordinator = MagicMock()
+    coordinator._normalize_domain = lambda d: (
+        d if d in ["automation", "script", "template"] else "automation"
+    )
     coordinator.config_entry.entry_id = "test_entry"
     info = {
         "name": "Test BP",
-        "rel_path": "automation/test.yaml",
+        "domain": "automation",
+        "relative_path": "automation/test.yaml",
         "updatable": True,
         "curr_version": "1.0",
         "remote_version": "1.1",
@@ -66,3 +74,7 @@ def test_update_entity_properties():
     assert entity.unique_id == expected_id
     assert entity.installed_version == "hash1234"
     assert entity.latest_version == "remot123"
+
+    attrs = entity.extra_state_attributes
+    assert attrs["domain"] == "automation"
+    assert attrs["relative_path"] == "automation/test.yaml"

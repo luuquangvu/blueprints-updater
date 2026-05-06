@@ -158,7 +158,7 @@ async def test_async_fetch_blueprint_force(coordinator):
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": url,
             "local_hash": "old_hash",
@@ -197,14 +197,14 @@ async def test_async_update_data_partial_failure(coordinator):
     blueprints = {
         path1: {
             "name": "OK",
-            "rel_path": "automation/ok.yaml",
+            "relative_path": "automation/ok.yaml",
             "domain": "automation",
             "source_url": url1,
             "local_hash": "h1",
         },
         path2: {
             "name": "Fail",
-            "rel_path": "automation/fail.yaml",
+            "relative_path": "automation/fail.yaml",
             "domain": "automation",
             "source_url": url2,
             "local_hash": "h2",
@@ -270,7 +270,7 @@ async def test_async_update_data_auto_update(mock_translate, coordinator):
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "domain": "automation",
             "source_url": url,
             "local_hash": "old",
@@ -317,7 +317,7 @@ async def test_async_update_data_auto_update_multiple_sorted(mock_translate, coo
     coordinator.data = {
         "path1": {
             "name": "A",
-            "rel_path": "automation/a.yaml",
+            "relative_path": "automation/a.yaml",
             "domain": "automation",
             "source_url": u1,
             "updatable": True,
@@ -327,7 +327,7 @@ async def test_async_update_data_auto_update_multiple_sorted(mock_translate, coo
         },
         "path2": {
             "name": "B",
-            "rel_path": "automation/b.yaml",
+            "relative_path": "automation/b.yaml",
             "domain": "automation",
             "source_url": u2,
             "updatable": True,
@@ -370,7 +370,7 @@ async def test_async_update_blueprint_unsafe_url_invalidates_cache(coordinator):
         "etag": "old_etag",
         "remote_hash": "old_hash",
         "updatable": True,
-        "rel_path": "automation/test.yaml",
+        "relative_path": "automation/test.yaml",
     }
 
     coordinator._is_safe_url = AsyncMock(return_value=False)
@@ -468,7 +468,7 @@ async def test_async_fetch_blueprint_regression_key_error_hash(coordinator):
                 path: {
                     "local_hash": "h",
                     "name": "N",
-                    "rel_path": "P",
+                    "relative_path": "P",
                     "domain": "automation",
                     "source_url": url,
                 }
@@ -501,7 +501,7 @@ async def test_ghost_update_prevention(coordinator):
         "local_hash": local_hash,
         "remote_hash": "different_hash",
         "updatable": True,
-        "rel_path": "automation/test.yaml",
+        "relative_path": "automation/test.yaml",
     }
 
     results_to_notify = []
@@ -562,7 +562,7 @@ async def test_handle_source_url_change_clears_metadata(coordinator):
     }
     coordinator.data = {
         path: {
-            "rel_path": path,
+            "relative_path": path,
             "source_url": "https://example.com/old.yaml",
             "etag": "old_etag",
             "remote_hash": "old_hash",
@@ -581,7 +581,7 @@ async def test_handle_source_url_change_clears_metadata(coordinator):
 async def test_process_blueprint_content_yaml_error(coordinator):
     """Test handling of YAML syntax errors during content processing."""
     path = "automation/error.yaml"
-    info = {"rel_path": "automation/error.yaml", "name": "Error", "local_hash": "h"}
+    info = {"relative_path": "automation/error.yaml", "name": "Error", "local_hash": "h"}
     coordinator.data[path] = info
 
     await coordinator._process_blueprint_content(
@@ -595,7 +595,7 @@ async def test_process_blueprint_content_yaml_error(coordinator):
 async def test_process_blueprint_content_unhandled_error(coordinator):
     """Test handling of unexpected errors during content processing."""
     path = "automation/error.yaml"
-    info = {"rel_path": "automation/error.yaml", "name": "Error", "local_hash": "h"}
+    info = {"relative_path": "automation/error.yaml", "name": "Error", "local_hash": "h"}
     coordinator.data[path] = info
 
     with patch.object(coordinator, "_ensure_source_url", side_effect=RuntimeError("Boom")):
@@ -616,8 +616,8 @@ async def test_process_blueprint_content_unhandled_error(coordinator):
 async def test_detect_risks_system_error_on_exception(coordinator):
     """Test that exceptions during risk detection result in a system_error risk."""
     path = "/config/blueprints/automation/test.yaml"
-    rel_path = "automation/test.yaml"
-    info = {"rel_path": rel_path, "name": "Test Blueprint"}
+    relative_path = "automation/test.yaml"
+    info = {"relative_path": relative_path, "name": "Test Blueprint"}
     coordinator.data = {path: info}
 
     remote_content = "blueprint:\n  name: New\n  domain: automation\n  source_url: https://example.com/new_blueprint.yaml\n"
@@ -634,12 +634,12 @@ async def test_detect_risks_system_error_on_exception(coordinator):
     assert len(risks) == 1
     assert risks[0]["type"] == "system_error"
     assert risks[0]["args"]["error"] == "Test Exception"
-    assert risks[0]["args"]["path"] == rel_path
+    assert risks[0]["args"]["path"] == relative_path
 
 
 @pytest.mark.asyncio
-async def test_detect_risks_missing_rel_path(coordinator):
-    """Test that missing rel_path results in a system_error risk."""
+async def test_detect_risks_missing_relative_path(coordinator):
+    """Test that missing relative_path results in a system_error risk."""
     path = "/config/blueprints/automation/test.yaml"
     info = {"name": "Test Blueprint"}
     coordinator.data = {path: info}
@@ -790,7 +790,7 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
             "last_error": "error",
             "remote_content": "old_remote",
             "updatable": True,
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "source_url": "https://github.com/user/repo/blob/main/test.yaml",
         }
     }
@@ -833,7 +833,7 @@ async def test_async_install_blueprint_state_synchronization(coordinator):
     coordinator.data = {
         path: {
             "name": "Old",
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "local_hash": "old_hash",
             "remote_hash": new_hash,
             "updatable": True,
@@ -922,7 +922,7 @@ async def test_async_update_blueprint(coordinator):
     path = "/config/blueprints/automation/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "automation/test.yaml",
+        "relative_path": "automation/test.yaml",
         "source_url": "https://github.com/user/repo/blob/main/test.yaml",
         "domain": "automation",
         "local_hash": "old_hash",
@@ -971,7 +971,7 @@ async def test_async_update_blueprint_304_auto_update(coordinator):
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "source_url": source_url,
             "local_hash": "old_hash",
             "updatable": True,
@@ -1030,7 +1030,7 @@ async def test_async_update_blueprint_cdn_gating(coordinator, cdn_config, expect
     path = "/config/blueprints/automation/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "automation/test.yaml",
+        "relative_path": "automation/test.yaml",
         "source_url": "https://github.com/user/repo/blob/main/test.yaml",
         "domain": "automation",
         "local_hash": "old_hash",
@@ -1200,7 +1200,7 @@ async def test_async_update_blueprint_not_modified(coordinator):
     path = "/config/blueprints/automation/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": "automation/test.yaml",
+        "relative_path": "automation/test.yaml",
         "source_url": "https://url",
         "domain": "automation",
         "local_hash": "old_hash",
@@ -1208,7 +1208,7 @@ async def test_async_update_blueprint_not_modified(coordinator):
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "automation/test.yaml",
+            "relative_path": "automation/test.yaml",
             "source_url": "https://url",
             "local_hash": "old_hash",
             "updatable": False,

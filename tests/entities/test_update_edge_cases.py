@@ -36,7 +36,7 @@ async def test_update_entity_release_notes_risks(mock_coordinator):
     path = "automation/test.yaml"
     info = {
         "name": "Test BP",
-        "rel_path": path,
+        "relative_path": path,
         "updatable": True,
         "source_url": "https://example.com",
         "local_hash": "12345678",
@@ -89,7 +89,7 @@ async def test_update_entity_release_notes_risks(mock_coordinator):
 async def test_update_entity_remove_path(mock_coordinator, hass):
     """Test the entity removal path."""
     path = "automation/test.yaml"
-    info = {"name": "Test", "rel_path": path}
+    info = {"name": "Test", "relative_path": path}
 
     entity = BlueprintUpdateEntity(mock_coordinator, path, info)
     entity.hass = hass
@@ -118,7 +118,7 @@ async def test_update_entity_remove_path(mock_coordinator, hass):
 def test_clear_cached_properties(mock_coordinator):
     """Test clearing cached properties."""
     path = "automation/test.yaml"
-    info = {"name": "Test", "rel_path": path, "local_hash": "123456789", "updatable": False}
+    info = {"name": "Test", "relative_path": path, "local_hash": "123456789", "updatable": False}
     mock_coordinator.data = {path: info}
 
     entity = BlueprintUpdateEntity(mock_coordinator, path, info)
@@ -138,7 +138,7 @@ async def test_extra_state_attributes(mock_coordinator):
     path = "automation/test.yaml"
     info = {
         "name": "Test",
-        "rel_path": path,
+        "relative_path": path,
         "last_error": "err_key|detail",
         "breaking_risks": ["risk1"],
         "update_blocking_reason": "auto_update_blocked_by_breaking_change",

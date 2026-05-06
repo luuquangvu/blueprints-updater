@@ -97,13 +97,13 @@ async def test_prune_stale_metadata(coordinator):
         "path1": {"etag": "etag1", "remote_hash": "hash1", "source_url": "u"},
         "path2": {"etag": "etag2", "remote_hash": "hash2", "source_url": "u"},
     }
-    coordinator.data = {"path1": {"rel_path": "path1", "source_url": "u"}}
+    coordinator.data = {"path1": {"relative_path": "path1", "source_url": "u"}}
 
     with (
         patch("os.path.isfile", side_effect=lambda x: str(x).replace("\\", "/").endswith("path1")),
         patch.object(coordinator, "_async_save_metadata", new_callable=AsyncMock) as mock_save,
         patch(
-            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            "custom_components.blueprints_updater.coordinator.get_blueprint_relative_path",
             side_effect=lambda hass, path: os.path.basename(path) if os.path.isfile(path) else None,
         ),
         patch.object(
@@ -157,7 +157,7 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
     blueprints = {
         f"automation/bp{i}.yaml": {
             "name": f"BP{i}",
-            "rel_path": f"automation/bp{i}.yaml",
+            "relative_path": f"automation/bp{i}.yaml",
             "source_url": f"https://url/bp{i}",
             "domain": "automation",
             "local_hash": "h",
@@ -217,7 +217,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
     source_url = "https://community.home-assistant.io/t/123"
     info = {
         "name": "Test",
-        "rel_path": "automation/test.yaml",
+        "relative_path": "automation/test.yaml",
         "source_url": source_url,
         "domain": "automation",
         "local_hash": "old_hash",
@@ -252,7 +252,7 @@ async def test_background_refresh_deduplication(hass, coordinator):
     blueprints = {
         "path/1": {
             "name": "BP1",
-            "rel_path": "path/1",
+            "relative_path": "path/1",
             "domain": "automation",
             "source_url": "url1",
             "local_hash": "h1",

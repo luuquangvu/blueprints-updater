@@ -34,6 +34,7 @@
   - [Code Quality \& Security](#code-quality--security)
   - [Contributing](#contributing)
   - [License](#license)
+  - [Support the Project](#support-the-project)
 
 ---
 
@@ -186,9 +187,18 @@ To ensure long-term reliability and stability, this project utilizes a modern st
 
 Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
 
+> [!IMPORTANT]
+> The development environment for this project is **Linux**. If you are using Windows, please use [WSL (Windows Subsystem for Linux)](https://learn.microsoft.com/en-us/windows/wsl/install), as the test suite and development tools are designed to run in a Linux environment.
+
 - **If you find a bug**, please help us improve by [opening an issue](https://github.com/luuquangvu/blueprints-updater/issues).
 - **If you'd like to contribute**, feel free to fork the repo and create a Pull Request (please ensure your code passes the [quality checks](#code-quality--security) mentioned above).
 
 ## License
 
 Distributed under the **MIT License**. See [LICENSE](LICENSE) for more information.
+
+## Support the Project
+
+If you find this project helpful, any contribution is always appreciated and serves as a meaningful encouragement to help sustain its development.
+
+[![Donate via PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?style=for-the-badge&logo=paypal)](https://www.paypal.me/luuquangvu89)

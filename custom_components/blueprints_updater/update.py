@@ -96,7 +96,7 @@ def async_update_entities(
 
     entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
     known_ids = {
-        BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, info["rel_path"])
+        BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, info["relative_path"])
         for info in coordinator.data.values()
     }
 
@@ -163,7 +163,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         self._path = path
         self._attr_name = info["name"]
         self._attr_unique_id = BlueprintUpdateCoordinator.generate_unique_id(
-            coordinator.config_entry.entry_id, info["rel_path"]
+            coordinator.config_entry.entry_id, info["relative_path"]
         )
         self._attr_title = info["name"]
         self._attr_release_url = info.get("source_url")
@@ -191,6 +191,24 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             Boolean indicating auto-update preference.
         """
         return self.coordinator.is_auto_update_enabled()
+
+    @property
+    def domain(self) -> str:
+        """Return the domain of the blueprint (e.g. automation, script)."""
+        info = self.coordinator.data.get(self._path, {})
+        raw_domain = info.get("domain") or self.relative_path.split("/", 1)[0]
+        return self.coordinator._normalize_domain(raw_domain)
+
+    @property
+    def relative_path(self) -> str:
+        """Return the relative path of the blueprint."""
+        return self.coordinator.data.get(self._path, {}).get("relative_path", "")
+
+    @property
+    def blueprint_id(self) -> str:
+        """Return the internal ID of the blueprint (path without domain)."""
+        relative_path = self.relative_path
+        return relative_path.split("/", 1)[-1] if "/" in relative_path else relative_path
 
     @cached_property
     def installed_version(self) -> str | None:
@@ -231,10 +249,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         notes = await self.coordinator.async_translate(
             "update_available", source_url=info.get("source_url", "<unknown>")
         )
-        rel_path = info.get("rel_path", "")
-        parts = rel_path.split("/", 1)
-        domain = parts[0]
-        bp_id = parts[-1] if len(parts) > 1 else rel_path
+        domain = self.domain
+        bp_id = self.blueprint_id
 
         total_usage = 0
         try:
@@ -313,6 +329,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         attrs = {}
         if self._path in self.coordinator.data:
             info = self.coordinator.data[self._path]
+            attrs["domain"] = self.domain
+            attrs["relative_path"] = self.relative_path
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
             if blocking := info.get("update_blocking_reason"):

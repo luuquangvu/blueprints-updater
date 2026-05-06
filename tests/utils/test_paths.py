@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from custom_components.blueprints_updater.utils import (
-    get_blueprint_rel_path,
+    get_blueprint_relative_path,
     get_relative_path,
 )
 
@@ -47,8 +47,8 @@ def test_get_relative_path_raises_on_escape_attempt(hass, tmp_path: Path) -> Non
         get_relative_path(hass, str(outside_path))
 
 
-def test_get_blueprint_rel_path_with_hass(hass, tmp_path: Path, caplog) -> None:
-    """Test get_blueprint_rel_path with real HomeAssistant instance (mocked config)."""
+def test_get_blueprint_relative_path_with_hass(hass, tmp_path: Path, caplog) -> None:
+    """Test get_blueprint_relative_path with real HomeAssistant instance (mocked config)."""
     blueprints_root = tmp_path / "blueprints"
     blueprints_root.mkdir(parents=True, exist_ok=True)
 
@@ -57,11 +57,11 @@ def test_get_blueprint_rel_path_with_hass(hass, tmp_path: Path, caplog) -> None:
         caplog.at_level(logging.DEBUG),
     ):
         file_path = _make_tree(blueprints_root, "automation/test.yaml")
-        rel = get_blueprint_rel_path(hass, str(file_path))
+        rel = get_blueprint_relative_path(hass, str(file_path))
         assert rel == "automation/test.yaml"
 
         outside_path = tmp_path / "evil.yaml"
         outside_path.write_text("content", encoding="utf-8")
-        rel = get_blueprint_rel_path(hass, str(outside_path))
+        rel = get_blueprint_relative_path(hass, str(outside_path))
         assert rel is None
         assert "escapes" in caplog.text.lower()

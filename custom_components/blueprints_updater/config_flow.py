@@ -40,7 +40,7 @@ from .const import (
 )
 from .coordinator import BlueprintUpdateCoordinator
 from .utils import (
-    get_blueprint_rel_path,
+    get_blueprint_relative_path,
     get_config_bool,
     get_config_str,
     get_config_value,
@@ -66,11 +66,11 @@ async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, An
     )
     options: list[dict[str, Any]] = []
     for path, info in blueprints.items():
-        if rel_path := info.get("rel_path") or get_blueprint_rel_path(hass, path):
+        if relative_path := info.get("relative_path") or get_blueprint_relative_path(hass, path):
             options.append(
                 {
-                    "value": rel_path,
-                    "label": f"{info['name']} [{rel_path}]",
+                    "value": relative_path,
+                    "label": f"{info['name']} [{relative_path}]",
                 }
             )
     options.sort(key=lambda x: x["label"])

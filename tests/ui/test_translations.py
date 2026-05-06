@@ -92,7 +92,7 @@ async def test_entity_localized_error(hass, coordinator):
     coordinator.data = {
         path: {
             "name": "Test",
-            "rel_path": "test.yaml",
+            "relative_path": "test.yaml",
             "updatable": True,
             "last_error": "yaml_syntax_error|Line 5",
             "local_hash": "old",
@@ -112,11 +112,19 @@ async def test_entity_localized_error(hass, coordinator):
         "custom_components.blueprints_updater.coordinator.async_get_translations",
         return_value=translations,
     ):
-        assert entity.extra_state_attributes == {"last_error": "yaml_syntax_error|Line 5"}
+        assert entity.extra_state_attributes == {
+            "domain": "automation",
+            "last_error": "yaml_syntax_error|Line 5",
+            "relative_path": "test.yaml",
+        }
 
         with patch.object(entity, "async_write_ha_state"):
             await entity._async_localize_strings()
-        assert entity.extra_state_attributes == {"last_error": "Lỗi cú pháp: Line 5"}
+        assert entity.extra_state_attributes == {
+            "domain": "automation",
+            "last_error": "Lỗi cú pháp: Line 5",
+            "relative_path": "test.yaml",
+        }
         assert entity.release_summary == "Có bản cập nhật"
 
 

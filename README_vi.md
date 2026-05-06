@@ -34,6 +34,7 @@
   - [Chất lượng Mã nguồn \& Bảo mật](#chất-lượng-mã-nguồn--bảo-mật)
   - [Đóng góp](#đóng-góp)
   - [Bản quyền](#bản-quyền)
+  - [Hỗ trợ dự án](#hỗ-trợ-dự-án)
 
 ---
 
@@ -186,9 +187,18 @@ blueprint:
 
 Sự đóng góp từ cộng đồng là yếu tố cốt lõi giúp các dự án mã nguồn mở trở nên tốt đẹp hơn. Mọi đóng góp của bạn đều được **ghi nhận và trân trọng**.
 
+> [!IMPORTANT]
+> Môi trường phát triển cho dự án này là **Linux**. Nếu bạn sử dụng Windows, vui lòng cài đặt và sử dụng [WSL (Windows Subsystem for Linux)](https://learn.microsoft.com/vi-vn/windows/wsl/install), vì bộ công cụ phát triển và kiểm thử (test suite & development tools) được tối ưu hóa để chạy trên Linux.
+
 - **Nếu bạn tìm thấy lỗi hoặc sự cố**, hãy giúp dự án hoàn thiện hơn bằng cách [mở một issue](https://github.com/luuquangvu/blueprints-updater/issues).
 - **Nếu bạn muốn đóng góp mã nguồn**, hãy Fork kho lưu trữ và tạo Pull Request (đừng quên kiểm tra mã nguồn theo [tiêu chuẩn chung](#chất-lượng-mã-nguồn--bảo-mật) phía trên nhé).
 
 ## Bản quyền
 
 Dự án được phát hành dưới **Giấy phép MIT**. Xem tệp [LICENSE](LICENSE) để biết thêm thông tin chi tiết.
+
+## Hỗ trợ dự án
+
+Nếu bạn thấy dự án này hữu ích, bất kỳ sự đóng góp nào cũng đều được trân trọng và là nguồn động viên ý nghĩa giúp duy trì sự phát triển của dự án.
+
+[![Donate via PayPal](https://img.shields.io/badge/Ủng%20hộ-PayPal-blue.svg?style=for-the-badge&logo=paypal)](https://www.paypal.me/luuquangvu89)

@@ -12,7 +12,7 @@ from homeassistant.exceptions import HomeAssistantError
 async def test_metadata_persistence_failures(coordinator):
     """Test failures during metadata persistence."""
     coordinator.setup_complete = True
-    coordinator.data = {"p1": {"rel_path": "a.yaml", "etag": "e"}}
+    coordinator.data = {"p1": {"relative_path": "a.yaml", "etag": "e"}}
 
     mock_store = AsyncMock()
     coordinator._store = mock_store
@@ -22,7 +22,7 @@ async def test_metadata_persistence_failures(coordinator):
             "custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=False
         ),
         patch(
-            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            "custom_components.blueprints_updater.coordinator.get_blueprint_relative_path",
             return_value=None,
         ),
     ):
@@ -33,7 +33,7 @@ async def test_metadata_persistence_failures(coordinator):
     with (
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
         patch(
-            "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+            "custom_components.blueprints_updater.coordinator.get_blueprint_relative_path",
             side_effect=lambda hass, path: os.path.basename(path) if os.path.isfile(path) else None,
         ),
         patch("custom_components.blueprints_updater.coordinator._LOGGER.exception") as mock_error,
@@ -47,7 +47,7 @@ async def test_metadata_persistence_failures(coordinator):
 @pytest.mark.asyncio
 async def test_background_refresh_error_scenarios(coordinator):
     """Test background refresh resilience to errors."""
-    blueprints = {"path1": {"source_url": "url1", "rel_path": "a.yaml"}}
+    blueprints = {"path1": {"source_url": "url1", "relative_path": "a.yaml"}}
 
     coordinator._async_update_blueprint_in_place = AsyncMock(
         side_effect=RuntimeError("Worker Boom")
@@ -122,7 +122,7 @@ async def test_invalidate_metadata(coordinator):
     """Test metadata invalidation."""
     path = "automation/test.yaml"
     coordinator._persisted_metadata = {path: {"etag": "e"}}
-    prev = {"rel_path": path, "etag": "e", "source_url": "old"}
+    prev = {"relative_path": path, "etag": "e", "source_url": "old"}
     coordinator.data = {path: prev}
     coordinator._invalidate_blueprint_metadata(path, "old", "new", prev)
     assert path not in coordinator._persisted_metadata
@@ -133,7 +133,7 @@ async def test_invalidate_metadata(coordinator):
 async def test_prune_stale_metadata_exception(coordinator):
     """Test _async_prune_stale_metadata handles path errors."""
     with patch(
-        "custom_components.blueprints_updater.coordinator.get_blueprint_rel_path",
+        "custom_components.blueprints_updater.coordinator.get_blueprint_relative_path",
         side_effect=ValueError("Bad path"),
     ):
         await coordinator._async_prune_stale_metadata({"/some/path"})
