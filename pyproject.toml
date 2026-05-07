@@ -52,9 +52,10 @@ indent-style = "space"
 [tool.pytest]
 asyncio_mode = "auto"
 pythonpath = ["."]
+testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
 addopts = ["--cov=custom_components", "--cov-fail-under=90", "--timeout=60"]
-testpaths = ["tests"]
+markers = ["real_network: tests that require real network access"]
 
 [tool.pyright]
 typeCheckingMode = "standard"

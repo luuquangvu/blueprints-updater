@@ -1222,22 +1222,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if reload_services:
                 await self.async_reload_services([domain])
 
-            current = self.data.get(path) if self.data else None
+            metadata = self._resolve_blueprint_metadata(path, bp_block, source_url, real_path)
+            current = metadata["current"]
+            blueprint_name = metadata["name"]
+            final_source_url = metadata["source_url"]
+            relative_path = metadata["relative_path"]
+
             previous_hash = current.get("local_hash") if current else None
             had_breaking_risks = bool(current.get("breaking_risks")) if current else False
-            blueprint_name = (
-                (bp_block.get("name") if bp_block else None)
-                or (current.get("name") if current else None)
-                or "Unknown"
-            )
-            final_source_url = (
-                (current.get("source_url") if current else None)
-                or source_url
-                or (bp_block.get("source_url") if bp_block else "")
-            )
-            relative_path = get_blueprint_relative_path(self.hass, real_path) or (
-                current.get("relative_path") if current else ""
-            )
 
             cached_remote_hash = (
                 current.get("remote_hash")
@@ -1273,24 +1265,88 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 self.async_set_updated_data(self.data)
                 await self._async_save_metadata(force=True)
 
-            self.hass.bus.async_fire(
-                EVENT_BLUEPRINTS_UPDATER_UPDATED,
-                {
-                    "blueprint_name": blueprint_name,
-                    "domain": domain,
-                    "relative_path": relative_path,
-                    "source_url": final_source_url,
-                    "previous_hash": previous_hash,
-                    "new_hash": final_hash,
-                    "is_auto_update": is_auto_update,
-                    "had_breaking_risks": had_breaking_risks,
-                },
+            self._fire_update_event(
+                blueprint_name=blueprint_name,
+                domain=domain,
+                relative_path=relative_path,
+                source_url=final_source_url,
+                previous_hash=previous_hash,
+                new_hash=final_hash,
+                is_auto_update=is_auto_update,
+                had_breaking_risks=had_breaking_risks,
             )
 
             _LOGGER.info("Blueprint at %s updated successfully", real_path)
         except Exception:
             _LOGGER.exception("Failed to update blueprint at %s", path)
             raise
+
+    def _resolve_blueprint_metadata(
+        self,
+        path: str,
+        bp_block: dict[str, Any] | None,
+        source_url: str | None,
+        real_path: str,
+    ) -> dict[str, Any]:
+        """Resolve blueprint metadata merging new content with cached data.
+
+        This method merges newly parsed content with existing cache. It:
+        1. Resolves the blueprint name, preferring the new content.
+        2. Implements Strict URL Persistence: the cached source_url is always
+           preserved if it exists to maintain update tracking stability and
+           prevent URL hijacking from blueprint content.
+        3. Resolves the relative path based on the actual file location.
+        """
+        current = self.data.get(path) if self.data else None
+
+        name = (
+            (bp_block.get("name") if bp_block else None)
+            or (current.get("name") if current else None)
+            or "Unknown"
+        )
+
+        final_source_url = (
+            (current.get("source_url") if current else None)
+            or source_url
+            or (bp_block.get("source_url") if bp_block else "")
+        )
+
+        relative_path = get_blueprint_relative_path(self.hass, real_path) or (
+            current.get("relative_path") if current else ""
+        )
+
+        return {
+            "name": name,
+            "source_url": final_source_url,
+            "relative_path": relative_path,
+            "current": current,
+        }
+
+    def _fire_update_event(
+        self,
+        blueprint_name: str,
+        domain: str,
+        relative_path: str,
+        source_url: str,
+        previous_hash: str | None,
+        new_hash: str,
+        is_auto_update: bool,
+        had_breaking_risks: bool,
+    ) -> None:
+        """Fire a standardized update event for external consumers."""
+        self.hass.bus.async_fire(
+            EVENT_BLUEPRINTS_UPDATER_UPDATED,
+            {
+                "blueprint_name": blueprint_name,
+                "domain": domain,
+                "relative_path": relative_path,
+                "source_url": source_url,
+                "previous_hash": previous_hash,
+                "new_hash": new_hash,
+                "is_auto_update": is_auto_update,
+                "had_breaking_risks": had_breaking_risks,
+            },
+        )
 
     async def _is_safe_url(self, url: str) -> bool:
         """Check if the URL is safe (not an internal network address).

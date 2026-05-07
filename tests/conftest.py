@@ -58,7 +58,7 @@ def _mock_hass():
 
 
 @pytest.fixture(autouse=True)
-def mock_getaddrinfo(monkeypatch):
+def mock_getaddrinfo(request, monkeypatch):
     """Mock getaddrinfo to block external network access.
 
     Delegates localhost, 127.0.0.1, and ::1 to the real resolver.
@@ -66,7 +66,12 @@ def mock_getaddrinfo(monkeypatch):
     127.0.0.2 to avoid HA's network security filters without triggering
     actual DNS resolution. All other hosts resolve to 1.1.1.1 (a dummy
     external IP) to prevent tests from touching the real network.
+
+    Can be bypassed using @pytest.mark.real_network.
     """
+    if "real_network" in request.keywords:
+        return
+
     real_getaddrinfo = socket.getaddrinfo
 
     def _fake_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
