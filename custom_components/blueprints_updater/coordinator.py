@@ -1307,7 +1307,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not hostname:
             return False
 
-        # Normalize hostname by stripping trailing dot for absolute domain names
         hostname_lower = hostname.rstrip(".").lower()
 
         for tld in SPECIAL_USE_TLDS:

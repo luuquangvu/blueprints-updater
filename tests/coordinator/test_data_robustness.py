@@ -54,7 +54,7 @@ async def test_async_prune_stale_metadata_empty_data(hass, mock_coordinator):
         ),
         patch(
             "custom_components.blueprints_updater.coordinator.get_blueprint_relative_path",
-            side_effect=lambda hass, path: None,  # Simulate missing/invalid path for pruning
+            side_effect=lambda hass, path: None,
         ),
         patch.object(coordinator, "_async_save_metadata", new_callable=AsyncMock) as mock_save,
     ):
