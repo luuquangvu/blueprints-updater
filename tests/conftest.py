@@ -50,3 +50,18 @@ def _mock_hass():
 
     hass_mock.data = {}
     return hass_mock
+
+
+@pytest.fixture(autouse=True)
+def mock_getaddrinfo():
+    """Mock socket.getaddrinfo to avoid DNS resolution blocking in tests.
+
+    This returns a safe dummy IP for all non-local hostnames, preventing
+    the 'DNS resolution disabled in tests' error while allowing the
+    integration's safety checks to proceed.
+    """
+    import socket
+
+    with patch("socket.getaddrinfo") as mock_get:
+        mock_get.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 443))]
+        yield mock_get

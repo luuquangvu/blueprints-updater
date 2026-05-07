@@ -1,6 +1,7 @@
 """Test the initialization of the integration."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 from homeassistant.components.update import SERVICE_INSTALL
@@ -22,8 +23,11 @@ async def test_setup_integration(hass: HomeAssistant) -> None:
     )
     entry.add_to_hass(hass)
 
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    with patch(
+        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
 
     assert DOMAIN in hass.data
     assert "coordinators" in hass.data[DOMAIN]

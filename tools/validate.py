@@ -45,8 +45,8 @@ def run_pipeline() -> None:
         print("\n>>> STEP: uv run interrogate")
         subprocess.run(["uv", "run", "interrogate"], check=True)
 
-        print("\n>>> STEP: npx prettier --write .")
-        subprocess.run(["npx", "prettier", "--write", "."], check=True)
+        print("\n>>> STEP: npx prettier --log-level warn --write .")
+        subprocess.run(["npx", "prettier", "--log-level", "warn", "--write", "."], check=True)
 
         print("\n>>> STEP: uv run pytest")
         subprocess.run(["uv", "run", "pytest"], check=True)
