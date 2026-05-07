@@ -1008,12 +1008,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if self.data and path in self.data:
             return self.data[path].get("domain", "automation")
 
-        norm_path = os.path.normpath(path)
-        parts = norm_path.split(os.sep)
-        if len(parts) >= 2:
-            parent = parts[-2]
-            if parent in ALLOWED_RELOAD_DOMAINS:
-                return parent
+        if relative_path := get_blueprint_relative_path(self.hass, path):
+            domain = relative_path.split("/", 1)[0]
+            if domain in ALLOWED_RELOAD_DOMAINS:
+                return domain
 
         if content and (bp_block := self._get_blueprint_block(path, content)):
             return self._normalize_domain(bp_block.get("domain"))
@@ -1194,20 +1192,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             current = self.data.get(path) if self.data else None
             previous_hash = current.get("local_hash") if current else None
             had_breaking_risks = bool(current.get("breaking_risks")) if current else False
-            blueprint_name = (
-                current.get("name")
-                if current
-                else (
-                    bp_block.get("name")
-                    if (bp_block := self._get_blueprint_block(path, remote_content))
-                    else "Unknown"
-                )
-            )
-            source_url = current.get("source_url", "") if current else ""
+            bp_block = current or self._get_blueprint_block(path, remote_content) or {}
+            blueprint_name = bp_block.get("name", "Unknown")
+            source_url = bp_block.get("source_url", "")
             relative_path = (
                 current.get("relative_path")
                 if current
-                else os.path.relpath(path, self.hass.config.path("blueprints"))
+                else get_blueprint_relative_path(self.hass, real_path)
             )
 
             cached_remote_hash = (
