@@ -288,6 +288,39 @@ def test_validate_blueprint_valid(coordinator):
     assert result is None
 
 
+def test_validate_blueprint_script_valid(coordinator):
+    """Test _validate_blueprint with valid script data."""
+    data = {
+        "blueprint": {
+            "name": "Test Script",
+            "domain": "script",
+            "input": {},
+        },
+        "sequence": [],
+    }
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/script.yaml", expected_domain="script"
+    )
+    assert result is None
+
+
+def test_validate_blueprint_template_valid(coordinator):
+    """Test _validate_blueprint with valid template data."""
+    data = {
+        "blueprint": {
+            "name": "Test Template",
+            "domain": "template",
+            "input": {},
+        },
+    }
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/template.yaml", expected_domain="template"
+    )
+    assert result is None
+
+
 def test_validate_blueprint_incompatible_version(coordinator):
     """Test _validate_blueprint blocks when min_version is too high."""
     data = {

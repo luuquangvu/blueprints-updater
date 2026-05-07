@@ -78,19 +78,19 @@ def mock_getaddrinfo(request, monkeypatch):
         if host is None:
             return real_getaddrinfo(host, port, family, type, proto, flags)
 
+        hostname = host.rstrip(".").lower()
         is_local = False
         try:
-            ip = ipaddress.ip_address(host)
+            ip = ipaddress.ip_address(hostname)
             is_local = not is_ip_safe(ip)
         except ValueError:
-            hostname_lower = host.lower()
             for tld in SPECIAL_USE_TLDS:
-                if hostname_lower == tld or hostname_lower.endswith("." + tld):
+                if hostname == tld or hostname.endswith("." + tld):
                     is_local = True
                     break
 
         if is_local:
-            if host in ("localhost", "127.0.0.1", "::1"):
+            if hostname in ("localhost", "127.0.0.1", "::1"):
                 return real_getaddrinfo(host, port, family, type, proto, flags)
             return [
                 (

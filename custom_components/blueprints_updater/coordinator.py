@@ -1185,10 +1185,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
                 os.replace(tmp_path, file_path)
 
-            await self.hass.async_add_executor_job(
-                _save_file, real_path, remote_content, max_backups
-            )
-
             parsed_raw = None
             try:
                 parsed_raw = yaml_util.parse_yaml(remote_content)
@@ -1201,6 +1197,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 path, content=remote_content if parsed else None, parsed_data=parsed
             )
             bp_block = self._get_blueprint_block(path, parsed_data=parsed)
+
+            metadata = self._resolve_blueprint_metadata(path, bp_block, source_url, real_path)
+            current = metadata["current"]
+            blueprint_name = metadata["name"]
+            final_source_url = metadata["source_url"]
+            relative_path = metadata["relative_path"]
+
+            if final_source_url:
+                remote_content = self._ensure_source_url(remote_content, final_source_url)
+            else:
+                remote_content = self._normalize_content(remote_content)
+
+            await self.hass.async_add_executor_job(
+                _save_file, real_path, remote_content, max_backups
+            )
 
             if parsed:
                 blueprint_meta = parsed.get("blueprint")
@@ -1222,12 +1233,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if reload_services:
                 await self.async_reload_services([domain])
 
-            metadata = self._resolve_blueprint_metadata(path, bp_block, source_url, real_path)
-            current = metadata["current"]
-            blueprint_name = metadata["name"]
-            final_source_url = metadata["source_url"]
-            relative_path = metadata["relative_path"]
-
             previous_hash = current.get("local_hash") if current else None
             had_breaking_risks = bool(current.get("breaking_risks")) if current else False
 
@@ -1239,7 +1244,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             final_hash = (
                 remote_hash
                 or cached_remote_hash
-                or self._hash_content(remote_content, final_source_url)
+                or self._hash_content(remote_content, already_normalized=True)
             )
             final_etag = etag if etag is not None else (current.get("etag") if current else None)
 
@@ -1363,21 +1368,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not hostname:
             return False
 
-        hostname_lower = hostname.rstrip(".").lower()
+        hostname = hostname.rstrip(".").lower()
 
         for tld in SPECIAL_USE_TLDS:
-            if hostname_lower == tld or hostname_lower.endswith("." + tld):
+            if hostname == tld or hostname.endswith("." + tld):
                 return False
 
-        if hostname_lower in self._safe_hostname_cache:
-            return self._safe_hostname_cache[hostname_lower]
+        if hostname in self._safe_hostname_cache:
+            return self._safe_hostname_cache[hostname]
 
         async with self._safe_hostname_lock:
-            if hostname_lower in self._safe_hostname_cache:
-                return self._safe_hostname_cache[hostname_lower]
+            if hostname in self._safe_hostname_cache:
+                return self._safe_hostname_cache[hostname]
 
-            result = await self._perform_safe_hostname_check(hostname_lower)
-            self._safe_hostname_cache[hostname_lower] = result
+            result = await self._perform_safe_hostname_check(hostname)
+            self._safe_hostname_cache[hostname] = result
             return result
 
     async def _perform_safe_hostname_check(self, hostname: str) -> bool:
