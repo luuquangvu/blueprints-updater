@@ -4,7 +4,6 @@ import re
 from enum import StrEnum
 
 DOMAIN = "blueprints_updater"
-EVENT_BLUEPRINTS_UPDATER_UPDATED = f"{DOMAIN}_updated"
 BLUEPRINTS_DATA_DIR = "blueprints"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_FILTER_MODE = "filter_mode"
@@ -12,6 +11,7 @@ CONF_SELECTED_BLUEPRINTS = "selected_blueprints"
 CONF_AUTO_UPDATE = "auto_update"
 CONF_MAX_BACKUPS = "max_backups"
 CONF_USE_CDN = "use_cdn"
+EVENT_BLUEPRINTS_UPDATER_UPDATED = f"{DOMAIN}_updated"
 
 DEFAULT_AUTO_UPDATE = False
 DEFAULT_USE_CDN = True
