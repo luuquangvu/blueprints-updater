@@ -16,6 +16,7 @@ from homeassistant.exceptions import HomeAssistantError
 from custom_components.blueprints_updater.const import (
     CONF_USE_CDN,
     DOMAIN_JSDELIVR,
+    EVENT_BLUEPRINTS_UPDATER_UPDATED,
     FILTER_MODE_ALL,
     MAX_CONCURRENT_REQUESTS,
     REQUEST_TIMEOUT,
@@ -302,6 +303,7 @@ async def test_async_update_data_auto_update(mock_translate, coordinator):
         backup=True,
         remote_hash=ANY,
         etag="new_etag",
+        is_auto_update=True,
     )
 
 
@@ -1269,3 +1271,42 @@ async def test_async_handle_notifications_multiple_domains(coordinator):
     assert coordinator.hass.services.async_call.call_count >= 2
     coordinator.hass.services.async_call.assert_any_call("automation", "reload")
     coordinator.hass.services.async_call.assert_any_call("script", "reload")
+
+
+@pytest.mark.asyncio
+async def test_async_install_blueprint_fires_event(hass, coordinator):
+    """Test that async_install_blueprint fires the expected event."""
+    path = "/config/blueprints/automation/test.yaml"
+    remote_content = "blueprint:\n  name: Test\n  domain: automation\n"
+
+    coordinator.data = {
+        path: {
+            "name": "Test Blueprint",
+            "relative_path": "automation/test.yaml",
+            "domain": "automation",
+            "source_url": "https://example.com/source.yaml",
+            "local_hash": "old_hash",
+            "breaking_risks": [{"type": "risk_type", "args": {}}],
+        }
+    }
+
+    hass.bus.async_fire = MagicMock()
+
+    with (
+        patch("builtins.open", MagicMock()),
+        patch("custom_components.blueprints_updater.coordinator.os.replace"),
+        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+    ):
+        await coordinator.async_install_blueprint(path, remote_content, is_auto_update=True)
+
+    assert hass.bus.async_fire.called
+    args, _kwargs = hass.bus.async_fire.call_args
+    assert args[0] == EVENT_BLUEPRINTS_UPDATER_UPDATED
+
+    payload = args[1]
+    assert payload["blueprint_name"] == "Test Blueprint"
+    assert payload["domain"] == "automation"
+    assert payload["is_auto_update"] is True
+    assert payload["had_breaking_risks"] is True
+    assert payload["previous_hash"] == "old_hash"
+    assert payload["new_hash"] is not None

@@ -276,6 +276,7 @@ async def test_entity_async_install(coordinator):
         "blueprint:\n  name: Test",
         reload_services=True,
         backup=False,
+        is_auto_update=False,
     )
     coordinator.async_refresh.assert_called_once()
 
@@ -318,6 +319,7 @@ async def test_entity_async_install_on_demand_fetch(coordinator):
         "fetched content",
         reload_services=True,
         backup=False,
+        is_auto_update=False,
     )
 
 
@@ -352,6 +354,7 @@ async def test_entity_async_install_backup(coordinator):
         "blueprint:\n  name: Test",
         reload_services=True,
         backup=True,
+        is_auto_update=False,
     )
     coordinator.async_refresh.assert_called_once()
 

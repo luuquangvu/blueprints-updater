@@ -56,6 +56,7 @@ from .const import (
     DEFAULT_AUTO_UPDATE,
     DEFAULT_USE_CDN,
     DOMAIN,
+    EVENT_BLUEPRINTS_UPDATER_UPDATED,
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
@@ -1081,6 +1082,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         backup: bool = True,
         remote_hash: str | None = None,
         etag: str | None = None,
+        is_auto_update: bool = False,
     ) -> None:
         """Install a blueprint to the local filesystem.
 
@@ -1091,6 +1093,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             backup: Whether to create backup files of the old version.
             remote_hash: Optional pre-computed hash of the remote content.
             etag: Optional ETag associated with the remote content.
+            is_auto_update: Whether this is an automatic update.
 
         """
         real_path = os.path.realpath(path)
@@ -1124,28 +1127,34 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 _save_file, real_path, remote_content, max_backups
             )
 
+            domain = "automation"
+            if bp_block := self._get_blueprint_block(path, remote_content):
+                domain = self._normalize_domain(bp_block.get("domain"))
+            elif self.data and path in self.data:
+                domain = self.data[path].get("domain", "automation")
+                _LOGGER.debug(
+                    "Blueprint metadata at %s is malformed; using cached domain '%s' for reload",
+                    path,
+                    domain,
+                )
+            else:
+                _LOGGER.info(
+                    "Blueprint metadata at %s is malformed and not cached; "
+                    "falling back to 'automation' domain for reload",
+                    path,
+                )
+
             if reload_services:
-                domain = "automation"
-                if bp_block := self._get_blueprint_block(path, remote_content):
-                    domain = self._normalize_domain(bp_block.get("domain"))
-                elif self.data and path in self.data:
-                    domain = self.data[path].get("domain", "automation")
-                    _LOGGER.debug(
-                        "Blueprint metadata at %s is malformed; "
-                        "using cached domain '%s' for reload",
-                        path,
-                        domain,
-                    )
-                else:
-                    _LOGGER.info(
-                        "Blueprint metadata at %s is malformed and not cached; "
-                        "falling back to 'automation' domain for reload",
-                        path,
-                    )
                 await self.async_reload_services([domain])
 
             if self.data and path in self.data:
                 current = self.data[path]
+                previous_hash = current.get("local_hash")
+                had_breaking_risks = bool(current.get("breaking_risks"))
+                blueprint_name = current.get("name", "Unknown")
+                source_url = current.get("source_url", "")
+                relative_path = current.get("relative_path", "")
+
                 cached_remote_hash = (
                     current.get("remote_hash")
                     if current.get("remote_content") == remote_content
@@ -1174,6 +1183,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
                 self.async_set_updated_data(self.data)
                 await self._async_save_metadata(force=True)
+
+                self.hass.bus.async_fire(
+                    EVENT_BLUEPRINTS_UPDATER_UPDATED,
+                    {
+                        "blueprint_name": blueprint_name,
+                        "domain": domain,
+                        "relative_path": relative_path,
+                        "source_url": source_url,
+                        "previous_hash": previous_hash,
+                        "new_hash": final_hash,
+                        "is_auto_update": is_auto_update,
+                        "had_breaking_risks": had_breaking_risks,
+                    },
+                )
 
             _LOGGER.info("Blueprint at %s updated successfully", real_path)
         except Exception:
@@ -2435,6 +2458,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 backup=True,
                 remote_hash=remote_hash,
                 etag=new_etag,
+                is_auto_update=True,
             )
             results_to_notify.append(info["name"])
             updated_domains.add(info.get("domain", "automation"))

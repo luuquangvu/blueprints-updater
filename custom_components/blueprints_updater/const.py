@@ -4,6 +4,7 @@ import re
 from enum import StrEnum
 
 DOMAIN = "blueprints_updater"
+EVENT_BLUEPRINTS_UPDATER_UPDATED = f"{DOMAIN}_updated"
 BLUEPRINTS_DATA_DIR = "blueprints"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_FILTER_MODE = "filter_mode"
