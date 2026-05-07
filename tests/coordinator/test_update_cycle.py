@@ -1315,3 +1315,61 @@ async def test_async_install_blueprint_fires_event(hass, coordinator):
     assert payload["previous_hash"] == "old_hash"
     assert payload["new_hash"] is not None
     assert payload["new_hash"] != payload["previous_hash"]
+
+
+@pytest.mark.asyncio
+async def test_async_update_blueprint_blocks_special_use_tld_home_arpa(coordinator):
+    """Ensure updates from special-use TLDs like home.arpa are blocked and logged."""
+    path = "/config/blueprints/script/script.yaml"
+    unsafe_url = "http://test.home.arpa/blueprints/script/script.yaml"
+
+    info = {
+        "name": "Unsafe BP",
+        "relative_path": "script/script.yaml",
+        "domain": "script",
+        "source_url": unsafe_url,
+    }
+
+    coordinator.data = {path: info}
+
+    with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
+        coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+        await coordinator._async_update_blueprint_in_place(AsyncMock(), path, info, [], set())
+
+        last_error = coordinator.data[path].get("last_error")
+        assert last_error and last_error.startswith("unsafe_url|")
+
+        mock_logger.warning.assert_called()
+        warning_args = mock_logger.warning.call_args.args
+        assert any("Blocking update from untrusted URL" in str(arg) for arg in warning_args)
+
+
+@pytest.mark.asyncio
+async def test_async_update_blueprint_blocks_special_use_tld_local(coordinator):
+    """Ensure updates from special-use TLDs like .local are blocked and logged."""
+    path = "/config/blueprints/automation/automation.yaml"
+    unsafe_url = "http://test.local/blueprints/automation/automation.yaml"
+
+    info = {
+        "name": "Unsafe BP Local",
+        "relative_path": "automation/automation.yaml",
+        "domain": "automation",
+        "source_url": unsafe_url,
+    }
+
+    coordinator.data = {path: info}
+
+    with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
+        coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+        await coordinator._async_update_blueprint_in_place(AsyncMock(), path, info, [], set())
+
+        last_error = coordinator.data[path].get("last_error")
+        assert last_error and last_error.startswith("unsafe_url|")
+
+        mock_logger.warning.assert_called()
+        warning_args = mock_logger.warning.call_args.args
+        assert any("Blocking update from untrusted URL" in str(arg) for arg in warning_args)

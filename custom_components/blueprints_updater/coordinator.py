@@ -996,25 +996,50 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return f"validation_error|{sanitize_error_detail(str(err))}"
         return None
 
-    def _get_functional_domain(self, path: str, content: str | None = None) -> str:
+    def _get_functional_domain(
+        self,
+        path: str,
+        content: str | None = None,
+        parsed_data: dict[str, Any] | None = None,
+    ) -> str:
         """Determine the functional domain for a blueprint path.
 
         Priority:
-        1. Cached domain in self.data (set during scan based on directory).
+        1. Cached domain in self.data (normalized and validated).
         2. Directory structure parsing from path.
-        3. Metadata parsing from content.
+        3. Metadata parsing from content or pre-parsed data.
         4. Default to 'automation'.
+
+        Args:
+            path: Local path to the blueprint.
+            content: Raw YAML content.
+            parsed_data: Pre-parsed YAML content dictionary.
+
+        Returns:
+            The determined domain string.
+
         """
         if self.data and path in self.data:
-            return self.data[path].get("domain", "automation")
+            cached_domain = self.data[path].get("domain")
+            if cached_domain:
+                normalized_domain = self._normalize_domain(cached_domain)
+                if normalized_domain in ALLOWED_RELOAD_DOMAINS:
+                    return normalized_domain
+            return "automation"
 
         if relative_path := get_blueprint_relative_path(self.hass, path):
             domain = relative_path.split("/", 1)[0]
             if domain in ALLOWED_RELOAD_DOMAINS:
                 return domain
 
-        if content and (bp_block := self._get_blueprint_block(path, content)):
-            return self._normalize_domain(bp_block.get("domain"))
+        bp_block = parsed_data or (self._get_blueprint_block(path, content) if content else None)
+        if bp_block:
+            domain = (
+                bp_block.get("blueprint", {}).get("domain")
+                if "blueprint" in bp_block
+                else bp_block.get("domain")
+            )
+            return self._normalize_domain(domain)
 
         return "automation"
 
@@ -1167,23 +1192,31 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 _save_file, real_path, remote_content, max_backups
             )
 
-            functional_domain = self._get_functional_domain(path, remote_content)
+            parsed_raw = None
             try:
-                parsed = yaml_util.parse_yaml(remote_content)
-                declared_domain = (
-                    parsed.get("blueprint", {}).get("domain") if isinstance(parsed, dict) else None
-                )
+                parsed_raw = yaml_util.parse_yaml(remote_content)
+            except (HomeAssistantError, yaml.YAMLError):
+                _LOGGER.warning("Failed to parse blueprint at %s", path)
+
+            parsed = cast(dict[str, Any], parsed_raw) if isinstance(parsed_raw, dict) else None
+
+            functional_domain = self._get_functional_domain(
+                path, remote_content, parsed_data=parsed
+            )
+            bp_block = self._get_blueprint_block(path, parsed_data=parsed)
+
+            if parsed:
+                declared_domain = parsed.get("blueprint", {}).get("domain")
 
                 if declared_domain and declared_domain != functional_domain:
                     _LOGGER.warning(
-                        "Blueprint at %s has unknown domain '%s', "
-                        "falling back to functional domain '%s'",
+                        "Blueprint at %s has declared domain '%s' that does "
+                        "not match functional domain '%s'; falling back to "
+                        "functional domain",
                         path,
                         declared_domain,
                         functional_domain,
                     )
-            except (HomeAssistantError, yaml.YAMLError):
-                _LOGGER.warning("Failed to parse blueprint at %s", path)
 
             domain = functional_domain
             if reload_services:
@@ -3193,31 +3226,37 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return []
 
     @staticmethod
-    def _get_blueprint_block(path: str, content: str) -> dict[str, Any] | None:
-        """Extract the 'blueprint' metadata block from YAML content."""
-        try:
-            blueprint_dict = yaml_util.parse_yaml(content)
-        except HomeAssistantError as err:
-            _LOGGER.warning("Failed to parse blueprint at %s", path)
-            _LOGGER.debug("Blueprint parse error at %s: %s", path, err)
-            return None
+    def _get_blueprint_block(
+        path: str,
+        content: str | None = None,
+        parsed_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Extract the blueprint block from YAML content or pre-parsed data."""
+        parsed = parsed_data
+        if not parsed and content:
+            try:
+                parsed = yaml_util.parse_yaml(content)
+            except HomeAssistantError as err:
+                _LOGGER.warning("Failed to parse blueprint at %s", path)
+                _LOGGER.debug("Blueprint parse error at %s: %s", path, err)
+                return None
 
-        if not isinstance(blueprint_dict, dict):
+        if not isinstance(parsed, dict):
             _LOGGER.debug(
                 "Skipping blueprint at %s: parsed YAML is not a mapping (got %s)",
                 path,
-                type(blueprint_dict).__name__,
+                type(parsed).__name__,
             )
             return None
 
-        if "blueprint" not in blueprint_dict:
+        if "blueprint" not in parsed:
             _LOGGER.debug(
                 "Skipping blueprint at %s: missing top-level 'blueprint' key",
                 path,
             )
             return None
 
-        bp_info = blueprint_dict["blueprint"]
+        bp_info = parsed["blueprint"]
         if not isinstance(bp_info, dict):
             _LOGGER.debug(
                 "Skipping blueprint at %s: 'blueprint' key is not a mapping (got %s)",
