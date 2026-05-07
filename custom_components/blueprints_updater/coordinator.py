@@ -79,6 +79,7 @@ from .utils import (
     get_blueprint_relative_path,
     get_config_bool,
     get_max_backups,
+    is_ip_safe,
     redact_url,
     retry_async,
     sanitize_error_detail,
@@ -1025,21 +1026,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 normalized_domain = self._normalize_domain(cached_domain)
                 if normalized_domain in ALLOWED_RELOAD_DOMAINS:
                     return normalized_domain
-            return "automation"
 
         if relative_path := get_blueprint_relative_path(self.hass, path):
             domain = relative_path.split("/", 1)[0]
             if domain in ALLOWED_RELOAD_DOMAINS:
                 return domain
 
-        bp_block = parsed_data or (self._get_blueprint_block(path, content) if content else None)
+        bp_block = self._get_blueprint_block(path, content, parsed_data=parsed_data)
         if bp_block:
-            domain = (
-                bp_block.get("blueprint", {}).get("domain")
-                if "blueprint" in bp_block
-                else bp_block.get("domain")
-            )
-            return self._normalize_domain(domain)
+            return self._normalize_domain(bp_block.get("domain"))
 
         return "automation"
 
@@ -1195,7 +1190,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             parsed_raw = None
             try:
                 parsed_raw = yaml_util.parse_yaml(remote_content)
-            except (HomeAssistantError, yaml.YAMLError):
+            except HomeAssistantError:
                 _LOGGER.warning("Failed to parse blueprint at %s", path)
 
             parsed = cast(dict[str, Any], parsed_raw) if isinstance(parsed_raw, dict) else None
@@ -1206,7 +1201,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             bp_block = self._get_blueprint_block(path, parsed_data=parsed)
 
             if parsed:
-                declared_domain = parsed.get("blueprint", {}).get("domain")
+                blueprint_meta = parsed.get("blueprint")
+                declared_domain = (
+                    blueprint_meta.get("domain") if isinstance(blueprint_meta, dict) else None
+                )
 
                 if declared_domain and declared_domain != functional_domain:
                     _LOGGER.warning(
@@ -1225,9 +1223,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             current = self.data.get(path) if self.data else None
             previous_hash = current.get("local_hash") if current else None
             had_breaking_risks = bool(current.get("breaking_risks")) if current else False
-            bp_block = current or self._get_blueprint_block(path, remote_content) or {}
-            blueprint_name = bp_block.get("name", "Unknown")
-            source_url = bp_block.get("source_url", "")
+            active_bp_block = current or bp_block or {}
+            blueprint_name = active_bp_block.get("name", "Unknown")
+            source_url = active_bp_block.get("source_url", "")
             relative_path = (
                 current.get("relative_path")
                 if current
@@ -1325,7 +1323,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         with contextlib.suppress(ValueError):
             ip = ipaddress.ip_address(hostname)
-            return self._is_ip_safe(ip)
+            return is_ip_safe(ip)
 
         try:
             async with asyncio.timeout(REQUEST_TIMEOUT):
@@ -1339,33 +1337,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     ip = ipaddress.ip_address(ip_str)
                 except ValueError:
                     continue
-                if not self._is_ip_safe(ip):
-                    return False
-                found_safe_ip = True
+                if is_ip_safe(ip):
+                    found_safe_ip = True
+                    break
         except (TimeoutError, socket.gaierror):
             return False
 
         return found_safe_ip
-
-    @staticmethod
-    def _is_ip_safe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-        """Check if an IP address is safe (public).
-
-        Args:
-            ip: The IP address to check.
-
-        Returns:
-            True if the IP is public and safe.
-
-        """
-        return not (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-            or ip.is_unspecified
-        )
 
     def _is_safe_path(self, path: str) -> bool:
         """Check if the path is within the blueprints' directory.

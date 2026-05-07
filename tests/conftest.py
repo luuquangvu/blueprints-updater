@@ -9,7 +9,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.blueprints_updater.const import SPECIAL_USE_TLDS
-from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.utils import is_ip_safe
 
 
 @pytest.fixture(autouse=True)
@@ -76,7 +76,7 @@ def mock_getaddrinfo(monkeypatch):
         is_local = False
         try:
             ip = ipaddress.ip_address(host)
-            is_local = not BlueprintUpdateCoordinator._is_ip_safe(ip)
+            is_local = not is_ip_safe(ip)
         except ValueError:
             hostname_lower = host.lower()
             for tld in SPECIAL_USE_TLDS:

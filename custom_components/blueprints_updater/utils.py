@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import ipaddress
 import logging
 import os
 import random
@@ -347,3 +348,23 @@ def get_blueprint_relative_path(hass: HomeAssistant, path: str) -> str | None:
     except (ValueError, TypeError, OSError) as err:
         _LOGGER.debug("Skipping invalid blueprint path %s: %s", path, err)
         return None
+
+
+def is_ip_safe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Check if an IP address is safe (public).
+
+    Args:
+        ip: The IP address to check.
+
+    Returns:
+        True if the IP is public and safe.
+
+    """
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
