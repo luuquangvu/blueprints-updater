@@ -1,10 +1,15 @@
 """Fixtures for Blueprints Updater tests."""
 
 import asyncio
+import ipaddress
+import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+
+from custom_components.blueprints_updater.const import SPECIAL_USE_TLDS
+from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
 @pytest.fixture(autouse=True)
@@ -60,8 +65,26 @@ def mock_getaddrinfo():
     the 'DNS resolution disabled in tests' error while allowing the
     integration's safety checks to proceed.
     """
-    import socket
+    original_getaddrinfo = socket.getaddrinfo
 
-    with patch("socket.getaddrinfo") as mock_get:
-        mock_get.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 443))]
+    def side_effect(host, port, family=0, type=0, proto=0, flags=0):
+        is_local = False
+        try:
+            ip = ipaddress.ip_address(host)
+            is_local = not BlueprintUpdateCoordinator._is_ip_safe(ip)
+        except ValueError:
+            hostname_lower = host.lower()
+            if hostname_lower in SPECIAL_USE_TLDS:
+                is_local = True
+            else:
+                parts = hostname_lower.rsplit(".", 1)
+                if len(parts) > 1 and parts[-1] in SPECIAL_USE_TLDS:
+                    is_local = True
+
+        if is_local:
+            return original_getaddrinfo(host, port, family, type, proto, flags)
+
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 443))]
+
+    with patch("socket.getaddrinfo", side_effect=side_effect) as mock_get:
         yield mock_get

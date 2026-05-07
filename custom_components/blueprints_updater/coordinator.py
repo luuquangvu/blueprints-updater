@@ -947,7 +947,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.exception("Failed to send auto-update notification")
 
     @staticmethod
-    def _validate_blueprint(data: Any, source_url: str) -> str | None:
+    def _validate_blueprint(
+        data: Any, source_url: str, expected_domain: str | None = None
+    ) -> str | None:
         """Validate blueprint data using HA Core's Blueprint class.
 
         Performs basic structure check, structural validation,
@@ -956,6 +958,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         Args:
             data: Parsed YAML dictionary of the blueprint.
             source_url: The URL the blueprint was loaded from (for logging).
+            expected_domain: The expected domain (automation/script/template) based on folder.
 
         Returns:
             An error string key if validation fails, or None if valid.
@@ -972,8 +975,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             return "invalid_blueprint"
 
+        schema = (
+            AUTOMATION_BLUEPRINT_SCHEMA if expected_domain == "automation" else BLUEPRINT_SCHEMA
+        )
+
         try:
-            bp = Blueprint(data, schema=BLUEPRINT_SCHEMA)
+            bp = Blueprint(data, expected_domain=expected_domain, schema=schema)
             if errors := bp.validate():
                 error_msg = "; ".join(errors)
                 _LOGGER.warning(
@@ -1086,6 +1093,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> None:
         """Install a blueprint to the local filesystem.
 
+        Fires EVENT_BLUEPRINTS_UPDATER_UPDATED upon success.
+
         Args:
             path: Target filesystem path for the blueprint.
             remote_content: Raw YAML content to write.
@@ -1128,21 +1137,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
 
             domain = "automation"
-            if bp_block := self._get_blueprint_block(path, remote_content):
-                domain = self._normalize_domain(bp_block.get("domain"))
-            elif self.data and path in self.data:
+            if self.data and path in self.data:
                 domain = self.data[path].get("domain", "automation")
-                _LOGGER.debug(
-                    "Blueprint metadata at %s is malformed; using cached domain '%s' for reload",
-                    path,
-                    domain,
-                )
-            else:
-                _LOGGER.info(
-                    "Blueprint metadata at %s is malformed and not cached; "
-                    "falling back to 'automation' domain for reload",
-                    path,
-                )
+            elif bp_block := self._get_blueprint_block(path, remote_content):
+                domain = self._normalize_domain(bp_block.get("domain"))
 
             if reload_services:
                 await self.async_reload_services([domain])
@@ -1937,7 +1935,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         remote_content_with_url = self._ensure_source_url(remote_content, source_url)
         try:
             blueprint_dict = yaml_util.parse_yaml(remote_content_with_url)
-            last_error = self._validate_blueprint(blueprint_dict, source_url)
+            expected_domain = self.data[path].get("domain") if path in self.data else None
+            last_error = self._validate_blueprint(
+                blueprint_dict, source_url, expected_domain=expected_domain
+            )
         except (HomeAssistantError, InvalidBlueprint) as err:
             last_error = f"yaml_syntax_error|{sanitize_error_detail(str(err))}"
 
@@ -2280,7 +2281,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             updatable = bool(remote_hash and remote_hash != local_hash)
 
             blueprint_dict = yaml_util.parse_yaml(remote_content)
-            last_error = self._validate_blueprint(blueprint_dict, source_url)
+            last_error = self._validate_blueprint(
+                blueprint_dict, source_url, expected_domain=info.get("domain")
+            )
         except (HomeAssistantError, InvalidBlueprint) as err:
             _LOGGER.warning(
                 "Invalid blueprint content from %s: %s",

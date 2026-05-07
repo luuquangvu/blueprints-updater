@@ -1306,6 +1306,8 @@ async def test_async_install_blueprint_fires_event(hass, coordinator):
     payload = args[1]
     assert payload["blueprint_name"] == "Test Blueprint"
     assert payload["domain"] == "automation"
+    assert payload["relative_path"] == "automation/test.yaml"
+    assert payload["source_url"] == "https://example.com/source.yaml"
     assert payload["is_auto_update"] is True
     assert payload["had_breaking_risks"] is True
     assert payload["previous_hash"] == "old_hash"
