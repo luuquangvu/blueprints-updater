@@ -1198,7 +1198,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             parsed = cast(dict[str, Any], parsed_raw) if isinstance(parsed_raw, dict) else None
 
             functional_domain = self._get_functional_domain(
-                path, remote_content, parsed_data=parsed
+                path, content=remote_content if parsed else None, parsed_data=parsed
             )
             bp_block = self._get_blueprint_block(path, parsed_data=parsed)
 
@@ -1232,7 +1232,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 current.get("relative_path")
                 if current
                 else get_blueprint_relative_path(self.hass, real_path)
-            )
+            ) or ""
 
             cached_remote_hash = (
                 current.get("remote_hash")
