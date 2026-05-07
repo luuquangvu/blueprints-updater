@@ -360,11 +360,4 @@ def is_ip_safe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         True if the IP is public and safe.
 
     """
-    return not (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
-    )
+    return ip.is_global

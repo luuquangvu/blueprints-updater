@@ -1225,14 +1225,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             current = self.data.get(path) if self.data else None
             previous_hash = current.get("local_hash") if current else None
             had_breaking_risks = bool(current.get("breaking_risks")) if current else False
-            active_bp_block = current or bp_block or {}
-            blueprint_name = active_bp_block.get("name", "Unknown")
-            final_source_url = source_url or active_bp_block.get("source_url", "")
-            relative_path = (
-                current.get("relative_path")
-                if current
-                else get_blueprint_relative_path(self.hass, real_path)
-            ) or ""
+            blueprint_name = (
+                (bp_block.get("name") if bp_block else None)
+                or (current.get("name") if current else None)
+                or "Unknown"
+            )
+            final_source_url = (
+                (current.get("source_url") if current else None)
+                or source_url
+                or (bp_block.get("source_url") if bp_block else "")
+            )
+            relative_path = get_blueprint_relative_path(self.hass, real_path) or (
+                current.get("relative_path") if current else ""
+            )
 
             cached_remote_hash = (
                 current.get("remote_hash")
@@ -1249,6 +1254,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if self.data and path in self.data:
                 self.data[path].update(
                     {
+                        "name": blueprint_name,
+                        "domain": domain,
+                        "source_url": final_source_url,
+                        "relative_path": relative_path,
                         "updatable": False,
                         "local_hash": final_hash,
                         "remote_hash": final_hash,
@@ -1298,7 +1307,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not hostname:
             return False
 
-        hostname_lower = hostname.lower()
+        # Normalize hostname by stripping trailing dot for absolute domain names
+        hostname_lower = hostname.rstrip(".").lower()
 
         for tld in SPECIAL_USE_TLDS:
             if hostname_lower == tld or hostname_lower.endswith("." + tld):
