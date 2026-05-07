@@ -1020,10 +1020,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             The determined domain string.
 
         """
-        if self.data and path in self.data:
-            cached_domain = self.data[path].get("domain")
-            if cached_domain:
-                normalized_domain = self._normalize_domain(cached_domain)
+        if self.data and (cached_info := self.data.get(path)):
+            cached_domain = cached_info.get("domain")
+            if isinstance(cached_domain, str):
+                normalized_domain = cached_domain.strip().lower()
                 if normalized_domain in ALLOWED_RELOAD_DOMAINS:
                     return normalized_domain
 
