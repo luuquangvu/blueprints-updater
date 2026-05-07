@@ -305,6 +305,7 @@ async def test_async_update_data_auto_update(mock_translate, coordinator):
         remote_hash=ANY,
         etag="new_etag",
         is_auto_update=True,
+        source_url=url,
     )
 
 

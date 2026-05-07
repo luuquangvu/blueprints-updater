@@ -1130,6 +1130,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         remote_hash: str | None = None,
         etag: str | None = None,
         is_auto_update: bool = False,
+        source_url: str | None = None,
     ) -> None:
         """Install a blueprint to the local filesystem.
 
@@ -1151,6 +1152,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             remote_hash: Optional pre-computed hash of the remote content.
             etag: Optional ETag associated with the remote content.
             is_auto_update: Whether this is an automatic update.
+            source_url: Optional source URL for event reporting.
 
         Raises:
             HomeAssistantError: If the path is unsafe or content is empty.
@@ -1225,7 +1227,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             had_breaking_risks = bool(current.get("breaking_risks")) if current else False
             active_bp_block = current or bp_block or {}
             blueprint_name = active_bp_block.get("name", "Unknown")
-            source_url = active_bp_block.get("source_url", "")
+            final_source_url = source_url or active_bp_block.get("source_url", "")
             relative_path = (
                 current.get("relative_path")
                 if current
@@ -1238,7 +1240,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 else None
             )
             final_hash = (
-                remote_hash or cached_remote_hash or self._hash_content(remote_content, source_url)
+                remote_hash
+                or cached_remote_hash
+                or self._hash_content(remote_content, final_source_url)
             )
             final_etag = etag if etag is not None else (current.get("etag") if current else None)
 
@@ -1266,7 +1270,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     "blueprint_name": blueprint_name,
                     "domain": domain,
                     "relative_path": relative_path,
-                    "source_url": source_url,
+                    "source_url": final_source_url,
                     "previous_hash": previous_hash,
                     "new_hash": final_hash,
                     "is_auto_update": is_auto_update,
@@ -1337,9 +1341,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     ip = ipaddress.ip_address(ip_str)
                 except ValueError:
                     continue
-                if is_ip_safe(ip):
-                    found_safe_ip = True
-                    break
+                if not is_ip_safe(ip):
+                    return False
+                found_safe_ip = True
         except (TimeoutError, socket.gaierror):
             return False
 
@@ -2363,21 +2367,24 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if self.data and path in self.data:
             self.data[path]["breaking_risks"] = risks
 
-        if updatable and not last_error and self.is_auto_update_enabled():
-            auto_update_handled = await self._handle_auto_update_step(
-                path,
-                info,
-                remote_content,
-                remote_hash,
-                new_etag,
-                risks,
-                results_to_notify,
-                updated_domains,
-            )
-            if auto_update_handled or (
-                self.data and path in self.data and self.data[path].get("update_blocking_reason")
-            ):
-                return
+            if updatable and not last_error and self.is_auto_update_enabled():
+                auto_update_handled = await self._handle_auto_update_step(
+                    path,
+                    info,
+                    remote_content,
+                    remote_hash,
+                    new_etag,
+                    risks,
+                    results_to_notify,
+                    updated_domains,
+                    source_url,
+                )
+                if auto_update_handled or (
+                    self.data
+                    and path in self.data
+                    and self.data[path].get("update_blocking_reason")
+                ):
+                    return
 
         self._update_coordinator_status_data(
             path, updatable, last_error, remote_hash, remote_content, new_etag, risks
@@ -2479,6 +2486,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         risks: list[StructuredRisk],
         results_to_notify: list[str],
         updated_domains: set[str],
+        source_url: str | None = None,
     ) -> bool:
         """Execute auto-update flow if safe.
 
@@ -2491,6 +2499,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             risks: Detected risks.
             results_to_notify: Accumulator for notifications.
             updated_domains: Accumulator for service reloads.
+            source_url: Original source URL for event reporting.
 
         Returns:
             True if processing for this blueprint should stop.
@@ -2522,6 +2531,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 remote_hash=remote_hash,
                 etag=new_etag,
                 is_auto_update=True,
+                source_url=source_url,
             )
             results_to_notify.append(info["name"])
             updated_domains.add(info.get("domain", "automation"))
