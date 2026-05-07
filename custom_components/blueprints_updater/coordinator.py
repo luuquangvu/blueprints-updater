@@ -947,9 +947,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.exception("Failed to send auto-update notification")
 
     @staticmethod
-    def _validate_blueprint(
-        data: Any, source_url: str, expected_domain: str | None = None
-    ) -> str | None:
+    def _validate_blueprint(data: Any, source_url: str, expected_domain: str) -> str | None:
         """Validate blueprint data using HA Core's Blueprint class.
 
         Performs basic structure check, structural validation,
@@ -997,6 +995,30 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             return f"validation_error|{sanitize_error_detail(str(err))}"
         return None
+
+    def _get_functional_domain(self, path: str, content: str | None = None) -> str:
+        """Determine the functional domain for a blueprint path.
+
+        Priority:
+        1. Cached domain in self.data (set during scan based on directory).
+        2. Directory structure parsing from path.
+        3. Metadata parsing from content.
+        4. Default to 'automation'.
+        """
+        if self.data and path in self.data:
+            return self.data[path].get("domain", "automation")
+
+        norm_path = os.path.normpath(path)
+        parts = norm_path.split(os.sep)
+        if len(parts) >= 2:
+            parent = parts[-2]
+            if parent in ALLOWED_RELOAD_DOMAINS:
+                return parent
+
+        if content and (bp_block := self._get_blueprint_block(path, content)):
+            return self._normalize_domain(bp_block.get("domain"))
+
+        return "automation"
 
     async def async_reload_services(self, domains: list[str] | set[str] | None = None) -> None:
         """Reload specific domains or default ones if they are allowed.
@@ -1093,6 +1115,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> None:
         """Install a blueprint to the local filesystem.
 
+        This method validates the blueprint path, creates a backup if requested,
+        writes the new content, and optionally reloads the associated services.
+        It also performs domain validation, logging a warning if the declared
+        domain in the YAML does not match the functional domain derived from
+        the directory structure. If YAML parsing fails during this validation,
+        a warning is logged but the installation continues using the functional
+        domain.
+
         Fires EVENT_BLUEPRINTS_UPDATER_UPDATED upon success.
 
         Args:
@@ -1103,6 +1133,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             remote_hash: Optional pre-computed hash of the remote content.
             etag: Optional ETag associated with the remote content.
             is_auto_update: Whether this is an automatic update.
+
+        Raises:
+            HomeAssistantError: If the path is unsafe or content is empty.
 
         """
         real_path = os.path.realpath(path)
@@ -1136,35 +1169,58 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 _save_file, real_path, remote_content, max_backups
             )
 
-            domain = "automation"
-            if self.data and path in self.data:
-                domain = self.data[path].get("domain", "automation")
-            elif bp_block := self._get_blueprint_block(path, remote_content):
-                domain = self._normalize_domain(bp_block.get("domain"))
+            functional_domain = self._get_functional_domain(path, remote_content)
+            try:
+                parsed = yaml_util.parse_yaml(remote_content)
+                declared_domain = (
+                    parsed.get("blueprint", {}).get("domain") if isinstance(parsed, dict) else None
+                )
 
+                if declared_domain and declared_domain != functional_domain:
+                    _LOGGER.warning(
+                        "Blueprint at %s has unknown domain '%s', "
+                        "falling back to functional domain '%s'",
+                        path,
+                        declared_domain,
+                        functional_domain,
+                    )
+            except (HomeAssistantError, yaml.YAMLError):
+                _LOGGER.warning("Failed to parse blueprint at %s", path)
+
+            domain = functional_domain
             if reload_services:
                 await self.async_reload_services([domain])
 
+            current = self.data.get(path) if self.data else None
+            previous_hash = current.get("local_hash") if current else None
+            had_breaking_risks = bool(current.get("breaking_risks")) if current else False
+            blueprint_name = (
+                current.get("name")
+                if current
+                else (
+                    bp_block.get("name")
+                    if (bp_block := self._get_blueprint_block(path, remote_content))
+                    else "Unknown"
+                )
+            )
+            source_url = current.get("source_url", "") if current else ""
+            relative_path = (
+                current.get("relative_path")
+                if current
+                else os.path.relpath(path, self.hass.config.path("blueprints"))
+            )
+
+            cached_remote_hash = (
+                current.get("remote_hash")
+                if current and current.get("remote_content") == remote_content
+                else None
+            )
+            final_hash = (
+                remote_hash or cached_remote_hash or self._hash_content(remote_content, source_url)
+            )
+            final_etag = etag if etag is not None else (current.get("etag") if current else None)
+
             if self.data and path in self.data:
-                current = self.data[path]
-                previous_hash = current.get("local_hash")
-                had_breaking_risks = bool(current.get("breaking_risks"))
-                blueprint_name = current.get("name", "Unknown")
-                source_url = current.get("source_url", "")
-                relative_path = current.get("relative_path", "")
-
-                cached_remote_hash = (
-                    current.get("remote_hash")
-                    if current.get("remote_content") == remote_content
-                    else None
-                )
-                final_hash = (
-                    remote_hash
-                    or cached_remote_hash
-                    or self._hash_content(remote_content, current.get("source_url", ""))
-                )
-                final_etag = etag if etag is not None else current.get("etag")
-
                 self.data[path].update(
                     {
                         "updatable": False,
@@ -1182,19 +1238,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 self.async_set_updated_data(self.data)
                 await self._async_save_metadata(force=True)
 
-                self.hass.bus.async_fire(
-                    EVENT_BLUEPRINTS_UPDATER_UPDATED,
-                    {
-                        "blueprint_name": blueprint_name,
-                        "domain": domain,
-                        "relative_path": relative_path,
-                        "source_url": source_url,
-                        "previous_hash": previous_hash,
-                        "new_hash": final_hash,
-                        "is_auto_update": is_auto_update,
-                        "had_breaking_risks": had_breaking_risks,
-                    },
-                )
+            self.hass.bus.async_fire(
+                EVENT_BLUEPRINTS_UPDATER_UPDATED,
+                {
+                    "blueprint_name": blueprint_name,
+                    "domain": domain,
+                    "relative_path": relative_path,
+                    "source_url": source_url,
+                    "previous_hash": previous_hash,
+                    "new_hash": final_hash,
+                    "is_auto_update": is_auto_update,
+                    "had_breaking_risks": had_breaking_risks,
+                },
+            )
 
             _LOGGER.info("Blueprint at %s updated successfully", real_path)
         except Exception:
@@ -1218,8 +1274,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         hostname_lower = hostname.lower()
 
-        if hostname_lower.rsplit(".", 1)[-1] in SPECIAL_USE_TLDS:
-            return False
+        for tld in SPECIAL_USE_TLDS:
+            if hostname_lower == tld or hostname_lower.endswith("." + tld):
+                return False
 
         if hostname_lower in self._safe_hostname_cache:
             return self._safe_hostname_cache[hostname_lower]
@@ -1456,7 +1513,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         configs: dict[str, dict[str, Any]] = {}
-        for domain in ("automation", "script"):
+        for domain in ALLOWED_RELOAD_DOMAINS:
             if domain not in self.hass.data:
                 continue
 
@@ -1935,7 +1992,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         remote_content_with_url = self._ensure_source_url(remote_content, source_url)
         try:
             blueprint_dict = yaml_util.parse_yaml(remote_content_with_url)
-            expected_domain = self.data[path].get("domain") if path in self.data else None
+            expected_domain = self._get_functional_domain(path, remote_content_with_url)
             last_error = self._validate_blueprint(
                 blueprint_dict, source_url, expected_domain=expected_domain
             )
@@ -2281,8 +2338,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             updatable = bool(remote_hash and remote_hash != local_hash)
 
             blueprint_dict = yaml_util.parse_yaml(remote_content)
+            expected_domain = self._get_functional_domain(path, remote_content)
             last_error = self._validate_blueprint(
-                blueprint_dict, source_url, expected_domain=info.get("domain")
+                blueprint_dict, source_url, expected_domain=expected_domain
             )
         except (HomeAssistantError, InvalidBlueprint) as err:
             _LOGGER.warning(

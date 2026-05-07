@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from custom_components.blueprints_updater.const import DOMAIN
+from custom_components.blueprints_updater.const import ALLOWED_RELOAD_DOMAINS, DOMAIN
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.update import (
     BlueprintUpdateEntity,
@@ -19,9 +19,7 @@ async def test_async_setup_entry_update(hass):
     config_entry.entry_id = "test_entry"
 
     coordinator = MagicMock()
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = lambda d: d if d in ALLOWED_RELOAD_DOMAINS else "automation"
     data = {
         "automation/test.yaml": {
             "name": "Test BP",
@@ -48,9 +46,7 @@ async def test_async_setup_entry_update(hass):
 def test_update_entity_properties():
     """Test properties of BlueprintUpdateEntity."""
     coordinator = MagicMock()
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = lambda d: d if d in ALLOWED_RELOAD_DOMAINS else "automation"
     coordinator.config_entry.entry_id = "test_entry"
     info = {
         "name": "Test BP",

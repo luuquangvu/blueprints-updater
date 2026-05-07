@@ -58,33 +58,54 @@ def _mock_hass():
 
 
 @pytest.fixture(autouse=True)
-def mock_getaddrinfo():
-    """Mock socket.getaddrinfo to avoid DNS resolution blocking in tests.
+def mock_getaddrinfo(monkeypatch):
+    """Mock getaddrinfo to block external network access.
 
-    This returns a safe dummy IP for all non-local hostnames, preventing
-    the 'DNS resolution disabled in tests' error while allowing the
-    integration's safety checks to proceed.
+    Delegates localhost, 127.0.0.1, and ::1 to the real resolver.
+    For other special-use domains (e.g., .local, .home.arpa), returns
+    127.0.0.2 to avoid HA's network security filters without triggering
+    actual DNS resolution. All other hosts resolve to 1.1.1.1 (a dummy
+    external IP) to prevent tests from touching the real network.
     """
-    original_getaddrinfo = socket.getaddrinfo
+    real_getaddrinfo = socket.getaddrinfo
 
-    def side_effect(host, port, family=0, type=0, proto=0, flags=0):
+    def _fake_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        if host is None:
+            return real_getaddrinfo(host, port, family, type, proto, flags)
+
         is_local = False
         try:
             ip = ipaddress.ip_address(host)
             is_local = not BlueprintUpdateCoordinator._is_ip_safe(ip)
         except ValueError:
             hostname_lower = host.lower()
-            if hostname_lower in SPECIAL_USE_TLDS:
-                is_local = True
-            else:
-                parts = hostname_lower.rsplit(".", 1)
-                if len(parts) > 1 and parts[-1] in SPECIAL_USE_TLDS:
+            for tld in SPECIAL_USE_TLDS:
+                if hostname_lower == tld or hostname_lower.endswith("." + tld):
                     is_local = True
+                    break
 
         if is_local:
-            return original_getaddrinfo(host, port, family, type, proto, flags)
+            if host in ("localhost", "127.0.0.1", "::1"):
+                return real_getaddrinfo(host, port, family, type, proto, flags)
+            return [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    socket.IPPROTO_TCP,
+                    "",
+                    ("127.0.0.2", port),
+                )
+            ]
 
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 443))]
+        return [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+                "",
+                ("1.1.1.1", port),
+            )
+        ]
 
-    with patch("socket.getaddrinfo", side_effect=side_effect) as mock_get:
-        yield mock_get
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+    yield

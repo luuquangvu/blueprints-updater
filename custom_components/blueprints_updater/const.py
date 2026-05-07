@@ -58,6 +58,7 @@ SPECIAL_USE_TLDS = {
     "example",
     "internal",
     "onion",
+    "home.arpa",
 }
 
 

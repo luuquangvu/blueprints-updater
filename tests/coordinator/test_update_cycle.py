@@ -14,6 +14,7 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import (
+    ALLOWED_RELOAD_DOMAINS,
     CONF_USE_CDN,
     DOMAIN_JSDELIVR,
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
@@ -662,7 +663,7 @@ async def test_async_install_blueprint(hass, coordinator):
 
     hass.services.has_service = MagicMock(
         side_effect=lambda domain, service: (
-            domain in ["automation", "script"] if service == "reload" else False
+            domain in ALLOWED_RELOAD_DOMAINS if service == "reload" else False
         )
     )
     hass.services.async_call = AsyncMock()
@@ -709,7 +710,7 @@ async def test_async_install_blueprint_backup(hass, coordinator):
 @pytest.mark.asyncio
 async def test_async_install_blueprint_domain_normalization(hass, coordinator):
     """Test that async_install_blueprint correctly normalizes the domain."""
-    path = "/config/blueprints/automation/test.yaml"
+    path = "/config/blueprints/script/test.yaml"
 
     hass.services.has_service = MagicMock(return_value=True)
     hass.services.async_call = AsyncMock()
@@ -718,6 +719,7 @@ async def test_async_install_blueprint_domain_normalization(hass, coordinator):
         patch("builtins.open", MagicMock()),
         patch("custom_components.blueprints_updater.coordinator.os.replace"),
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+        patch.object(coordinator, "_rotate_backups", MagicMock()),
     ):
         content_domain = "blueprint:\n  name: Test\n  domain:  script  "
         await coordinator.async_install_blueprint(path, content_domain)
@@ -725,19 +727,19 @@ async def test_async_install_blueprint_domain_normalization(hass, coordinator):
         hass.services.async_call.reset_mock()
         content_no_domain = "blueprint:\n  name: Test"
         await coordinator.async_install_blueprint(path, content_no_domain)
-        hass.services.async_call.assert_called_once_with("automation", "reload")
+        hass.services.async_call.assert_called_once_with("script", "reload")
         hass.services.async_call.reset_mock()
         content_empty_domain = "blueprint:\n  name: Test\n  domain: ''"
         await coordinator.async_install_blueprint(path, content_empty_domain)
-        hass.services.async_call.assert_called_once_with("automation", "reload")
+        hass.services.async_call.assert_called_once_with("script", "reload")
 
         hass.services.async_call.reset_mock()
         with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
             content_invalid_domain = "blueprint:\n  name: Test\n  domain:  unknown_domain  "
             await coordinator.async_install_blueprint(path, content_invalid_domain)
-            hass.services.async_call.assert_called_once_with("automation", "reload")
+            hass.services.async_call.assert_called_once_with("script", "reload")
             mock_logger.warning.assert_called()
-            assert "unknown_domain" in mock_logger.warning.call_args[0][1]
+            assert "unknown_domain" in mock_logger.warning.call_args[0][2]
 
 
 @pytest.mark.asyncio
@@ -860,7 +862,7 @@ async def test_async_install_blueprint_state_synchronization(coordinator):
 @pytest.mark.asyncio
 async def test_async_install_blueprint_targeted_reload(coordinator):
     """Test that installing a blueprint with a specific domain only reloads that domain."""
-    path = "/config/blueprints/automation/script.yaml"
+    path = "/config/blueprints/script/script.yaml"
     content = "blueprint:\n  name: Test Script\n  domain: script"
 
     coordinator.hass.services.has_service = MagicMock(return_value=True)
@@ -1187,7 +1189,7 @@ async def test_async_update_blueprint_in_place_unsafe_url(coordinator):
 
     coordinator.data = {path: info}
     with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
-        await coordinator._async_update_blueprint_in_place(MagicMock(), path, info, [], set())
+        await coordinator._async_update_blueprint_in_place(AsyncMock(), path, info, [], set())
         mock_logger.warning.assert_called()
         args = mock_logger.warning.call_args.args
         assert "Blocking update from untrusted URL" in args[0]
@@ -1265,7 +1267,7 @@ async def test_async_handle_notifications_multiple_domains(coordinator):
         patch.object(coordinator, "async_translate", side_effect=lambda x, **_kw: x),
     ):
         await coordinator._async_handle_notifications(
-            ["BP1", "BP2"], domains={"automation", "script"}
+            ["BP1", "BP2"], domains=ALLOWED_RELOAD_DOMAINS
         )
 
     assert coordinator.hass.services.async_call.call_count >= 2
@@ -1312,3 +1314,4 @@ async def test_async_install_blueprint_fires_event(hass, coordinator):
     assert payload["had_breaking_risks"] is True
     assert payload["previous_hash"] == "old_hash"
     assert payload["new_hash"] is not None
+    assert payload["new_hash"] != payload["previous_hash"]
