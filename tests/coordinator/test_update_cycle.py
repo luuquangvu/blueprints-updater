@@ -830,8 +830,8 @@ async def test_async_install_blueprint_missing_cache_fallback(hass, coordinator)
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_manual_install_overrides(hass, coordinator):
-    """Test that manual install with explicit source_url overrides cache."""
+async def test_async_install_blueprint_manual_install_preserves_url(hass, coordinator):
+    """Test that manual install preserves the cached source_url."""
     path = "/config/blueprints/automation/override.yaml"
     content = "blueprint:\n  name: Override\n  domain: automation\n"
     cached_url = "https://example.com/cached.yaml"

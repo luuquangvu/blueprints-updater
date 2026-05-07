@@ -1215,8 +1215,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             if parsed:
                 blueprint_meta = parsed.get("blueprint")
-                declared_domain = (
+                declared_domain_raw = (
                     blueprint_meta.get("domain") if isinstance(blueprint_meta, dict) else None
+                )
+                declared_domain = (
+                    declared_domain_raw.strip().lower()
+                    if isinstance(declared_domain_raw, str)
+                    else None
                 )
 
                 if declared_domain and declared_domain != functional_domain:
