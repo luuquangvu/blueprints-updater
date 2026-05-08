@@ -744,13 +744,18 @@ async def test_async_install_blueprint_domain_normalization(hass, coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_error(coordinator):
+async def test_async_install_blueprint_error(hass, coordinator):
     """Test exception during blueprint installation."""
+    hass.bus.async_fire = MagicMock()
+    path = "/config/blueprints/automation/test.yaml"
     with (
-        patch("builtins.open", side_effect=Exception("Write failed")),
-        pytest.raises(Exception, match="Write failed"),
+        patch("builtins.open", side_effect=OSError("Write failed")),
+        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+        pytest.raises(OSError, match="Write failed"),
     ):
-        await coordinator.async_install_blueprint("/fake/path.yaml", "content")
+        await coordinator.async_install_blueprint(path, "content")
+
+    assert not hass.bus.async_fire.called
 
 
 @pytest.mark.asyncio
@@ -1403,11 +1408,18 @@ async def test_async_install_blueprint_fires_event(hass, coordinator):
     assert payload["new_hash"] != payload["previous_hash"]
 
 
+@pytest.mark.parametrize(
+    "unsafe_url",
+    [
+        "http://test.home.arpa/blueprints/script/script.yaml",
+        "http://TEST.HOME.ARPA/blueprints/script/script.yaml",
+        "http://test.home.arpa./blueprints/script/script.yaml",
+    ],
+)
 @pytest.mark.asyncio
-async def test_async_update_blueprint_blocks_special_use_tld_home_arpa(coordinator):
+async def test_async_update_blueprint_blocks_special_use_tld_home_arpa(coordinator, unsafe_url):
     """Ensure updates from special-use TLDs like home.arpa are blocked and logged."""
     path = "/config/blueprints/script/script.yaml"
-    unsafe_url = "http://test.home.arpa/blueprints/script/script.yaml"
 
     info = {
         "name": "Unsafe BP",
@@ -1432,11 +1444,18 @@ async def test_async_update_blueprint_blocks_special_use_tld_home_arpa(coordinat
         assert any("Blocking update from untrusted URL" in str(arg) for arg in warning_args)
 
 
+@pytest.mark.parametrize(
+    "unsafe_url",
+    [
+        "http://test.local/blueprints/automation/automation.yaml",
+        "http://TEST.LOCAL/blueprints/automation/automation.yaml",
+        "http://test.local./blueprints/automation/automation.yaml",
+    ],
+)
 @pytest.mark.asyncio
-async def test_async_update_blueprint_blocks_special_use_tld_local(coordinator):
+async def test_async_update_blueprint_blocks_special_use_tld_local(coordinator, unsafe_url):
     """Ensure updates from special-use TLDs like .local are blocked and logged."""
     path = "/config/blueprints/automation/automation.yaml"
-    unsafe_url = "http://test.local/blueprints/automation/automation.yaml"
 
     info = {
         "name": "Unsafe BP Local",

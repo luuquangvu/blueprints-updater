@@ -89,26 +89,26 @@ def mock_getaddrinfo(request, monkeypatch):
                     is_local = True
                     break
 
-        if is_local:
-            if hostname in ("localhost", "127.0.0.1", "::1"):
-                return real_getaddrinfo(host, port, family, type, proto, flags)
-            return [
-                (
-                    socket.AF_INET,
-                    socket.SOCK_STREAM,
-                    socket.IPPROTO_TCP,
-                    "",
-                    ("127.0.0.2", port),
-                )
-            ]
+        if is_local and hostname in ("localhost", "127.0.0.1", "::1"):
+            return real_getaddrinfo(host, port, family, type, proto, flags)
+
+        effective_family = family or socket.AF_INET
+        if effective_family == socket.AF_INET:
+            dummy_ip = "127.0.0.2" if is_local else "1.1.1.1"
+            addr_tuple = (dummy_ip, port)
+        elif effective_family == socket.AF_INET6:
+            dummy_ip = "::2" if is_local else "2606:4700:4700::1111"
+            addr_tuple = (dummy_ip, port, 0, 0)
+        else:
+            return real_getaddrinfo(host, port, family, type, proto, flags)
 
         return [
             (
-                socket.AF_INET,
+                effective_family,
                 socket.SOCK_STREAM,
                 socket.IPPROTO_TCP,
                 "",
-                ("1.1.1.1", port),
+                addr_tuple,
             )
         ]
 

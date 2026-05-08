@@ -321,6 +321,24 @@ def test_validate_blueprint_template_valid(coordinator):
     assert result is None
 
 
+def test_validate_blueprint_domain_mismatch(coordinator):
+    """Test _validate_blueprint returns error on domain mismatch."""
+    data = {
+        "blueprint": {
+            "name": "Mismatch",
+            "domain": "script",
+            "input": {},
+        },
+        "sequence": [],
+    }
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/bp.yaml", expected_domain="automation"
+    )
+    assert result is not None
+    assert "Found incorrect blueprint type script, expected automation" in result
+
+
 def test_validate_blueprint_incompatible_version(coordinator):
     """Test _validate_blueprint blocks when min_version is too high."""
     data = {

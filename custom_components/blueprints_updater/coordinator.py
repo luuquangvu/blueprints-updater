@@ -1337,7 +1337,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         blueprint_name: str,
         domain: str,
         relative_path: str,
-        source_url: str,
+        source_url: str | None,
         previous_hash: str | None,
         new_hash: str,
         is_auto_update: bool,
