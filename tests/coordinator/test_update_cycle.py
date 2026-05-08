@@ -673,6 +673,7 @@ async def test_async_install_blueprint(hass, coordinator):
         patch("builtins.open", MagicMock()),
         patch("custom_components.blueprints_updater.coordinator.os.replace"),
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+        patch.object(coordinator, "_rotate_backups", MagicMock()),
     ):
         await coordinator.async_install_blueprint(path, remote_content)
 
@@ -963,6 +964,7 @@ async def test_async_install_blueprint_targeted_reload(coordinator):
         patch("builtins.open", MagicMock()),
         patch("custom_components.blueprints_updater.coordinator.os.replace"),
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+        patch.object(coordinator, "_rotate_backups", MagicMock()),
     ):
         await coordinator.async_install_blueprint(path, content)
 
@@ -1389,6 +1391,7 @@ async def test_async_install_blueprint_fires_event(hass, coordinator):
         patch("builtins.open", MagicMock()),
         patch("custom_components.blueprints_updater.coordinator.os.replace"),
         patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+        patch.object(coordinator, "_rotate_backups", MagicMock()),
     ):
         await coordinator.async_install_blueprint(path, remote_content, is_auto_update=True)
 

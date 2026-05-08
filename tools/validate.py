@@ -27,9 +27,9 @@ def run_pipeline() -> None:
         )
         sys.exit(1)
 
-    print("\n" + "=" * 40, flush=True)
+    print("=" * 40, flush=True)
     print("STARTING UNIFIED VALIDATION PIPELINE", flush=True)
-    print("=" * 40 + "\n", flush=True)
+    print("=" * 40, flush=True)
 
     try:
         print("\n>>> STEP: uv run ruff format", flush=True)
