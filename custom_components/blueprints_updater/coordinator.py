@@ -105,6 +105,19 @@ class StructuredRisk(TypedDict):
     args: JSONDict
 
 
+class BlueprintUpdateEventPayload(TypedDict):
+    """Payload for the blueprint update event."""
+
+    blueprint_name: str
+    domain: str
+    relative_path: str
+    source_url: str | None
+    previous_hash: str | None
+    new_hash: str
+    is_auto_update: bool
+    had_breaking_risks: bool
+
+
 class ParsedBlueprintData(TypedDict):
     """Data extracted from a blueprint YAML file."""
 
@@ -1357,19 +1370,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         had_breaking_risks: bool,
     ) -> None:
         """Fire a standardized update event for external consumers."""
-        self.hass.bus.async_fire(
-            EVENT_BLUEPRINTS_UPDATER_UPDATED,
-            {
-                "blueprint_name": blueprint_name,
-                "domain": domain,
-                "relative_path": relative_path,
-                "source_url": source_url,
-                "previous_hash": previous_hash,
-                "new_hash": new_hash,
-                "is_auto_update": is_auto_update,
-                "had_breaking_risks": had_breaking_risks,
-            },
-        )
+        payload: BlueprintUpdateEventPayload = {
+            "blueprint_name": blueprint_name,
+            "domain": domain,
+            "relative_path": relative_path,
+            "source_url": source_url,
+            "previous_hash": previous_hash,
+            "new_hash": new_hash,
+            "is_auto_update": is_auto_update,
+            "had_breaking_risks": had_breaking_risks,
+        }
+        self.hass.bus.async_fire(EVENT_BLUEPRINTS_UPDATER_UPDATED, payload)
 
     async def _is_safe_url(self, url: str) -> bool:
         """Check if the URL is safe (not an internal network address).

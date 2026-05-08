@@ -27,3 +27,19 @@ async def test_mock_getaddrinfo_logic():
 
     res = socket.getaddrinfo("8.8.8.8", 80)
     assert res[0][4][0] == "1.1.1.1"
+
+
+def test_mock_getaddrinfo_af_unspec():
+    """Verify that AF_UNSPEC returns both IPv4 and IPv6 results."""
+    res = socket.getaddrinfo("example.com", 80, family=socket.AF_UNSPEC)
+    families = [r[0] for r in res]
+    assert socket.AF_INET in families
+    assert socket.AF_INET6 in families
+
+    ips = [r[4][0] for r in res]
+    assert "1.1.1.1" in ips
+    assert "2606:4700:4700::1111" in ips
+
+    res_local = socket.getaddrinfo("localhost", 80, family=socket.AF_UNSPEC)
+    local_ips = [r[4][0] for r in res_local]
+    assert any(ip in ("127.0.0.1", "::1") for ip in local_ips)

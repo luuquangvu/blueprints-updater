@@ -23,7 +23,10 @@ from custom_components.blueprints_updater.const import (
     MAX_CONCURRENT_REQUESTS,
     REQUEST_TIMEOUT,
 )
-from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintUpdateCoordinator,
+    BlueprintUpdateEventPayload,
+)
 
 
 @pytest.mark.asyncio
@@ -856,17 +859,22 @@ async def test_async_install_blueprint_missing_cache_fallback(hass, coordinator)
         assert mock_fire.called
         event_name, event_data = mock_fire.call_args[0]
         assert event_name == EVENT_BLUEPRINTS_UPDATER_UPDATED
-        assert event_data["blueprint_name"] == "New BP"
-        assert event_data["relative_path"] == "automation/new_bp.yaml"
-        assert event_data["source_url"] == "https://example.com/new.yaml"
-        assert event_data["is_auto_update"] is True
+        payload: BlueprintUpdateEventPayload = event_data
+        assert payload["blueprint_name"] == "New BP"
+        assert payload["domain"] == "automation"
+        assert payload["relative_path"] == "automation/new_bp.yaml"
+        assert payload["source_url"] == "https://example.com/new.yaml"
+        assert payload["previous_hash"] is None
+        assert isinstance(payload["new_hash"], str)
+        assert payload["is_auto_update"] is True
+        assert payload["had_breaking_risks"] is False
 
 
 @pytest.mark.asyncio
 async def test_async_install_blueprint_manual_install_preserves_url(hass, coordinator):
     """Test that manual install preserves the cached source_url."""
     path = "/config/blueprints/automation/override.yaml"
-    content = "blueprint:\n  name: Override\n  domain: automation\n"
+    content = "blueprint:\n  name: Manual Preserve\n  domain: automation\n"
     cached_url = "https://example.com/cached.yaml"
     explicit_url = "https://example.com/explicit.yaml"
 
@@ -896,8 +904,13 @@ async def test_async_install_blueprint_manual_install_preserves_url(hass, coordi
         assert mock_fire.called
         event_name, event_data = mock_fire.call_args[0]
         assert event_name == EVENT_BLUEPRINTS_UPDATER_UPDATED
-        assert event_data["source_url"] == cached_url
-        assert event_data["is_auto_update"] is False
+        payload: BlueprintUpdateEventPayload = event_data
+        assert payload["blueprint_name"] == "Manual Preserve"
+        assert payload["domain"] == "automation"
+        assert payload["relative_path"] == "automation/override.yaml"
+        assert payload["source_url"] == cached_url
+        assert payload["is_auto_update"] is False
+        assert payload["had_breaking_risks"] is False
 
 
 @pytest.mark.asyncio

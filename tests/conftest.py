@@ -92,26 +92,31 @@ def mock_getaddrinfo(request, monkeypatch):
         if is_local and hostname in ("localhost", "127.0.0.1", "::1"):
             return real_getaddrinfo(host, port, family, type, proto, flags)
 
-        effective_family = family or socket.AF_INET
-        if effective_family == socket.AF_INET:
-            dummy_ip = "127.0.0.2" if is_local else "1.1.1.1"
-            addr_tuple = (dummy_ip, port)
-        elif effective_family == socket.AF_INET6:
-            dummy_ip = "::2" if is_local else "2606:4700:4700::1111"
-            addr_tuple = (dummy_ip, port, 0, 0)
-        else:
-            msg = f"Address family {family} not supported in tests"
-            raise socket.gaierror(socket.EAI_FAMILY, msg)
+        results = []
+        families = [socket.AF_INET, socket.AF_INET6] if family == socket.AF_UNSPEC else [family]
 
-        return [
-            (
-                effective_family,
-                socket.SOCK_STREAM,
-                socket.IPPROTO_TCP,
-                "",
-                addr_tuple,
+        for f in families:
+            if f == socket.AF_INET:
+                dummy_ip = "127.0.0.2" if is_local else "1.1.1.1"
+                addr_tuple = (dummy_ip, port)
+            elif f == socket.AF_INET6:
+                dummy_ip = "::2" if is_local else "2606:4700:4700::1111"
+                addr_tuple = (dummy_ip, port, 0, 0)
+            else:
+                msg = f"Address family {f} not supported in tests"
+                raise socket.gaierror(socket.EAI_FAMILY, msg)
+
+            results.append(
+                (
+                    f,
+                    socket.SOCK_STREAM,
+                    socket.IPPROTO_TCP,
+                    "",
+                    addr_tuple,
+                )
             )
-        ]
+
+        return results
 
     monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
     yield
