@@ -21,37 +21,57 @@ def run_pipeline() -> None:
     the static nature of the commands being executed, avoiding dynamic
     variable execution in subprocess calls.
     """
+    # Set environment variables to disable color
+    os.environ["NO_COLOR"] = "1"
+
     if os.name != "posix":
-        print(
-            "Error: This script is only supported on POSIX systems (Linux, WSL, macOS)", flush=True
-        )
+        print("VALIDATION_ERROR: Non-POSIX environment detected", flush=True)
         sys.exit(1)
 
-    print("=" * 40, flush=True)
-    print("STARTING UNIFIED VALIDATION PIPELINE", flush=True)
-    print("=" * 40, flush=True)
+    print("VALIDATION_START", flush=True)
 
     try:
-        print("\n>>> STEP: uv run ruff format", flush=True)
-        subprocess.run(["uv", "run", "ruff", "format"], check=True)
+        # 1. Ruff Format
+        ruff_format = ["uv", "run", "ruff", "format"]
+        print(f"STEP_START: {' '.join(ruff_format)}", flush=True)
+        subprocess.run(ruff_format, check=True)
+        print(f"STEP_OK: {' '.join(ruff_format)}", flush=True)
 
-        print("\n>>> STEP: uv run ruff check --fix", flush=True)
-        subprocess.run(["uv", "run", "ruff", "check", "--fix"], check=True)
+        # 2. Ruff Check
+        ruff_check = ["uv", "run", "ruff", "check", "--fix"]
+        print(f"STEP_START: {' '.join(ruff_check)}", flush=True)
+        subprocess.run(ruff_check, check=True)
+        print(f"STEP_OK: {' '.join(ruff_check)}", flush=True)
 
-        print("\n>>> STEP: uv run ty check", flush=True)
-        subprocess.run(["uv", "run", "ty", "check"], check=True)
+        # 3. Ty Check
+        ty_check = ["uv", "run", "ty", "check"]
+        print(f"STEP_START: {' '.join(ty_check)}", flush=True)
+        subprocess.run(ty_check, check=True)
+        print(f"STEP_OK: {' '.join(ty_check)}", flush=True)
 
-        print("\n>>> STEP: uv run pyright", flush=True)
-        subprocess.run(["uv", "run", "pyright"], check=True)
+        # 4. Pyright
+        pyright = ["uv", "run", "pyright"]
+        print(f"STEP_START: {' '.join(pyright)}", flush=True)
+        subprocess.run(pyright, check=True)
+        print(f"STEP_OK: {' '.join(pyright)}", flush=True)
 
-        print("\n>>> STEP: uv run interrogate", flush=True)
-        subprocess.run(["uv", "run", "interrogate"], check=True)
+        # 5. Interrogate
+        interrogate = ["uv", "run", "interrogate"]
+        print(f"STEP_START: {' '.join(interrogate)}", flush=True)
+        subprocess.run(interrogate, check=True)
+        print(f"STEP_OK: {' '.join(interrogate)}", flush=True)
 
-        print("\n>>> STEP: npx prettier --log-level warn --write .", flush=True)
-        subprocess.run(["npx", "prettier", "--log-level", "warn", "--write", "."], check=True)
+        # 6. Prettier
+        prettier = ["npx", "prettier", "--log-level", "warn", "--write", "."]
+        print(f"STEP_START: {' '.join(prettier)}", flush=True)
+        subprocess.run(prettier, check=True)
+        print(f"STEP_OK: {' '.join(prettier)}", flush=True)
 
-        print("\n>>> STEP: uv run pytest", flush=True)
-        subprocess.run(["uv", "run", "pytest"], check=True)
+        # 7. Pytest
+        pytest = ["uv", "run", "pytest"]
+        print(f"STEP_START: {' '.join(pytest)}", flush=True)
+        subprocess.run(pytest, check=True)
+        print(f"STEP_OK: {' '.join(pytest)}", flush=True)
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         ret_code = getattr(e, "returncode", 1)
@@ -62,20 +82,15 @@ def run_pipeline() -> None:
                 if isinstance(cmd_val, (list, tuple))
                 else str(cmd_val)
             )
+            print(f"STEP_FAILED: {cmd_str} EXIT_CODE={ret_code}", flush=True)
+            print("VALIDATION_FAILED", flush=True)
         else:
             cmd_str = getattr(e, "filename", "Unknown command")
+            print(f"VALIDATION_ERROR: '{cmd_str}' not found.", flush=True)
 
-        print(f"\nFAILED: {cmd_str} (Exit code: {ret_code})", flush=True)
-        if isinstance(e, FileNotFoundError):
-            print(
-                f"Error: '{cmd_str}' not found. Please ensure all dependencies are installed.",
-                flush=True,
-            )
         sys.exit(ret_code)
 
-    print("\n" + "=" * 40, flush=True)
-    print("ALL VALIDATION STEPS PASSED SUCCESSFULLY", flush=True)
-    print("=" * 40 + "\n", flush=True)
+    print("VALIDATION_SUCCESS", flush=True)
 
 
 def main() -> None:
@@ -83,7 +98,7 @@ def main() -> None:
     try:
         run_pipeline()
     except KeyboardInterrupt:
-        print("\nValidation interrupted by user.", flush=True)
+        print("VALIDATION_INTERRUPTED", flush=True)
         sys.exit(1)
 
 

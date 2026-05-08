@@ -1316,11 +1316,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             or "Unknown"
         )
 
-        final_source_url = (
+        raw_source_url = (
             (current.get("source_url") if current else None)
             or source_url
-            or (bp_block.get("source_url") if bp_block else "")
+            or (bp_block.get("source_url") if bp_block else None)
         )
+
+        if isinstance(raw_source_url, str):
+            final_source_url = raw_source_url
+        elif raw_source_url is None:
+            final_source_url = None
+        else:
+            _LOGGER.warning(
+                "Blueprint metadata for %s contains non-string source_url (%r); ignoring it",
+                path,
+                raw_source_url,
+            )
+            final_source_url = None
 
         relative_path = get_blueprint_relative_path(self.hass, real_path) or (
             current.get("relative_path") if current else ""
