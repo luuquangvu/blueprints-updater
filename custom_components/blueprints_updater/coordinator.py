@@ -1206,12 +1206,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             relative_path = metadata["relative_path"]
 
             if final_source_url:
-                remote_content = self._ensure_source_url(remote_content, final_source_url)
+                final_content = self._ensure_source_url(remote_content, final_source_url)
             else:
-                remote_content = self._normalize_content(remote_content)
+                final_content = self._normalize_content(remote_content)
 
             await self.hass.async_add_executor_job(
-                _save_file, real_path, remote_content, max_backups
+                _save_file, real_path, final_content, max_backups
             )
 
             if parsed:
@@ -1244,13 +1244,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             cached_remote_hash = (
                 current.get("remote_hash")
-                if current and current.get("remote_content") == remote_content
+                if current and current.get("remote_content") == final_content
                 else None
             )
             final_hash = (
                 remote_hash
                 or cached_remote_hash
-                or self._hash_content(remote_content, already_normalized=True)
+                or self._hash_content(final_content, already_normalized=True)
             )
             final_etag = etag if etag is not None else (current.get("etag") if current else None)
 

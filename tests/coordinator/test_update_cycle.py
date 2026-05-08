@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import logging
 import os
 from http import HTTPStatus
 from types import MappingProxyType
@@ -742,6 +743,32 @@ async def test_async_install_blueprint_domain_normalization(hass, coordinator):
             hass.services.async_call.assert_called_once_with("script", "reload")
             mock_logger.warning.assert_called()
             assert "unknown_domain" in mock_logger.warning.call_args[0][2]
+
+
+@pytest.mark.asyncio
+async def test_async_install_blueprint_domain_mismatch(hass, coordinator, caplog):
+    """Test that directory domain takes precedence and logs a warning."""
+    path = "/config/blueprints/automation/test.yaml"
+    remote_content = "blueprint:\n  name: Test automation as script\n  domain: script\n"
+
+    hass.services.has_service = MagicMock(return_value=True)
+    hass.services.async_call = AsyncMock()
+
+    with (
+        patch("builtins.open", MagicMock()),
+        patch("custom_components.blueprints_updater.coordinator.os.replace"),
+        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
+        patch.object(coordinator, "_rotate_backups", MagicMock()),
+        caplog.at_level(logging.WARNING),
+    ):
+        await coordinator.async_install_blueprint(path, remote_content)
+
+    hass.services.async_call.assert_awaited_once_with("automation", "reload")
+
+    assert any(
+        "automation" in record.getMessage() and "script" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 @pytest.mark.asyncio
