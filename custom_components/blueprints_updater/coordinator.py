@@ -1197,7 +1197,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             functional_domain = self._get_functional_domain(
                 path, content=remote_content if parsed else None, parsed_data=parsed
             )
-            bp_block = self._get_blueprint_block(path, parsed_data=parsed)
+            bp_block = self._get_blueprint_block(path, parsed_data=parsed) if parsed else None
 
             metadata = self._resolve_blueprint_metadata(path, bp_block, source_url, real_path)
             current = metadata["current"]
