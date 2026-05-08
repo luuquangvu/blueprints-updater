@@ -21,57 +21,42 @@ def run_pipeline() -> None:
     the static nature of the commands being executed, avoiding dynamic
     variable execution in subprocess calls.
     """
-    # Set environment variables to disable color
     os.environ["NO_COLOR"] = "1"
+
+    print("VALIDATION_START", flush=True)
 
     if os.name != "posix":
         print("VALIDATION_ERROR: Non-POSIX environment detected", flush=True)
         sys.exit(1)
 
-    print("VALIDATION_START", flush=True)
-
     try:
-        # 1. Ruff Format
-        ruff_format = ["uv", "run", "ruff", "format"]
-        print(f"STEP_START: {' '.join(ruff_format)}", flush=True)
-        subprocess.run(ruff_format, check=True)
-        print(f"STEP_OK: {' '.join(ruff_format)}", flush=True)
+        print("STEP_START: uv run ruff format", flush=True)
+        subprocess.run(["uv", "run", "ruff", "format"], check=True)
+        print("STEP_OK: uv run ruff format", flush=True)
 
-        # 2. Ruff Check
-        ruff_check = ["uv", "run", "ruff", "check", "--fix"]
-        print(f"STEP_START: {' '.join(ruff_check)}", flush=True)
-        subprocess.run(ruff_check, check=True)
-        print(f"STEP_OK: {' '.join(ruff_check)}", flush=True)
+        print("STEP_START: uv run ruff check --fix", flush=True)
+        subprocess.run(["uv", "run", "ruff", "check", "--fix"], check=True)
+        print("STEP_OK: uv run ruff check --fix", flush=True)
 
-        # 3. Ty Check
-        ty_check = ["uv", "run", "ty", "check"]
-        print(f"STEP_START: {' '.join(ty_check)}", flush=True)
-        subprocess.run(ty_check, check=True)
-        print(f"STEP_OK: {' '.join(ty_check)}", flush=True)
+        print("STEP_START: uv run ty check", flush=True)
+        subprocess.run(["uv", "run", "ty", "check"], check=True)
+        print("STEP_OK: uv run ty check", flush=True)
 
-        # 4. Pyright
-        pyright = ["uv", "run", "pyright"]
-        print(f"STEP_START: {' '.join(pyright)}", flush=True)
-        subprocess.run(pyright, check=True)
-        print(f"STEP_OK: {' '.join(pyright)}", flush=True)
+        print("STEP_START: uv run pyright", flush=True)
+        subprocess.run(["uv", "run", "pyright"], check=True)
+        print("STEP_OK: uv run pyright", flush=True)
 
-        # 5. Interrogate
-        interrogate = ["uv", "run", "interrogate"]
-        print(f"STEP_START: {' '.join(interrogate)}", flush=True)
-        subprocess.run(interrogate, check=True)
-        print(f"STEP_OK: {' '.join(interrogate)}", flush=True)
+        print("STEP_START: uv run interrogate", flush=True)
+        subprocess.run(["uv", "run", "interrogate"], check=True)
+        print("STEP_OK: uv run interrogate", flush=True)
 
-        # 6. Prettier
-        prettier = ["npx", "prettier", "--log-level", "warn", "--write", "."]
-        print(f"STEP_START: {' '.join(prettier)}", flush=True)
-        subprocess.run(prettier, check=True)
-        print(f"STEP_OK: {' '.join(prettier)}", flush=True)
+        print("STEP_START: npx prettier --log-level warn --write .", flush=True)
+        subprocess.run(["npx", "prettier", "--log-level", "warn", "--write", "."], check=True)
+        print("STEP_OK: npx prettier --log-level warn --write .", flush=True)
 
-        # 7. Pytest
-        pytest = ["uv", "run", "pytest"]
-        print(f"STEP_START: {' '.join(pytest)}", flush=True)
-        subprocess.run(pytest, check=True)
-        print(f"STEP_OK: {' '.join(pytest)}", flush=True)
+        print("STEP_START: uv run pytest", flush=True)
+        subprocess.run(["uv", "run", "pytest"], check=True)
+        print("STEP_OK: uv run pytest", flush=True)
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         ret_code = getattr(e, "returncode", 1)
