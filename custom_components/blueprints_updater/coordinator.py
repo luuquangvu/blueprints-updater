@@ -1188,8 +1188,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             parsed_raw = None
             try:
                 parsed_raw = yaml_util.parse_yaml(remote_content)
-            except HomeAssistantError:
+            except HomeAssistantError as err:
                 _LOGGER.warning("Failed to parse blueprint at %s", path)
+                _LOGGER.debug("Blueprint YAML parse error at %s: %s", path, err, exc_info=err)
 
             parsed = cast(dict[str, Any], parsed_raw) if isinstance(parsed_raw, dict) else None
 

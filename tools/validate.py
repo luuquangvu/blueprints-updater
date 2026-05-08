@@ -22,33 +22,35 @@ def run_pipeline() -> None:
     variable execution in subprocess calls.
     """
     if os.name != "posix":
-        print("Error: This script is only supported on POSIX systems (Linux, WSL, macOS).")
+        print(
+            "Error: This script is only supported on POSIX systems (Linux, WSL, macOS)", flush=True
+        )
         sys.exit(1)
 
-    print("\n" + "=" * 40)
-    print("STARTING UNIFIED VALIDATION PIPELINE")
-    print("=" * 40 + "\n")
+    print("\n" + "=" * 40, flush=True)
+    print("STARTING UNIFIED VALIDATION PIPELINE", flush=True)
+    print("=" * 40 + "\n", flush=True)
 
     try:
-        print("\n>>> STEP: uv run ruff format")
+        print("\n>>> STEP: uv run ruff format", flush=True)
         subprocess.run(["uv", "run", "ruff", "format"], check=True)
 
-        print("\n>>> STEP: uv run ruff check --fix")
+        print("\n>>> STEP: uv run ruff check --fix", flush=True)
         subprocess.run(["uv", "run", "ruff", "check", "--fix"], check=True)
 
-        print("\n>>> STEP: uv run ty check")
+        print("\n>>> STEP: uv run ty check", flush=True)
         subprocess.run(["uv", "run", "ty", "check"], check=True)
 
-        print("\n>>> STEP: uv run pyright")
+        print("\n>>> STEP: uv run pyright", flush=True)
         subprocess.run(["uv", "run", "pyright"], check=True)
 
-        print("\n>>> STEP: uv run interrogate")
+        print("\n>>> STEP: uv run interrogate", flush=True)
         subprocess.run(["uv", "run", "interrogate"], check=True)
 
-        print("\n>>> STEP: npx prettier --log-level warn --write .")
+        print("\n>>> STEP: npx prettier --log-level warn --write .", flush=True)
         subprocess.run(["npx", "prettier", "--log-level", "warn", "--write", "."], check=True)
 
-        print("\n>>> STEP: uv run pytest")
+        print("\n>>> STEP: uv run pytest", flush=True)
         subprocess.run(["uv", "run", "pytest"], check=True)
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
@@ -63,14 +65,17 @@ def run_pipeline() -> None:
         else:
             cmd_str = getattr(e, "filename", "Unknown command")
 
-        print(f"\nFAILED: {cmd_str} (Exit code: {ret_code})")
+        print(f"\nFAILED: {cmd_str} (Exit code: {ret_code})", flush=True)
         if isinstance(e, FileNotFoundError):
-            print(f"Error: '{cmd_str}' not found. Please ensure all dependencies are installed.")
+            print(
+                f"Error: '{cmd_str}' not found. Please ensure all dependencies are installed.",
+                flush=True,
+            )
         sys.exit(ret_code)
 
-    print("\n" + "=" * 40)
-    print("ALL VALIDATION STEPS PASSED SUCCESSFULLY")
-    print("=" * 40 + "\n")
+    print("\n" + "=" * 40, flush=True)
+    print("ALL VALIDATION STEPS PASSED SUCCESSFULLY", flush=True)
+    print("=" * 40 + "\n", flush=True)
 
 
 def main() -> None:
@@ -78,7 +83,7 @@ def main() -> None:
     try:
         run_pipeline()
     except KeyboardInterrupt:
-        print("\nValidation interrupted by user.")
+        print("\nValidation interrupted by user.", flush=True)
         sys.exit(1)
 
 

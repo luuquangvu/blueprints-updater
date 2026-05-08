@@ -100,7 +100,8 @@ def mock_getaddrinfo(request, monkeypatch):
             dummy_ip = "::2" if is_local else "2606:4700:4700::1111"
             addr_tuple = (dummy_ip, port, 0, 0)
         else:
-            return real_getaddrinfo(host, port, family, type, proto, flags)
+            msg = f"Address family {family} not supported in tests"
+            raise socket.gaierror(socket.EAI_FAMILY, msg)
 
         return [
             (
