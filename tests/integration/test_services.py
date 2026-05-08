@@ -30,8 +30,11 @@ async def test_reload_service(hass: HomeAssistant) -> None:
         entry_id="test_service_entry",
     )
     entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    with patch(
+        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
 
     coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
 

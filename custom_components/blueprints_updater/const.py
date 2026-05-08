@@ -11,6 +11,7 @@ CONF_SELECTED_BLUEPRINTS = "selected_blueprints"
 CONF_AUTO_UPDATE = "auto_update"
 CONF_MAX_BACKUPS = "max_backups"
 CONF_USE_CDN = "use_cdn"
+EVENT_BLUEPRINTS_UPDATER_UPDATED = f"{DOMAIN}_updated"
 
 DEFAULT_AUTO_UPDATE = False
 DEFAULT_USE_CDN = True
@@ -57,6 +58,7 @@ SPECIAL_USE_TLDS = {
     "example",
     "internal",
     "onion",
+    "home.arpa",
 }
 
 

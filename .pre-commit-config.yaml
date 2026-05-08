@@ -38,7 +38,7 @@ repos:
 
       - id: prettier
         name: prettier
-        entry: npx prettier --write .
+        entry: npx prettier --log-level warn --write .
         language: system
         pass_filenames: false
         always_run: true

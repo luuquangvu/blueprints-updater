@@ -1,10 +1,15 @@
 """Fixtures for Blueprints Updater tests."""
 
 import asyncio
+import ipaddress
+import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+
+from custom_components.blueprints_updater.const import SPECIAL_USE_TLDS
+from custom_components.blueprints_updater.utils import is_ip_safe
 
 
 @pytest.fixture(autouse=True)
@@ -50,3 +55,68 @@ def _mock_hass():
 
     hass_mock.data = {}
     return hass_mock
+
+
+@pytest.fixture(autouse=True)
+def mock_getaddrinfo(request, monkeypatch):
+    """Mock getaddrinfo to block external network access.
+
+    Delegates localhost, 127.0.0.1, and ::1 to the real resolver.
+    For other special-use domains (e.g., .local, .home.arpa), returns
+    127.0.0.2 to avoid HA's network security filters without triggering
+    actual DNS resolution. All other hosts resolve to 1.1.1.1 (a dummy
+    external IP) to prevent tests from touching the real network.
+
+    Can be bypassed using @pytest.mark.real_network.
+    """
+    if "real_network" in request.keywords:
+        return
+
+    real_getaddrinfo = socket.getaddrinfo
+
+    def _fake_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        if host is None:
+            return real_getaddrinfo(host, port, family, type, proto, flags)
+
+        hostname = host.rstrip(".").lower()
+        is_local = False
+        try:
+            ip = ipaddress.ip_address(hostname)
+            is_local = not is_ip_safe(ip)
+        except ValueError:
+            for tld in SPECIAL_USE_TLDS:
+                if hostname == tld or hostname.endswith("." + tld):
+                    is_local = True
+                    break
+
+        if is_local and hostname in ("localhost", "127.0.0.1", "::1"):
+            return real_getaddrinfo(host, port, family, type, proto, flags)
+
+        results = []
+        families = [socket.AF_INET, socket.AF_INET6] if family == socket.AF_UNSPEC else [family]
+
+        for f in families:
+            if f == socket.AF_INET:
+                dummy_ip = "127.0.0.2" if is_local else "1.1.1.1"
+                addr_tuple = (dummy_ip, port)
+            elif f == socket.AF_INET6:
+                dummy_ip = "::2" if is_local else "2606:4700:4700::1111"
+                addr_tuple = (dummy_ip, port, 0, 0)
+            else:
+                msg = f"Address family {f} not supported in tests"
+                raise socket.gaierror(socket.EAI_FAMILY, msg)
+
+            results.append(
+                (
+                    f,
+                    socket.SOCK_STREAM,
+                    socket.IPPROTO_TCP,
+                    "",
+                    addr_tuple,
+                )
+            )
+
+        return results
+
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+    yield

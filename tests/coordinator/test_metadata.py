@@ -282,8 +282,61 @@ def test_validate_blueprint_valid(coordinator):
         "action": [],
     }
     coordinator.hass.data = {}
-    result = coordinator._validate_blueprint(data, "https://example.com/bp.yaml")
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/bp.yaml", expected_domain="automation"
+    )
     assert result is None
+
+
+def test_validate_blueprint_script_valid(coordinator):
+    """Test _validate_blueprint with valid script data."""
+    data = {
+        "blueprint": {
+            "name": "Test Script",
+            "domain": "script",
+            "input": {},
+        },
+        "sequence": [],
+    }
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/script.yaml", expected_domain="script"
+    )
+    assert result is None
+
+
+def test_validate_blueprint_template_valid(coordinator):
+    """Test _validate_blueprint with valid template data."""
+    data = {
+        "blueprint": {
+            "name": "Test Template",
+            "domain": "template",
+            "input": {},
+        },
+    }
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/template.yaml", expected_domain="template"
+    )
+    assert result is None
+
+
+def test_validate_blueprint_domain_mismatch(coordinator):
+    """Test _validate_blueprint returns error on domain mismatch."""
+    data = {
+        "blueprint": {
+            "name": "Mismatch",
+            "domain": "script",
+            "input": {},
+        },
+        "sequence": [],
+    }
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/bp.yaml", expected_domain="automation"
+    )
+    assert result is not None
+    assert "Found incorrect blueprint type script, expected automation" in result
 
 
 def test_validate_blueprint_incompatible_version(coordinator):
@@ -299,7 +352,9 @@ def test_validate_blueprint_incompatible_version(coordinator):
         "action": [],
     }
     coordinator.hass.data = {}
-    result = coordinator._validate_blueprint(data, "https://example.com/bp.yaml")
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/bp.yaml", expected_domain="automation"
+    )
     assert result is not None
     assert "incompatible" in result
     assert "2099.1.0" in result
@@ -309,7 +364,9 @@ def test_validate_blueprint_schema_error(coordinator):
     """Test _validate_blueprint catches schema validation errors."""
     data = {"blueprint": {"name": "Test"}}
     coordinator.hass.data = {}
-    result = coordinator._validate_blueprint(data, "https://example.com/bp.yaml")
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/bp.yaml", expected_domain="automation"
+    )
     assert result is not None
     assert "validation_error" in result
 
@@ -317,7 +374,9 @@ def test_validate_blueprint_schema_error(coordinator):
 def test_validate_blueprint_missing_key(coordinator):
     """Test _validate_blueprint with data missing the 'blueprint' key."""
     coordinator.hass.data = {}
-    result = coordinator._validate_blueprint({"not_blueprint": {}}, "https://example.com/bp.yaml")
+    result = coordinator._validate_blueprint(
+        {"not_blueprint": {}}, "https://example.com/bp.yaml", expected_domain="automation"
+    )
     assert result is not None
     assert "invalid_blueprint" in result
 

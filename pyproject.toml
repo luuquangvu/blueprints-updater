@@ -8,7 +8,7 @@ dependencies = []
 [dependency-groups]
 dev = [
   "h2>=4,<5",
-  "homeassistant>=2026.4",
+  "homeassistant>=2026.5.0",
   "interrogate",
   "packaging",
   "prek",
@@ -52,9 +52,15 @@ indent-style = "space"
 [tool.pytest]
 asyncio_mode = "auto"
 pythonpath = ["."]
-filterwarnings = ["ignore::DeprecationWarning"]
-addopts = ["--cov=custom_components", "--cov-fail-under=90", "--timeout=60"]
 testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+addopts = [
+  "--cov=custom_components",
+  "--cov-fail-under=90",
+  "--timeout=60",
+  "--strict-markers",
+]
+markers = ["real_network: tests that require real network access"]
 
 [tool.pyright]
 typeCheckingMode = "standard"

@@ -192,9 +192,7 @@ def coordinator():
     comp.is_auto_update_enabled = BlueprintUpdateCoordinator.is_auto_update_enabled.__get__(
         comp, BlueprintUpdateCoordinator
     )
-    comp._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    comp._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     return comp
 
 
@@ -276,6 +274,7 @@ async def test_entity_async_install(coordinator):
         "blueprint:\n  name: Test",
         reload_services=True,
         backup=False,
+        is_auto_update=False,
     )
     coordinator.async_refresh.assert_called_once()
 
@@ -318,6 +317,7 @@ async def test_entity_async_install_on_demand_fetch(coordinator):
         "fetched content",
         reload_services=True,
         backup=False,
+        is_auto_update=False,
     )
 
 
@@ -352,6 +352,7 @@ async def test_entity_async_install_backup(coordinator):
         "blueprint:\n  name: Test",
         reload_services=True,
         backup=True,
+        is_auto_update=False,
     )
     coordinator.async_refresh.assert_called_once()
 
@@ -427,9 +428,7 @@ async def test_entity_release_notes_encoding(coordinator):
         "remote_content": "",
     }
     coordinator.data[path] = info
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
@@ -464,9 +463,7 @@ async def test_script_release_notes_encoding(coordinator):
         "remote_content": "",
     }
     coordinator.data[path] = info
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
@@ -497,9 +494,7 @@ async def test_entity_release_notes_usage_error_handled(coordinator):
         "remote_content": "",
     }
     coordinator.data[path] = info
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
@@ -526,9 +521,7 @@ async def test_entity_release_notes_usage_error_unhandled(coordinator):
         "remote_content": "",
     }
     coordinator.data[path] = info
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
@@ -689,9 +682,7 @@ async def test_entity_release_notes_git_diff(coordinator):
         "  domain: automation\ncondition: []\naction: []\n"
     )
 
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
@@ -720,9 +711,7 @@ async def test_entity_release_notes_git_diff_missing_remote(coordinator):
     }
     coordinator.data[path] = info
 
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
@@ -755,9 +744,7 @@ async def test_entity_release_notes_git_diff_source_url_normalization(coordinato
     coordinator.data[path] = info
     info["remote_content"] = remote_content
 
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
@@ -789,9 +776,7 @@ async def test_entity_release_notes_git_diff_cached(coordinator):
         diff_text=cached_diff, is_semantic_sync=False
     )
 
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
@@ -816,9 +801,7 @@ async def test_async_install_bypass_protection(coordinator):
     }
     coordinator.data[path] = info
 
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
@@ -857,9 +840,7 @@ async def test_async_install_unsafe_url_protection(coordinator):
     }
     coordinator.data[path] = info
 
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
@@ -895,9 +876,7 @@ async def test_entity_release_notes_git_diff_with_backticks(coordinator):
         diff_text=diff_text, is_semantic_sync=False
     )
 
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
@@ -920,9 +899,7 @@ async def test_entity_release_notes_semantic_sync_notice(coordinator):
     }
     coordinator.data[path] = info
 
-    coordinator._normalize_domain = lambda d: (
-        d if d in ["automation", "script", "template"] else "automation"
-    )
+    coordinator._normalize_domain = BlueprintUpdateCoordinator._normalize_domain
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 

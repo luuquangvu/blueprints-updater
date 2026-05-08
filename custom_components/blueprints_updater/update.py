@@ -463,6 +463,10 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             )
 
         await self.coordinator.async_install_blueprint(
-            self._path, remote_content, reload_services=True, backup=backup
+            self._path,
+            remote_content,
+            reload_services=True,
+            backup=backup,
+            is_auto_update=False,
         )
         await self.coordinator.async_refresh()

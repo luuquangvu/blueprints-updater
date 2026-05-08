@@ -21,35 +21,43 @@ def run_pipeline() -> None:
     the static nature of the commands being executed, avoiding dynamic
     variable execution in subprocess calls.
     """
+    os.environ["NO_COLOR"] = "1"
+
+    print("VALIDATION_START", flush=True)
+
     if os.name != "posix":
-        print("Error: This script is only supported on POSIX systems (Linux, WSL, macOS).")
+        print("VALIDATION_ERROR: Non-POSIX environment detected", flush=True)
+        print("VALIDATION_FAILED", flush=True)
         sys.exit(1)
 
-    print("\n" + "=" * 40)
-    print("STARTING UNIFIED VALIDATION PIPELINE")
-    print("=" * 40 + "\n")
-
     try:
-        print("\n>>> STEP: uv run ruff format")
+        print("STEP_START: uv run ruff format", flush=True)
         subprocess.run(["uv", "run", "ruff", "format"], check=True)
+        print("STEP_OK: uv run ruff format", flush=True)
 
-        print("\n>>> STEP: uv run ruff check --fix")
+        print("STEP_START: uv run ruff check --fix", flush=True)
         subprocess.run(["uv", "run", "ruff", "check", "--fix"], check=True)
+        print("STEP_OK: uv run ruff check --fix", flush=True)
 
-        print("\n>>> STEP: uv run ty check")
+        print("STEP_START: uv run ty check", flush=True)
         subprocess.run(["uv", "run", "ty", "check"], check=True)
+        print("STEP_OK: uv run ty check", flush=True)
 
-        print("\n>>> STEP: uv run pyright")
+        print("STEP_START: uv run pyright", flush=True)
         subprocess.run(["uv", "run", "pyright"], check=True)
+        print("STEP_OK: uv run pyright", flush=True)
 
-        print("\n>>> STEP: uv run interrogate")
+        print("STEP_START: uv run interrogate", flush=True)
         subprocess.run(["uv", "run", "interrogate"], check=True)
+        print("STEP_OK: uv run interrogate", flush=True)
 
-        print("\n>>> STEP: npx prettier --write .")
-        subprocess.run(["npx", "prettier", "--write", "."], check=True)
+        print("STEP_START: npx prettier --log-level warn --write .", flush=True)
+        subprocess.run(["npx", "prettier", "--log-level", "warn", "--write", "."], check=True)
+        print("STEP_OK: npx prettier --log-level warn --write .", flush=True)
 
-        print("\n>>> STEP: uv run pytest")
+        print("STEP_START: uv run pytest", flush=True)
         subprocess.run(["uv", "run", "pytest"], check=True)
+        print("STEP_OK: uv run pytest", flush=True)
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         ret_code = getattr(e, "returncode", 1)
@@ -60,17 +68,15 @@ def run_pipeline() -> None:
                 if isinstance(cmd_val, (list, tuple))
                 else str(cmd_val)
             )
+            print(f"STEP_FAILED: {cmd_str} EXIT_CODE={ret_code}", flush=True)
         else:
             cmd_str = getattr(e, "filename", "Unknown command")
+            print(f"VALIDATION_ERROR: '{cmd_str}' not found.", flush=True)
 
-        print(f"\nFAILED: {cmd_str} (Exit code: {ret_code})")
-        if isinstance(e, FileNotFoundError):
-            print(f"Error: '{cmd_str}' not found. Please ensure all dependencies are installed.")
+        print("VALIDATION_FAILED", flush=True)
         sys.exit(ret_code)
 
-    print("\n" + "=" * 40)
-    print("ALL VALIDATION STEPS PASSED SUCCESSFULLY")
-    print("=" * 40 + "\n")
+    print("VALIDATION_SUCCESS", flush=True)
 
 
 def main() -> None:
@@ -78,7 +84,7 @@ def main() -> None:
     try:
         run_pipeline()
     except KeyboardInterrupt:
-        print("\nValidation interrupted by user.")
+        print("VALIDATION_INTERRUPTED", flush=True)
         sys.exit(1)
 
 
