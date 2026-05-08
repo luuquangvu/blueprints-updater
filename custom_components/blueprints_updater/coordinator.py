@@ -2455,24 +2455,22 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if self.data and path in self.data:
             self.data[path]["breaking_risks"] = risks
 
-            if updatable and not last_error and self.is_auto_update_enabled():
-                auto_update_handled = await self._handle_auto_update_step(
-                    path,
-                    info,
-                    remote_content,
-                    remote_hash,
-                    new_etag,
-                    risks,
-                    results_to_notify,
-                    updated_domains,
-                    source_url,
-                )
-                if auto_update_handled or (
-                    self.data
-                    and path in self.data
-                    and self.data[path].get("update_blocking_reason")
-                ):
-                    return
+        if updatable and not last_error and self.is_auto_update_enabled():
+            auto_update_handled = await self._handle_auto_update_step(
+                path,
+                info,
+                remote_content,
+                remote_hash,
+                new_etag,
+                risks,
+                results_to_notify,
+                updated_domains,
+                source_url,
+            )
+            if auto_update_handled or (
+                self.data and path in self.data and self.data[path].get("update_blocking_reason")
+            ):
+                return
 
         self._update_coordinator_status_data(
             path, updatable, last_error, remote_hash, remote_content, new_etag, risks
