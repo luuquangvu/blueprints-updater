@@ -54,7 +54,12 @@ asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
-addopts = ["--cov=custom_components", "--cov-fail-under=90", "--timeout=60"]
+addopts = [
+  "--cov=custom_components",
+  "--cov-fail-under=90",
+  "--timeout=60",
+  "--strict-markers",
+]
 markers = ["real_network: tests that require real network access"]
 
 [tool.pyright]
