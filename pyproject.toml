@@ -29,17 +29,23 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = [
-  "E",   # pycodestyle errors
-  "F",   # pyflakes
-  "W",   # pycodestyle warnings
-  "I",   # isort
-  "UP",  # pyupgrade
   "B",   # flake8-bugbear
   "C4",  # flake8-comprehensions
-  "SIM", # flake8-simplify
-  "RUF", # ruff-specific rules
-  "TID", # flake8-tidy-imports
   "D",   # pydocstyle
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "G",   # flake8-logging-format
+  "I",   # isort
+  "LOG", # flake8-logging
+  "N",   # pep8-naming
+  "PIE", # flake8-pie
+  "PT",  # flake8-pytest-style
+  "RET", # flake8-return
+  "RUF", # ruff-specific rules
+  "SIM", # flake8-simplify
+  "TID", # flake8-tidy-imports
+  "UP",  # pyupgrade
+  "W",   # pycodestyle warnings
 ]
 
 [tool.ruff.lint.pydocstyle]

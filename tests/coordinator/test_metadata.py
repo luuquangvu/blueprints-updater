@@ -228,7 +228,7 @@ def test_ensure_source_url_prioritizes_local(coordinator):
 
 
 @pytest.mark.parametrize(
-    "variant, input_content, expected_output",
+    ("variant", "input_content", "expected_output"),
     [
         ("standard", "blueprint:\n  name: Test", "blueprint:\n  name: Test"),
         ("BOM", "\ufeffblueprint:\n  name: Test", "blueprint:\n  name: Test"),

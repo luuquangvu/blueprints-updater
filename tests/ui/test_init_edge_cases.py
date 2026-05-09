@@ -25,7 +25,6 @@ from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoor
 
 async def _async_none(*args, **kwargs) -> None:
     """Mock async function returning None."""
-    pass
 
 
 async def _async_true(*args, **kwargs) -> bool:

@@ -199,6 +199,6 @@ Distributed under the **MIT License**. See [LICENSE](LICENSE) for more informati
 
 ## Support the Project
 
-If you find this project helpful, any contribution is always appreciated and serves as a meaningful encouragement to help sustain its development.
+If you find this project helpful, your support is truly appreciated and serves as a great motivation to keep improving it. Thank you! ❤️
 
 [![Donate via PayPal](https://img.shields.io/badge/Donate-PayPal-blue.svg?style=for-the-badge&logo=paypal)](https://www.paypal.me/luuquangvu89)
