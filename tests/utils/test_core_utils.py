@@ -136,21 +136,18 @@ def test_retry_async_invalid_args():
         @retry_async(-1, (Exception,))
         async def mock_func_1():
             """Mock mock_func_1."""
-            pass
 
     with pytest.raises(ValueError, match="base_delay must be greater than or equal to 0"):
 
         @retry_async(3, (Exception,), base_delay=-1.0)
         async def mock_func_2():
             """Mock mock_func_2."""
-            pass
 
     with pytest.raises(ValueError, match="exceptions tuple must not be empty"):
 
         @retry_async(3, ())
         async def mock_func_3():
             """Mock mock_func_3."""
-            pass
 
     with pytest.raises(TypeError, match="exceptions must be a tuple of Exception subclasses"):
         cast(Any, retry_async)(3, [Exception])

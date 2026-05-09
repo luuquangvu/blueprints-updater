@@ -66,7 +66,7 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
 
         async def check_during_validation(*args, **kwargs):
             assert mock_hub._blueprints["test.yaml"] != original_bp
-            return None
+            return
 
         mock_validate.side_effect = check_during_validation
 

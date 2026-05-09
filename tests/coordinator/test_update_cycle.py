@@ -1155,7 +1155,7 @@ async def test_async_update_blueprint_304_auto_update(coordinator):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "cdn_config, expect_cdn",
+    ("cdn_config", "expect_cdn"),
     [
         (None, True),
         (True, True),
@@ -1255,7 +1255,7 @@ async def test_async_update_blueprint_failure_paths(coordinator, error_case):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "error_type, response_text, side_effect, expected_error",
+    ("error_type", "response_text", "side_effect", "expected_error"),
     [
         ("empty_content", "", None, "empty_content|"),
         ("yaml_syntax_error", "}invalid yaml: {\n", None, "yaml_syntax_error"),
@@ -1480,7 +1480,8 @@ async def test_async_update_blueprint_blocks_special_use_tld_home_arpa(coordinat
         await coordinator._async_update_blueprint_in_place(AsyncMock(), path, info, [], set())
 
         last_error = coordinator.data[path].get("last_error")
-        assert last_error and last_error.startswith("unsafe_url|")
+        assert last_error
+        assert last_error.startswith("unsafe_url|")
 
         mock_logger.warning.assert_called()
         warning_args = mock_logger.warning.call_args.args
@@ -1516,7 +1517,8 @@ async def test_async_update_blueprint_blocks_special_use_tld_local(coordinator, 
         await coordinator._async_update_blueprint_in_place(AsyncMock(), path, info, [], set())
 
         last_error = coordinator.data[path].get("last_error")
-        assert last_error and last_error.startswith("unsafe_url|")
+        assert last_error
+        assert last_error.startswith("unsafe_url|")
 
         mock_logger.warning.assert_called()
         warning_args = mock_logger.warning.call_args.args

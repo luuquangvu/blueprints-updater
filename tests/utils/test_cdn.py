@@ -30,7 +30,7 @@ def coordinator(hass):
 
 
 @pytest.mark.parametrize(
-    "source_url,expected_cdn_url",
+    ("source_url", "expected_cdn_url"),
     [
         (
             "https://raw.githubusercontent.com/user/repo/main/path/file.yaml",

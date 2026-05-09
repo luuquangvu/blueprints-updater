@@ -3430,7 +3430,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             for root, _, files in os.walk(domain_path):
                 for file in files:
-                    if not (file.endswith(".yaml") or file.endswith(".yml")):
+                    if not (file.endswith((".yaml", ".yml"))):
                         continue
 
                     full_path = os.path.join(root, file)

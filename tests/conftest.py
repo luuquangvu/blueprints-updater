@@ -119,4 +119,4 @@ def mock_getaddrinfo(request, monkeypatch):
         return results
 
     monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
-    yield
+    return

@@ -199,6 +199,6 @@ Dự án được phát hành dưới **Giấy phép MIT**. Xem tệp [LICENSE](
 
 ## Hỗ trợ dự án
 
-Nếu bạn thấy dự án này hữu ích, bất kỳ sự đóng góp nào cũng đều được trân trọng và là nguồn động viên ý nghĩa giúp duy trì sự phát triển của dự án.
+Nếu thấy dự án này hữu ích, sự ủng hộ của bạn là nguồn động lực lớn để mình tiếp tục hoàn thiện nó tốt hơn nữa. Cảm ơn bạn! ❤️
 
 [![Donate via PayPal](https://img.shields.io/badge/Ủng%20hộ-PayPal-blue.svg?style=for-the-badge&logo=paypal)](https://www.paypal.me/luuquangvu89)
