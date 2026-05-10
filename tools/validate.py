@@ -55,9 +55,9 @@ def run_pipeline() -> None:
         subprocess.run(["npx", "prettier", "--log-level", "warn", "--write", "."], check=True)
         print("STEP_OK: npx prettier --log-level warn --write .", flush=True)
 
-        print("STEP_START: uv run pytest", flush=True)
-        subprocess.run(["uv", "run", "pytest"], check=True)
-        print("STEP_OK: uv run pytest", flush=True)
+        print("STEP_START: uv run pytest --quiet", flush=True)
+        subprocess.run(["uv", "run", "pytest", "--quiet"], check=True)
+        print("STEP_OK: uv run pytest --quiet", flush=True)
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         ret_code = getattr(e, "returncode", 1)

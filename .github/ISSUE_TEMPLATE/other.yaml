@@ -1,0 +1,59 @@
+name: "Non-standard / Other"
+description: Use this ONLY if your issue does not fit into Bug Report or Feature Request.
+labels: ["uncategorized"]
+title: "[Other]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!NOTE]
+        > **Thank you for reaching out.**
+        > Use this template only for things that truly don't fit into a Bug Report or Feature Request (e.g., documentation gaps, complex questions, performance observations).
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have searched existing [issues](https://github.com/luuquangvu/blueprints-updater/issues?q=is%3Aissue) to ensure this hasn't been reported or requested before.
+          required: true
+        - label: I have updated to the [latest version](https://github.com/luuquangvu/blueprints-updater/releases/latest).
+          required: true
+        - label: I have read the [documentation](https://github.com/luuquangvu/blueprints-updater#readme).
+          required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Issue Category
+      description: What kind of issue is this?
+      options:
+        - Documentation Gap
+        - Question / Discussion
+        - Performance Observation
+        - Security Concern (Non-critical)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Detailed Description
+      description: Provide a clear and concise description of the issue.
+      placeholder: |
+        Please explain what you are encountering or what you would like to discuss.
+    validations:
+      required: true
+  - type: textarea
+    id: steps_taken
+    attributes:
+      label: Steps Taken So Far
+      description: What have you tried to resolve or investigate this?
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Info
+      description: Relevant versions (Home Assistant, Blueprints Updater, OS, etc.) if applicable.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Add any other context, screenshots, or links here.
