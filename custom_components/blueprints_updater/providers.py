@@ -36,6 +36,24 @@ def _normalize_hostname(hostname: str | None) -> str:
     return hostname[4:] if hostname.startswith("www.") else hostname
 
 
+def _replace_path_segment(url: str, raw_marker: str, from_seg: str, to_seg: str) -> str:
+    """Helper to replace a specific path segment for raw URL normalization."""
+    parsed = urlparse(url)
+    if raw_marker in parsed.path:
+        return url
+
+    path_parts = parsed.path.strip("/").split("/")
+    if len(path_parts) < 4:
+        return url
+
+    if from_seg in path_parts:
+        idx = path_parts.index(from_seg)
+        path_parts[idx] = to_seg
+        return urlunparse(parsed._replace(path="/" + "/".join(path_parts)))
+
+    return url
+
+
 class SourceProvider(ABC):
     """Abstract base class for blueprint source providers."""
 
@@ -271,7 +289,7 @@ class HAForumProvider(SourceProvider):
                 pass
 
         parsed = urlparse(url)
-        hostname = parsed.hostname.lower() if parsed.hostname else "community.home-assistant.io"
+        hostname = parsed.hostname.lower() if parsed.hostname else DOMAIN_HA_FORUM
         match = RE_FORUM_TOPIC_ID.search(parsed.path)
         topic_id = match.group(1) if match else "topic"
         return {"author": hostname, "name": topic_id}
@@ -323,21 +341,7 @@ class GitLabProvider(SourceProvider):
 
     def normalize_url(self, url: str) -> str:
         """Normalize GitLab URL to raw endpoint."""
-        parsed = urlparse(url)
-        if "/-/raw/" in parsed.path:
-            return url
-
-        path_parts = parsed.path.strip("/").split("/")
-        if len(path_parts) < 4:
-            return url
-
-        if "-" in path_parts:
-            idx = path_parts.index("-")
-            if idx + 1 < len(path_parts) and path_parts[idx + 1] == "blob":
-                path_parts[idx + 1] = "raw"
-                return urlunparse(parsed._replace(path="/" + "/".join(path_parts)))
-
-        return url
+        return _replace_path_segment(url, "/-/raw/", "blob", "raw")
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from GitLab URL (Matching HA Generic Logic)."""
@@ -365,20 +369,7 @@ class CodebergProvider(SourceProvider):
 
     def normalize_url(self, url: str) -> str:
         """Normalize Codeberg URL to raw endpoint."""
-        parsed = urlparse(url)
-        if "/raw/" in parsed.path:
-            return url
-
-        path_parts = parsed.path.strip("/").split("/")
-        if len(path_parts) < 4:
-            return url
-
-        if "src" in path_parts:
-            idx = path_parts.index("src")
-            path_parts[idx] = "raw"
-            return urlunparse(parsed._replace(path="/" + "/".join(path_parts)))
-
-        return url
+        return _replace_path_segment(url, "/raw/", "src", "raw")
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from Codeberg URL (Matching HA Generic Logic)."""
@@ -406,20 +397,7 @@ class BitbucketProvider(SourceProvider):
 
     def normalize_url(self, url: str) -> str:
         """Normalize Bitbucket URL to raw endpoint."""
-        parsed = urlparse(url)
-        if "/raw/" in parsed.path:
-            return url
-
-        path_parts = parsed.path.strip("/").split("/")
-        if len(path_parts) < 4:
-            return url
-
-        if "src" in path_parts:
-            idx = path_parts.index("src")
-            path_parts[idx] = "raw"
-            return urlunparse(parsed._replace(path="/" + "/".join(path_parts)))
-
-        return url
+        return _replace_path_segment(url, "/raw/", "src", "raw")
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from Bitbucket URL (Matching HA Generic Logic)."""

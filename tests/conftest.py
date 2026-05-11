@@ -29,6 +29,13 @@ def mock_storage():
         yield mock_store
 
 
+@pytest.fixture(autouse=True)
+def mock_makedirs():
+    """Mock os.makedirs for all tests."""
+    with patch("custom_components.blueprints_updater.coordinator.os.makedirs") as mock:
+        yield mock
+
+
 @pytest.fixture
 def _mock_hass():
     """Mock HomeAssistant fixture for unit tests."""

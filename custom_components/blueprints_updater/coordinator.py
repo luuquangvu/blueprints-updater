@@ -495,7 +495,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "remote_content": None,
                 "last_error": None,
                 "etag": None if self._first_update_done else persisted.get("etag"),
-                "last_modified": None
+                "last_modified": self.data.get(path, {}).get("last_modified")
                 if self._first_update_done
                 else persisted.get("last_modified"),
                 "persisted_source_url": persisted.get("source_url"),
@@ -543,6 +543,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "remote_content": prev.get("remote_content"),
                         "last_error": next_error,
                         "etag": prev.get("etag"),
+                        "last_modified": prev.get("last_modified"),
                         "update_blocking_reason": prev.get("update_blocking_reason")
                         if is_updatable
                         else None,
@@ -1166,13 +1167,32 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         rel_path = f"{domain}/{author}/{name}.yaml"
         full_path = self.hass.config.path(BLUEPRINTS_DATA_DIR, rel_path)
 
-        if full_path in self.data and self.data[full_path].get("source_url") != canonical_url:
+        existing_url = None
+        if full_path in self.data:
+            existing_url = self.data[full_path].get("source_url")
+        elif os.path.exists(full_path):
+            try:
+                with open(full_path, encoding="utf-8") as f:
+                    content_on_disk = f.read()
+                parsed_disk = yaml_util.parse_yaml(content_on_disk)
+                if isinstance(parsed_disk, dict):
+                    existing_url = parsed_disk.get("blueprint", {}).get("source_url")
+            except Exception:
+                pass
+
+        if existing_url and existing_url != canonical_url:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="import_path_conflict",
-                translation_placeholders={
-                    "existing_url": redact_url(self.data[full_path].get("source_url", "unknown"))
-                },
+                translation_placeholders={"existing_url": redact_url(existing_url)},
+            )
+
+        if validation_error := self._validate_blueprint(parsed, canonical_url, domain):
+            error_key = validation_error.split("|")[0]
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=error_key,
+                translation_placeholders={"error": validation_error.split("|")[-1]},
             )
 
         await self.async_install_blueprint(
@@ -1304,6 +1324,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             def _save_file(file_path: str, content: str, max_bak: int) -> None:
                 """Local helper for _save_file."""
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 tmp_path = f"{file_path}.tmp"
 
                 with open(tmp_path, "w", encoding="utf-8") as f:

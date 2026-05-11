@@ -135,7 +135,7 @@
       "message": "Il file importato non è un blueprint YAML valido."
     },
     "import_path_conflict": {
-      "message": "Un blueprint con questo nome esiste già da una fonte diversa ({existing_url}). Rimuovilo prima để tránh xung đột."
+      "message": "Un blueprint con questo nome esiste già da una fonte diversa ({existing_url}). Rimuovilo prima per evitare conflitti."
     }
   },
   "common": {
