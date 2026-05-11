@@ -133,3 +133,18 @@ def test_git_normalization_robustness():
         bb.normalize_url("https://bitbucket.org/user/repo/notsrc/master/bp.yaml")
         == "https://bitbucket.org/user/repo/notsrc/master/bp.yaml"
     )
+
+
+def test_gist_metadata_normalization():
+    """Verify that GistProvider handles /raw suffix when extracting metadata."""
+    provider = GistProvider()
+
+    url = "https://gist.github.com/author/gist_id"
+    metadata = provider.get_metadata(url)
+    assert metadata["author"] == "author"
+    assert metadata["name"] == "gist_id"
+
+    normalized_url = "https://gist.github.com/author/gist_id/raw"
+    metadata_raw = provider.get_metadata(normalized_url)
+    assert metadata_raw["author"] == "author"
+    assert metadata_raw["name"] == "gist_id"

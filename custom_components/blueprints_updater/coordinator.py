@@ -1192,6 +1192,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     translation_key="import_path_conflict",
                     translation_placeholders={"existing_url": redact_url(existing_url)},
                 )
+        elif os.path.exists(full_path):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="import_path_conflict",
+                translation_placeholders={"existing_url": redact_url(full_path)},
+            )
 
         if validation_error := self._validate_blueprint(parsed, canonical_url, domain):
             error_key = validation_error.split("|")[0]
@@ -2425,7 +2431,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 remote_content, new_etag, new_last_modified = await self._async_fetch_content(
                     session, cdn_url, etag=etag, last_modified=last_modified, force=force
                 )
-                if remote_content or (remote_content is None and new_etag is not None):
+                if remote_content or (
+                    remote_content is None
+                    and (new_etag is not None or new_last_modified is not None)
+                ):
                     return remote_content, new_etag, new_last_modified
             except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
                 _LOGGER.warning(
