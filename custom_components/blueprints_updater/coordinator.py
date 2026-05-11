@@ -22,7 +22,6 @@ from urllib.parse import urlparse
 import httpx
 import orjson
 import voluptuous as vol
-import yaml
 from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.automation.config import AUTOMATION_BLUEPRINT_SCHEMA
 from homeassistant.components.automation.config import (
@@ -606,7 +605,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         try:
             content_hash = self._hash_content(content, source_url)
-        except (ValueError, TypeError, yaml.YAMLError) as err:
+        except (ValueError, TypeError, HomeAssistantError) as err:
             _LOGGER.debug("Semantic comparison failed: %s", err)
             return False
 
@@ -1126,27 +1125,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 translation_placeholders={"error": str(err)},
             ) from err
 
-        metadata = provider.get_metadata(canonical_url, content=content)
+        metadata = provider.get_metadata(canonical_url, content=response.text)
         author = metadata["author"]
         name = metadata["name"]
 
-        if provider.provider_type == SourceProviderType.HA_FORUM:
-            try:
-                data = response.json()
-                post_stream = data.get("post_stream", {})
-                posts = post_stream.get("posts", [])
-                if posts and isinstance(posts[0], dict):
-                    author = posts[0].get("username", "forum_user")
-            except Exception:
-                pass
-
         try:
-            parsed = yaml.safe_load(content)
+            parsed = yaml_util.parse_yaml(content)
+            parsed_data = parsed if isinstance(parsed, dict) else None
             functional_domain = self._get_functional_domain(
-                "imported.yaml", content=content, parsed_data=parsed
+                "imported.yaml", content=content, parsed_data=parsed_data
             )
             domain = functional_domain
-        except Exception as err:
+        except HomeAssistantError as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="invalid_yaml",
@@ -3273,7 +3263,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         try:
             return yaml_util.dump(target_data)
-        except (yaml.YAMLError, TypeError, ValueError) as err:
+        except (HomeAssistantError, TypeError, ValueError) as err:
             _LOGGER.warning("YAML canonicalization failed for %s: %s", redact_url(source_url), err)
             return BlueprintUpdateCoordinator._normalize_content(content)
 

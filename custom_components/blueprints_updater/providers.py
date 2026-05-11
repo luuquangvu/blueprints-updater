@@ -1,10 +1,16 @@
 """Source providers for Blueprints Updater."""
 
+import hashlib
 import html
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlparse, urlunparse
+
+import orjson
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util import slugify
+from homeassistant.util import yaml as yaml_util
 
 from .const import (
     DOMAIN_BITBUCKET,
@@ -242,18 +248,26 @@ class HAForumProvider(SourceProvider):
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from Forum URL, prioritizing username/slug from topic JSON."""
         if content:
-            import json
-
             try:
-                data = json.loads(content)
+                data = orjson.loads(content)
                 if isinstance(data, dict) and "post_stream" in data:
                     posts = data["post_stream"].get("posts", [])
-                    if posts:
-                        username = posts[0].get("username")
+                    target_post = posts[0] if posts else None
+
+                    for post in posts:
+                        if not isinstance(post, dict):
+                            continue
+                        cooked = post.get("cooked", "")
+                        if "blueprint:" in cooked:
+                            target_post = post
+                            break
+
+                    if target_post and isinstance(target_post, dict):
+                        username = target_post.get("username")
                         slug = data.get("slug")
                         if username and slug:
                             return {"author": username, "name": slug}
-            except Exception:
+            except (orjson.JSONDecodeError, KeyError, TypeError):
                 pass
 
         parsed = urlparse(url)
@@ -444,24 +458,18 @@ class GenericProvider(SourceProvider):
         if last_part.lower().endswith((".yaml", ".yml")):
             name = last_part.removesuffix(".yaml").removesuffix(".yml")
         elif content:
-            import yaml
-
             try:
-                data = yaml.safe_load(content)
+                data = yaml_util.parse_yaml(content)
                 if isinstance(data, dict) and "blueprint" in data:
-                    from homeassistant.util import slugify
-
                     name = slugify(data["blueprint"].get("name", ""))
                 else:
                     name = ""
-            except Exception:
+            except (HomeAssistantError, AttributeError):
                 name = ""
         else:
             name = ""
 
         if not name:
-            import hashlib
-
             short_sha = hashlib.sha256(url.encode()).hexdigest()[:7]
             name = f"blueprint_{short_sha}"
 
