@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 import httpx
 import orjson
 import voluptuous as vol
+import yaml
 from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.automation.config import AUTOMATION_BLUEPRINT_SCHEMA
 from homeassistant.components.automation.config import (
@@ -3299,7 +3300,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         try:
             return yaml_util.dump(target_data)
-        except (HomeAssistantError, TypeError, ValueError) as err:
+        except (HomeAssistantError, yaml.YAMLError, TypeError, ValueError) as err:
             _LOGGER.warning("YAML canonicalization failed for %s: %s", redact_url(source_url), err)
             return BlueprintUpdateCoordinator._normalize_content(content)
 

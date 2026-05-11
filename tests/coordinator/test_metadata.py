@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, mock_open, patch
 
 import pytest
 import yaml
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import yaml as yaml_util
 
 import custom_components.blueprints_updater.coordinator as coord_mod
@@ -195,7 +194,7 @@ def test_ensure_source_url_yaml_dump_failure_falls_back_to_normalize_content(
         return sentinel_result
 
     def _failing_dump(*args, **kwargs):
-        raise HomeAssistantError("simulated dump failure")
+        raise yaml.YAMLError("simulated dump failure")
 
     monkeypatch.setattr(coord_mod.yaml_util, "dump", _failing_dump)
     monkeypatch.setattr(BlueprintUpdateCoordinator, "_normalize_content", _fake_normalize_content)
