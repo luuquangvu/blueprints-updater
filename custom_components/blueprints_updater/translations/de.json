@@ -78,6 +78,20 @@
           "description": "Erstellen Sie nummerierte Backup-Dateien für alle aktualisierten Blueprints, bevor diese überschrieben werden."
         }
       }
+    },
+    "import_blueprint": {
+      "name": "Blueprint importieren",
+      "description": "Lädt einen Blueprint von einer URL herunter und installiert ihn.",
+      "fields": {
+        "url": {
+          "name": "Blueprint-URL",
+          "description": "Die Raw-URL der Blueprint-YAML-Datei."
+        },
+        "confirm": {
+          "name": "Externe Quelle bestätigen",
+          "description": "Erforderlich, um den Import aus externen/unverifizierten Quellen zu bestätigen."
+        }
+      }
     }
   },
   "exceptions": {
@@ -101,6 +115,24 @@
     },
     "system_error": {
       "message": "Systemfehler bei der Wiederherstellung: {error}"
+    },
+    "missing_url": {
+      "message": "URL-Parameter fehlt."
+    },
+    "no_coordinator": {
+      "message": "Kein aktiver Coordinator gefunden. Bitte überprüfen Sie die Integrationseinrichtung."
+    },
+    "confirmation_required": {
+      "message": "Der Import aus externen Quellen erfordert eine ausdrückliche Bestätigung. Bitte aktivieren Sie das Kontrollkästchen 'Bestätigen'."
+    },
+    "unsupported_source": {
+      "message": "Nicht unterstützte Quelle. Nur GitHub, GitLab, Codeberg, Bitbucket und direkte YAML-Links werden unterstützt."
+    },
+    "invalid_content_type": {
+      "message": "Ungültiger Inhaltstyp: {content_type}. Erwartet wurde text/plain oder YAML."
+    },
+    "invalid_yaml": {
+      "message": "Die importierte Datei ist kein gültiger YAML-Blueprint."
     }
   },
   "common": {

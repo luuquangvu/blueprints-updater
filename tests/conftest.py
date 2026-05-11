@@ -78,6 +78,8 @@ def mock_getaddrinfo(request, monkeypatch):
         if host is None:
             return real_getaddrinfo(host, port, family, type, proto, flags)
 
+        if isinstance(host, bytes):
+            host = host.decode("utf-8")
         hostname = host.rstrip(".").lower()
         is_local = False
         try:

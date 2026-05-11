@@ -74,11 +74,11 @@ async def test_auto_update_guard_blocks_when_risks_present(coordinator: Blueprin
             blueprint_path,
             coordinator.data[blueprint_path],
             new_content,
-            "new_hash",
-            "new_etag",
             risks,
             [],
             set(),
+            remote_hash="new_hash",
+            new_etag="new_etag",
         )
 
     assert result is True
@@ -124,11 +124,11 @@ async def test_auto_update_proceeds_when_risks_and_no_consumers(
             blueprint_path,
             coordinator.data[blueprint_path],
             new_content,
-            "new_hash",
-            "new_etag",
             risks,
             [],
             set(),
+            remote_hash="new_hash",
+            new_etag="new_etag",
         )
 
     assert result is True
@@ -191,11 +191,11 @@ async def test_auto_update_guard_blocks_on_system_error(coordinator: BlueprintUp
             blueprint_path,
             coordinator.data[blueprint_path],
             "blueprint: name: New",
-            "new_hash",
-            "new_etag",
             risks,
             [],
             set(),
+            remote_hash="new_hash",
+            new_etag="new_etag",
         )
 
     assert result is True

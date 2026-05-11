@@ -19,7 +19,11 @@ from custom_components.blueprints_updater import (
     async_setup_entry,
     async_unload_entry,
 )
-from custom_components.blueprints_updater.const import ALLOWED_RELOAD_DOMAINS, DOMAIN
+from custom_components.blueprints_updater.const import (
+    ALLOWED_RELOAD_DOMAINS,
+    DOMAIN,
+    IntegrationService,
+)
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
@@ -312,7 +316,7 @@ async def test_service_registration_rollback(hass: HomeAssistant) -> None:
             _async_register_services(hass)
 
         assert mock_register.call_count == 2
-        mock_remove.assert_called_once_with(DOMAIN, "reload")
+        mock_remove.assert_called_once_with(DOMAIN, IntegrationService.IMPORT_BLUEPRINT)
 
 
 @pytest.mark.asyncio

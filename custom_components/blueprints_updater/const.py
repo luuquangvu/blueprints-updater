@@ -30,12 +30,15 @@ MAX_UPDATE_INTERVAL_HOURS = 720
 
 STORAGE_VERSION = 1
 STORAGE_KEY_DATA = f"{DOMAIN}_data"
-METADATA_STORAGE_FIELDS = ("etag", "remote_hash", "source_url")
+METADATA_STORAGE_FIELDS = ("etag", "remote_hash", "source_url", "last_modified")
 
 DOMAIN_GITHUB = "github.com"
 DOMAIN_GITHUB_RAW = "raw.githubusercontent.com"
 DOMAIN_GIST = "gist.github.com"
 DOMAIN_HA_FORUM = "community.home-assistant.io"
+DOMAIN_GITLAB = "gitlab.com"
+DOMAIN_CODEBERG = "codeberg.org"
+DOMAIN_BITBUCKET = "bitbucket.org"
 DOMAIN_JSDELIVR = "cdn.jsdelivr.net"
 
 RE_FORUM_TOPIC_ID = re.compile(r"/t/(?:[^/]+/)?(\d+)")
@@ -62,12 +65,25 @@ SPECIAL_USE_TLDS = {
 }
 
 
+class SourceProviderType(StrEnum):
+    """Types of blueprint source providers."""
+
+    GITHUB = "github"
+    GIST = "gist"
+    HA_FORUM = "ha_forum"
+    GITLAB = "gitlab"
+    CODEBERG = "codeberg"
+    BITBUCKET = "bitbucket"
+    GENERIC = "generic"
+
+
 class IntegrationService(StrEnum):
     """Services provided by the integration."""
 
     RELOAD = "reload"
     RESTORE_BLUEPRINT = "restore_blueprint"
     UPDATE_ALL = "update_all"
+    IMPORT_BLUEPRINT = "import_blueprint"
 
 
 class BlueprintRiskType(StrEnum):

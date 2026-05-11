@@ -78,6 +78,20 @@
           "description": "Créez des fichiers de sauvegarde numérotés pour tous les blueprints mis à jour avant de les écraser."
         }
       }
+    },
+    "import_blueprint": {
+      "name": "Importer un Blueprint",
+      "description": "Télécharge et installe un blueprint à partir d'une URL.",
+      "fields": {
+        "url": {
+          "name": "URL du Blueprint",
+          "description": "L'URL brute du fichier YAML du blueprint."
+        },
+        "confirm": {
+          "name": "Confirmer la source externe",
+          "description": "Requis pour confirmer l'importation à partir de sources externes/non vérifiées."
+        }
+      }
     }
   },
   "exceptions": {
@@ -101,6 +115,24 @@
     },
     "system_error": {
       "message": "Erreur système lors de la restauration : {error}"
+    },
+    "missing_url": {
+      "message": "Paramètre URL manquant."
+    },
+    "no_coordinator": {
+      "message": "Aucun coordinateur actif trouvé. Veuillez vérifier la configuration de l'intégration."
+    },
+    "confirmation_required": {
+      "message": "L'importation à partir de sources externes nécessite une confirmation explicite. Veuillez cocher la case 'Confirmer'."
+    },
+    "unsupported_source": {
+      "message": "Source non prise en charge. Seuls GitHub, GitLab, Codeberg, Bitbucket et les liens YAML directs sont pris en charge."
+    },
+    "invalid_content_type": {
+      "message": "Type de contenu invalide : {content_type}. text/plain ou YAML attendu."
+    },
+    "invalid_yaml": {
+      "message": "Le fichier importé n'est pas un blueprint YAML valide."
     }
   },
   "common": {

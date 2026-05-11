@@ -31,3 +31,20 @@ update_all:
       default: true
       selector:
         boolean:
+import_blueprint:
+  name: Import Blueprint
+  description: Downloads and installs a blueprint from a URL.
+  fields:
+    url:
+      name: Blueprint URL
+      description: The raw URL of the blueprint YAML file.
+      required: true
+      selector:
+        text:
+    confirm:
+      name: Confirm External Source
+      description: Required to acknowledge importing from external/unverified sources.
+      required: true
+      default: false
+      selector:
+        boolean:

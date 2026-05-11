@@ -37,7 +37,7 @@ from homeassistant.components.script.config import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
@@ -73,6 +73,7 @@ from .const import (
     STORAGE_VERSION,
     BlueprintBlockingReason,
     BlueprintRiskType,
+    SourceProviderType,
 )
 from .providers import registry
 from .utils import (
@@ -493,6 +494,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "remote_content": None,
                 "last_error": None,
                 "etag": None if self._first_update_done else persisted.get("etag"),
+                "last_modified": None
+                if self._first_update_done
+                else persisted.get("last_modified"),
                 "persisted_source_url": persisted.get("source_url"),
             }
         return results
@@ -880,6 +884,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 existing |= {
                     "remote_hash": info.get("remote_hash"),
                     "etag": info.get("etag"),
+                    "last_modified": info.get("last_modified"),
                     "source_url": info.get("source_url"),
                 }
             candidate_metadata[relative_path] = existing
@@ -1070,6 +1075,95 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if self.hass.services.has_service(domain, "reload"):
                 await self.hass.services.async_call(domain, "reload")
 
+    async def async_import_blueprint(self, url: str, confirm: bool = False) -> None:
+        """Import a new blueprint from a URL."""
+        if not confirm:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="confirmation_required",
+            )
+
+        if not await self._is_safe_url(url):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="unsafe_url",
+                translation_placeholders={"url": redact_url(url)},
+            )
+
+        provider = registry.get_provider(url)
+        if not provider:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="unsupported_source",
+            )
+
+        canonical_url = provider.normalize_url(url)
+
+        session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
+        try:
+            response = await self._execute_with_redirect_guard(session, canonical_url, {})
+
+            if provider.provider_type == SourceProviderType.GENERIC:
+                content_type = response.headers.get("Content-Type", "").lower()
+                allowed = ["text/plain", "application/x-yaml", "text/yaml", "application/yaml"]
+                if not any(t in content_type for t in allowed):
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="invalid_content_type",
+                        translation_placeholders={"content_type": content_type},
+                    )
+
+            content = await self._parse_provider_response(response, canonical_url)
+            if not content:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="empty_content",
+                )
+        except (httpx.HTTPError, HomeAssistantError) as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="fetch_error",
+                translation_placeholders={"error": str(err)},
+            ) from err
+
+        metadata = provider.get_metadata(canonical_url, content=content)
+        author = metadata["author"]
+        name = metadata["name"]
+
+        if provider.provider_type == SourceProviderType.HA_FORUM:
+            try:
+                data = response.json()
+                post_stream = data.get("post_stream", {})
+                posts = post_stream.get("posts", [])
+                if posts and isinstance(posts[0], dict):
+                    author = posts[0].get("username", "forum_user")
+            except Exception:
+                pass
+
+        try:
+            parsed = yaml.safe_load(content)
+            functional_domain = self._get_functional_domain(
+                "imported.yaml", content=content, parsed_data=parsed
+            )
+            domain = functional_domain
+        except Exception as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_yaml",
+            ) from err
+
+        rel_path = f"{domain}/{author}/{name}.yaml"
+        full_path = self.hass.config.path(BLUEPRINTS_DATA_DIR, rel_path)
+
+        await self.async_install_blueprint(
+            full_path,
+            content,
+            source_url=canonical_url,
+            etag=response.headers.get("ETag"),
+        )
+
+        await self.async_request_refresh()
+
     async def async_fetch_blueprint(self, path: str, force: bool = False) -> None:
         """Fetch content for a single blueprint if needed.
 
@@ -1142,6 +1236,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         backup: bool = True,
         remote_hash: str | None = None,
         etag: str | None = None,
+        last_modified: str | None = None,
         is_auto_update: bool = False,
         source_url: str | None = None,
     ) -> None:
@@ -1164,6 +1259,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             backup: Whether to create backup files of the old version.
             remote_hash: Optional pre-computed hash of the remote content.
             etag: Optional ETag associated with the remote content.
+            last_modified: Optional Last-Modified associated with the remote content.
             is_auto_update: Whether this is an automatic update.
             source_url: Optional source URL for event reporting.
 
@@ -1212,7 +1308,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             bp_block = self._get_blueprint_block(path, parsed_data=parsed) if parsed else None
 
-            metadata = self._resolve_blueprint_metadata(path, bp_block, source_url, real_path)
+            metadata = self._resolve_blueprint_metadata(
+                path, bp_block, real_path, source_url=source_url
+            )
             current = metadata["current"]
             blueprint_name = metadata["name"]
             final_source_url = metadata["source_url"]
@@ -1266,6 +1364,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 or self._hash_content(final_content, already_normalized=True)
             )
             final_etag = etag if etag is not None else (current.get("etag") if current else None)
+            final_last_modified = (
+                last_modified
+                if last_modified is not None
+                else (current.get("last_modified") if current else None)
+            )
 
             if self.data and path in self.data:
                 self.data[path].update(
@@ -1284,6 +1387,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "breaking_risks": [],
                         "update_blocking_reason": None,
                         "etag": final_etag,
+                        "last_modified": final_last_modified,
                     }
                 )
                 self.async_set_updated_data(self.data)
@@ -1309,8 +1413,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self,
         path: str,
         bp_block: dict[str, Any] | None,
-        source_url: str | None,
         real_path: str,
+        source_url: str | None = None,
     ) -> dict[str, Any]:
         """Resolve blueprint metadata merging new content with cached data.
 
@@ -1363,11 +1467,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         blueprint_name: str,
         domain: str,
         relative_path: str,
-        source_url: str | None,
-        previous_hash: str | None,
         new_hash: str,
         is_auto_update: bool,
         had_breaking_risks: bool,
+        source_url: str | None = None,
+        previous_hash: str | None = None,
     ) -> None:
         """Fire a standardized update event for external consumers."""
         payload: BlueprintUpdateEventPayload = {
@@ -2081,12 +2185,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
         cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
-        remote_content, _ = await self._async_fetch_with_cdn_fallback(
+        remote_content, _, _ = await self._async_fetch_with_cdn_fallback(
             session,
             path,
             normalized_url,
             cdn_url,
             stored_etag=None,
+            stored_last_modified=None,
             stored_remote_hash=None,
             force=True,
         )
@@ -2237,9 +2342,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         normalized_url: str,
         cdn_url: str | None,
         stored_etag: str | None,
+        stored_last_modified: str | None,
         stored_remote_hash: str | None,
         force: bool,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, str | None]:
         """Fetch remote content from CDN with fallback to original source.
 
         Args:
@@ -2248,23 +2354,25 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             normalized_url: The normalized raw GitHub URL.
             cdn_url: The jsDelivr CDN URL, if applicable.
             stored_etag: Previously stored ETag.
+            stored_last_modified: Previously stored Last-Modified date.
             stored_remote_hash: Previously stored content hash.
-            force: If True, ignore ETag and force a full download.
+            force: If True, ignore ETag/Last-Modified and force a full download.
 
         Returns:
-            A tuple of (remote_content, new_etag).
+            A tuple of (remote_content, new_etag, new_last_modified).
 
         """
         etag = stored_etag if (stored_remote_hash and not force) else None
+        last_modified = stored_last_modified if (stored_remote_hash and not force) else None
 
         if cdn_url:
             try:
                 _LOGGER.debug("Fetching blueprint via CDN: %s", redact_url(cdn_url))
-                remote_content, new_etag = await self._async_fetch_content(
-                    session, cdn_url, etag=etag, force=force
+                remote_content, new_etag, new_last_modified = await self._async_fetch_content(
+                    session, cdn_url, etag=etag, last_modified=last_modified, force=force
                 )
                 if remote_content or (remote_content is None and new_etag is not None):
-                    return remote_content, new_etag
+                    return remote_content, new_etag, new_last_modified
             except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
                 _LOGGER.warning(
                     "CDN fetch failed for %s; falling back to original source: %s",
@@ -2272,7 +2380,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     sanitize_error_detail(str(err)),
                 )
 
-        return await self._async_fetch_content(session, normalized_url, etag=etag, force=force)
+        return await self._async_fetch_content(
+            session, normalized_url, etag=etag, last_modified=last_modified, force=force
+        )
 
     async def _async_update_blueprint_in_place(
         self,
@@ -2309,22 +2419,24 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
         stored_etag = self.data.get(path, {}).get("etag")
+        stored_last_modified = self.data.get(path, {}).get("last_modified")
         stored_remote_hash = self.data.get(path, {}).get("remote_hash")
 
         try:
-            remote_content, new_etag = await self._async_fetch_with_cdn_fallback(
+            remote_content, new_etag, new_last_modified = await self._async_fetch_with_cdn_fallback(
                 session,
                 path,
                 normalized_url,
                 cdn_url,
                 stored_etag,
+                stored_last_modified,
                 stored_remote_hash,
                 force,
             )
 
             if remote_content is None:
-                remote_content, new_etag = await self._handle_not_modified_case(
-                    session, path, info, normalized_url, new_etag
+                remote_content, new_etag, new_last_modified = await self._handle_not_modified_case(
+                    session, path, info, normalized_url, new_etag, new_last_modified
                 )
         except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
             _LOGGER.warning(
@@ -2347,10 +2459,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 path,
                 info,
                 remote_content,
-                new_etag,
                 source_url,
                 results_to_notify,
                 updated_domains,
+                new_etag=new_etag,
+                new_last_modified=new_last_modified,
             )
         except Exception as err:
             _LOGGER.error(
@@ -2367,8 +2480,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         path: str,
         info: dict[str, Any],
         normalized_url: str,
-        new_etag: str | None,
-    ) -> tuple[str | None, str | None]:
+        new_etag: str | None = None,
+        new_last_modified: str | None = None,
+    ) -> tuple[str | None, str | None, str | None]:
         """Handle the 304 Not Modified case for a blueprint.
 
         Args:
@@ -2377,21 +2491,25 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             info: Current blueprint metadata.
             normalized_url: The URL used to fetch.
             new_etag: The ETag returned (if any).
+            new_last_modified: The Last-Modified returned (if any).
 
         Returns:
-            A tuple of (content, etag). Content is None if still not modified.
+            A tuple of (content, etag, last_modified). Content is None if still not modified.
 
         """
         _LOGGER.debug("[304] '%s' is up to date on server", info["name"])
         if not (self.data and path in self.data):
-            return None, new_etag
+            return None, new_etag, new_last_modified
 
         if new_etag:
             self.data[path]["etag"] = new_etag
 
+        if new_last_modified:
+            self.data[path]["last_modified"] = new_last_modified
+
         remote_hash = self.data[path].get("remote_hash")
         if not remote_hash:
-            return None, new_etag
+            return None, new_etag, new_last_modified
 
         local_hash = info["local_hash"]
         self.data[path]["updatable"] = local_hash != remote_hash
@@ -2408,21 +2526,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 normalized_url,
                 cdn_url,
                 stored_etag=None,
+                stored_last_modified=None,
                 stored_remote_hash=None,
                 force=True,
             )
 
-        return None, new_etag
+        return None, new_etag, new_last_modified
 
     async def _process_blueprint_content(
         self,
         path: str,
         info: dict[str, Any],
         remote_content: str,
-        new_etag: str | None,
         source_url: str,
         results_to_notify: list[str],
         updated_domains: set[str],
+        new_etag: str | None = None,
+        new_last_modified: str | None = None,
     ) -> None:
         """Process and validate newly fetched blueprint content.
 
@@ -2434,6 +2554,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             source_url: Original source URL.
             results_to_notify: List to track auto-updates for notification.
             updated_domains: Set to track domains requiring reload.
+            new_last_modified: Last-Modified from response.
 
         """
         try:
@@ -2471,12 +2592,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 path,
                 info,
                 remote_content,
-                remote_hash,
-                new_etag,
                 risks,
                 results_to_notify,
                 updated_domains,
-                source_url,
+                remote_hash=remote_hash,
+                new_etag=new_etag,
+                new_last_modified=new_last_modified,
+                source_url=source_url,
             )
             if auto_update_handled or (
                 self.data and path in self.data and self.data[path].get("update_blocking_reason")
@@ -2484,7 +2606,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 return
 
         self._update_coordinator_status_data(
-            path, updatable, last_error, remote_hash, remote_content, new_etag, risks
+            path,
+            updatable,
+            remote_content,
+            risks=risks,
+            last_error=last_error,
+            remote_hash=remote_hash,
+            new_etag=new_etag,
+            new_last_modified=new_last_modified,
         )
 
     async def _detect_risks_for_update(
@@ -2578,11 +2707,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         path: str,
         info: dict[str, Any],
         remote_content: str,
-        remote_hash: str | None,
-        new_etag: str | None,
         risks: list[StructuredRisk],
         results_to_notify: list[str],
         updated_domains: set[str],
+        remote_hash: str | None = None,
+        new_etag: str | None = None,
+        new_last_modified: str | None = None,
         source_url: str | None = None,
     ) -> bool:
         """Execute auto-update flow if safe.
@@ -2596,6 +2726,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             risks: Detected risks.
             results_to_notify: Accumulator for notifications.
             updated_domains: Accumulator for service reloads.
+            new_last_modified: New response Last-Modified.
             source_url: Original source URL for event reporting.
 
         Returns:
@@ -2615,7 +2746,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if is_breaking:
             await self._async_handle_auto_update_blocked(
-                path, info, remote_hash, remote_content, new_etag, risks, guard_failed
+                path, info, remote_hash, remote_content, risks, guard_failed, new_etag=new_etag
             )
             return True
 
@@ -2627,6 +2758,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 backup=True,
                 remote_hash=remote_hash,
                 etag=new_etag,
+                last_modified=new_last_modified,
                 is_auto_update=True,
                 source_url=source_url,
             )
@@ -2644,6 +2776,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "invalid_remote_hash": None,
                         "update_blocking_reason": BlueprintBlockingReason.SYSTEM_ERROR,
                         "etag": new_etag,
+                        "last_modified": new_last_modified,
                         "auto_update_last_error": sanitize_error_detail(str(err)),
                     }
                 )
@@ -2655,9 +2788,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         info: dict[str, Any],
         remote_hash: str,
         remote_content: str,
-        new_etag: str | None,
         risks: list[StructuredRisk],
         guard_failed: bool,
+        new_etag: str | None = None,
+        new_last_modified: str | None = None,
     ) -> None:
         """Handle notification and state when auto-update is blocked."""
         _LOGGER.warning(
@@ -2696,6 +2830,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     "invalid_remote_hash": None,
                     "update_blocking_reason": blocking_reason,
                     "etag": new_etag,
+                    "last_modified": new_last_modified,
                 }
             )
 
@@ -2703,11 +2838,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self,
         path: str,
         updatable: bool,
-        last_error: str | None,
-        remote_hash: str | None,
         remote_content: str,
-        new_etag: str | None,
         risks: list[StructuredRisk] | None = None,
+        last_error: str | None = None,
+        remote_hash: str | None = None,
+        new_etag: str | None = None,
+        new_last_modified: str | None = None,
     ) -> None:
         """Update internal data state for a blueprint.
 
@@ -2718,6 +2854,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             remote_hash: Hash of remote content.
             remote_content: Content if updatable.
             new_etag: Associated ETag.
+            new_last_modified: Associated Last-Modified header.
             risks: Optional list of identified breaking risks to store/preserve.
 
         """
@@ -2728,6 +2865,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             update_data: dict[str, Any] = {
                 "last_error": last_error,
                 "etag": new_etag,
+                "last_modified": new_last_modified,
                 "invalid_remote_hash": remote_hash,
                 "remote_hash": None,
                 "remote_content": None,
@@ -2744,6 +2882,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             update_data: dict[str, Any] = {
                 "last_error": last_error,
                 "etag": new_etag,
+                "last_modified": new_last_modified,
                 "invalid_remote_hash": None,
                 "remote_hash": remote_hash,
                 "remote_content": remote_content if updatable else None,
@@ -2798,22 +2937,27 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         session: httpx.AsyncClient,
         url: str,
         etag: str | None = None,
+        last_modified: str | None = None,
         force: bool = False,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, str | None]:
         """Fetch content from a URL.
 
-        Returns (content, etag). Content is None on 304 Not Modified.
+        Returns (content, etag, last_modified). Content is None on 304 Not Modified.
 
         Args:
             session: Async HTTP client.
             url: URL to fetch.
             etag: Optional ETag for conditional GET.
-            force: If True, bypass ETag (even if provided) and force download.
+            last_modified: Optional Last-Modified for conditional GET.
+            force: If True, bypass headers (even if provided) and force download.
 
         """
         headers: dict[str, str] = {}
-        if etag and not force:
-            headers["If-None-Match"] = etag
+        if not force:
+            if etag:
+                headers["If-None-Match"] = etag
+            if last_modified:
+                headers["If-Modified-Since"] = last_modified
 
         await self._apply_request_pacing()
 
@@ -2821,8 +2965,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         response = await self._execute_with_redirect_guard(session, url, headers)
         new_etag = response.headers.get("ETag") or etag
+        new_last_modified = response.headers.get("Last-Modified") or last_modified
         content = await self._parse_provider_response(response, url)
-        return content, new_etag
+        return content, new_etag, new_last_modified
 
     async def _apply_request_pacing(self) -> None:
         """Enforce a random pacing delay between outbound HTTP requests.

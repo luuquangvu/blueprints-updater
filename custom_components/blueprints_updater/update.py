@@ -193,6 +193,11 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         return self.coordinator.is_auto_update_enabled()
 
     @property
+    def provider_type(self) -> str | None:
+        """Return the provider type of the blueprint."""
+        return self.coordinator.data.get(self._path, {}).get("provider_type")
+
+    @property
     def domain(self) -> str:
         """Return the domain of the blueprint (e.g. automation, script)."""
         info = self.coordinator.data.get(self._path, {})
@@ -331,6 +336,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             info = self.coordinator.data[self._path]
             attrs["domain"] = self.domain
             attrs["relative_path"] = self.relative_path
+            if p_type := info.get("provider_type"):
+                attrs["provider_type"] = p_type
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
             if blocking := info.get("update_blocking_reason"):

@@ -78,6 +78,20 @@
           "description": "Maak genummerde back-upbestanden voor alle bijgewerkte blueprints voordat u deze overschrijft."
         }
       }
+    },
+    "import_blueprint": {
+      "name": "Blueprint importeren",
+      "description": "Downloadt en installeert een blueprint via een URL.",
+      "fields": {
+        "url": {
+          "name": "Blueprint-URL",
+          "description": "De ruwe URL van het blueprint YAML-bestand."
+        },
+        "confirm": {
+          "name": "Externe bron bevestigen",
+          "description": "Vereist om het importeren uit externe/niet-geverifieerde bronnen te bevestigen."
+        }
+      }
     }
   },
   "exceptions": {
@@ -101,6 +115,24 @@
     },
     "system_error": {
       "message": "Systeemfout tijdens herstel: {error}"
+    },
+    "missing_url": {
+      "message": "URL-parameter ontbreekt."
+    },
+    "no_coordinator": {
+      "message": "Geen actieve coördinator gevonden. Controleer de integratie-instellingen."
+    },
+    "confirmation_required": {
+      "message": "Importeren uit externe bronnen vereist expliciete bevestiging. Vink het vakje 'Bevestigen' aan."
+    },
+    "unsupported_source": {
+      "message": "Niet-ondersteunde bron. Alleen GitHub, GitLab, Codeberg, Bitbucket en directe YAML-links worden ondersteund."
+    },
+    "invalid_content_type": {
+      "message": "Ongeldig inhoudstype: {content_type}. text/plain of YAML verwacht."
+    },
+    "invalid_yaml": {
+      "message": "Het geïmporteerde bestand is geen geldige YAML-blueprint."
     }
   },
   "common": {

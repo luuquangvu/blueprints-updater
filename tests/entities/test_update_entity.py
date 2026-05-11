@@ -812,7 +812,7 @@ async def test_async_install_bypass_protection(coordinator):
         patch.object(
             coordinator,
             "_async_fetch_content",
-            AsyncMock(return_value=("not_a_blueprint: true", "etag")),
+            AsyncMock(return_value=("not_a_blueprint: true", "etag", None)),
         ),
         patch.object(
             coordinator, "_validate_blueprint", MagicMock(return_value="invalid_blueprint")

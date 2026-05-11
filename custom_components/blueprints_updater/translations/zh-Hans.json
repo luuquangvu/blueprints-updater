@@ -78,6 +78,20 @@
           "description": "在覆盖之前为所有更新的蓝图创建编号的备份文件。"
         }
       }
+    },
+    "import_blueprint": {
+      "name": "导入蓝图",
+      "description": "从 URL 下载并安装蓝图。",
+      "fields": {
+        "url": {
+          "name": "蓝图 URL",
+          "description": "蓝图 YAML 文件的原始 URL。"
+        },
+        "confirm": {
+          "name": "确认外部来源",
+          "description": "确认从外部/未验证的来源导入所需的确认。"
+        }
+      }
     }
   },
   "exceptions": {
@@ -101,6 +115,24 @@
     },
     "system_error": {
       "message": "还原期间发生系统错误：{error}"
+    },
+    "missing_url": {
+      "message": "缺少 URL 参数。"
+    },
+    "no_coordinator": {
+      "message": "未找到活跃的协调器。请检查集成设置。"
+    },
+    "confirmation_required": {
+      "message": "从外部来源导入需要明确确认。请勾选“确认”框。"
+    },
+    "unsupported_source": {
+      "message": "不支持的来源。仅支持 GitHub、GitLab、Codeberg、Bitbucket 和直接 YAML 链接。"
+    },
+    "invalid_content_type": {
+      "message": "无效的内容类型：{content_type}。应为 text/plain 或 YAML。"
+    },
+    "invalid_yaml": {
+      "message": "导入的文件不是有效的 YAML 蓝图。"
     }
   },
   "common": {

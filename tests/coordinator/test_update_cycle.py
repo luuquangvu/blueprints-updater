@@ -22,6 +22,8 @@ from custom_components.blueprints_updater.const import (
     FILTER_MODE_ALL,
     MAX_CONCURRENT_REQUESTS,
     REQUEST_TIMEOUT,
+    RISK_TYPE_TRANSLATIONS,
+    BlueprintRiskType,
 )
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
@@ -219,10 +221,14 @@ async def test_async_update_data_partial_failure(coordinator):
 
     def mock_fetch(session, path, url, cdn_url, *args, **kwargs):
         if url == url1:
-            return (f"blueprint:\n  name: OK\n  domain: automation\n  source_url: {url1}\n", "e1")
+            return (
+                f"blueprint:\n  name: OK\n  domain: automation\n  source_url: {url1}\n",
+                "e1",
+                None,
+            )
         if url == url2:
             raise httpx.RequestError("Failed")
-        return None, None
+        return None, None, None
 
     coordinator._async_fetch_with_cdn_fallback = AsyncMock(side_effect=mock_fetch)
 
@@ -287,7 +293,7 @@ async def test_async_update_data_auto_update(mock_translate, coordinator):
     }
 
     coordinator.async_install_blueprint = AsyncMock()
-    coordinator._async_fetch_with_cdn_fallback = AsyncMock(return_value=(content, "new_etag"))
+    coordinator._async_fetch_with_cdn_fallback = AsyncMock(return_value=(content, "new_etag", None))
 
     with (
         patch.object(
@@ -308,6 +314,7 @@ async def test_async_update_data_auto_update(mock_translate, coordinator):
         backup=True,
         remote_hash=ANY,
         etag="new_etag",
+        last_modified=None,
         is_auto_update=True,
         source_url=url,
     )
@@ -347,8 +354,8 @@ async def test_async_update_data_auto_update_multiple_sorted(mock_translate, coo
 
     def mock_fetch(session, path, url, cdn_url, *args, **kwargs):
         if url == u1:
-            return (c1, "e1")
-        return (c2, "e2") if url == u2 else (None, None)
+            return (c1, "e1", None)
+        return (c2, "e2", None) if url == u2 else (None, None, None)
 
     coordinator.async_install_blueprint = AsyncMock()
     coordinator._async_fetch_with_cdn_fallback = AsyncMock(side_effect=mock_fetch)
@@ -523,10 +530,10 @@ async def test_ghost_update_prevention(coordinator):
             path,
             coordinator.data[path],
             content,
-            "new_etag",
             url,
             results_to_notify,
             updated_domains,
+            new_etag="new_etag",
         )
 
         assert coordinator.data[path]["updatable"] is False
@@ -551,7 +558,7 @@ async def test_yaml_normalization_ignores_comments(coordinator):
 
     new_content = f"{content}# new comment line\n"
     await coordinator._process_blueprint_content(
-        path, coordinator.data[path], new_content, "e", url, [], set()
+        path, coordinator.data[path], new_content, url, [], set(), new_etag="e"
     )
     assert coordinator.data[path]["updatable"] is False
     assert coordinator.data[path]["remote_hash"] == local_hash
@@ -593,7 +600,13 @@ async def test_process_blueprint_content_yaml_error(coordinator):
     coordinator.data[path] = info
 
     await coordinator._process_blueprint_content(
-        path, info, "invalid: yaml: [data", "etag", "https://example.com/blueprint.yaml", [], set()
+        path,
+        info,
+        "invalid: yaml: [data",
+        "https://example.com/blueprint.yaml",
+        [],
+        set(),
+        new_etag="etag",
     )
 
     assert coordinator.data[path]["last_error"].startswith("yaml_syntax_error|")
@@ -611,10 +624,10 @@ async def test_process_blueprint_content_unhandled_error(coordinator):
             path,
             info,
             "blueprint: { name: Test }",
-            "etag",
             "https://example.com/blueprint.yaml",
             [],
             set(),
+            new_etag="etag",
         )
 
     assert coordinator.data[path]["last_error"] == "processing_error|Boom"
@@ -1184,7 +1197,9 @@ async def test_async_update_blueprint_cdn_gating(coordinator, cdn_config, expect
     updated_domains = set()
 
     with patch.object(
-        coordinator, "_async_fetch_with_cdn_fallback", AsyncMock(return_value=("cont", "etag"))
+        coordinator,
+        "_async_fetch_with_cdn_fallback",
+        AsyncMock(return_value=("cont", "etag", None)),
     ) as mock_fetch:
         await coordinator._async_update_blueprint_in_place(
             mock_session, path, info, results_to_notify, updated_domains
@@ -1226,10 +1241,10 @@ async def test_async_update_blueprint_failure_paths(coordinator, error_case):
             side_effect=httpx.HTTPError("Network down")
         )
     elif error_case == "empty_content":
-        coordinator._async_fetch_with_cdn_fallback = AsyncMock(return_value=("", "new-etag"))
+        coordinator._async_fetch_with_cdn_fallback = AsyncMock(return_value=("", "new-etag", None))
     elif error_case == "processing_error":
         coordinator._async_fetch_with_cdn_fallback = AsyncMock(
-            return_value=("valid content", "new-etag")
+            return_value=("valid content", "new-etag", None)
         )
         coordinator._process_blueprint_content = AsyncMock(
             side_effect=ValueError("Invalid structure")
@@ -1251,6 +1266,52 @@ async def test_async_update_blueprint_failure_paths(coordinator, error_case):
         assert entry["etag"] is None
 
     assert entry["invalid_remote_hash"] is None
+
+
+@pytest.mark.asyncio
+async def test_async_detect_risks_missing_path(coordinator):
+    """Test risk detection when relative_path is missing."""
+    path = "test.yaml"
+    info = {"name": "Test"}
+    risks = await coordinator._detect_risks_for_update(path, info, "content", None)
+    assert len(risks) == 1
+    assert risks[0]["type"] == "system_error"
+    assert risks[0]["args"]["error"] == "missing_path"
+
+
+@pytest.mark.asyncio
+async def test_async_handle_auto_update_blocked(coordinator):
+    """Test handling of blocked auto-updates."""
+    blueprint_path = "automation/test.yaml"
+    risks = [{"type": BlueprintRiskType.COMPATIBILITY, "args": {"desc": "Bad"}}]
+
+    coordinator.hass.config.language = "en"
+    coordinator._translations = {
+        ("en", "common"): {
+            "component.blueprints_updater.common.auto_update_blocked_by_breaking_change": (
+                "Blocked {name}"
+            ),
+            "component.blueprints_updater.common.breaking_risks_report": (
+                f"Update for {blueprint_path} blocked: {{risks}}"
+            ),
+        }
+    }
+    coordinator.setup_complete = True
+
+    with patch.object(coordinator, "_async_send_auto_update_notification") as mock_notify:
+        await coordinator._async_handle_auto_update_blocked(
+            blueprint_path,
+            {"name": "Test", "relative_path": blueprint_path},
+            "hash",
+            "content",
+            risks,
+            False,
+            new_etag="etag",
+        )
+        mock_notify.assert_called_once()
+        args, _ = mock_notify.call_args
+        assert blueprint_path in args[1]
+        assert RISK_TYPE_TRANSLATIONS[BlueprintRiskType.COMPATIBILITY] in args[1]
 
 
 @pytest.mark.asyncio

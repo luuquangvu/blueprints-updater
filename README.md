@@ -23,15 +23,16 @@
   - [Installation](#installation)
     - [Option 1: Using HACS (Recommended)](#option-1-using-hacs-recommended)
     - [Option 2: Manual Installation](#option-2-manual-installation)
-  - [Setup \& Configuration](#setup--configuration)
+  - [Setup & Configuration](#setup--configuration)
   - [See it in Action](#see-it-in-action)
-  - [Backup \& Restore](#backup--restore)
+  - [Backup & Restore](#backup--restore)
     - [Enabling Backups](#enabling-backups)
     - [Restoring a Backup](#restoring-a-backup)
   - [Advanced Compatibility Guard](#advanced-compatibility-guard)
   - [Refreshing the Blueprint List](#refreshing-the-blueprint-list)
+  - [Importing Blueprints](#importing-blueprints)
   - [Requirements](#requirements)
-  - [Code Quality \& Security](#code-quality--security)
+  - [Code Quality & Security](#code-quality--security)
   - [Contributing](#contributing)
   - [License](#license)
   - [Support the Project](#support-the-project)
@@ -44,7 +45,8 @@
 - **Advanced Compatibility Guard**: Safeguard your smart home against breaking changes with proactive validation. Before applying any update, the system performs a thorough analysis of all dependent automations and scripts against the new blueprint content, identifying compatibility risks, system errors, and other blocking issues to prevent silent failures.
 - **Set It and Forget It**: Automate your entire workflow. Enable auto-updates and let the system handle backups, downloads, and change notifications for you.
 - **Smart Change Detection**: Minimizes system overhead by using SHA256 hashing and ETag headers to pull data only when a genuine change is detected.
-- **Universal Source Compatibility**: Robustly handles blueprints from GitHub, GitHub Gist, and the Home Assistant Community Forum.
+- **Wide-Ranging Source Support**: Robustly tracks and updates blueprints from major platforms (**GitHub, GitHub Gist, HA Forum, GitLab, Codeberg, and Bitbucket**) and **any direct YAML URL** (e.g., Pastebin, Private Gists, or custom web servers).
+- **Versatile Blueprint Importer**: A dedicated tool to instantly download and install blueprints from **any of the supported sources** with automatic metadata extraction, stable path generation, and strict security validation.
 - **High-Performance CDN Support**: Leverages the [jsDelivr](https://www.jsdelivr.com/) CDN for GitHub-hosted blueprints to maximize download speeds and reduce the impact of rate limiting. Features an intelligent fallback mechanism that automatically reverts to the original source in case of CDN unavailability.
 - **Pre-Update Impact Visibility**: See exactly how many Automations or Scripts use the blueprint before you update, ensuring full control over your smart home logic.
 - **Granular Tracking Control**: Fine-tune your experience by tracking all blueprints or targeting specific ones using flexible Whitelists and Blacklists.
@@ -151,6 +153,30 @@ To apply changes instantly without waiting for the next scheduled background sca
 1. **Run the Reload Action (Recommended)**: Go to **Developer Tools** > **YAML**, find **Blueprints Updater** in the **YAML configuration reloading** list, and click **Reload**. Alternatively, use the **`blueprints_updater.reload`** action in **Developer Tools** > **Actions** (Administrator only).
 2. **Reload the Integration**: Go to **Settings** > **Devices & Services** > **Blueprints Updater**, click the three dots, and select **Reload**.
 3. **Restart Home Assistant**.
+
+---
+
+## Importing Blueprints
+
+Blueprints Updater provides a dedicated service to import blueprints from external sources directly into your Home Assistant setup.
+
+### Supported Platforms
+
+- **Specialized**: GitHub (with CDN support), GitHub Gist, HA Community Forum, GitLab, Codeberg, and Bitbucket.
+- **Generic**: Any direct YAML link (Pastebin, private servers, etc.).
+
+### How to Import
+
+1. Go to **Developer Tools** > **Actions**.
+2. Search for the **`blueprints_updater.import_blueprint`** action.
+3. Paste the **Blueprint URL**.
+4. Enable the **Confirm External Source** toggle to acknowledge that you trust the source. This is required for all external domains.
+5. Click **Perform Action**.
+
+The system automatically validates content, extracts metadata, and generates a stable file path. For GitHub, Gist, and HA Forum, the path structure is fully compatible with Home Assistant Core's native importer.
+
+> [!TIP]
+> **Verify Content**: It is recommended to review the blueprint content before use to ensure it matches your automation logic and expectations.
 
 ---
 

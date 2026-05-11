@@ -78,6 +78,20 @@
           "description": "Utwórz ponumerowane pliki kopii zapasowych dla wszystkich zaktualizowanych Blueprints przed nadpisaniem."
         }
       }
+    },
+    "import_blueprint": {
+      "name": "Importuj Blueprint",
+      "description": "Pobiera i instaluje blueprint z adresu URL.",
+      "fields": {
+        "url": {
+          "name": "Adres URL Blueprintu",
+          "description": "Surowy adres URL pliku YAML blueprintu."
+        },
+        "confirm": {
+          "name": "Potwierdź zewnętrzne źródło",
+          "description": "Wymagane do potwierdzenia importu z zewnętrznych/niezweryfikowanych źródeł."
+        }
+      }
     }
   },
   "exceptions": {
@@ -101,6 +115,24 @@
     },
     "system_error": {
       "message": "Błąd systemu podczas przywracania: {error}"
+    },
+    "missing_url": {
+      "message": "Brak parametru URL."
+    },
+    "no_coordinator": {
+      "message": "Nie znaleziono aktywnego koordynatora. Sprawdź konfigurację integracji."
+    },
+    "confirmation_required": {
+      "message": "Import z zewnętrznych źródeł wymaga wyraźnego potwierdzenia. Zaznacz pole 'Potwierdź'."
+    },
+    "unsupported_source": {
+      "message": "Niespierane źródło. Obsługiwane są tylko GitHub, GitLab, Codeberg, Bitbucket i bezpośrednie linki YAML."
+    },
+    "invalid_content_type": {
+      "message": "Nieprawidłowy typ zawartości: {content_type}. Oczekiwano text/plain lub YAML."
+    },
+    "invalid_yaml": {
+      "message": "Importowany plik nie jest prawidłowym blueprintem YAML."
     }
   },
   "common": {

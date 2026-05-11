@@ -23,15 +23,16 @@
   - [Cài đặt](#cài-đặt)
     - [Cách 1: Sử dụng HACS (Khuyên dùng)](#cách-1-sử-dụng-hacs-khuyên-dùng)
     - [Cách 2: Cài đặt thủ công](#cách-2-cài-đặt-thủ-công)
-  - [Hướng dẫn thiết lập \& Cấu hình](#hướng-dẫn-thiết-lập--cấu-hình)
+  - [Hướng dẫn thiết lập & Cấu hình](#hướng-dẫn-thiết-lập--cấu-hình)
   - [Xem thử ngay](#xem-thử-ngay)
-  - [Sao lưu \& Phục hồi (Backup \& Restore)](#sao-lưu--phục-hồi-backup--restore)
+  - [Sao lưu & Phục hồi (Backup & Restore)](#sao-lưu--phục-hồi-backup--restore)
     - [Kích hoạt Sao lưu](#kích-hoạt-sao-lưu)
     - [Khôi phục bản Sao lưu](#khôi-phục-bản-sao-lưu)
   - [Lớp bảo vệ Nâng cao (Advanced Compatibility Guard)](#lớp-bảo-vệ-nâng-cao-advanced-compatibility-guard)
   - [Làm mới danh sách Blueprint](#làm-mới-danh-sách-blueprint)
+  - [Nhập (Import) Blueprint](#nhập-import-blueprint)
   - [Yêu cầu](#yêu-cầu)
-  - [Chất lượng Mã nguồn \& Bảo mật](#chất-lượng-mã-nguồn--bảo-mật)
+  - [Chất lượng Mã nguồn & Bảo mật](#chất-lượng-mã-nguồn--bảo-mật)
   - [Đóng góp](#đóng-góp)
   - [Bản quyền](#bản-quyền)
   - [Hỗ trợ dự án](#hỗ-trợ-dự-án)
@@ -44,7 +45,8 @@
 - **Cơ chế Bảo vệ Tương thích Nâng cao (Advanced Compatibility Guard)**: Chủ động bảo vệ ngôi nhà thông minh khỏi các thay đổi gây lỗi (breaking changes). Trước khi áp dụng cập nhật, hệ thống thực hiện phân tích toàn diện toàn bộ automation và script phụ thuộc dựa trên nội dung blueprint mới, giúp nhận diện sớm rủi ro tương thích, lỗi hệ thống hoặc các xung đột tiềm ẩn nhằm ngăn ngừa tình trạng lỗi ngầm sau khi cập nhật.
 - **Tự động hóa hoàn toàn**: Khi bật chế độ tự động cập nhật, hệ thống sẽ thay bạn thực hiện mọi thao tác từ sao lưu, tải bản mới đến gửi thông báo chi tiết khi hoàn tất.
 - **Tối ưu hiệu suất và băng thông**: Sử dụng mã băm SHA256 và ETag để chỉ tải về khi thực sự có thay đổi từ nguồn, giảm thiểu tải cho hệ thống.
-- **Hỗ trợ Blueprint đa nền tảng**: Tương thích hoàn hảo với các tệp nguồn từ GitHub, GitHub Gist và Diễn đàn cộng đồng Home Assistant.
+- **Hỗ trợ nguồn đa dạng và linh hoạt**: Tự động theo dõi và cập nhật các bản thiết kế từ những nền tảng phổ biến (**GitHub, GitHub Gist, HA Forum, GitLab, Codeberg và Bitbucket**) cũng như **mọi liên kết YAML trực tiếp** (như Pastebin, Gist riêng tư, hoặc máy chủ riêng).
+- **Nhập Blueprint từ mọi nguồn**: Công cụ chuyên dụng giúp tải về và cài đặt nhanh chóng các bản thiết kế từ **bất kỳ nguồn nào được hỗ trợ** vào hệ thống của bạn với cơ chế tự động hóa tệp tin và xác thực bảo mật nghiêm ngặt.
 - **Tối ưu hóa với jsDelivr CDN**: Tận dụng mạng lưới [jsDelivr](https://www.jsdelivr.com/) CDN để tăng tốc độ tải và giảm ảnh hưởng từ giới hạn truy cập (rate limit). Cơ chế dự phòng đi kèm sẽ tự động lấy dữ liệu trực tiếp từ GitHub nếu CDN gặp sự cố, đảm bảo quá trình cập nhật luôn diễn ra thông suốt.
 - **Nắm rõ tác động trước khi cập nhật**: Hiển thị chính xác số lượng Automation hoặc Script đang sử dụng blueprint đó, giúp bạn chủ động kiểm soát mọi thay đổi.
 - **Kiểm soát linh hoạt theo nhu cầu**: Cho phép theo dõi toàn bộ hoặc lọc danh sách blueprint theo Whitelist/Blacklist một cách chi tiết.
@@ -151,6 +153,30 @@ Vì Home Assistant không liên tục giám sát tệp hệ thống để tiết
 1. **Chạy hành động Reload (Khuyên dùng)**: Vào **Công cụ nhà phát triển (Developer Tools)** > **YAML**, tìm **Blueprints Updater** trong danh sách **YAML configuration reloading** và nhấn **Reload**. Hoặc sử dụng hành động **`blueprints_updater.reload`** trong phần **Hành động (Actions)** (Chỉ dành cho quản trị viên).
 2. **Reload Tích hợp**: Vào **Cài đặt (Settings)** > **Thiết bị & Dịch vụ (Devices & Services)** > **Blueprints Updater**, nhấn vào ba chấm và chọn **Tải lại (Reload)**.
 3. **Khởi động lại Home Assistant**.
+
+---
+
+## Nhập (Import) Blueprint
+
+Blueprints Updater cung cấp một dịch vụ chuyên dụng để nhập blueprint từ các nguồn bên ngoài trực tiếp vào Home Assistant của bạn.
+
+### Các nền tảng hỗ trợ
+
+- **Chuyên dụng**: GitHub (hỗ trợ CDN), GitHub Gist, HA Community Forum, GitLab, Codeberg và Bitbucket.
+- **Tùy chỉnh (Generic)**: Bất kỳ liên kết YAML trực tiếp nào (Pastebin, máy chủ riêng, v.v.).
+
+### Cách nhập
+
+1. Đi tới **Developer Tools** > **Actions**.
+2. Tìm kiếm hành động **`blueprints_updater.import_blueprint`**.
+3. Dán **URL của Blueprint**.
+4. Bật tùy chọn **Confirm External Source** để xác nhận bạn tin tưởng nguồn này. Đây là yêu cầu bắt buộc khi nhập từ các tên miền bên ngoài.
+5. Nhấp vào **Perform Action**.
+
+Hệ thống tự động xác thực nội dung, trích xuất metadata và tạo đường dẫn tệp ổn định. Đối với GitHub, Gist và HA Forum, cấu trúc đường dẫn này hoàn toàn tương thích với trình nhập gốc của Home Assistant Core.
+
+> [!TIP]
+> **Kiểm tra nội dung**: Bạn nên xem lại nội dung blueprint trước khi sử dụng để đảm bảo nó phù hợp với logic tự động hóa và mong đợi của mình.
 
 ---
 

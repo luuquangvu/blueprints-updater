@@ -78,6 +78,20 @@
           "description": "Tạo bản sao lưu đánh số cho tất cả các blueprint được cập nhật trước khi ghi đè."
         }
       }
+    },
+    "import_blueprint": {
+      "name": "Nhập Blueprint",
+      "description": "Tải xuống và cài đặt một blueprint từ một URL.",
+      "fields": {
+        "url": {
+          "name": "URL của Blueprint",
+          "description": "URL thô của tệp YAML blueprint."
+        },
+        "confirm": {
+          "name": "Xác nhận nguồn ngoài",
+          "description": "Yêu cầu xác nhận khi nhập từ các nguồn bên ngoài/không xác định."
+        }
+      }
     }
   },
   "exceptions": {
@@ -101,6 +115,24 @@
     },
     "system_error": {
       "message": "Lỗi hệ thống khi khôi phục: {error}"
+    },
+    "missing_url": {
+      "message": "Thiếu tham số URL."
+    },
+    "no_coordinator": {
+      "message": "Không tìm thấy coordinator hoạt động. Vui lòng kiểm tra cài đặt tích hợp."
+    },
+    "confirmation_required": {
+      "message": "Nhập từ nguồn bên ngoài yêu cầu xác nhận rõ ràng. Vui lòng tích chọn 'Xác nhận'."
+    },
+    "unsupported_source": {
+      "message": "Nguồn không được hỗ trợ. Chỉ hỗ trợ GitHub, GitLab, Codeberg, Bitbucket và các liên kết YAML trực tiếp."
+    },
+    "invalid_content_type": {
+      "message": "Loại nội dung không hợp lệ: {content_type}. Yêu cầu text/plain hoặc YAML."
+    },
+    "invalid_yaml": {
+      "message": "Tệp được nhập không phải là một blueprint YAML hợp lệ."
     }
   },
   "common": {

@@ -78,6 +78,20 @@
           "description": "Skapa numrerade backupfiler för alla uppdaterade blueprints innan de skrivs över."
         }
       }
+    },
+    "import_blueprint": {
+      "name": "Importera Blueprint",
+      "description": "Laddar ner och installerar en blueprint från en URL.",
+      "fields": {
+        "url": {
+          "name": "Blueprint URL",
+          "description": "Den råa URL:en till blueprintens YAML-fil."
+        },
+        "confirm": {
+          "name": "Bekräfta extern källa",
+          "description": "Krävs för att bekräfta import från externa/overifierade källor."
+        }
+      }
     }
   },
   "exceptions": {
@@ -101,6 +115,24 @@
     },
     "system_error": {
       "message": "Systemfel under återställning: {error}"
+    },
+    "missing_url": {
+      "message": "URL-parameter saknas."
+    },
+    "no_coordinator": {
+      "message": "Ingen aktiv koordinator hittades. Kontrollera integrationsinställningarna."
+    },
+    "confirmation_required": {
+      "message": "Import från externa källor kräver uttrycklig bekräftelse. Markera rutan 'Bekräfta'."
+    },
+    "unsupported_source": {
+      "message": "Källan stöds inte. Endast GitHub, GitLab, Codeberg, Bitbucket och direkta YAML-länkar stöds."
+    },
+    "invalid_content_type": {
+      "message": "Ogiltig innehållstyp: {content_type}. Förväntade text/plain eller YAML."
+    },
+    "invalid_yaml": {
+      "message": "Den importerade filen är inte en giltig YAML-blueprint."
     }
   },
   "common": {
