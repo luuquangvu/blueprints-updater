@@ -1104,7 +1104,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             if provider.provider_type == SourceProviderType.GENERIC:
                 content_type = response.headers.get("Content-Type", "").lower()
-                allowed = ["text/plain", "application/x-yaml", "text/yaml", "application/yaml"]
+                allowed = [
+                    "application/x-yaml",
+                    "application/yaml",
+                    "text/plain",
+                    "text/x-yaml",
+                    "text/yaml",
+                ]
                 if not any(t in content_type for t in allowed):
                     raise ServiceValidationError(
                         translation_domain=DOMAIN,
@@ -1131,12 +1137,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         try:
             parsed = yaml_util.parse_yaml(content)
-            parsed_data = parsed if isinstance(parsed, dict) else None
+            if not isinstance(parsed, dict) or "blueprint" not in parsed:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="invalid_yaml",
+                )
             functional_domain = self._get_functional_domain(
-                "imported.yaml", content=content, parsed_data=parsed_data
+                "imported.yaml", content=content, parsed_data=parsed
             )
             domain = functional_domain
         except HomeAssistantError as err:
+            if isinstance(err, ServiceValidationError):
+                raise
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="invalid_yaml",
@@ -1144,6 +1156,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         rel_path = f"{domain}/{author}/{name}.yaml"
         full_path = self.hass.config.path(BLUEPRINTS_DATA_DIR, rel_path)
+
+        if full_path in self.data and self.data[full_path].get("source_url") != canonical_url:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="import_path_conflict",
+                translation_placeholders={
+                    "existing_url": redact_url(self.data[full_path].get("source_url", "unknown"))
+                },
+            )
 
         await self.async_install_blueprint(
             full_path,
@@ -2736,7 +2757,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if is_breaking:
             await self._async_handle_auto_update_blocked(
-                path, info, remote_hash, remote_content, risks, guard_failed, new_etag=new_etag
+                path,
+                info,
+                remote_hash,
+                remote_content,
+                risks,
+                guard_failed,
+                new_etag=new_etag,
+                new_last_modified=new_last_modified,
             )
             return True
 

@@ -126,7 +126,10 @@
       "message": "Nhập từ nguồn bên ngoài yêu cầu xác nhận rõ ràng. Vui lòng tích chọn 'Xác nhận'."
     },
     "unsupported_source": {
-      "message": "Nguồn không được hỗ trợ. Chỉ hỗ trợ GitHub, GitLab, Codeberg, Bitbucket và các liên kết YAML trực tiếp."
+      "message": "Nguồn không được hỗ trợ. Chỉ hỗ trợ GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket và các liên kết YAML trực tiếp."
+    },
+    "import_path_conflict": {
+      "message": "Một blueprint với tên này đã tồn tại từ một nguồn khác ({existing_url}). Vui lòng xóa nó trước để tránh xung đột."
     },
     "invalid_content_type": {
       "message": "Loại nội dung không hợp lệ: {content_type}. Yêu cầu text/plain hoặc YAML."

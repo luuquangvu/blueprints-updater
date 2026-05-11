@@ -126,13 +126,16 @@
       "message": "Importeren uit externe bronnen vereist expliciete bevestiging. Vink het vakje 'Bevestigen' aan."
     },
     "unsupported_source": {
-      "message": "Niet-ondersteunde bron. Alleen GitHub, GitLab, Codeberg, Bitbucket en directe YAML-links worden ondersteund."
+      "message": "Niet-ondersteunde bron. Alleen GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket en directe YAML-links worden ondersteund."
     },
     "invalid_content_type": {
       "message": "Ongeldig inhoudstype: {content_type}. text/plain of YAML verwacht."
     },
     "invalid_yaml": {
       "message": "Het geïmporteerde bestand is geen geldige YAML-blueprint."
+    },
+    "import_path_conflict": {
+      "message": "Er bestaat al een blueprint met deze naam uit een andere bron ({existing_url}). Verwijder deze eerst om conflicten te voorkomen."
     }
   },
   "common": {

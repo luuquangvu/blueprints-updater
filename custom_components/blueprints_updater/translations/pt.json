@@ -126,13 +126,16 @@
       "message": "A importação de fontes externas requer confirmação explícita. Por favor, marque a caixa 'Confirmar'."
     },
     "unsupported_source": {
-      "message": "Fonte não suportada. Apenas GitHub, GitLab, Codeberg, Bitbucket e links YAML diretos são suportados."
+      "message": "Fonte não suportada. Apenas GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket e links YAML diretos são suportados."
     },
     "invalid_content_type": {
       "message": "Tipo de conteúdo inválido: {content_type}. Esperado text/plain ou YAML."
     },
     "invalid_yaml": {
       "message": "O ficheiro importado não é um blueprint YAML válido."
+    },
+    "import_path_conflict": {
+      "message": "Já existe um blueprint com este nome de uma fonte diferente ({existing_url}). Por favor, remova-o primeiro para evitar conflitos."
     }
   },
   "common": {

@@ -126,13 +126,16 @@
       "message": "Import från externa källor kräver uttrycklig bekräftelse. Markera rutan 'Bekräfta'."
     },
     "unsupported_source": {
-      "message": "Källan stöds inte. Endast GitHub, GitLab, Codeberg, Bitbucket och direkta YAML-länkar stöds."
+      "message": "Källan stöds inte. Endast GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket och direkta YAML-länkar stöds."
     },
     "invalid_content_type": {
       "message": "Ogiltig innehållstyp: {content_type}. Förväntade text/plain eller YAML."
     },
     "invalid_yaml": {
       "message": "Den importerade filen är inte en giltig YAML-blueprint."
+    },
+    "import_path_conflict": {
+      "message": "En blueprint med detta namn finns redan från en annan källa ({existing_url}). Ta bort den först för att undvika konflikter."
     }
   },
   "common": {

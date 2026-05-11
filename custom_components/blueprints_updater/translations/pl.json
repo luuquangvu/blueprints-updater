@@ -126,13 +126,16 @@
       "message": "Import z zewnętrznych źródeł wymaga wyraźnego potwierdzenia. Zaznacz pole 'Potwierdź'."
     },
     "unsupported_source": {
-      "message": "Niespierane źródło. Obsługiwane są tylko GitHub, GitLab, Codeberg, Bitbucket i bezpośrednie linki YAML."
+      "message": "Niespierane źródło. Obsługiwane są tylko GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket i bezpośrednie linki YAML."
     },
     "invalid_content_type": {
       "message": "Nieprawidłowy typ zawartości: {content_type}. Oczekiwano text/plain lub YAML."
     },
     "invalid_yaml": {
       "message": "Importowany plik nie jest prawidłowym blueprintem YAML."
+    },
+    "import_path_conflict": {
+      "message": "Blueprint o tej nazwie już istnieje z innego źródła ({existing_url}). Usuń go najpierw, aby uniknąć konfliktów."
     }
   },
   "common": {

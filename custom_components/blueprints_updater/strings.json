@@ -126,7 +126,10 @@
       "message": "Importing from external sources requires explicit confirmation. Please check the 'Confirm' box."
     },
     "unsupported_source": {
-      "message": "Unsupported source. Only GitHub, GitLab, Codeberg, Bitbucket, and direct YAML links are supported."
+      "message": "Unsupported source. Only GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket, and direct YAML links are supported."
+    },
+    "import_path_conflict": {
+      "message": "A blueprint with this name already exists from a different source ({existing_url}). Please remove it first to avoid conflicts."
     },
     "invalid_content_type": {
       "message": "Invalid content type: {content_type}. Expected text/plain or YAML."

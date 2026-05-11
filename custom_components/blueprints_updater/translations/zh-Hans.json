@@ -126,13 +126,16 @@
       "message": "从外部来源导入需要明确确认。请勾选“确认”框。"
     },
     "unsupported_source": {
-      "message": "不支持的来源。仅支持 GitHub、GitLab、Codeberg、Bitbucket 和直接 YAML 链接。"
+      "message": "不支持的来源。仅支持 GitHub, Gists, HA Forum、GitLab、Codeberg、Bitbucket 和直接 YAML 链接。"
     },
     "invalid_content_type": {
       "message": "无效的内容类型：{content_type}。应为 text/plain 或 YAML。"
     },
     "invalid_yaml": {
       "message": "导入的文件不是有效的 YAML 蓝图。"
+    },
+    "import_path_conflict": {
+      "message": "具有此名称的蓝图已从其他来源 ({existing_url}) 存在。请先将其删除以避免冲突。"
     }
   },
   "common": {

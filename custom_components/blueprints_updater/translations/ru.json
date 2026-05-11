@@ -126,13 +126,16 @@
       "message": "Импорт из внешних источников требует явного подтверждения. Пожалуйста, установите флажок 'Подтвердить'."
     },
     "unsupported_source": {
-      "message": "Неподдерживаемый источник. Поддерживаются только GitHub, GitLab, Codeberg, Bitbucket и прямые ссылки на YAML."
+      "message": "Неподдерживаемый источник. Поддерживаются только GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket и прямые ссылки на YAML."
     },
     "invalid_content_type": {
       "message": "Недопустимый тип контента: {content_type}. Ожидался text/plain или YAML."
     },
     "invalid_yaml": {
       "message": "Импортированный файл не является допустимым YAML-чертежом."
+    },
+    "import_path_conflict": {
+      "message": "Blueprint с этим именем уже существует из другого источника ({existing_url}). Пожалуйста, сначала удалите его, чтобы избежать конфликтов."
     }
   },
   "common": {
