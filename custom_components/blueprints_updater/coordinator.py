@@ -1177,15 +1177,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 parsed_disk = yaml_util.parse_yaml(content_on_disk)
                 if isinstance(parsed_disk, dict):
                     existing_url = parsed_disk.get("blueprint", {}).get("source_url")
-            except Exception:
-                pass
+            except (OSError, UnicodeDecodeError, HomeAssistantError) as err:
+                _LOGGER.debug(
+                    "Failed to read existing blueprint file %s to determine source_url: %s",
+                    full_path,
+                    err,
+                )
 
-        if existing_url and existing_url != canonical_url:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="import_path_conflict",
-                translation_placeholders={"existing_url": redact_url(existing_url)},
-            )
+        if existing_url:
+            norm_existing = registry.normalize_url(existing_url)
+            if norm_existing != canonical_url:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="import_path_conflict",
+                    translation_placeholders={"existing_url": redact_url(existing_url)},
+                )
 
         if validation_error := self._validate_blueprint(parsed, canonical_url, domain):
             error_key = validation_error.split("|")[0]
@@ -1200,6 +1206,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             content,
             source_url=canonical_url,
             etag=response.headers.get("ETag"),
+            last_modified=response.headers.get("Last-Modified"),
         )
 
         await self.async_request_refresh()

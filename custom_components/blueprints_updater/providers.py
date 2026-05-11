@@ -485,5 +485,11 @@ class ProviderRegistry:
 
         return None
 
+    def normalize_url(self, url: str) -> str:
+        """Find appropriate provider and normalize URL."""
+        if provider := self.get_provider(url):
+            return provider.normalize_url(url)
+        return url
+
 
 registry = ProviderRegistry()
