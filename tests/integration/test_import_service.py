@@ -1,6 +1,6 @@
 """Tests for the import_blueprint service."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -81,7 +81,8 @@ async def test_import_blueprint_success_github(hass, setup_integration, respx_mo
     )
 
     with patch(
-        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator.async_install_blueprint"
+        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator.async_install_blueprint",
+        new_callable=AsyncMock,
     ) as mock_install:
         await hass.services.async_call(
             DOMAIN,
@@ -90,8 +91,9 @@ async def test_import_blueprint_success_github(hass, setup_integration, respx_mo
             blocking=True,
         )
 
-        mock_install.assert_called_once()
-        args, _kwargs = mock_install.call_args
+        mock_install.assert_awaited_once()
+        assert mock_install.await_args is not None
+        args = mock_install.await_args[0]
         assert "automation/user/test.yaml" in args[0]
         assert args[1] == content
 
@@ -147,7 +149,8 @@ async def test_import_blueprint_success_generic(hass, setup_integration, respx_m
     )
 
     with patch(
-        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator.async_install_blueprint"
+        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator.async_install_blueprint",
+        new_callable=AsyncMock,
     ) as mock_install:
         await hass.services.async_call(
             DOMAIN,
@@ -156,7 +159,8 @@ async def test_import_blueprint_success_generic(hass, setup_integration, respx_m
             blocking=True,
         )
 
-        mock_install.assert_called_once()
-        args, _kwargs = mock_install.call_args
+        mock_install.assert_awaited_once()
+        assert mock_install.await_args is not None
+        args = mock_install.await_args[0]
         assert "automation/pastebin.com/generic_blueprint.yaml" in args[0]
         assert args[1] == content

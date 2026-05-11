@@ -1418,28 +1418,34 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 else (current.get("last_modified") if current else None)
             )
 
+            metadata_update = {
+                "name": blueprint_name,
+                "domain": domain,
+                "source_url": final_source_url,
+                "relative_path": relative_path,
+                "updatable": False,
+                "local_hash": final_hash,
+                "remote_hash": final_hash,
+                "last_error": None,
+                "auto_update_last_error": None,
+                "remote_content": None,
+                "invalid_remote_hash": None,
+                "breaking_risks": [],
+                "update_blocking_reason": None,
+                "etag": final_etag,
+                "last_modified": final_last_modified,
+            }
+
             if self.data and path in self.data:
-                self.data[path].update(
-                    {
-                        "name": blueprint_name,
-                        "domain": domain,
-                        "source_url": final_source_url,
-                        "relative_path": relative_path,
-                        "updatable": False,
-                        "local_hash": final_hash,
-                        "remote_hash": final_hash,
-                        "last_error": None,
-                        "auto_update_last_error": None,
-                        "remote_content": None,
-                        "invalid_remote_hash": None,
-                        "breaking_risks": [],
-                        "update_blocking_reason": None,
-                        "etag": final_etag,
-                        "last_modified": final_last_modified,
-                    }
-                )
-                self.async_set_updated_data(self.data)
+                self.data[path].update(metadata_update)
                 await self._async_save_metadata(force=True)
+                self.async_set_updated_data(self.data)
+            elif bp_block:
+                if self.data is None:
+                    self.data = {}
+                self.data[path] = cast(dict[str, Any], metadata_update)
+                await self._async_save_metadata(force=True)
+                self.async_set_updated_data(self.data)
 
             self._fire_update_event(
                 blueprint_name=blueprint_name,

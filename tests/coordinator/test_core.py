@@ -62,5 +62,5 @@ async def test_coordinator_translation_format_error(coordinator):
         "custom_components.blueprints_updater.coordinator.async_get_translations",
         side_effect=Exception("Should not be called"),
     ):
-        result = await coordinator.async_translate("test", category="common")
+        result = await coordinator.async_translate("test", category="common", username="x")
         assert result == "Hello {name}"

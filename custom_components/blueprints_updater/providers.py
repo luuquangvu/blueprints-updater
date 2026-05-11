@@ -46,10 +46,14 @@ def _replace_path_segment(url: str, raw_marker: str, from_seg: str, to_seg: str)
     if len(path_parts) < 4:
         return url
 
-    if from_seg in path_parts:
-        idx = path_parts.index(from_seg)
-        path_parts[idx] = to_seg
-        return urlunparse(parsed._replace(path="/" + "/".join(path_parts)))
+    from_marker_parts = from_seg.strip("/").split("/")
+    to_marker_parts = to_seg.strip("/").split("/")
+    marker_len = len(from_marker_parts)
+
+    for i in range(len(path_parts) - marker_len + 1):
+        if path_parts[i : i + marker_len] == from_marker_parts:
+            new_parts = path_parts[:i] + to_marker_parts + path_parts[i + marker_len :]
+            return urlunparse(parsed._replace(path="/" + "/".join(new_parts)))
 
     return url
 

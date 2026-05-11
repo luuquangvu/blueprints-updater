@@ -167,11 +167,11 @@ Blueprints Updater cung cấp một dịch vụ chuyên dụng để nhập blue
 
 ### Cách nhập
 
-1. Đi tới **Developer Tools** > **Actions**.
+1. Đi tới **Công cụ nhà phát triển (Developer Tools)** > **Hành động (Actions)**. _Lưu ý: Yêu cầu quyền quản trị._
 2. Tìm kiếm hành động **`blueprints_updater.import_blueprint`**.
 3. Dán **URL của Blueprint**.
-4. Bật tùy chọn **Confirm External Source** để xác nhận bạn tin tưởng nguồn này. Đây là yêu cầu bắt buộc khi nhập từ các tên miền bên ngoài.
-5. Nhấp vào **Perform Action**.
+4. Bật tùy chọn **Xác nhận nguồn bên ngoài (Confirm External Source)** để xác nhận bạn tin tưởng nguồn này. Đây là yêu cầu bắt buộc khi nhập từ các nguồn bên ngoài/chưa xác minh.
+5. Nhấn **Thực hiện hành động (Perform Action)**.
 
 Hệ thống tự động xác thực nội dung, trích xuất metadata và tạo đường dẫn tệp ổn định. Đối với GitHub, Gist và HA Forum, cấu trúc đường dẫn này hoàn toàn tương thích với trình nhập gốc của Home Assistant Core.
 

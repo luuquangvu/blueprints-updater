@@ -170,7 +170,7 @@ Blueprints Updater provides a dedicated service to import blueprints from extern
 1. Go to **Developer Tools** > **Actions**.
 2. Search for the **`blueprints_updater.import_blueprint`** action.
 3. Paste the **Blueprint URL**.
-4. Enable the **Confirm External Source** toggle to acknowledge that you trust the source. This is required for all external domains.
+4. Enable the **Confirm External Source** toggle to acknowledge that you trust the source. This is required for external/unverified sources.
 5. Click **Perform Action**.
 
 The system automatically validates content, extracts metadata, and generates a stable file path. For GitHub, Gist, and HA Forum, the path structure is fully compatible with Home Assistant Core's native importer.

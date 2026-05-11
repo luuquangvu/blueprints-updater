@@ -32,7 +32,7 @@ from custom_components.blueprints_updater.coordinator import (
 
 
 @pytest.mark.asyncio
-async def test_scan_blueprints(coordinator):
+async def test_scan_blueprints(coordinator, mock_makedirs):
     """Test scanning for blueprints across all valid domains and ignoring invalid ones."""
     base_path = os.path.normpath("/config/blueprints")
     auto_path = os.path.join(base_path, "automation")
@@ -105,7 +105,7 @@ async def test_scan_blueprints(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_scan_blueprints_domain_extraction(coordinator):
+async def test_scan_blueprints_domain_extraction(coordinator, mock_makedirs):
     """Test that domain is extracted correctly from folder structure during scan."""
     base_path = os.path.normpath("/config/blueprints")
     auto_path = os.path.join(base_path, "automation")
@@ -159,7 +159,7 @@ async def test_scan_blueprints_domain_extraction(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_fetch_blueprint_force(coordinator):
+async def test_async_fetch_blueprint_force(coordinator, mock_makedirs):
     """Test fetching a single blueprint with force=True."""
     path = "/config/blueprints/automation/test.yaml"
     url = "https://example.com/blueprint.yaml"
@@ -195,7 +195,7 @@ async def test_async_fetch_blueprint_force(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_update_data_partial_failure(coordinator):
+async def test_async_update_data_partial_failure(coordinator, mock_makedirs):
     """Test that partial failures don't stop the entire update."""
     path1 = "/config/blueprints/automation/ok.yaml"
     path2 = "/config/blueprints/automation/fail.yaml"
@@ -245,7 +245,7 @@ async def test_async_update_data_partial_failure(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_background_refresh_503_resilience(coordinator):
+async def test_async_background_refresh_503_resilience(coordinator, mock_makedirs):
     """Test resilience to 503 errors during background refresh."""
     path = "automation/test.yaml"
     coordinator.data = {
@@ -273,7 +273,7 @@ async def test_async_background_refresh_503_resilience(coordinator):
 
 @pytest.mark.asyncio
 @patch.object(BlueprintUpdateCoordinator, "async_translate", return_value="Mocked Translation")
-async def test_async_update_data_auto_update(mock_translate, coordinator):
+async def test_async_update_data_auto_update(mock_translate, coordinator, mock_makedirs):
     """Test automatic update logic."""
     path = "/config/blueprints/automation/test.yaml"
     url = "https://example.com/blueprint.yaml"
@@ -322,7 +322,9 @@ async def test_async_update_data_auto_update(mock_translate, coordinator):
 
 @pytest.mark.asyncio
 @patch.object(BlueprintUpdateCoordinator, "async_translate", return_value="Mocked Translation")
-async def test_async_update_data_auto_update_multiple_sorted(mock_translate, coordinator):
+async def test_async_update_data_auto_update_multiple_sorted(
+    mock_translate, coordinator, mock_makedirs
+):
     """Test auto-update installs all queued blueprints (concurrent order not guaranteed)."""
     coordinator.config_entry.options = {"auto_update": True}
     u1 = "https://example.com/blueprint1.yaml"
@@ -377,7 +379,7 @@ async def test_async_update_data_auto_update_multiple_sorted(mock_translate, coo
 
 
 @pytest.mark.asyncio
-async def test_async_update_blueprint_unsafe_url_invalidates_cache(coordinator):
+async def test_async_update_blueprint_unsafe_url_invalidates_cache(coordinator, mock_makedirs):
     """Test that switching to an unsafe URL invalidates previous cache."""
     path = "automation/test.yaml"
     coordinator.data[path] = {
@@ -401,7 +403,9 @@ async def test_async_update_blueprint_unsafe_url_invalidates_cache(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_background_refresh_concurrency_and_cancellation(hass, coordinator):
+async def test_async_background_refresh_concurrency_and_cancellation(
+    hass, coordinator, mock_makedirs
+):
     """Test that background refresh respects concurrency limits and handles cancellation."""
     num_blueprints = MAX_CONCURRENT_REQUESTS * 2
     paths = [f"path{i}" for i in range(num_blueprints)]
@@ -457,7 +461,7 @@ async def test_async_background_refresh_concurrency_and_cancellation(hass, coord
 
 
 @pytest.mark.asyncio
-async def test_async_fetch_blueprint_regression_key_error_hash(coordinator):
+async def test_async_fetch_blueprint_regression_key_error_hash(coordinator, mock_makedirs):
     """Regression test for KeyError when updating a blueprint not in coordinator.data."""
     path = "/config/blueprints/automation/new.yaml"
     url = "https://example.com/new_blueprint.yaml"
@@ -499,7 +503,7 @@ async def test_async_fetch_blueprint_regression_key_error_hash(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_ghost_update_prevention(coordinator):
+async def test_ghost_update_prevention(coordinator, mock_makedirs):
     """Test that updates are rejected if remote content matches local file but not remote_hash."""
     path = "/config/blueprints/automation/test.yaml"
     url = "https://github.com/user/repo/blob/main/test.yaml"
@@ -542,7 +546,7 @@ async def test_ghost_update_prevention(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_yaml_normalization_ignores_comments(coordinator):
+async def test_yaml_normalization_ignores_comments(coordinator, mock_makedirs):
     """Test that adding/changing comments does NOT trigger an update."""
     path = "/config/blueprints/automation/test.yaml"
     url = "https://github.com/user/repo/blob/main/test.yaml"
@@ -565,7 +569,7 @@ async def test_yaml_normalization_ignores_comments(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_handle_source_url_change_clears_metadata(coordinator):
+async def test_handle_source_url_change_clears_metadata(coordinator, mock_makedirs):
     """Test that changing source_url clears old ETags and remote hashes."""
     path = "automation/test.yaml"
     coordinator._persisted_metadata = {
@@ -593,7 +597,7 @@ async def test_handle_source_url_change_clears_metadata(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_process_blueprint_content_yaml_error(coordinator):
+async def test_process_blueprint_content_yaml_error(coordinator, mock_makedirs):
     """Test handling of YAML syntax errors during content processing."""
     path = "automation/error.yaml"
     info = {"relative_path": "automation/error.yaml", "name": "Error", "local_hash": "h"}
@@ -613,7 +617,7 @@ async def test_process_blueprint_content_yaml_error(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_process_blueprint_content_unhandled_error(coordinator):
+async def test_process_blueprint_content_unhandled_error(coordinator, mock_makedirs):
     """Test handling of unexpected errors during content processing."""
     path = "automation/error.yaml"
     info = {"relative_path": "automation/error.yaml", "name": "Error", "local_hash": "h"}
@@ -634,7 +638,7 @@ async def test_process_blueprint_content_unhandled_error(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_detect_risks_system_error_on_exception(coordinator):
+async def test_detect_risks_system_error_on_exception(coordinator, mock_makedirs):
     """Test that exceptions during risk detection result in a system_error risk."""
     path = "/config/blueprints/automation/test.yaml"
     relative_path = "automation/test.yaml"
@@ -659,7 +663,7 @@ async def test_detect_risks_system_error_on_exception(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_detect_risks_missing_relative_path(coordinator):
+async def test_detect_risks_missing_relative_path(coordinator, mock_makedirs):
     """Test that missing relative_path results in a system_error risk."""
     path = "/config/blueprints/automation/test.yaml"
     info = {"name": "Test Blueprint"}
@@ -674,7 +678,7 @@ async def test_detect_risks_missing_relative_path(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint(hass, coordinator):
+async def test_async_install_blueprint(hass, coordinator, mock_makedirs):
     """Test installing a blueprint and reloading services."""
     path = "/config/blueprints/automation/test.yaml"
     remote_content = "blueprint:\n  name: Test"
@@ -699,7 +703,7 @@ async def test_async_install_blueprint(hass, coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_backup(hass, coordinator):
+async def test_async_install_blueprint_backup(hass, coordinator, mock_makedirs):
     """Test installing a blueprint with backup enabled."""
     path = "/config/blueprints/automation/test.yaml"
     remote_content = "blueprint:\n  name: Test"
@@ -727,7 +731,7 @@ async def test_async_install_blueprint_backup(hass, coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_domain_normalization(hass, coordinator):
+async def test_async_install_blueprint_domain_normalization(hass, coordinator, mock_makedirs):
     """Test that async_install_blueprint correctly normalizes the domain."""
     path = "/config/blueprints/script/test.yaml"
 
@@ -762,7 +766,7 @@ async def test_async_install_blueprint_domain_normalization(hass, coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_domain_mismatch(hass, coordinator, caplog):
+async def test_async_install_blueprint_domain_mismatch(hass, coordinator, caplog, mock_makedirs):
     """Test that directory domain takes precedence and logs a warning."""
     path = "/config/blueprints/automation/test.yaml"
     remote_content = "blueprint:\n  name: Test automation as script\n  domain: script\n"
@@ -788,7 +792,7 @@ async def test_async_install_blueprint_domain_mismatch(hass, coordinator, caplog
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_error(hass, coordinator):
+async def test_async_install_blueprint_error(hass, coordinator, mock_makedirs):
     """Test exception during blueprint installation."""
     hass.bus.async_fire = MagicMock()
     path = "/config/blueprints/automation/test.yaml"
@@ -803,7 +807,7 @@ async def test_async_install_blueprint_error(hass, coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_reload_fallback(hass, coordinator):
+async def test_async_install_blueprint_reload_fallback(hass, coordinator, mock_makedirs):
     """Test that reload fallback works when blueprint block is missing or malformed."""
     path = "automation/test.yaml"
     content = "invalid: yaml"
@@ -840,7 +844,7 @@ async def test_async_install_blueprint_reload_fallback(hass, coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_missing_cache_fallback(hass, coordinator):
+async def test_async_install_blueprint_missing_cache_fallback(hass, coordinator, mock_makedirs):
     """Test fallback to blueprint defaults when path is missing from cache."""
     path = "/config/blueprints/automation/new_bp.yaml"
     content = "blueprint:\n  name: New BP\n  domain: automation\n  source_url: https://example.com/new.yaml\n"
@@ -884,7 +888,9 @@ async def test_async_install_blueprint_missing_cache_fallback(hass, coordinator)
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_manual_install_preserves_url(hass, coordinator):
+async def test_async_install_blueprint_manual_install_preserves_url(
+    hass, coordinator, mock_makedirs
+):
     """Test that manual install preserves the cached source_url."""
     path = "/config/blueprints/automation/override.yaml"
     content = "blueprint:\n  name: Manual Preserve\n  domain: automation\n"
@@ -927,7 +933,7 @@ async def test_async_install_blueprint_manual_install_preserves_url(hass, coordi
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_state_sync_fix(coordinator):
+async def test_async_install_blueprint_state_sync_fix(coordinator, mock_makedirs):
     """Test that async_install_blueprint syncs hashes and triggers UI update."""
     path = "/config/blueprints/automation/test.yaml"
     raw_remote = "blueprint:\r\n  name: New\r\n"
@@ -972,7 +978,7 @@ async def test_async_install_blueprint_state_sync_fix(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_state_synchronization(coordinator):
+async def test_async_install_blueprint_state_synchronization(coordinator, mock_makedirs):
     """Test that self.data is updated immediately after async_install_blueprint."""
     path = "/config/blueprints/automation/test.yaml"
     url = "https://url"
@@ -1005,7 +1011,7 @@ async def test_async_install_blueprint_state_synchronization(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_targeted_reload(coordinator):
+async def test_async_install_blueprint_targeted_reload(coordinator, mock_makedirs):
     """Test that installing a blueprint with a specific domain only reloads that domain."""
     path = "/config/blueprints/script/script.yaml"
     content = "blueprint:\n  name: Test Script\n  domain: script"
@@ -1025,7 +1031,7 @@ async def test_async_install_blueprint_targeted_reload(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_unsafe_path(coordinator):
+async def test_async_install_blueprint_unsafe_path(coordinator, mock_makedirs):
     """Test that installing to an unsafe path is blocked."""
     coordinator._is_safe_path = BlueprintUpdateCoordinator._is_safe_path.__get__(coordinator)
     with (
@@ -1047,7 +1053,7 @@ async def test_async_install_blueprint_unsafe_path(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_yaml_error_logging(coordinator):
+async def test_async_install_blueprint_yaml_error_logging(coordinator, mock_makedirs):
     """Test that YAML errors during install reload are logged as warnings."""
     path = "/config/blueprints/automation/test.yaml"
     content = "invalid yaml"
@@ -1067,7 +1073,7 @@ async def test_async_install_blueprint_yaml_error_logging(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_update_blueprint(coordinator):
+async def test_async_update_blueprint(coordinator, mock_makedirs):
     """Test the full update flow for a single blueprint."""
     path = "/config/blueprints/automation/test.yaml"
     info = {
@@ -1111,7 +1117,7 @@ async def test_async_update_blueprint(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_update_blueprint_304_auto_update(coordinator):
+async def test_async_update_blueprint_304_auto_update(coordinator, mock_makedirs):
     """Test that auto-update works even if the fetch returns 304."""
     path = "/config/blueprints/automation/test.yaml"
     source_url = "https://url/test.yaml"
@@ -1269,7 +1275,7 @@ async def test_async_update_blueprint_failure_paths(coordinator, error_case):
 
 
 @pytest.mark.asyncio
-async def test_async_detect_risks_missing_path(coordinator):
+async def test_async_detect_risks_missing_path(coordinator, mock_makedirs):
     """Test risk detection when relative_path is missing."""
     path = "test.yaml"
     info = {"name": "Test"}
@@ -1280,7 +1286,7 @@ async def test_async_detect_risks_missing_path(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_handle_auto_update_blocked(coordinator):
+async def test_async_handle_auto_update_blocked(coordinator, mock_makedirs):
     """Test handling of blocked auto-updates."""
     blueprint_path = "automation/test.yaml"
     risks = [{"type": BlueprintRiskType.COMPATIBILITY, "args": {"desc": "Bad"}}]
@@ -1375,7 +1381,7 @@ async def test_async_update_blueprint_in_place_errors_isolated(
 
 
 @pytest.mark.asyncio
-async def test_async_update_blueprint_in_place_unsafe_url(coordinator):
+async def test_async_update_blueprint_in_place_unsafe_url(coordinator, mock_makedirs):
     """Test that updating from an unsafe URL is blocked."""
     coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
     path = "/config/blueprints/automation/test.yaml"
@@ -1393,7 +1399,7 @@ async def test_async_update_blueprint_in_place_unsafe_url(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_update_blueprint_not_modified(coordinator):
+async def test_async_update_blueprint_not_modified(coordinator, mock_makedirs):
     """Test the update flow when server returns 304 Not Modified."""
     path = "/config/blueprints/automation/test.yaml"
     info = {
@@ -1435,7 +1441,7 @@ async def test_async_update_blueprint_not_modified(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_update_data_uses_current_options(coordinator):
+async def test_async_update_data_uses_current_options(coordinator, mock_makedirs):
     """Test that _async_update_data uses the latest options from config_entry."""
     coordinator.config_entry.options = {
         "filter_mode": "whitelist",
@@ -1452,7 +1458,7 @@ async def test_async_update_data_uses_current_options(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_handle_notifications_multiple_domains(coordinator):
+async def test_async_handle_notifications_multiple_domains(coordinator, mock_makedirs):
     """Test that multiple domains are reloaded during auto-update notification."""
     coordinator.hass.services.has_service = MagicMock(return_value=True)
     coordinator.hass.services.async_call = AsyncMock()
@@ -1470,7 +1476,7 @@ async def test_async_handle_notifications_multiple_domains(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_fires_event(hass, coordinator):
+async def test_async_install_blueprint_fires_event(hass, coordinator, mock_makedirs):
     """Test that async_install_blueprint fires the expected event."""
     path = "/config/blueprints/automation/test.yaml"
     remote_content = "blueprint:\n  name: Test\n  domain: automation\n"

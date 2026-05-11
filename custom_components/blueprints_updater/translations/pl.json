@@ -126,7 +126,7 @@
       "message": "Import z zewnętrznych źródeł wymaga wyraźnego potwierdzenia. Zaznacz pole 'Potwierdź'."
     },
     "unsupported_source": {
-      "message": "Niespierane źródło. Obsługiwane są tylko GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket i bezpośrednie linki YAML."
+      "message": "Niewspierane źródło. Obsługiwane są tylko GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket i bezpośrednie linki YAML."
     },
     "invalid_content_type": {
       "message": "Nieprawidłowy typ zawartości: {content_type}. Oczekiwano text/plain lub YAML."

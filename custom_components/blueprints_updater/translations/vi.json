@@ -88,7 +88,7 @@
           "description": "URL thô của tệp YAML blueprint."
         },
         "confirm": {
-          "name": "Xác nhận nguồn ngoài",
+          "name": "Xác nhận nguồn bên ngoài",
           "description": "Yêu cầu xác nhận khi nhập từ các nguồn bên ngoài/không xác định."
         }
       }

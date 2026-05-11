@@ -9,7 +9,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 
 @pytest.mark.asyncio
-async def test_metadata_persistence_failures(coordinator):
+async def test_metadata_persistence_failures(coordinator, mock_makedirs):
     """Test failures during metadata persistence."""
     coordinator.setup_complete = True
     coordinator.data = {"p1": {"relative_path": "a.yaml", "etag": "e"}}
@@ -45,7 +45,7 @@ async def test_metadata_persistence_failures(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_background_refresh_error_scenarios(coordinator):
+async def test_background_refresh_error_scenarios(coordinator, mock_makedirs):
     """Test background refresh resilience to errors."""
     blueprints = {"path1": {"source_url": "url1", "relative_path": "a.yaml"}}
 
@@ -61,7 +61,7 @@ async def test_background_refresh_error_scenarios(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_blueprint_installation_security_and_errors(coordinator):
+async def test_blueprint_installation_security_and_errors(coordinator, mock_makedirs):
     """Test security checks and error handling during installation."""
     path = "/config/blueprints/automation/test.yaml"
 
@@ -92,7 +92,7 @@ async def test_blueprint_installation_security_and_errors(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_fetch_content_failures(coordinator):
+async def test_async_fetch_content_failures(coordinator, mock_makedirs):
     """Test failures during remote content fetching."""
     mock_session = MagicMock()
     mock_request = MagicMock()
@@ -108,7 +108,7 @@ async def test_async_fetch_content_failures(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_notification_handling(coordinator):
+async def test_notification_handling(coordinator, mock_makedirs):
     """Test persistent notification creation."""
     coordinator.hass.services.async_call = AsyncMock()
     coordinator.async_translate = AsyncMock(return_value="translated")
@@ -118,7 +118,7 @@ async def test_notification_handling(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_invalidate_metadata(coordinator):
+async def test_invalidate_metadata(coordinator, mock_makedirs):
     """Test metadata invalidation."""
     path = "automation/test.yaml"
     coordinator._persisted_metadata = {path: {"etag": "e"}}
@@ -130,7 +130,7 @@ async def test_invalidate_metadata(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_prune_stale_metadata_exception(coordinator):
+async def test_prune_stale_metadata_exception(coordinator, mock_makedirs):
     """Test _async_prune_stale_metadata handles path errors."""
     with patch(
         "custom_components.blueprints_updater.coordinator.get_blueprint_relative_path",
@@ -140,7 +140,7 @@ async def test_prune_stale_metadata_exception(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_update_data_scan_failure(coordinator):
+async def test_async_update_data_scan_failure(coordinator, mock_makedirs):
     """Test _async_update_data handles scanning failures gracefully."""
     with (
         patch.object(coordinator, "scan_blueprints", side_effect=Exception("Scan Crash")),

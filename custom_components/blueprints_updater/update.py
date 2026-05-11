@@ -25,6 +25,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import BlueprintUpdateCoordinator, StructuredRisk
+from .providers import registry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -195,7 +196,11 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
     @property
     def provider_type(self) -> str | None:
         """Return the provider type of the blueprint."""
-        return self.coordinator.data.get(self._path, {}).get("provider_type")
+        source_url = self.coordinator.data.get(self._path, {}).get("source_url")
+        if not source_url:
+            return None
+        provider = registry.get_provider(source_url)
+        return provider.provider_type if provider else None
 
     @property
     def domain(self) -> str:
