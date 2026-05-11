@@ -46,7 +46,7 @@
 - **Tự động hóa hoàn toàn**: Khi bật chế độ tự động cập nhật, hệ thống sẽ thay bạn thực hiện mọi thao tác từ sao lưu, tải bản mới đến gửi thông báo chi tiết khi hoàn tất.
 - **Tối ưu hiệu suất và băng thông**: Sử dụng mã băm SHA256 và ETag để chỉ tải về khi thực sự có thay đổi từ nguồn, giảm thiểu tải cho hệ thống.
 - **Hỗ trợ nguồn đa dạng và linh hoạt**: Tự động theo dõi và cập nhật các bản thiết kế từ những nền tảng phổ biến (**GitHub, GitHub Gist, HA Forum, GitLab, Codeberg và Bitbucket**) cũng như **mọi liên kết YAML trực tiếp** (như Pastebin, Gist riêng tư, hoặc máy chủ riêng).
-- **Nhập Blueprint từ mọi nguồn**: Công cụ chuyên dụng giúp tải về và cài đặt nhanh chóng các bản thiết kế từ **bất kỳ nguồn nào được hỗ trợ** vào hệ thống của bạn với cơ chế tự động hóa tệp tin và xác thực bảo mật nghiêm ngặt.
+- **Nhập Blueprint từ mọi nguồn**: Công cụ chuyên dụng giúp tải về và cài đặt nhanh chóng các bản thiết kế từ **bất kỳ nguồn nào được hỗ trợ** vào hệ thống của bạn với cơ chế tự động trích xuất metadata, tạo đường dẫn tệp tin ổn định và xác thực bảo mật nghiêm ngặt.
 - **Tối ưu hóa với jsDelivr CDN**: Tận dụng mạng lưới [jsDelivr](https://www.jsdelivr.com/) CDN để tăng tốc độ tải và giảm ảnh hưởng từ giới hạn truy cập (rate limit). Cơ chế dự phòng đi kèm sẽ tự động lấy dữ liệu trực tiếp từ GitHub nếu CDN gặp sự cố, đảm bảo quá trình cập nhật luôn diễn ra thông suốt.
 - **Nắm rõ tác động trước khi cập nhật**: Hiển thị chính xác số lượng Automation hoặc Script đang sử dụng blueprint đó, giúp bạn chủ động kiểm soát mọi thay đổi.
 - **Kiểm soát linh hoạt theo nhu cầu**: Cho phép theo dõi toàn bộ hoặc lọc danh sách blueprint theo Whitelist/Blacklist một cách chi tiết.

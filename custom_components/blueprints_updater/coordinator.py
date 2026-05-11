@@ -47,6 +47,7 @@ from homeassistant.util.ssl import SSL_ALPN_HTTP11_HTTP2
 
 from .const import (
     ALLOWED_RELOAD_DOMAINS,
+    ALLOWED_YAML_MIME_TYPES,
     BLUEPRINTS_DATA_DIR,
     CONF_AUTO_UPDATE,
     CONF_FILTER_MODE,
@@ -1075,7 +1076,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 await self.hass.services.async_call(domain, "reload")
 
     async def async_import_blueprint(self, url: str, confirm: bool = False) -> None:
-        """Import a new blueprint from a URL."""
+        """Import a new blueprint from a URL.
+
+        This method fetches, validates, and installs a blueprint. It uses raw components
+        (author/name) for the destination path instead of slugifying them. This is a
+        deliberate design choice to maintain 100% parity with Home Assistant Core's
+        internal blueprint importer (see homeassistant/components/blueprint/importer.py).
+
+        By avoiding slugification, we ensure that:
+        1. Hostnames (e.g., 'pastebin.com') or platform usernames remain as-is in the
+           folder structure, matching exactly how HA Core stores them.
+        2. Blueprints imported via this service will resolve to the exact same file
+           system path as those imported via the Home Assistant UI, preventing
+           duplicate entries and ensuring seamless update management.
+        """
         if not confirm:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -1104,13 +1118,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             if provider.provider_type == SourceProviderType.GENERIC:
                 content_type = response.headers.get("Content-Type", "").lower()
-                allowed = [
-                    "application/x-yaml",
-                    "application/yaml",
-                    "text/plain",
-                    "text/x-yaml",
-                    "text/yaml",
-                ]
+                allowed = ALLOWED_YAML_MIME_TYPES
                 if not any(t in content_type for t in allowed):
                     raise ServiceValidationError(
                         translation_domain=DOMAIN,

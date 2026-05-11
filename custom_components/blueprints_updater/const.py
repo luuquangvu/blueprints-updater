@@ -114,3 +114,11 @@ RISK_TYPE_TRANSLATIONS = {
     BlueprintRiskType.VALIDATION_FAILED: "risk_validation_failed_blueprint",
     BlueprintRiskType.SYSTEM_ERROR: "risk_system_error",
 }
+
+ALLOWED_YAML_MIME_TYPES = [
+    "application/x-yaml",
+    "application/yaml",
+    "text/plain",
+    "text/x-yaml",
+    "text/yaml",
+]
