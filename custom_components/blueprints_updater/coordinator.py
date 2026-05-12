@@ -675,6 +675,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             "remote_content": None,
             "last_error": None,
             "etag": None,
+            "last_modified": None,
             "updatable": False,
         }
         self.data[path] = invalidated

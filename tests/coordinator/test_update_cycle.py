@@ -1287,7 +1287,7 @@ async def test_async_handle_auto_update_blocked(coordinator, mock_makedirs):
                 "Blocked {name}"
             ),
             "component.blueprints_updater.common.breaking_risks_report": (
-                f"Update for {blueprint_path} blocked: {{risks}}"
+                "Update for {name} blocked: {risks}"
             ),
         }
     }
@@ -1305,7 +1305,7 @@ async def test_async_handle_auto_update_blocked(coordinator, mock_makedirs):
         )
         mock_notify.assert_called_once()
         args, _ = mock_notify.call_args
-        assert blueprint_path in args[1]
+        assert "Test" in args[1]
         assert RISK_TYPE_TRANSLATIONS[BlueprintRiskType.COMPATIBILITY] in args[1]
 
 
