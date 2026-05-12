@@ -144,7 +144,7 @@
       "message": "Hämtningsfel: {error}"
     },
     "unsafe_url": {
-      "message": "Osäker URL: {error}"
+      "message": "Osäker URL: {url}"
     },
     "unsafe_path": {
       "message": "Målsökvägen är osäker: {path}"
@@ -170,7 +170,7 @@
     "fetch_error": "Hämtningsfel: {error}",
     "processing_error": "Bearbetningsfel: {error}",
     "auto_update_failed": "Automatisk uppdatering misslyckades: {error}",
-    "unsafe_url": "Osäker URL: {error}",
+    "unsafe_url": "Osäker URL: {url}",
     "unsafe_path": "Målsökvägen är osäker: {path}",
     "content_missing": "Innehållet i blueprint saknas eller kunde inte hämtas.",
     "git_diff_title": "Kodändringar (Git Diff)",

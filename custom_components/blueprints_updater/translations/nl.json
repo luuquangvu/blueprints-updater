@@ -144,7 +144,7 @@
       "message": "Ophaalfout: {error}"
     },
     "unsafe_url": {
-      "message": "Onveilige URL: {error}"
+      "message": "Onveilige URL: {url}"
     },
     "unsafe_path": {
       "message": "Doelpad is onveilig: {path}"
@@ -170,7 +170,7 @@
     "fetch_error": "Ophaalfout: {error}",
     "processing_error": "Verwerkingsfout: {error}",
     "auto_update_failed": "Automatische update mislukt: {error}",
-    "unsafe_url": "Onveilige URL: {error}",
+    "unsafe_url": "Onveilige URL: {url}",
     "unsafe_path": "Doelpad is onveilig: {path}",
     "content_missing": "De inhoud van de blueprint ontbreekt of kon niet worden opgehaald.",
     "git_diff_title": "Codewijzigingen (Git Diff)",

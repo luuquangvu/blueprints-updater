@@ -144,7 +144,7 @@
       "message": "Lỗi tải xuống: {error}"
     },
     "unsafe_url": {
-      "message": "URL không an toàn: {error}"
+      "message": "URL không an toàn: {url}"
     },
     "unsafe_path": {
       "message": "Đường dẫn mục tiêu không an toàn: {path}"
@@ -170,7 +170,7 @@
     "fetch_error": "Lỗi tải xuống: {error}",
     "processing_error": "Lỗi xử lý: {error}",
     "auto_update_failed": "Tự động cập nhật thất bại: {error}",
-    "unsafe_url": "URL không an toàn: {error}",
+    "unsafe_url": "URL không an toàn: {url}",
     "unsafe_path": "Đường dẫn mục tiêu không an toàn: {path}",
     "content_missing": "Nội dung blueprint bị thiếu hoặc không thể tải xuống",
     "git_diff_title": "Mã nguồn thay đổi (Git Diff)",

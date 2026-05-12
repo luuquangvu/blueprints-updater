@@ -1,5 +1,6 @@
 """Tests for the import_blueprint service."""
 
+import socket
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -21,8 +22,14 @@ async def setup_integration(hass):
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+        ),
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))],
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()

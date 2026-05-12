@@ -144,7 +144,7 @@
       "message": "Fetch Error: {error}"
     },
     "unsafe_url": {
-      "message": "Unsafe URL: {error}"
+      "message": "Unsafe URL: {url}"
     },
     "unsafe_path": {
       "message": "Target path is unsafe: {path}"
@@ -170,7 +170,7 @@
     "fetch_error": "Fetch Error: {error}",
     "processing_error": "Processing Error: {error}",
     "auto_update_failed": "Auto-update failed: {error}",
-    "unsafe_url": "Unsafe URL: {error}",
+    "unsafe_url": "Unsafe URL: {url}",
     "unsafe_path": "Target path is unsafe: {path}",
     "content_missing": "Blueprint content is missing or could not be fetched",
     "git_diff_title": "Code Changes (Git Diff)",

@@ -144,7 +144,7 @@
       "message": "Error de obtención: {error}"
     },
     "unsafe_url": {
-      "message": "URL no segura: {error}"
+      "message": "URL no segura: {url}"
     },
     "unsafe_path": {
       "message": "La ruta de destino no es segura: {path}"
@@ -170,7 +170,7 @@
     "fetch_error": "Error de obtención: {error}",
     "processing_error": "Error de procesamiento: {error}",
     "auto_update_failed": "Error en la actualización automática: {error}",
-    "unsafe_url": "URL no segura: {error}",
+    "unsafe_url": "URL no segura: {url}",
     "unsafe_path": "La ruta de destino no es segura: {path}",
     "content_missing": "El contenido del blueprint falta o no se pudo obtener.",
     "git_diff_title": "Cambios en el código (Git Diff)",

@@ -144,7 +144,7 @@
       "message": "Błąd pobierania: {error}"
     },
     "unsafe_url": {
-      "message": "Niebezpieczny adres URL: {error}"
+      "message": "Niebezpieczny adres URL: {url}"
     },
     "unsafe_path": {
       "message": "Ścieżka docelowa jest niebezpieczna: {path}"
@@ -170,7 +170,7 @@
     "fetch_error": "Błąd pobierania: {error}",
     "processing_error": "Błąd przetwarzania: {error}",
     "auto_update_failed": "Automatyczna aktualizacja nie powiodła się: {error}",
-    "unsafe_url": "Niebezpieczny adres URL: {error}",
+    "unsafe_url": "Niebezpieczny adres URL: {url}",
     "unsafe_path": "Ścieżka docelowa jest niebezpieczna: {path}",
     "content_missing": "Brak zawartości Blueprinta lub nie można jej pobrać.",
     "git_diff_title": "Zmiany w kodzie (Git Diff)",

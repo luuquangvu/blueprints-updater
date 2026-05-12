@@ -144,7 +144,7 @@
       "message": "Abruffehler: {error}"
     },
     "unsafe_url": {
-      "message": "Unsichere URL: {error}"
+      "message": "Unsichere URL: {url}"
     },
     "unsafe_path": {
       "message": "Zielpfad ist unsicher: {path}"
@@ -170,7 +170,7 @@
     "fetch_error": "Abruffehler: {error}",
     "processing_error": "Verarbeitungsfehler: {error}",
     "auto_update_failed": "Automatisches Update fehlgeschlagen: {error}",
-    "unsafe_url": "Unsichere URL: {error}",
+    "unsafe_url": "Unsichere URL: {url}",
     "unsafe_path": "Zielpfad ist unsicher: {path}",
     "content_missing": "Der Blueprint-Inhalt fehlt oder konnte nicht abgerufen werden.",
     "git_diff_title": "Codeänderungen (Git Diff)",

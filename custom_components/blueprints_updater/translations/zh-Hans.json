@@ -144,7 +144,7 @@
       "message": "获取错误：{error}"
     },
     "unsafe_url": {
-      "message": "不安全的 URL：{error}"
+      "message": "不安全的 URL：{url}"
     },
     "unsafe_path": {
       "message": "目标路径不安全：{path}"
@@ -170,7 +170,7 @@
     "fetch_error": "获取错误：{error}",
     "processing_error": "处理错误：{error}",
     "auto_update_failed": "自动更新失败：{error}",
-    "unsafe_url": "不安全的 URL：{error}",
+    "unsafe_url": "不安全的 URL：{url}",
     "unsafe_path": "目标路径不安全：{path}",
     "content_missing": "蓝图内容缺失或无法获取",
     "git_diff_title": "代码更改 (Git Diff)",

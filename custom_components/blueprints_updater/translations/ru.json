@@ -144,7 +144,7 @@
       "message": "Ошибка получения: {error}"
     },
     "unsafe_url": {
-      "message": "Небезопасный URL: {error}"
+      "message": "Небезопасный URL: {url}"
     },
     "unsafe_path": {
       "message": "Целевой путь небезопасен: {path}"
@@ -170,7 +170,7 @@
     "fetch_error": "Ошибка получения: {error}",
     "processing_error": "Ошибка обработки: {error}",
     "auto_update_failed": "Автоматическое обновление не удалось: {error}",
-    "unsafe_url": "Небезопасный URL: {error}",
+    "unsafe_url": "Небезопасный URL: {url}",
     "unsafe_path": "Целевой путь небезопасен: {path}",
     "content_missing": "Содержимое чертежа отсутствует или не может быть получено.",
     "git_diff_title": "Изменения в коде (Git Diff)",

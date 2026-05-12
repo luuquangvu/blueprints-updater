@@ -1103,7 +1103,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="unsafe_url",
-                translation_placeholders={"error": redact_url(url)},
+                translation_placeholders={"url": redact_url(url)},
             )
 
         provider = registry.get_provider(url)
@@ -1118,7 +1118,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="unsafe_url",
-                translation_placeholders={"error": redact_url(canonical_url)},
+                translation_placeholders={"url": redact_url(canonical_url)},
             )
 
         session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)

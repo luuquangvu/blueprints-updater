@@ -144,7 +144,7 @@
       "message": "Erreur de récupération : {error}"
     },
     "unsafe_url": {
-      "message": "URL non sécurisée : {error}"
+      "message": "URL non sécurisée : {url}"
     },
     "unsafe_path": {
       "message": "Le chemin cible n'est pas sûr : {path}"
@@ -170,7 +170,7 @@
     "fetch_error": "Erreur de récupération : {error}",
     "processing_error": "Erreur de traitement : {error}",
     "auto_update_failed": "Échec de la mise à jour automatique : {error}",
-    "unsafe_url": "URL non sécurisée : {error}",
+    "unsafe_url": "URL non sécurisée : {url}",
     "unsafe_path": "Le chemin cible n'est pas sûr : {path}",
     "content_missing": "Le contenu du blueprint est manquant ou n'a pas pu être récupéré.",
     "git_diff_title": "Modifications du code (Git Diff)",

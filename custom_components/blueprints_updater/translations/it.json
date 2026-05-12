@@ -144,7 +144,7 @@
       "message": "Errore di recupero: {error}"
     },
     "unsafe_url": {
-      "message": "URL non sicuro: {error}"
+      "message": "URL non sicuro: {url}"
     },
     "unsafe_path": {
       "message": "Il percorso di destinazione non è sicuro: {path}"
@@ -170,7 +170,7 @@
     "fetch_error": "Errore di recupero: {error}",
     "processing_error": "Errore di elaborazione: {error}",
     "auto_update_failed": "Aggiornamento automatico fallito: {error}",
-    "unsafe_url": "URL non sicuro: {error}",
+    "unsafe_url": "URL non sicuro: {url}",
     "unsafe_path": "Il percorso di destinazione non è sicuro: {path}",
     "content_missing": "Il contenuto del blueprint è mancante o non è stato possibile recuperarlo.",
     "git_diff_title": "Modifiche al codice (Git Diff)",
