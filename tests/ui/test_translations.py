@@ -116,6 +116,7 @@ async def test_entity_localized_error(hass, coordinator):
             "domain": "automation",
             "last_error": "yaml_syntax_error|Line 5",
             "relative_path": "test.yaml",
+            "provider_type": None,
         }
 
         with patch.object(entity, "async_write_ha_state"):
@@ -124,6 +125,7 @@ async def test_entity_localized_error(hass, coordinator):
             "domain": "automation",
             "last_error": "Lỗi cú pháp: Line 5",
             "relative_path": "test.yaml",
+            "provider_type": None,
         }
         assert entity.release_summary == "Có bản cập nhật"
 

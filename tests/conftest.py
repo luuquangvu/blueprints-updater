@@ -31,7 +31,7 @@ def mock_storage():
 
 @pytest.fixture
 def mock_makedirs():
-    """Mock os.makedirs for all tests."""
+    """Mock coordinator.os.makedirs for opt-in tests."""
     with patch("custom_components.blueprints_updater.coordinator.os.makedirs") as mock:
         yield mock
 

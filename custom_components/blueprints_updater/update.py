@@ -341,8 +341,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             info = self.coordinator.data[self._path]
             attrs["domain"] = self.domain
             attrs["relative_path"] = self.relative_path
-            if p_type := info.get("provider_type"):
-                attrs["provider_type"] = p_type
+            attrs["provider_type"] = info.get("provider_type") or self.provider_type
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
             if blocking := info.get("update_blocking_reason"):

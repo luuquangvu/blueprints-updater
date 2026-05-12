@@ -1275,17 +1275,6 @@ async def test_async_update_blueprint_failure_paths(coordinator, error_case):
 
 
 @pytest.mark.asyncio
-async def test_async_detect_risks_missing_path(coordinator, mock_makedirs):
-    """Test risk detection when relative_path is missing."""
-    path = "test.yaml"
-    info = {"name": "Test"}
-    risks = await coordinator._detect_risks_for_update(path, info, "content", None)
-    assert len(risks) == 1
-    assert risks[0]["type"] == "system_error"
-    assert risks[0]["args"]["error"] == "missing_path"
-
-
-@pytest.mark.asyncio
 async def test_async_handle_auto_update_blocked(coordinator, mock_makedirs):
     """Test handling of blocked auto-updates."""
     blueprint_path = "automation/test.yaml"

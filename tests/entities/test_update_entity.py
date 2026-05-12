@@ -221,7 +221,11 @@ async def test_entity_properties(coordinator):
         "Safety Tip: It is recommended to enable the backup option "
         "before installing updates to ensure you can revert if needed."
     )
-    assert entity.extra_state_attributes == {"domain": "automation", "relative_path": "test.yaml"}
+    assert entity.extra_state_attributes == {
+        "domain": "automation",
+        "relative_path": "test.yaml",
+        "provider_type": "generic",
+    }
 
     entity_missing = BlueprintUpdateEntity(
         coordinator,
@@ -243,6 +247,7 @@ async def test_entity_properties(coordinator):
         "last_error": "Fetch Error",
         "domain": "automation",
         "relative_path": "test.yaml",
+        "provider_type": "generic",
     }
 
     path = "/config/blueprints/test.yaml"

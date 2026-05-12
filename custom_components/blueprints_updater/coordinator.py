@@ -1135,6 +1135,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     translation_key="empty_content",
                 )
         except (httpx.HTTPError, HomeAssistantError) as err:
+            if isinstance(err, ServiceValidationError):
+                raise
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="fetch_error",
