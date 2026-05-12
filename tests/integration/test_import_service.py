@@ -28,13 +28,13 @@ async def setup_integration(hass):
         ),
         patch(
             "socket.getaddrinfo",
-            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))],
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
         ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
 
-    yield
+        yield
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
