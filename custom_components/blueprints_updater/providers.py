@@ -277,9 +277,10 @@ class HAForumProvider(SourceProvider):
         if content:
             try:
                 data = orjson.loads(content)
-                if isinstance(data, dict) and "post_stream" in data:
-                    posts = data["post_stream"].get("posts", [])
-                    target_post = posts[0] if posts else None
+                if isinstance(data, dict):
+                    post_stream = data.get("post_stream")
+                    posts = post_stream.get("posts", []) if isinstance(post_stream, dict) else []
+                    target_post = posts[0] if posts and isinstance(posts, list) else None
 
                     for post in posts:
                         if not isinstance(post, dict):

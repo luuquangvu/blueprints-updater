@@ -1103,7 +1103,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="unsafe_url",
-                translation_placeholders={"url": redact_url(url)},
+                translation_placeholders={"error": redact_url(url)},
             )
 
         provider = registry.get_provider(url)
@@ -1118,7 +1118,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="unsafe_url",
-                translation_placeholders={"error": "Canonical URL validation failed"},
+                translation_placeholders={"error": redact_url(canonical_url)},
             )
 
         session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
@@ -1182,6 +1182,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         rel_path = f"{domain}/{author}/{name}.yaml"
         full_path = self.hass.config.path(BLUEPRINTS_DATA_DIR, rel_path)
+
+        if not self._is_safe_path(full_path):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="unsafe_path",
+                translation_placeholders={"path": rel_path},
+            )
 
         existing_url = None
         if full_path in self.data:

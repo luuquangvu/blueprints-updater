@@ -128,14 +128,14 @@
     "unsupported_source": {
       "message": "Неподдерживаемый источник. Поддерживаются только GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket и прямые ссылки на YAML."
     },
+    "import_path_conflict": {
+      "message": "Blueprint с этим именем уже существует из другого источника ({existing_url}). Пожалуйста, сначала удалите его, чтобы избежать конфликтов."
+    },
     "invalid_content_type": {
       "message": "Недопустимый тип контента: {content_type}. Ожидался text/plain или YAML."
     },
     "invalid_yaml": {
       "message": "Импортированный файл не является допустимым YAML-чертежом."
-    },
-    "import_path_conflict": {
-      "message": "Blueprint с этим именем уже существует из другого источника ({existing_url}). Пожалуйста, сначала удалите его, чтобы избежать конфликтов."
     },
     "empty_content": {
       "message": "Получено пустое содержимое"
@@ -145,6 +145,9 @@
     },
     "unsafe_url": {
       "message": "Небезопасный URL: {error}"
+    },
+    "unsafe_path": {
+      "message": "Целевой путь небезопасен: {path}"
     },
     "validation_error": {
       "message": "Ошибка валидации: {error}"
@@ -168,6 +171,7 @@
     "processing_error": "Ошибка обработки: {error}",
     "auto_update_failed": "Автоматическое обновление не удалось: {error}",
     "unsafe_url": "Небезопасный URL: {error}",
+    "unsafe_path": "Целевой путь небезопасен: {path}",
     "content_missing": "Содержимое чертежа отсутствует или не может быть получено.",
     "git_diff_title": "Изменения в коде (Git Diff)",
     "semantic_sync_notice": "Этот блюпринт логически не изменился, но требует структурного обновления для соответствия новому каноническому форматированию (например, нормализация переносов строк, внедрение метаданных).",

@@ -128,14 +128,14 @@
     "unsupported_source": {
       "message": "Källan stöds inte. Endast GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket och direkta YAML-länkar stöds."
     },
+    "import_path_conflict": {
+      "message": "En blueprint med detta namn finns redan från en annan källa ({existing_url}). Ta bort den först för att undvika konflikter."
+    },
     "invalid_content_type": {
       "message": "Ogiltig innehållstyp: {content_type}. Förväntade text/plain eller YAML."
     },
     "invalid_yaml": {
       "message": "Den importerade filen är inte en giltig YAML-blueprint."
-    },
-    "import_path_conflict": {
-      "message": "En blueprint med detta namn finns redan från en annan källa ({existing_url}). Ta bort den först för att undvika konflikter."
     },
     "empty_content": {
       "message": "Tomt innehåll mottogs"
@@ -145,6 +145,9 @@
     },
     "unsafe_url": {
       "message": "Osäker URL: {error}"
+    },
+    "unsafe_path": {
+      "message": "Målsökvägen är osäker: {path}"
     },
     "validation_error": {
       "message": "Valideringsfel: {error}"
@@ -168,6 +171,7 @@
     "processing_error": "Bearbetningsfel: {error}",
     "auto_update_failed": "Automatisk uppdatering misslyckades: {error}",
     "unsafe_url": "Osäker URL: {error}",
+    "unsafe_path": "Målsökvägen är osäker: {path}",
     "content_missing": "Innehållet i blueprint saknas eller kunde inte hämtas.",
     "git_diff_title": "Kodändringar (Git Diff)",
     "semantic_sync_notice": "Denna blueprint är semantiskt identisk, men kräver en strukturell uppdatering för att anpassas till den nya kanoniska formateringen (t.ex. normalisering av radbrytningar, metadata-injektion).",

@@ -146,6 +146,9 @@
     "unsafe_url": {
       "message": "URL không an toàn: {error}"
     },
+    "unsafe_path": {
+      "message": "Đường dẫn mục tiêu không an toàn: {path}"
+    },
     "validation_error": {
       "message": "Lỗi xác thực: {error}"
     }
@@ -168,6 +171,7 @@
     "processing_error": "Lỗi xử lý: {error}",
     "auto_update_failed": "Tự động cập nhật thất bại: {error}",
     "unsafe_url": "URL không an toàn: {error}",
+    "unsafe_path": "Đường dẫn mục tiêu không an toàn: {path}",
     "content_missing": "Nội dung blueprint bị thiếu hoặc không thể tải xuống",
     "git_diff_title": "Mã nguồn thay đổi (Git Diff)",
     "semantic_sync_notice": "Bản blueprint này giống hệt về mặt logic, nhưng cần cập nhật cấu trúc để đồng bộ với định dạng chuẩn mới (ví dụ: chuẩn hóa xuống dòng, bổ sung metadata).",

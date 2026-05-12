@@ -128,14 +128,14 @@
     "unsupported_source": {
       "message": "Fuente no compatible. Solo se admiten GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket y enlaces YAML directos."
     },
+    "import_path_conflict": {
+      "message": "Ya existe un blueprint con este nombre desde una fuente diferente ({existing_url}). Por favor, elimínelo primero para evitar conflictos."
+    },
     "invalid_content_type": {
       "message": "Tipo de contenido no válido: {content_type}. Se esperaba text/plain o YAML."
     },
     "invalid_yaml": {
       "message": "El archivo importado no es un blueprint YAML válido."
-    },
-    "import_path_conflict": {
-      "message": "Ya existe un blueprint con este nombre desde una fuente diferente ({existing_url}). Por favor, elimínelo primero para evitar conflictos."
     },
     "empty_content": {
       "message": "Se ha recibido contenido vacío"
@@ -145,6 +145,9 @@
     },
     "unsafe_url": {
       "message": "URL no segura: {error}"
+    },
+    "unsafe_path": {
+      "message": "La ruta de destino no es segura: {path}"
     },
     "validation_error": {
       "message": "Error de validación: {error}"
@@ -168,6 +171,7 @@
     "processing_error": "Error de procesamiento: {error}",
     "auto_update_failed": "Error en la actualización automática: {error}",
     "unsafe_url": "URL no segura: {error}",
+    "unsafe_path": "La ruta de destino no es segura: {path}",
     "content_missing": "El contenido del blueprint falta o no se pudo obtener.",
     "git_diff_title": "Cambios en el código (Git Diff)",
     "semantic_sync_notice": "Este blueprint es semánticamente idéntico, pero requiere una actualización estructural para alinearse con el nuevo formato canónico (p. ej., normalización de saltos de línea, inyección de metadatos).",

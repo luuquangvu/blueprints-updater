@@ -146,6 +146,9 @@
     "unsafe_url": {
       "message": "Unsafe URL: {error}"
     },
+    "unsafe_path": {
+      "message": "Target path is unsafe: {path}"
+    },
     "validation_error": {
       "message": "Validation Error: {error}"
     }
@@ -168,6 +171,7 @@
     "processing_error": "Processing Error: {error}",
     "auto_update_failed": "Auto-update failed: {error}",
     "unsafe_url": "Unsafe URL: {error}",
+    "unsafe_path": "Target path is unsafe: {path}",
     "content_missing": "Blueprint content is missing or could not be fetched",
     "git_diff_title": "Code Changes (Git Diff)",
     "semantic_sync_notice": "This blueprint is semantically identical, but requires a structural update to align with the new canonical formatting (e.g. newline normalization, metadata injection).",

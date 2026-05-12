@@ -128,14 +128,14 @@
     "unsupported_source": {
       "message": "Source non prise en charge. Seuls GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket et les liens YAML directs sont pris en charge."
     },
+    "import_path_conflict": {
+      "message": "Un blueprint avec ce nom existe déjà depuis une source différente ({existing_url}). Veuillez le supprimer d'abord pour éviter les conflits."
+    },
     "invalid_content_type": {
       "message": "Type de contenu invalide : {content_type}. text/plain ou YAML attendu."
     },
     "invalid_yaml": {
       "message": "Le fichier importé n'est pas un blueprint YAML valide."
-    },
-    "import_path_conflict": {
-      "message": "Un blueprint avec ce nom existe déjà depuis une source différente ({existing_url}). Veuillez le supprimer d'abord pour éviter les conflits."
     },
     "empty_content": {
       "message": "Contenu vide reçu"
@@ -145,6 +145,9 @@
     },
     "unsafe_url": {
       "message": "URL non sécurisée : {error}"
+    },
+    "unsafe_path": {
+      "message": "Le chemin cible n'est pas sûr : {path}"
     },
     "validation_error": {
       "message": "Erreur de validation : {error}"
@@ -168,6 +171,7 @@
     "processing_error": "Erreur de traitement : {error}",
     "auto_update_failed": "Échec de la mise à jour automatique : {error}",
     "unsafe_url": "URL non sécurisée : {error}",
+    "unsafe_path": "Le chemin cible n'est pas sûr : {path}",
     "content_missing": "Le contenu du blueprint est manquant ou n'a pas pu être récupéré.",
     "git_diff_title": "Modifications du code (Git Diff)",
     "semantic_sync_notice": "Ce blueprint est sémantiquement identique, mais nécessite une mise à jour structurelle pour s'aligner sur le nouveau format canonique (ex: normalisation des sauts de ligne, injection de métadonnées).",
