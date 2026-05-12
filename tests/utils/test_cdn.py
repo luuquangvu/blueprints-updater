@@ -281,10 +281,11 @@ async def test_async_fetch_with_cdn_failure_preserves_conditional_etag(coordinat
     cdn_url = "https://cdn.jsdelivr.net/gh/u/r@b/p.yaml"
 
     stored_etag = "W/old-etag"
+    stored_last_modified = "old-mod"
     stored_remote_hash = "old-hash"
 
     coordinator._async_fetch_content = AsyncMock(
-        side_effect=[httpx.HTTPError("CDN Down"), ("fallback_content", "new_etag", None)]
+        side_effect=[httpx.HTTPError("CDN Down"), ("fallback_content", "new_etag", "old-mod")]
     )
 
     content, etag, _last_modified = await coordinator._async_fetch_with_cdn_fallback(
@@ -293,17 +294,20 @@ async def test_async_fetch_with_cdn_failure_preserves_conditional_etag(coordinat
         normalized_url,
         cdn_url,
         stored_etag,
-        None,
+        stored_last_modified,
         stored_remote_hash,
         False,
     )
 
     assert content == "fallback_content"
     assert etag == "new_etag"
+    assert _last_modified == "old-mod"
     calls = coordinator._async_fetch_content.call_args_list
     args0, kwargs0 = calls[0]
     args1, kwargs1 = calls[1]
     assert args0[1] == cdn_url
     assert kwargs0.get("etag") == stored_etag
+    assert kwargs0.get("last_modified") == stored_last_modified
     assert args1[1] == normalized_url
     assert kwargs1.get("etag") == stored_etag
+    assert kwargs1.get("last_modified") == stored_last_modified

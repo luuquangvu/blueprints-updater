@@ -447,11 +447,12 @@ class GenericProvider(SourceProvider):
         elif content:
             try:
                 data = yaml_util.parse_yaml(content)
-                if isinstance(data, dict) and "blueprint" in data:
-                    name = slugify(data["blueprint"].get("name", ""))
-                else:
-                    name = ""
-            except (HomeAssistantError, AttributeError):
+                name = ""
+                if isinstance(data, dict):
+                    bp = data.get("blueprint")
+                    if isinstance(bp, dict):
+                        name = slugify(bp.get("name", ""))
+            except HomeAssistantError:
                 name = ""
         else:
             name = ""

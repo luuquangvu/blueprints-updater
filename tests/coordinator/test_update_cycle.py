@@ -1225,6 +1225,8 @@ async def test_async_update_blueprint_304_last_modified(coordinator, mock_makedi
         )
 
         mock_install.assert_awaited_once()
+        _, kwargs = mock_install.call_args
+        assert kwargs["last_modified"] == "stored_mod"
         assert mock_session.get.call_count == 2
 
 
