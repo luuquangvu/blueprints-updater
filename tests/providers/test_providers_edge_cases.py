@@ -46,6 +46,12 @@ def test_github_provider_complex_urls():
     cdn_url = provider.get_cdn_url(url)
     assert cdn_url == "https://cdn.jsdelivr.net/gh/user/repo@main/bp.yaml"
 
+    url = "https://github.com/user/repo/blob/main/raw/bp.yaml"
+    assert (
+        provider.normalize_url(url)
+        == "https://raw.githubusercontent.com/user/repo/main/raw/bp.yaml"
+    )
+
 
 def test_ha_forum_metadata_parsing():
     """Verify HAForumProvider can extract metadata directly from the Forum's JSON response.

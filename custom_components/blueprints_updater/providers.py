@@ -40,20 +40,22 @@ def _replace_path_segment(url: str, raw_marker: str, from_seg: str, to_seg: str)
     """Helper to replace a specific path segment for raw URL normalization."""
     parsed = urlparse(url)
     path_parts = parsed.path.strip("/").split("/")
-    marker_token = raw_marker.strip("/")
-    if marker_token in path_parts:
+    raw_parts = [p.lower() for p in raw_marker.strip("/").split("/")]
+    from_parts = [p.lower() for p in from_seg.strip("/").split("/")]
+    to_parts = to_seg.strip("/").split("/")
+
+    raw_len = len(raw_parts)
+    from_len = len(from_parts)
+
+    if not path_parts or path_parts == [""]:
         return url
 
-    if len(path_parts) < 4:
-        return url
-
-    from_marker_parts = from_seg.strip("/").split("/")
-    to_marker_parts = to_seg.strip("/").split("/")
-    marker_len = len(from_marker_parts)
-
-    for i in range(2, len(path_parts) - marker_len + 1):
-        if path_parts[i : i + marker_len] == from_marker_parts:
-            new_parts = path_parts[:i] + to_marker_parts + path_parts[i + marker_len :]
+    for i in range(2, len(path_parts)):
+        current_parts_lower = [p.lower() for p in path_parts[i:]]
+        if i + raw_len <= len(path_parts) and current_parts_lower[:raw_len] == raw_parts:
+            return url
+        if i + from_len <= len(path_parts) and current_parts_lower[:from_len] == from_parts:
+            new_parts = path_parts[:i] + to_parts + path_parts[i + from_len :]
             return urlunparse(parsed._replace(path="/" + "/".join(new_parts)))
 
     return url
