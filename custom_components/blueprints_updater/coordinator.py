@@ -3145,7 +3145,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
 
             current_url = next_url
-            current_headers = {}
+            current_headers = {
+                k: v
+                for k, v in current_headers.items()
+                if k.lower() in ("if-none-match", "if-modified-since")
+            }
 
         _LOGGER.error("Redirect loop exceeded range without raising")
         raise httpx.HTTPError("Too many redirects")
