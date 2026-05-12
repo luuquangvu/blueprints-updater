@@ -350,7 +350,7 @@ class GitLabProvider(SourceProvider):
 
     def normalize_url(self, url: str) -> str:
         """Normalize GitLab URL to raw endpoint."""
-        return _replace_path_segment(url, "/-/raw/", "blob", "raw")
+        return _replace_path_segment(url, "/-/raw/", "/-/blob/", "/-/raw/")
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from GitLab URL (Matching HA Generic Logic)."""

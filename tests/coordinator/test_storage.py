@@ -256,6 +256,7 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator, moc
         "automation/test.yaml": {
             "remote_hash": initial_hash,
             "etag": "initial_etag",
+            "last_modified": "initial_mod",
             "source_url": "https://url",
         }
     }
@@ -282,6 +283,7 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator, moc
     coordinator._persisted_metadata["automation/test.yaml"] = {
         "remote_hash": "stale_hash",
         "etag": "stale_etag",
+        "last_modified": "stale_mod",
     }
 
     with (
@@ -292,6 +294,7 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator, moc
 
     assert results[path]["remote_hash"] == initial_hash
     assert results[path]["etag"] == "initial_etag"
+    assert results[path]["last_modified"] == "initial_mod"
 
 
 @pytest.mark.asyncio

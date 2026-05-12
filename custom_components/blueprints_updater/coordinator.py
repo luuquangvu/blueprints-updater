@@ -1114,6 +1114,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
 
         canonical_url = provider.normalize_url(url)
+        if not await self._is_safe_url(canonical_url):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="unsafe_url",
+                translation_placeholders={"error": "Canonical URL validation failed"},
+            )
 
         session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
         try:
@@ -1144,9 +1150,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 translation_placeholders={"error": str(err)},
             ) from err
 
-        metadata = provider.get_metadata(canonical_url, content=response.text)
-        author = metadata["author"]
-        name = metadata["name"]
+        try:
+            metadata = provider.get_metadata(canonical_url, content=response.text)
+            author = metadata["author"]
+            name = metadata["name"]
+        except (KeyError, TypeError, ValueError) as err:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="fetch_error",
+                translation_placeholders={"error": f"Malformed metadata: {err}"},
+            ) from err
 
         try:
             parsed = yaml_util.parse_yaml(content)
