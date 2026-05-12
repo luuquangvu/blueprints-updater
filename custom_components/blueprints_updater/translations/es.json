@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "URL del Blueprint",
-          "description": "La URL raw del archivo YAML del blueprint."
+          "description": "La URL del archivo YAML del blueprint."
         },
         "confirm": {
           "name": "Confirmar fuente externa",
@@ -136,6 +136,18 @@
     },
     "import_path_conflict": {
       "message": "Ya existe un blueprint con este nombre desde una fuente diferente ({existing_url}). Por favor, elimínelo primero para evitar conflictos."
+    },
+    "empty_content": {
+      "message": "Se ha recibido contenido vacío"
+    },
+    "fetch_error": {
+      "message": "Error de obtención: {error}"
+    },
+    "unsafe_url": {
+      "message": "URL no segura: {error}"
+    },
+    "validation_error": {
+      "message": "Error de validación: {error}"
     }
   },
   "common": {

@@ -39,10 +39,10 @@ def _normalize_hostname(hostname: str | None) -> str:
 def _replace_path_segment(url: str, raw_marker: str, from_seg: str, to_seg: str) -> str:
     """Helper to replace a specific path segment for raw URL normalization."""
     parsed = urlparse(url)
-    if raw_marker in parsed.path:
+    path_parts = parsed.path.strip("/").split("/")
+    if raw_marker in path_parts:
         return url
 
-    path_parts = parsed.path.strip("/").split("/")
     if len(path_parts) < 4:
         return url
 

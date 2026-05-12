@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "Blueprint URL",
-          "description": "The raw URL of the blueprint YAML file."
+          "description": "The URL of the blueprint YAML file."
         },
         "confirm": {
           "name": "Confirm External Source",
@@ -136,6 +136,18 @@
     },
     "invalid_yaml": {
       "message": "The imported file is not a valid YAML blueprint."
+    },
+    "empty_content": {
+      "message": "Empty content received"
+    },
+    "fetch_error": {
+      "message": "Fetch Error: {error}"
+    },
+    "unsafe_url": {
+      "message": "Unsafe URL: {error}"
+    },
+    "validation_error": {
+      "message": "Validation Error: {error}"
     }
   },
   "common": {

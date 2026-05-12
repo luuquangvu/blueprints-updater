@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "URL của Blueprint",
-          "description": "URL thô của tệp YAML blueprint."
+          "description": "URL của tệp YAML blueprint."
         },
         "confirm": {
           "name": "Xác nhận nguồn bên ngoài",
@@ -136,6 +136,18 @@
     },
     "invalid_yaml": {
       "message": "Tệp được nhập không phải là một blueprint YAML hợp lệ."
+    },
+    "empty_content": {
+      "message": "Nội dung nhận được bị trống"
+    },
+    "fetch_error": {
+      "message": "Lỗi tải xuống: {error}"
+    },
+    "unsafe_url": {
+      "message": "URL không an toàn: {error}"
+    },
+    "validation_error": {
+      "message": "Lỗi xác thực: {error}"
     }
   },
   "common": {

@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "Blueprint-URL",
-          "description": "De ruwe URL van het blueprint YAML-bestand."
+          "description": "De URL van het blueprint YAML-bestand."
         },
         "confirm": {
           "name": "Externe bron bevestigen",
@@ -136,6 +136,18 @@
     },
     "import_path_conflict": {
       "message": "Er bestaat al een blueprint met deze naam uit een andere bron ({existing_url}). Verwijder deze eerst om conflicten te voorkomen."
+    },
+    "empty_content": {
+      "message": "Lege inhoud ontvangen"
+    },
+    "fetch_error": {
+      "message": "Ophaalfout: {error}"
+    },
+    "unsafe_url": {
+      "message": "Onveilige URL: {error}"
+    },
+    "validation_error": {
+      "message": "Validatiefout: {error}"
     }
   },
   "common": {

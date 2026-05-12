@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "Blueprint URL",
-          "description": "Den råa URL:en till blueprintens YAML-fil."
+          "description": "URL:en till blueprint-YAML-filen."
         },
         "confirm": {
           "name": "Bekräfta extern källa",
@@ -136,6 +136,18 @@
     },
     "import_path_conflict": {
       "message": "En blueprint med detta namn finns redan från en annan källa ({existing_url}). Ta bort den först för att undvika konflikter."
+    },
+    "empty_content": {
+      "message": "Tomt innehåll mottogs"
+    },
+    "fetch_error": {
+      "message": "Hämtningsfel: {error}"
+    },
+    "unsafe_url": {
+      "message": "Osäker URL: {error}"
+    },
+    "validation_error": {
+      "message": "Valideringsfel: {error}"
     }
   },
   "common": {

@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "URL чертежа",
-          "description": "Прямой URL-адрес YAML-файла чертежа."
+          "description": "URL-адрес YAML-файла чертежа."
         },
         "confirm": {
           "name": "Подтвердить внешний источник",
@@ -136,6 +136,18 @@
     },
     "import_path_conflict": {
       "message": "Blueprint с этим именем уже существует из другого источника ({existing_url}). Пожалуйста, сначала удалите его, чтобы избежать конфликтов."
+    },
+    "empty_content": {
+      "message": "Получено пустое содержимое"
+    },
+    "fetch_error": {
+      "message": "Ошибка получения: {error}"
+    },
+    "unsafe_url": {
+      "message": "Небезопасный URL: {error}"
+    },
+    "validation_error": {
+      "message": "Ошибка валидации: {error}"
     }
   },
   "common": {

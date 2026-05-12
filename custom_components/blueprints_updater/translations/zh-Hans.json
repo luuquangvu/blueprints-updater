@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "蓝图 URL",
-          "description": "蓝图 YAML 文件的原始 URL。"
+          "description": "蓝图 YAML 文件的 URL。"
         },
         "confirm": {
           "name": "确认外部来源",
@@ -136,6 +136,18 @@
     },
     "import_path_conflict": {
       "message": "具有此名称的蓝图已从其他来源 ({existing_url}) 存在。请先将其删除以避免冲突。"
+    },
+    "empty_content": {
+      "message": "收到的内容为空"
+    },
+    "fetch_error": {
+      "message": "获取错误：{error}"
+    },
+    "unsafe_url": {
+      "message": "不安全的 URL：{error}"
+    },
+    "validation_error": {
+      "message": "验证错误：{error}"
     }
   },
   "common": {
