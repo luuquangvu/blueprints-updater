@@ -610,3 +610,32 @@ def test_hash_content_no_semantic(coordinator):
     content = "blueprint:\n  name: Test"
     hash1 = coordinator._hash_content(content, "https://example.com")
     assert len(hash1) == 64
+
+
+def test_parse_blueprint_data_domain_override(coordinator):
+    """Test that folder structure overrides metadata domain for all domains.
+
+    Verify that parity with Home Assistant Core is maintained by ensuring
+    that the folder (e.g., script/, template/) takes precedence over the
+    'domain' field in the blueprint YAML.
+    """
+    content = (
+        "blueprint:\n"
+        "  name: Test\n"
+        "  domain: automation\n"
+        "  source_url: https://github.com/user/test\n"
+    )
+
+    result = coordinator._parse_blueprint_data(
+        "/config/blueprints/script/test.yaml",
+        content,
+        relative_path="script/test.yaml",
+    )
+    assert result["domain"] == DOMAIN_SCRIPT
+
+    result = coordinator._parse_blueprint_data(
+        "/config/blueprints/template/test.yaml",
+        content,
+        relative_path="template/test.yaml",
+    )
+    assert result["domain"] == DOMAIN_TEMPLATE

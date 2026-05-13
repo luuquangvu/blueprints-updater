@@ -1821,15 +1821,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         configs: dict[str, dict[str, Any]] = {}
+        entity_ids_set = set(entity_ids)
         for domain in ALLOWED_RELOAD_DOMAINS:
             if domain == DOMAIN_TEMPLATE:
                 for platform in async_get_platforms(self.hass, DOMAIN_TEMPLATE):
                     for entity_id, entity in platform.entities.items():
-                        if entity_id in entity_ids:
+                        if entity_id in entity_ids_set:
                             self._populate_config_from_entity(entity, entity_id, configs)
                 continue
 
-            domain_ids = {eid for eid in entity_ids if eid.startswith(f"{domain}.")}
+            domain_ids = {eid for eid in entity_ids_set if eid.startswith(f"{domain}.")}
             if not domain_ids:
                 continue
 
