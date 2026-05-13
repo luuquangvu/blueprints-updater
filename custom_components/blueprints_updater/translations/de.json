@@ -126,7 +126,7 @@
       "message": "Der Import aus externen Quellen erfordert eine ausdrückliche Bestätigung. Bitte aktivieren Sie das Kontrollkästchen 'Bestätigen'."
     },
     "unsupported_source": {
-      "message": "Nicht unterstützte Quelle. Nur GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket und direkte YAML-Links werden unterstützt."
+      "message": "Nicht unterstützte Quelle. Nur GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket und direkte YAML-Links werden unterstützt."
     },
     "import_path_conflict": {
       "message": "Ein Blueprint mit diesem Namen existiert bereits aus einer anderen Quelle ({existing_url}). Bitte entfernen Sie ihn zuerst, um Konflikte zu vermeiden."

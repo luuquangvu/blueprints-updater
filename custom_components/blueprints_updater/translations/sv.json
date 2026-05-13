@@ -126,7 +126,7 @@
       "message": "Import från externa källor kräver uttrycklig bekräftelse. Markera rutan 'Bekräfta'."
     },
     "unsupported_source": {
-      "message": "Källan stöds inte. Endast GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket och direkta YAML-länkar stöds."
+      "message": "Källan stöds inte. Endast GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket och direkta YAML-länkar stöds."
     },
     "import_path_conflict": {
       "message": "En blueprint med detta namn finns redan från en annan källa ({existing_url}). Ta bort den först för att undvika konflikter."

@@ -126,7 +126,7 @@
       "message": "Importeren uit externe bronnen vereist expliciete bevestiging. Vink het vakje 'Bevestigen' aan."
     },
     "unsupported_source": {
-      "message": "Niet-ondersteunde bron. Alleen GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket en directe YAML-links worden ondersteund."
+      "message": "Niet-ondersteunde bron. Alleen GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket en directe YAML-links worden ondersteund."
     },
     "import_path_conflict": {
       "message": "Er bestaat al een blueprint met deze naam uit een andere bron ({existing_url}). Verwijder deze eerst om conflicten te voorkomen."

@@ -126,7 +126,7 @@
       "message": "Импорт из внешних источников требует явного подтверждения. Пожалуйста, установите флажок 'Подтвердить'."
     },
     "unsupported_source": {
-      "message": "Неподдерживаемый источник. Поддерживаются только GitHub, Gists, HA Forum, GitLab, Codeberg, Bitbucket и прямые ссылки на YAML."
+      "message": "Неподдерживаемый источник. Поддерживаются только GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket и прямые ссылки на YAML."
     },
     "import_path_conflict": {
       "message": "Blueprint с этим именем уже существует из другого источника ({existing_url}). Пожалуйста, сначала удалите его, чтобы избежать конфликтов."
