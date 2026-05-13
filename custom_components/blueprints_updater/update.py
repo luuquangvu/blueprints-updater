@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.script import scripts_with_blueprint
+from homeassistant.components.template.helpers import templates_with_blueprint
 from homeassistant.components.update import (
     UpdateDeviceClass,
     UpdateEntity,
@@ -268,6 +269,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 total_usage = len(automations_with_blueprint(self.coordinator.hass, bp_id))
             elif domain == "script":
                 total_usage = len(scripts_with_blueprint(self.coordinator.hass, bp_id))
+            elif domain == "template":
+                total_usage = len(templates_with_blueprint(self.coordinator.hass, bp_id))
         except HomeAssistantError as err:
             _LOGGER.warning(
                 "Error calculating %s usage for blueprint %s: %s",

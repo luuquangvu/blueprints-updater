@@ -35,9 +35,17 @@ from homeassistant.components.script import scripts_with_blueprint
 from homeassistant.components.script.config import (
     async_validate_config_item as async_validate_script_config,
 )
+from homeassistant.components.template.config import (
+    TEMPLATE_BLUEPRINT_SCHEMA,
+)
+from homeassistant.components.template.config import (
+    async_validate_config_section as async_validate_template_config,
+)
+from homeassistant.components.template.helpers import templates_with_blueprint
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers.entity_platform import async_get_platforms
 from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
@@ -1808,11 +1816,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         configs: dict[str, dict[str, Any]] = {}
         for domain in ALLOWED_RELOAD_DOMAINS:
-            if domain not in self.hass.data:
-                continue
-
             domain_ids = {eid for eid in entity_ids if eid.startswith(f"{domain}.")}
             if not domain_ids:
+                continue
+
+            if domain == "template":
+                for platform in async_get_platforms(self.hass, "template"):
+                    for entity_id, entity in platform.entities.items():
+                        if entity_id in domain_ids:
+                            self._populate_config_from_entity(entity, entity_id, configs)
+                continue
+
+            if domain not in self.hass.data:
                 continue
 
             component = self.hass.data[domain]
@@ -1841,8 +1856,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> None:
         """Extract and validate blueprint configuration from a HA entity.
 
-        Checks both raw_config (preferred) and normalized config attributes to
-        recover the original blueprint input schema.
+        Attempts to recover blueprint inputs from available entity attributes.
+        Prioritizes public attributes (raw_config, config) before falling back
+        to internal attributes (_blueprint_inputs) used by Home Assistant Core
+        integrations like automation, script, and template.
+
+        Args:
+            entity: The Home Assistant entity object.
+            entity_id: The entity ID of the consumer.
+            configs: Dictionary to store the extracted configurations.
 
         """
         raw_config = getattr(entity, "raw_config", None)
@@ -1851,6 +1873,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             entity_config = getattr(entity, "config", None)
             if isinstance(entity_config, dict):
                 cfg = entity_config
+        if cfg is None:
+            cfg = getattr(entity, "_blueprint_inputs", None)
+
         if isinstance(cfg, dict) and "use_blueprint" in cfg:
             configs[entity_id] = cfg
 
@@ -2024,6 +2049,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             result.extend(automations_with_blueprint(self.hass, bp_id))
         if domain in (None, "script"):
             result.extend(scripts_with_blueprint(self.hass, bp_id))
+        if domain in (None, "template"):
+            result.extend(templates_with_blueprint(self.hass, bp_id))
         return list(dict.fromkeys(result))
 
     @contextlib.asynccontextmanager
@@ -2103,7 +2130,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 ]
             domain = parts[0]
             bp_id = parts[1]
-            schema = AUTOMATION_BLUEPRINT_SCHEMA if domain == "automation" else BLUEPRINT_SCHEMA
+            if domain == "automation":
+                schema = AUTOMATION_BLUEPRINT_SCHEMA
+            elif domain == "template":
+                schema = TEMPLATE_BLUEPRINT_SCHEMA
+            else:
+                schema = BLUEPRINT_SCHEMA
 
             blueprint_obj = Blueprint(
                 blueprint_dict, expected_domain=domain, path=relative_path, schema=schema
@@ -2149,6 +2181,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         await async_validate_automation_config(
                             self.hass, config_key=entity_id, config=config
                         )
+                    elif domain == "template":
+                        await async_validate_template_config(self.hass, config=config)
                     else:
                         object_id = (
                             entity_id.split(".", 1)[1]

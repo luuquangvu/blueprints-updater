@@ -42,13 +42,13 @@
 ## Features
 
 - **Seamless Native Integration**: Blends perfectly into the Home Assistant ecosystem, looking and feeling like a core feature. Manage everything directly from your dashboard with single-click or bulk updates.
-- **Advanced Compatibility Guard**: Safeguard your smart home against breaking changes with proactive validation. Before applying any update, the system performs a thorough analysis of all dependent automations and scripts against the new blueprint content, identifying compatibility risks, system errors, and other blocking issues to prevent silent failures.
+- **Advanced Compatibility Guard**: Safeguard your smart home against breaking changes with proactive validation. Before applying any update, the system performs a thorough analysis of all dependent automations, scripts, and templates against the new blueprint content, identifying compatibility risks, system errors, and other blocking issues to prevent silent failures.
 - **Set It and Forget It**: Automate your entire workflow. Enable auto-updates and let the system handle backups, downloads, and change notifications for you.
 - **Smart Change Detection**: Minimizes system overhead by using SHA256 hashing and ETag headers to pull data only when a genuine change is detected.
 - **Wide-Ranging Source Support**: Robustly tracks and updates blueprints from major platforms (**GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, and Bitbucket**) and **any direct YAML URL** (e.g., Pastebin, Private Gists, or custom web servers).
 - **Versatile Blueprint Importer**: A dedicated tool to instantly download and install blueprints from **any of the supported sources** with automatic metadata extraction, stable path generation, and strict security validation.
 - **High-Performance CDN Support**: Leverages the [jsDelivr](https://www.jsdelivr.com/) CDN for GitHub-hosted blueprints to maximize download speeds and reduce the impact of rate limiting. Features an intelligent fallback mechanism that automatically reverts to the original source in case of CDN unavailability.
-- **Pre-Update Impact Visibility**: See exactly how many Automations or Scripts use the blueprint before you update, ensuring full control over your smart home logic.
+- **Pre-Update Impact Visibility**: See exactly how many Automations, Scripts, or Templates use the blueprint before you update, ensuring full control over your smart home logic.
 - **Granular Tracking Control**: Fine-tune your experience by tracking all blueprints or targeting specific ones using flexible Whitelists and Blacklists.
 - **Instant, Restart-Free Reloads**: Automatically reloads relevant automation, script, or template domains after an update for immediate results without rebooting.
 - **Preserves Link Metadata**: Automatically maintains `source_url` metadata in your YAML, ensuring your blueprints remain trackable and updatable for years.
@@ -122,7 +122,7 @@ When installing an update from the Home Assistant dashboard, you will have the o
 
 ### Restoring a Backup
 
-If you find that a newly updated blueprint breaks your automations or has an incompatible change, you can easily revert to the previous version:
+If you find that a newly updated blueprint breaks your automations, scripts, or templates or has an incompatible change, you can easily revert to the previous version:
 
 1. Go to **Developer Tools** > **Actions**. _Note: Administrative privileges are required._
 2. Search for the **`blueprints_updater.restore_blueprint`** action.
@@ -130,7 +130,7 @@ If you find that a newly updated blueprint breaks your automations or has an inc
 4. (Optional) Provide the **Backup Version** you wish to restore (default is **1** for the most recent).
 5. Click **Perform Action**.
 
-The integration will look for the specified numbered backup file, restore the original YAML content, and automatically reload your automations and scripts to apply the change immediately.
+The integration will look for the specified numbered backup file, restore the original YAML content, and automatically reload your automations, scripts, and templates to apply the change immediately.
 
 ## Advanced Compatibility Guard
 
@@ -139,7 +139,7 @@ The **Advanced Compatibility Guard** is a professional-grade safety layer design
 When an update is detected, the system performs a multi-stage safety check:
 
 1. **Code Validation**: Automatically verifies the new blueprint's structure to ensure it complies with Home Assistant's rules.
-2. **Impact Analysis**: Simulates the update against your existing automations and scripts to see if anything will break.
+2. **Impact Analysis**: Simulates the update in an isolated sandbox environment against your existing automations, scripts, and templates to see if anything will break.
 3. **Risk Alerts**: If a problem is found (such as a missing required setting), the update is flagged with a **"compatibility error"**.
 4. **Auto-Update Protection**: Blueprints at risk of causing errors are automatically blocked from auto-updating to safeguard your smart home from unexpected incidents.
 5. **Full Transparency**: For blocked updates, you can review the **"[WARNING] POTENTIAL BREAKING CHANGES"** to see specific breaking changes (like missing mandatory inputs) and use the **"Git Diff"** section for a detailed code comparison before proceeding manually.
@@ -176,7 +176,7 @@ Blueprints Updater provides a dedicated service to import blueprints from extern
 The system automatically validates content, extracts metadata, and generates a stable file path. For GitHub, GitHub Gist, and Home Assistant Community, the path structure is fully compatible with Home Assistant Core's native importer.
 
 > [!TIP]
-> **Verify Content**: It is recommended to review the blueprint content before use to ensure it matches your automation logic and expectations.
+> **Verify Content**: It is recommended to review the blueprint content before use to ensure it matches your automation, script, or template logic and expectations.
 
 ---
 
