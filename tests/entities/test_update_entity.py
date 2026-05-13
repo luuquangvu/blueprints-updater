@@ -420,6 +420,33 @@ async def test_entity_release_summary_with_usage(coordinator):
         assert "1 running script(s)" in notes
         assert "[1 running script(s)](/config/script/dashboard?blueprint=test2.yaml)" in notes
 
+    info_template = {
+        "name": "Test Template",
+        "relative_path": "template/test3.yaml",
+        "source_url": "https://url.com",
+        "updatable": True,
+    }
+    entity_template = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/template/test3.yaml",
+        info_template,
+    )
+    entity_template.entity_id = "update.template"
+    coordinator.data["/config/blueprints/template/test3.yaml"] = info_template
+    entity_template.hass = coordinator.hass
+
+    with (
+        patch.object(update_module, "templates_with_blueprint", return_value=["template1"]),
+        patch.object(entity_template, "async_write_ha_state"),
+    ):
+        await entity_template._async_localize_strings()
+        assert entity_template.release_summary == "Update available"
+        notes = await entity_template.async_release_notes()
+        assert notes is not None
+        assert "/config/blueprint/dashboard" in notes
+        assert "1 running template(s)" in notes
+        assert "[1 running template(s)](/config/blueprint/dashboard)" in notes
+
 
 @pytest.mark.asyncio
 async def test_entity_release_notes_encoding(coordinator):
