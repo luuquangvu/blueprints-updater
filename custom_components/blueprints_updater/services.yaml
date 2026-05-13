@@ -22,7 +22,7 @@ restore_blueprint:
         number:
 update_all:
   name: Update All Blueprints
-  description: Automatically downloads and installs all available blueprint updates.
+  description: Automatically downloads and installs all available blueprint updates simultaneously.
   fields:
     backup:
       name: Create Backup

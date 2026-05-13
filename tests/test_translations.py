@@ -38,7 +38,12 @@ def check_dict_order(data, ref, path=""):
     )
 
     for key in ref_keys:
-        if isinstance(ref[key], dict) and isinstance(data[key], dict):
+        ref_is_dict = isinstance(ref[key], dict)
+        data_is_dict = isinstance(data[key], dict)
+        assert data_is_dict == ref_is_dict, (
+            f"Type mismatch at '{path}.{key}'" if path else f"Type mismatch at '{key}'"
+        )
+        if ref_is_dict:
             new_path = f"{path}.{key}" if path else key
             check_dict_order(data[key], ref[key], new_path)
 

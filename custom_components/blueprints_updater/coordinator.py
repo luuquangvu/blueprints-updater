@@ -525,6 +525,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     info["updatable"] = is_mismatch
                     if is_url_change or is_mismatch:
                         info["etag"] = None
+                        info["last_modified"] = None
             return
 
         for path, info in results.items():

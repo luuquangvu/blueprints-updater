@@ -193,7 +193,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         """
         return self.coordinator.is_auto_update_enabled()
 
-    @property
+    @cached_property
     def provider_type(self) -> str | None:
         """Return the provider type of the blueprint."""
         source_url = self.coordinator.data.get(self._path, {}).get("source_url")
