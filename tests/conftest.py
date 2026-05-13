@@ -30,6 +30,13 @@ def mock_storage():
 
 
 @pytest.fixture
+def mock_makedirs():
+    """Mock coordinator.os.makedirs for opt-in tests."""
+    with patch("custom_components.blueprints_updater.coordinator.os.makedirs") as mock:
+        yield mock
+
+
+@pytest.fixture
 def _mock_hass():
     """Mock HomeAssistant fixture for unit tests."""
     hass_mock = MagicMock(spec=HomeAssistant)
@@ -78,6 +85,8 @@ def mock_getaddrinfo(request, monkeypatch):
         if host is None:
             return real_getaddrinfo(host, port, family, type, proto, flags)
 
+        if isinstance(host, bytes):
+            host = host.decode("utf-8")
         hostname = host.rstrip(".").lower()
         is_local = False
         try:

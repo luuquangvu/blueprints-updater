@@ -1,5 +1,6 @@
 """Test the initialization of the integration."""
 
+import socket
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,8 +24,14 @@ async def test_setup_integration(hass: HomeAssistant) -> None:
     )
     entry.add_to_hass(hass)
 
-    with patch(
-        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+        ),
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -60,8 +67,12 @@ async def test_full_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
         entry_id="lifecycle_entry",
     )
     entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    with patch(
+        "socket.getaddrinfo",
+        return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
     coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
     await coordinator.async_wait_until_done()
 

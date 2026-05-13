@@ -22,12 +22,29 @@ restore_blueprint:
         number:
 update_all:
   name: Update All Blueprints
-  description: Automatically downloads and installs all available blueprint updates.
+  description: Automatically downloads and installs all available blueprint updates simultaneously.
   fields:
     backup:
       name: Create Backup
       description: Create numbered backup files for all updated blueprints before overwriting.
       required: false
       default: true
+      selector:
+        boolean:
+import_blueprint:
+  name: Import Blueprint
+  description: Downloads and installs a blueprint from a URL.
+  fields:
+    url:
+      name: Blueprint URL
+      description: The URL of the blueprint. Supports direct YAML links or provider URLs (GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket).
+      required: true
+      selector:
+        text:
+    confirm:
+      name: Confirm External Source
+      description: Required to acknowledge importing from external/unverified sources.
+      required: true
+      default: false
       selector:
         boolean:

@@ -11,7 +11,7 @@ from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoor
 
 
 @pytest.mark.asyncio
-async def test_prune_preserves_hashes_only_metadata(coordinator):
+async def test_prune_preserves_hashes_only_metadata(coordinator, mock_makedirs):
     """Test that blueprints with only a hash (and no ETag) are not pruned if they exist."""
     coordinator._persisted_metadata = {"automation/hash_only.yaml": {"remote_hash": "some_hash"}}
 
@@ -29,7 +29,7 @@ async def test_prune_preserves_hashes_only_metadata(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_prune_stale_metadata_triggers_save(coordinator):
+async def test_async_prune_stale_metadata_triggers_save(coordinator, mock_makedirs):
     """Test that pruning stale metadata triggers a background save operation."""
     coordinator._persisted_metadata = {"automation/stale.yaml": {"remote_hash": "some_hash"}}
 
@@ -50,7 +50,7 @@ async def test_async_prune_stale_metadata_triggers_save(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_save_metadata_honors_cleared_in_memory_state(coordinator):
+async def test_save_metadata_honors_cleared_in_memory_state(coordinator, mock_makedirs):
     """Test that clearing an ETag in-memory correctly results in it being removed from save."""
     path = "/config/blueprints/automation/test.yaml"
     coordinator._persisted_metadata = {
@@ -80,7 +80,7 @@ async def test_save_metadata_honors_cleared_in_memory_state(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_metadata_pruning(coordinator):
+async def test_metadata_pruning(coordinator, mock_makedirs):
     """Test that stale metadata is pruned during update."""
     path_valid = "/config/blueprints/automation/valid.yaml"
 
@@ -118,7 +118,7 @@ async def test_metadata_pruning(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_save_metadata_empty_data(coordinator):
+async def test_async_save_metadata_empty_data(coordinator, mock_makedirs):
     """Test that saving metadata with empty data clears the store."""
     coordinator.data = {}
     coordinator.setup_complete = True
@@ -135,7 +135,7 @@ async def test_async_save_metadata_empty_data(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_prune_metadata_persistence(coordinator):
+async def test_prune_metadata_persistence(coordinator, mock_makedirs):
     """Test that stale metadata is pruned from memory and persisted to disk."""
     path_exist = "/config/blueprints/automation/exist.yaml"
 
@@ -183,7 +183,7 @@ async def test_prune_metadata_persistence(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_cold_start_rehydration(coordinator):
+async def test_cold_start_rehydration(coordinator, mock_makedirs):
     """Test that persisted hashes are used on reboot but verified later."""
     path = "/config/blueprints/automation/test.yaml"
     local_hash = "current_hash"
@@ -215,7 +215,7 @@ async def test_cold_start_rehydration(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_etag_invalidation_on_mismatch(coordinator):
+async def test_etag_invalidation_on_mismatch(coordinator, mock_makedirs):
     """Test that ETag is invalidated when local and remote hashes mismatch on startup."""
     path = "/config/blueprints/automation/test.yaml"
     local_hash = "current_hash"
@@ -248,7 +248,7 @@ async def test_etag_invalidation_on_mismatch(coordinator):
 
 
 @pytest.mark.asyncio
-async def test_persisted_metadata_not_reused_after_first_update(coordinator):
+async def test_persisted_metadata_not_reused_after_first_update(coordinator, mock_makedirs):
     """Test that persisted hashes/ETags are only used for the very first update."""
     path = "/config/blueprints/automation/test.yaml"
     initial_hash = "initial_hash"
@@ -256,6 +256,7 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator):
         "automation/test.yaml": {
             "remote_hash": initial_hash,
             "etag": "initial_etag",
+            "last_modified": "initial_mod",
             "source_url": "https://url",
         }
     }
@@ -282,6 +283,7 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator):
     coordinator._persisted_metadata["automation/test.yaml"] = {
         "remote_hash": "stale_hash",
         "etag": "stale_etag",
+        "last_modified": "stale_mod",
     }
 
     with (
@@ -292,10 +294,11 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator):
 
     assert results[path]["remote_hash"] == initial_hash
     assert results[path]["etag"] == "initial_etag"
+    assert results[path]["last_modified"] == "initial_mod"
 
 
 @pytest.mark.asyncio
-async def test_metadata_preservation_during_scan(coordinator):
+async def test_metadata_preservation_during_scan(coordinator, mock_makedirs):
     """Test that existing metadata is preserved during a scan until refreshed."""
     path = "/config/blueprints/automation/test.yaml"
     local_hash = "some_hash"
@@ -376,7 +379,7 @@ async def test_backup_rotation(coordinator, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_async_restore_blueprint_error(hass, coordinator):
+async def test_async_restore_blueprint_error(hass, coordinator, mock_makedirs):
     """Test error handling during blueprint restoration."""
     path = "/config/blueprints/automation/test.yaml"
     coordinator.data = {path: {"updatable": False}}
@@ -400,7 +403,7 @@ async def test_async_restore_blueprint_error(hass, coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_restore_blueprint_missing(hass, coordinator):
+async def test_async_restore_blueprint_missing(hass, coordinator, mock_makedirs):
     """Test restoration when backup is missing."""
     path = "/config/blueprints/automation/test.yaml"
     coordinator.data = {path: {"updatable": False}}
@@ -417,7 +420,7 @@ async def test_async_restore_blueprint_missing(hass, coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_restore_blueprint_success(hass, coordinator):
+async def test_async_restore_blueprint_success(hass, coordinator, mock_makedirs):
     """Test successful restoration of a blueprint backup."""
     path = "/config/blueprints/automation/test.yaml"
     coordinator.data = {path: {"updatable": False}}
@@ -449,7 +452,7 @@ async def test_async_restore_blueprint_success(hass, coordinator):
 
 
 @pytest.mark.asyncio
-async def test_async_restore_blueprint_unsafe_path(coordinator):
+async def test_async_restore_blueprint_unsafe_path(coordinator, mock_makedirs):
     """Test that restoring to an unsafe path is blocked."""
     coordinator._is_safe_path = BlueprintUpdateCoordinator._is_safe_path.__get__(coordinator)
     result = await coordinator.async_restore_blueprint("/config/secrets.yaml")

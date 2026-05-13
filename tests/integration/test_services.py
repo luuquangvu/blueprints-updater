@@ -1,5 +1,6 @@
 """Test the services provided by Blueprints Updater."""
 
+import socket
 from pathlib import Path
 from unittest.mock import patch
 
@@ -30,8 +31,14 @@ async def test_reload_service(hass: HomeAssistant) -> None:
         entry_id="test_service_entry",
     )
     entry.add_to_hass(hass)
-    with patch(
-        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+        ),
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
+        ),
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -68,8 +75,12 @@ async def test_update_all_service(hass: HomeAssistant, respx_mock) -> None:
         entry_id="test_update_all",
     )
     entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    with patch(
+        "socket.getaddrinfo",
+        return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
 
     coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
     await coordinator.async_wait_until_done()
@@ -106,8 +117,12 @@ async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> Non
         entry_id="test_restore",
     )
     entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    with patch(
+        "socket.getaddrinfo",
+        return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
 
     coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
 

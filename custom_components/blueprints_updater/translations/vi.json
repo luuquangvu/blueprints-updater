@@ -78,6 +78,20 @@
           "description": "Tạo bản sao lưu đánh số cho tất cả các blueprint được cập nhật trước khi ghi đè."
         }
       }
+    },
+    "import_blueprint": {
+      "name": "Nhập Blueprint",
+      "description": "Tải xuống và cài đặt một blueprint từ một URL.",
+      "fields": {
+        "url": {
+          "name": "URL của Blueprint",
+          "description": "URL của blueprint. Hỗ trợ liên kết YAML trực tiếp hoặc URL từ GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket."
+        },
+        "confirm": {
+          "name": "Xác nhận nguồn bên ngoài",
+          "description": "Yêu cầu xác nhận khi nhập từ các nguồn bên ngoài/không xác định."
+        }
+      }
     }
   },
   "exceptions": {
@@ -101,6 +115,45 @@
     },
     "system_error": {
       "message": "Lỗi hệ thống khi khôi phục: {error}"
+    },
+    "missing_url": {
+      "message": "Thiếu tham số URL."
+    },
+    "no_coordinator": {
+      "message": "Không tìm thấy coordinator hoạt động. Vui lòng kiểm tra cài đặt tích hợp."
+    },
+    "confirmation_required": {
+      "message": "Nhập từ nguồn bên ngoài yêu cầu xác nhận rõ ràng. Vui lòng tích chọn 'Xác nhận'."
+    },
+    "unsupported_source": {
+      "message": "Nguồn không được hỗ trợ. Chỉ hỗ trợ GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket và các liên kết YAML trực tiếp."
+    },
+    "import_path_conflict": {
+      "message": "Một blueprint với tên này đã tồn tại từ một nguồn khác ({existing_url}). Vui lòng xóa nó trước để tránh xung đột."
+    },
+    "invalid_content_type": {
+      "message": "Loại nội dung không hợp lệ: {content_type}. Yêu cầu text/plain hoặc YAML."
+    },
+    "invalid_yaml": {
+      "message": "Tệp được nhập không phải là một blueprint YAML hợp lệ."
+    },
+    "empty_content": {
+      "message": "Nội dung nhận được bị trống"
+    },
+    "fetch_error": {
+      "message": "Lỗi tải xuống: {error}"
+    },
+    "unsafe_url": {
+      "message": "URL không an toàn: {url}"
+    },
+    "unsafe_path": {
+      "message": "Đường dẫn mục tiêu không an toàn: {path}"
+    },
+    "validation_error": {
+      "message": "Lỗi xác thực: {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Kiểu dữ liệu source_url không hợp lệ: {type}. Yêu cầu một chuỗi ký tự (string)."
     }
   },
   "common": {
@@ -120,7 +173,8 @@
     "fetch_error": "Lỗi tải xuống: {error}",
     "processing_error": "Lỗi xử lý: {error}",
     "auto_update_failed": "Tự động cập nhật thất bại: {error}",
-    "unsafe_url": "URL không an toàn: {error}",
+    "unsafe_url": "URL không an toàn: {url}",
+    "unsafe_path": "Đường dẫn mục tiêu không an toàn: {path}",
     "content_missing": "Nội dung blueprint bị thiếu hoặc không thể tải xuống",
     "git_diff_title": "Mã nguồn thay đổi (Git Diff)",
     "semantic_sync_notice": "Bản blueprint này giống hệt về mặt logic, nhưng cần cập nhật cấu trúc để đồng bộ với định dạng chuẩn mới (ví dụ: chuẩn hóa xuống dòng, bổ sung metadata).",

@@ -221,7 +221,11 @@ async def test_entity_properties(coordinator):
         "Safety Tip: It is recommended to enable the backup option "
         "before installing updates to ensure you can revert if needed."
     )
-    assert entity.extra_state_attributes == {"domain": "automation", "relative_path": "test.yaml"}
+    assert entity.extra_state_attributes == {
+        "domain": "automation",
+        "relative_path": "test.yaml",
+        "provider_type": "generic",
+    }
 
     entity_missing = BlueprintUpdateEntity(
         coordinator,
@@ -243,6 +247,7 @@ async def test_entity_properties(coordinator):
         "last_error": "Fetch Error",
         "domain": "automation",
         "relative_path": "test.yaml",
+        "provider_type": "generic",
     }
 
     path = "/config/blueprints/test.yaml"
@@ -812,7 +817,7 @@ async def test_async_install_bypass_protection(coordinator):
         patch.object(
             coordinator,
             "_async_fetch_content",
-            AsyncMock(return_value=("not_a_blueprint: true", "etag")),
+            AsyncMock(return_value=("not_a_blueprint: true", "etag", None)),
         ),
         patch.object(
             coordinator, "_validate_blueprint", MagicMock(return_value="invalid_blueprint")

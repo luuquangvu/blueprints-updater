@@ -78,6 +78,20 @@
           "description": "在覆盖之前为所有更新的蓝图创建编号的备份文件。"
         }
       }
+    },
+    "import_blueprint": {
+      "name": "导入蓝图",
+      "description": "从 URL 下载并安装蓝图。",
+      "fields": {
+        "url": {
+          "name": "蓝图 URL",
+          "description": "蓝图的 URL。支持直接 YAML 链接或提供商 URL（GitHub、GitHub Gist、Home Assistant Community、GitLab、Codeberg、Bitbucket）。"
+        },
+        "confirm": {
+          "name": "确认外部来源",
+          "description": "确认从外部/未验证的来源导入所需的确认。"
+        }
+      }
     }
   },
   "exceptions": {
@@ -101,6 +115,45 @@
     },
     "system_error": {
       "message": "还原期间发生系统错误：{error}"
+    },
+    "missing_url": {
+      "message": "缺少 URL 参数。"
+    },
+    "no_coordinator": {
+      "message": "未找到活跃的协调器。请检查集成设置。"
+    },
+    "confirmation_required": {
+      "message": "从外部来源导入需要明确确认。请勾选“确认”框。"
+    },
+    "unsupported_source": {
+      "message": "不支持的来源。仅支持 GitHub、GitHub Gist、Home Assistant Community、GitLab、Codeberg、Bitbucket 和直接 YAML 链接。"
+    },
+    "import_path_conflict": {
+      "message": "具有此名称的蓝图已从其他来源 ({existing_url}) 存在。请先将其删除以避免冲突。"
+    },
+    "invalid_content_type": {
+      "message": "无效的内容类型：{content_type}。应为 text/plain 或 YAML。"
+    },
+    "invalid_yaml": {
+      "message": "导入的文件不是有效的 YAML 蓝图。"
+    },
+    "empty_content": {
+      "message": "收到的内容为空"
+    },
+    "fetch_error": {
+      "message": "获取错误：{error}"
+    },
+    "unsafe_url": {
+      "message": "不安全的 URL：{url}"
+    },
+    "unsafe_path": {
+      "message": "目标路径不安全：{path}"
+    },
+    "validation_error": {
+      "message": "验证错误：{error}"
+    },
+    "import_invalid_source_type": {
+      "message": "source_url 类型无效：{type}。应为字符串 (string)。"
     }
   },
   "common": {
@@ -120,7 +173,8 @@
     "fetch_error": "获取错误：{error}",
     "processing_error": "处理错误：{error}",
     "auto_update_failed": "自动更新失败：{error}",
-    "unsafe_url": "不安全的 URL：{error}",
+    "unsafe_url": "不安全的 URL：{url}",
+    "unsafe_path": "目标路径不安全：{path}",
     "content_missing": "蓝图内容缺失或无法获取",
     "git_diff_title": "代码更改 (Git Diff)",
     "semantic_sync_notice": "此蓝图在语义上是完全相同的，但需要进行结构更新以符合新的规范格式（例如：换行符标准化、元数据注入）。",

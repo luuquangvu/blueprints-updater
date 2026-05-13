@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.script import scripts_with_blueprint
+from homeassistant.components.template.helpers import templates_with_blueprint
 from homeassistant.components.update import (
     UpdateDeviceClass,
     UpdateEntity,
@@ -25,6 +26,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import BlueprintUpdateCoordinator, StructuredRisk
+from .providers import registry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -192,19 +194,28 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         """
         return self.coordinator.is_auto_update_enabled()
 
-    @property
+    @cached_property
+    def provider_type(self) -> str | None:
+        """Return the provider type of the blueprint."""
+        source_url = self.coordinator.data.get(self._path, {}).get("source_url")
+        if not source_url:
+            return None
+        provider = registry.get_provider(source_url)
+        return provider.provider_type if provider else None
+
+    @cached_property
     def domain(self) -> str:
         """Return the domain of the blueprint (e.g. automation, script)."""
         info = self.coordinator.data.get(self._path, {})
         raw_domain = info.get("domain") or self.relative_path.split("/", 1)[0]
         return self.coordinator._normalize_domain(raw_domain)
 
-    @property
+    @cached_property
     def relative_path(self) -> str:
         """Return the relative path of the blueprint."""
         return self.coordinator.data.get(self._path, {}).get("relative_path", "")
 
-    @property
+    @cached_property
     def blueprint_id(self) -> str:
         """Return the internal ID of the blueprint (path without domain)."""
         relative_path = self.relative_path
@@ -258,6 +269,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 total_usage = len(automations_with_blueprint(self.coordinator.hass, bp_id))
             elif domain == "script":
                 total_usage = len(scripts_with_blueprint(self.coordinator.hass, bp_id))
+            elif domain == "template":
+                total_usage = len(templates_with_blueprint(self.coordinator.hass, bp_id))
         except HomeAssistantError as err:
             _LOGGER.warning(
                 "Error calculating %s usage for blueprint %s: %s",
@@ -331,6 +344,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             info = self.coordinator.data[self._path]
             attrs["domain"] = self.domain
             attrs["relative_path"] = self.relative_path
+            attrs["provider_type"] = info.get("provider_type") or self.provider_type
             if error := info.get("last_error"):
                 attrs["last_error"] = self._localized_error or error
             if blocking := info.get("update_blocking_reason"):

@@ -78,6 +78,20 @@
           "description": "Crea file di backup numerati per tutti i blueprint aggiornati prima di sovrascriverli."
         }
       }
+    },
+    "import_blueprint": {
+      "name": "Importa Blueprint",
+      "description": "Scarica e installa un blueprint da un URL.",
+      "fields": {
+        "url": {
+          "name": "URL del Blueprint",
+          "description": "L'URL del blueprint. Supporta link YAML diretti o URL di provider (GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket)."
+        },
+        "confirm": {
+          "name": "Conferma fonte esterna",
+          "description": "Richiesto per confermare l'importazione da fonti esterne/non verificate."
+        }
+      }
     }
   },
   "exceptions": {
@@ -101,6 +115,45 @@
     },
     "system_error": {
       "message": "Errore di sistema durante il ripristino: {error}"
+    },
+    "missing_url": {
+      "message": "Parametro URL mancante."
+    },
+    "no_coordinator": {
+      "message": "Nessun coordinatore attivo trovato. Controlla la configurazione dell'integrazione."
+    },
+    "confirmation_required": {
+      "message": "L'importazione da fonti esterne richiede una conferma esplicita. Seleziona la casella 'Conferma'."
+    },
+    "unsupported_source": {
+      "message": "Fonte non supportata. Sono supportati solo GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket e link YAML diretti."
+    },
+    "import_path_conflict": {
+      "message": "Un blueprint con questo nome esiste già da una fonte diversa ({existing_url}). Rimuovilo prima per evitare conflitti."
+    },
+    "invalid_content_type": {
+      "message": "Tipo di contenuto non valido: {content_type}. Atteso text/plain o YAML."
+    },
+    "invalid_yaml": {
+      "message": "Il file importato non è un blueprint YAML valido."
+    },
+    "empty_content": {
+      "message": "Contenuto vuoto ricevuto"
+    },
+    "fetch_error": {
+      "message": "Errore di recupero: {error}"
+    },
+    "unsafe_url": {
+      "message": "URL non sicuro: {url}"
+    },
+    "unsafe_path": {
+      "message": "Il percorso di destinazione non è sicuro: {path}"
+    },
+    "validation_error": {
+      "message": "Errore di validazione: {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Tipo di source_url non valido: {type}. Prevista una stringa (string)."
     }
   },
   "common": {
@@ -120,7 +173,8 @@
     "fetch_error": "Errore di recupero: {error}",
     "processing_error": "Errore di elaborazione: {error}",
     "auto_update_failed": "Aggiornamento automatico fallito: {error}",
-    "unsafe_url": "URL non sicuro: {error}",
+    "unsafe_url": "URL non sicuro: {url}",
+    "unsafe_path": "Il percorso di destinazione non è sicuro: {path}",
     "content_missing": "Il contenuto del blueprint è mancante o non è stato possibile recuperarlo.",
     "git_diff_title": "Modifiche al codice (Git Diff)",
     "semantic_sync_notice": "Questo blueprint è semanticamente identico, ma richiede un aggiornamento strutturale per allinearsi al nuovo formato canonico (es. normalizzazione dei fine riga, inserimento di metadati).",

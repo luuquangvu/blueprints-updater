@@ -78,6 +78,20 @@
           "description": "Создавать пронумерованные файлы резервных копий для всех обновленных чертежей перед перезаписью."
         }
       }
+    },
+    "import_blueprint": {
+      "name": "Импорт чертежа",
+      "description": "Загружает и устанавливает чертеж по URL-адресу.",
+      "fields": {
+        "url": {
+          "name": "URL чертежа",
+          "description": "URL-адрес чертежа. Поддерживаются прямые ссылки на YAML или URL-адреса провайдеров (GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket)."
+        },
+        "confirm": {
+          "name": "Подтвердить внешний источник",
+          "description": "Требуется для подтверждения импорта из внешних/непроверенных источников."
+        }
+      }
     }
   },
   "exceptions": {
@@ -101,6 +115,45 @@
     },
     "system_error": {
       "message": "Системная ошибка при восстановлении: {error}"
+    },
+    "missing_url": {
+      "message": "Отсутствует параметр URL."
+    },
+    "no_coordinator": {
+      "message": "Активный координатор не найден. Пожалуйста, проверьте настройки интеграции."
+    },
+    "confirmation_required": {
+      "message": "Импорт из внешних источников требует явного подтверждения. Пожалуйста, установите флажок 'Подтвердить'."
+    },
+    "unsupported_source": {
+      "message": "Неподдерживаемый источник. Поддерживаются только GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket и прямые ссылки на YAML."
+    },
+    "import_path_conflict": {
+      "message": "Blueprint с этим именем уже существует из другого источника ({existing_url}). Пожалуйста, сначала удалите его, чтобы избежать конфликтов."
+    },
+    "invalid_content_type": {
+      "message": "Недопустимый тип контента: {content_type}. Ожидался text/plain или YAML."
+    },
+    "invalid_yaml": {
+      "message": "Импортированный файл не является допустимым YAML-чертежом."
+    },
+    "empty_content": {
+      "message": "Получено пустое содержимое"
+    },
+    "fetch_error": {
+      "message": "Ошибка получения: {error}"
+    },
+    "unsafe_url": {
+      "message": "Небезопасный URL: {url}"
+    },
+    "unsafe_path": {
+      "message": "Целевой путь небезопасен: {path}"
+    },
+    "validation_error": {
+      "message": "Ошибка валидации: {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Неверный тип source_url: {type}. Ожидалась строка (string)."
     }
   },
   "common": {
@@ -120,7 +173,8 @@
     "fetch_error": "Ошибка получения: {error}",
     "processing_error": "Ошибка обработки: {error}",
     "auto_update_failed": "Автоматическое обновление не удалось: {error}",
-    "unsafe_url": "Небезопасный URL: {error}",
+    "unsafe_url": "Небезопасный URL: {url}",
+    "unsafe_path": "Целевой путь небезопасен: {path}",
     "content_missing": "Содержимое чертежа отсутствует или не может быть получено.",
     "git_diff_title": "Изменения в коде (Git Diff)",
     "semantic_sync_notice": "Этот блюпринт логически не изменился, но требует структурного обновления для соответствия новому каноническому форматированию (например, нормализация переносов строк, внедрение метаданных).",

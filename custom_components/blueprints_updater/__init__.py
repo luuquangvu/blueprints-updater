@@ -178,6 +178,27 @@ def _async_register_services(hass: HomeAssistant) -> None:
             _LOGGER.debug("Error formatting translation for %s: %s", key, err)
             return msg
 
+    async def async_import_blueprint_handler(call: ServiceCall) -> None:
+        """Handle the import blueprint action."""
+        url = call.data.get("url")
+        confirm = call.data.get("confirm", False)
+
+        if not url:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="missing_url",
+            )
+
+        coordinators = _get_coordinators()
+        if not coordinators:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="no_coordinator",
+            )
+
+        active_coordinator = coordinators[0]
+        await active_coordinator.async_import_blueprint(url, confirm=confirm)
+
     async def async_reload_action_handler(_: ServiceCall) -> None:
         """Handle the reload action call."""
         for active_coordinator in _get_coordinators():
@@ -335,6 +356,21 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     registered_services = []
     try:
+        if not hass.services.has_service(DOMAIN, IntegrationService.IMPORT_BLUEPRINT):
+            async_register_admin_service(
+                hass,
+                DOMAIN,
+                IntegrationService.IMPORT_BLUEPRINT,
+                async_import_blueprint_handler,
+                schema=vol.Schema(
+                    {
+                        vol.Required("url"): cv.string,
+                        vol.Required("confirm", default=False): cv.boolean,
+                    }
+                ),
+            )
+            registered_services.append(IntegrationService.IMPORT_BLUEPRINT)
+
         if not hass.services.has_service(DOMAIN, IntegrationService.RELOAD):
             async_register_admin_service(
                 hass,
