@@ -45,7 +45,7 @@
 - **Advanced Compatibility Guard**: Safeguard your smart home against breaking changes with proactive validation. Before applying any update, the system performs a thorough analysis of all dependent automations and scripts against the new blueprint content, identifying compatibility risks, system errors, and other blocking issues to prevent silent failures.
 - **Set It and Forget It**: Automate your entire workflow. Enable auto-updates and let the system handle backups, downloads, and change notifications for you.
 - **Smart Change Detection**: Minimizes system overhead by using SHA256 hashing and ETag headers to pull data only when a genuine change is detected.
-- **Wide-Ranging Source Support**: Robustly tracks and updates blueprints from major platforms (**GitHub, GitHub Gist, HA Forum, GitLab, Codeberg, and Bitbucket**) and **any direct YAML URL** (e.g., Pastebin, Private Gists, or custom web servers).
+- **Wide-Ranging Source Support**: Robustly tracks and updates blueprints from major platforms (**GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, and Bitbucket**) and **any direct YAML URL** (e.g., Pastebin, Private Gists, or custom web servers).
 - **Versatile Blueprint Importer**: A dedicated tool to instantly download and install blueprints from **any of the supported sources** with automatic metadata extraction, stable path generation, and strict security validation.
 - **High-Performance CDN Support**: Leverages the [jsDelivr](https://www.jsdelivr.com/) CDN for GitHub-hosted blueprints to maximize download speeds and reduce the impact of rate limiting. Features an intelligent fallback mechanism that automatically reverts to the original source in case of CDN unavailability.
 - **Pre-Update Impact Visibility**: See exactly how many Automations or Scripts use the blueprint before you update, ensuring full control over your smart home logic.
@@ -162,7 +162,7 @@ Blueprints Updater provides a dedicated service to import blueprints from extern
 
 ### Supported Platforms
 
-- **Specialized**: GitHub (with CDN support), GitHub Gist, HA Community Forum, GitLab, Codeberg, and Bitbucket.
+- **Specialized**: GitHub (with CDN support), GitHub Gist, Home Assistant Community, GitLab, Codeberg, and Bitbucket.
 - **Generic**: Any direct YAML link (Pastebin, private servers, etc.).
 
 ### How to Import
@@ -173,7 +173,7 @@ Blueprints Updater provides a dedicated service to import blueprints from extern
 4. Enable the **Confirm External Source** toggle to acknowledge that you trust the source. This is required for external/unverified sources.
 5. Click **Perform Action**.
 
-The system automatically validates content, extracts metadata, and generates a stable file path. For GitHub, Gist, and HA Forum, the path structure is fully compatible with Home Assistant Core's native importer.
+The system automatically validates content, extracts metadata, and generates a stable file path. For GitHub, GitHub Gist, and Home Assistant Community, the path structure is fully compatible with Home Assistant Core's native importer.
 
 > [!TIP]
 > **Verify Content**: It is recommended to review the blueprint content before use to ensure it matches your automation logic and expectations.

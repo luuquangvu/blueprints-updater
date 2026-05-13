@@ -37,7 +37,7 @@ import_blueprint:
   fields:
     url:
       name: Blueprint URL
-      description: The raw URL of the blueprint YAML file.
+      description: The URL of the blueprint. Supports direct YAML links or provider URLs (GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket).
       required: true
       selector:
         text:

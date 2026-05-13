@@ -45,7 +45,7 @@
 - **Cơ chế Bảo vệ Tương thích Nâng cao (Advanced Compatibility Guard)**: Chủ động bảo vệ ngôi nhà thông minh khỏi các thay đổi gây lỗi (breaking changes). Trước khi áp dụng cập nhật, hệ thống thực hiện phân tích toàn diện toàn bộ automation và script phụ thuộc dựa trên nội dung blueprint mới, giúp nhận diện sớm rủi ro tương thích, lỗi hệ thống hoặc các xung đột tiềm ẩn nhằm ngăn ngừa tình trạng lỗi ngầm sau khi cập nhật.
 - **Tự động hóa hoàn toàn**: Khi bật chế độ tự động cập nhật, hệ thống sẽ thay bạn thực hiện mọi thao tác từ sao lưu, tải bản mới đến gửi thông báo chi tiết khi hoàn tất.
 - **Tối ưu hiệu suất và băng thông**: Sử dụng mã băm SHA256 và ETag để chỉ tải về khi thực sự có thay đổi từ nguồn, giảm thiểu tải cho hệ thống.
-- **Hỗ trợ nguồn đa dạng và linh hoạt**: Tự động theo dõi và cập nhật các bản thiết kế từ những nền tảng phổ biến (**GitHub, GitHub Gist, HA Forum, GitLab, Codeberg và Bitbucket**) cũng như **mọi liên kết YAML trực tiếp** (như Pastebin, Gist riêng tư, hoặc máy chủ riêng).
+- **Hỗ trợ nguồn đa dạng và linh hoạt**: Tự động theo dõi và cập nhật các bản thiết kế từ những nền tảng phổ biến (**GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg và Bitbucket**) cũng như **mọi liên kết YAML trực tiếp** (như Pastebin, Gist riêng tư, hoặc máy chủ riêng).
 - **Nhập Blueprint từ mọi nguồn**: Công cụ chuyên dụng giúp tải về và cài đặt nhanh chóng các bản thiết kế từ **bất kỳ nguồn nào được hỗ trợ** vào hệ thống của bạn với cơ chế tự động trích xuất metadata, tạo đường dẫn tệp tin ổn định và xác thực bảo mật nghiêm ngặt.
 - **Tối ưu hóa với jsDelivr CDN**: Tận dụng mạng lưới [jsDelivr](https://www.jsdelivr.com/) CDN để tăng tốc độ tải và giảm ảnh hưởng từ giới hạn truy cập (rate limit). Cơ chế dự phòng đi kèm sẽ tự động lấy dữ liệu trực tiếp từ GitHub nếu CDN gặp sự cố, đảm bảo quá trình cập nhật luôn diễn ra thông suốt.
 - **Nắm rõ tác động trước khi cập nhật**: Hiển thị chính xác số lượng Automation hoặc Script đang sử dụng blueprint đó, giúp bạn chủ động kiểm soát mọi thay đổi.
@@ -162,7 +162,7 @@ Blueprints Updater cung cấp một dịch vụ chuyên dụng để nhập blue
 
 ### Các nền tảng hỗ trợ
 
-- **Chuyên dụng**: GitHub (hỗ trợ CDN), GitHub Gist, HA Community Forum, GitLab, Codeberg và Bitbucket.
+- **Chuyên dụng**: GitHub (hỗ trợ CDN), GitHub Gist, Home Assistant Community, GitLab, Codeberg và Bitbucket.
 - **Tùy chỉnh (Generic)**: Bất kỳ liên kết YAML trực tiếp nào (Pastebin, máy chủ riêng, v.v.).
 
 ### Cách nhập
@@ -173,7 +173,7 @@ Blueprints Updater cung cấp một dịch vụ chuyên dụng để nhập blue
 4. Bật tùy chọn **Xác nhận nguồn bên ngoài (Confirm External Source)** để xác nhận bạn tin tưởng nguồn này. Đây là yêu cầu bắt buộc khi nhập từ các nguồn bên ngoài/chưa xác minh.
 5. Nhấn **Thực hiện hành động (Perform Action)**.
 
-Hệ thống tự động xác thực nội dung, trích xuất metadata và tạo đường dẫn tệp ổn định. Đối với GitHub, Gist và HA Forum, cấu trúc đường dẫn này hoàn toàn tương thích với trình nhập gốc của Home Assistant Core.
+Hệ thống tự động xác thực nội dung, trích xuất metadata và tạo đường dẫn tệp ổn định. Đối với GitHub, GitHub Gist và Home Assistant Community, cấu trúc đường dẫn này hoàn toàn tương thích với trình nhập gốc của Home Assistant Core.
 
 > [!TIP]
 > **Kiểm tra nội dung**: Bạn nên xem lại nội dung blueprint trước khi sử dụng để đảm bảo nó phù hợp với logic tự động hóa và mong đợi của mình.

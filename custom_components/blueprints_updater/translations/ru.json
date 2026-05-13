@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "URL чертежа",
-          "description": "URL-адрес YAML-файла чертежа."
+          "description": "URL-адрес чертежа. Поддерживаются прямые ссылки на YAML или URL-адреса провайдеров (GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket)."
         },
         "confirm": {
           "name": "Подтвердить внешний источник",

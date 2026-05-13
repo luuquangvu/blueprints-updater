@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "URL của Blueprint",
-          "description": "URL của tệp YAML blueprint."
+          "description": "URL của blueprint. Hỗ trợ liên kết YAML trực tiếp hoặc URL từ GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket."
         },
         "confirm": {
           "name": "Xác nhận nguồn bên ngoài",

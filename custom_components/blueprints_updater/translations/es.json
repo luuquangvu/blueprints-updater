@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "URL del Blueprint",
-          "description": "La URL del archivo YAML del blueprint."
+          "description": "La URL del blueprint. Admite enlaces YAML directos o URL de proveedores (GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket)."
         },
         "confirm": {
           "name": "Confirmar fuente externa",

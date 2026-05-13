@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "蓝图 URL",
-          "description": "蓝图 YAML 文件的 URL。"
+          "description": "蓝图的 URL。支持直接 YAML 链接或提供商 URL（GitHub、GitHub Gist、Home Assistant Community、GitLab、Codeberg、Bitbucket）。"
         },
         "confirm": {
           "name": "确认外部来源",

@@ -85,7 +85,7 @@
       "fields": {
         "url": {
           "name": "Blueprint URL",
-          "description": "URL:en till blueprint-YAML-filen."
+          "description": "Webbadressen för blueprinten. Stöder direkta YAML-länkar eller leverantörsadresser (GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket)."
         },
         "confirm": {
           "name": "Bekräfta extern källa",
