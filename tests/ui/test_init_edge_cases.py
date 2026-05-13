@@ -22,6 +22,7 @@ from custom_components.blueprints_updater import (
 from custom_components.blueprints_updater.const import (
     ALLOWED_RELOAD_DOMAINS,
     DOMAIN,
+    DOMAIN_AUTOMATION,
     IntegrationService,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
@@ -258,7 +259,7 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
 
     mock_comp = MagicMock()
     mock_comp.get_entity.return_value = None
-    hass.data["automation"] = mock_comp
+    hass.data[DOMAIN_AUTOMATION] = mock_comp
     assert coordinator._get_entities_configs(["automation.missing"]) == {}
 
     with (

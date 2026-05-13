@@ -162,7 +162,7 @@
     "update_available_short": "Update verfügbar",
     "update_available": "Update verfügbar von {source_url}",
     "update_safety_message": "Tipp: Es wird empfohlen, vor der Installation von Updates die Backup-Option zu aktivieren.",
-    "usage_warning": "Warnung: Dieses Update betrifft [{count} laufende {domain}](/config/{domain}/dashboard?blueprint={bp_id}).",
+    "usage_warning": "Warnung: Dieses Update betrifft [{count} laufende {domain}]({usage_url}).",
     "up_to_date": "Auf dem neuesten Stand",
     "install_error": "Blueprint kann nicht installiert werden: {error}. Die Remote-Datei weist Fehler auf und kann nicht sicher angewendet werden.",
     "invalid_blueprint": "Ungültiger Blueprint: Root-Schlüssel 'blueprint' fehlt",

@@ -16,7 +16,7 @@ import pytest
 from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.blueprints_updater.const import BlueprintRiskType
+from custom_components.blueprints_updater.const import DOMAIN_AUTOMATION, BlueprintRiskType
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
@@ -51,7 +51,7 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
     original_bp = MagicMock()
     mock_hub._blueprints = {"test.yaml": original_bp}
 
-    hass.data["blueprint"] = {"automation": mock_hub}
+    hass.data["blueprint"] = {DOMAIN_AUTOMATION: mock_hub}
 
     configs: dict[str, dict[str, Any]] = {
         "automation.test": {
@@ -125,7 +125,7 @@ async def test_process_blueprint_content_error_handling(coordinator):
     coordinator.data[path3] = dict(info)
     with patch(
         "custom_components.blueprints_updater.coordinator.Blueprint",
-        side_effect=InvalidBlueprint("automation", "test", {}, "Mock Schema Failure"),
+        side_effect=InvalidBlueprint(DOMAIN_AUTOMATION, "test", {}, "Mock Schema Failure"),
     ):
         await coordinator._process_blueprint_content(
             path3,

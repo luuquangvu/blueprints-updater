@@ -162,7 +162,7 @@
     "update_available_short": "Update available",
     "update_available": "Update available from {source_url}",
     "update_safety_message": "Safety Tip: It is recommended to enable the backup option before installing updates to ensure you can revert if needed.",
-    "usage_warning": "Warning: This update will affect [{count} running {domain}(s)](/config/{domain}/dashboard?blueprint={bp_id}).",
+    "usage_warning": "Warning: This update will affect [{count} running {domain}(s)]({usage_url}).",
     "up_to_date": "Up to date",
     "install_error": "Cannot install blueprint: {error}. The remote file has errors and cannot be safely applied.",
     "invalid_blueprint": "Invalid blueprint: Missing 'blueprint' root key",

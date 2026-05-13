@@ -65,6 +65,9 @@ from .const import (
     DEFAULT_AUTO_UPDATE,
     DEFAULT_USE_CDN,
     DOMAIN,
+    DOMAIN_AUTOMATION,
+    DOMAIN_SCRIPT,
+    DOMAIN_TEMPLATE,
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
@@ -1004,9 +1007,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             return "invalid_blueprint"
 
-        schema = (
-            AUTOMATION_BLUEPRINT_SCHEMA if expected_domain == "automation" else BLUEPRINT_SCHEMA
-        )
+        schema = BlueprintUpdateCoordinator._get_blueprint_schema(expected_domain)
 
         try:
             bp = Blueprint(data, expected_domain=expected_domain, schema=schema)
@@ -1066,7 +1067,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if bp_block:
             return self._normalize_domain(bp_block.get("domain"))
 
-        return "automation"
+        return DOMAIN_AUTOMATION
 
     async def async_reload_services(self, domains: list[str] | set[str] | None = None) -> None:
         """Reload specific domains or default ones if they are allowed.
@@ -1713,11 +1714,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     entry["etag"] = None
                     entry["remote_hash"] = None
 
-                domain = "automation"
+                domain = self._get_functional_domain(real_path)
                 if self.data and real_path in self.data:
                     self.data[real_path]["etag"] = None
                     self.data[real_path]["remote_hash"] = None
-                    domain = self.data[real_path].get("domain", "automation")
                 await self.async_reload_services([domain])
                 self.hass.async_create_background_task(
                     self._async_save_metadata(force=True),
@@ -1821,17 +1821,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         configs: dict[str, dict[str, Any]] = {}
-        for domain in ALLOWED_RELOAD_DOMAINS:
-            domain_ids = {eid for eid in entity_ids if eid.startswith(f"{domain}.")}
+        remaining_ids = set(entity_ids)
+
+        for domain in (DOMAIN_AUTOMATION, DOMAIN_SCRIPT):
+            if not remaining_ids:
+                break
+
+            domain_ids = {eid for eid in remaining_ids if eid.startswith(f"{domain}.")}
             if not domain_ids:
                 continue
 
-            if domain == "template":
-                for platform in async_get_platforms(self.hass, "template"):
-                    for entity_id, entity in platform.entities.items():
-                        if entity_id in domain_ids:
-                            self._populate_config_from_entity(entity, entity_id, configs)
-                continue
+            remaining_ids -= domain_ids
 
             if domain not in self.hass.data:
                 continue
@@ -1853,6 +1853,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 for entity_id in domain_ids:
                     if entity := entity_map.get(entity_id):
                         self._populate_config_from_entity(entity, entity_id, configs)
+
+        if remaining_ids:
+            for platform in async_get_platforms(self.hass, DOMAIN_TEMPLATE):
+                for entity_id, entity in platform.entities.items():
+                    if entity_id in remaining_ids:
+                        self._populate_config_from_entity(entity, entity_id, configs)
+                        remaining_ids.remove(entity_id)
+                        if not remaining_ids:
+                            return configs
 
         return configs
 
@@ -2051,11 +2060,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         bp_id = parts[-1] if len(parts) > 1 else relative_path
 
         result: list[str] = []
-        if domain in (None, "automation"):
+        if domain in (None, DOMAIN_AUTOMATION):
             result.extend(automations_with_blueprint(self.hass, bp_id))
-        if domain in (None, "script"):
+        if domain in (None, DOMAIN_SCRIPT):
             result.extend(scripts_with_blueprint(self.hass, bp_id))
-        if domain in (None, "template"):
+        if domain in (None, DOMAIN_TEMPLATE):
             result.extend(templates_with_blueprint(self.hass, bp_id))
         return list(dict.fromkeys(result))
 
@@ -2136,12 +2145,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 ]
             domain = parts[0]
             bp_id = parts[1]
-            if domain == "automation":
-                schema = AUTOMATION_BLUEPRINT_SCHEMA
-            elif domain == "template":
-                schema = TEMPLATE_BLUEPRINT_SCHEMA
-            else:
-                schema = BLUEPRINT_SCHEMA
+            schema = BlueprintUpdateCoordinator._get_blueprint_schema(domain)
 
             blueprint_obj = Blueprint(
                 blueprint_dict, expected_domain=domain, path=relative_path, schema=schema
@@ -2183,11 +2187,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         ):
             for entity_id, config in configs.items():
                 try:
-                    if domain == "automation":
+                    if domain == DOMAIN_AUTOMATION:
                         await async_validate_automation_config(
                             self.hass, config_key=entity_id, config=config
                         )
-                    elif domain == "template":
+                    elif domain == DOMAIN_TEMPLATE:
                         await async_validate_template_config(self.hass, config=config)
                     else:
                         object_id = (
@@ -2898,7 +2902,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 source_url=source_url,
             )
             results_to_notify.append(info["name"])
-            updated_domains.add(info.get("domain", "automation"))
+            updated_domains.add(info.get("domain", DOMAIN_AUTOMATION))
             return True
         except Exception as err:
             _LOGGER.exception("Auto-update failed for %s", path)
@@ -3348,6 +3352,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     @staticmethod
+    def _get_blueprint_schema(domain: str) -> Any:
+        """Return the appropriate Home Assistant blueprint schema for a given domain.
+
+        Args:
+            domain: The blueprint domain (automation, script, or template).
+
+        Returns:
+            The corresponding voluptuous Schema.
+
+        """
+        if domain == DOMAIN_AUTOMATION:
+            return AUTOMATION_BLUEPRINT_SCHEMA
+        if domain == DOMAIN_TEMPLATE:
+            return TEMPLATE_BLUEPRINT_SCHEMA
+        return BLUEPRINT_SCHEMA
+
+    @staticmethod
     def _ensure_source_url(content: str, source_url: str) -> str:
         """Ensure the target source_url is present in the blueprint metadata.
 
@@ -3399,8 +3420,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         target_data = parsed
         try:
-            domain = blueprint_info.get("domain", "automation")
-            schema = AUTOMATION_BLUEPRINT_SCHEMA if domain == "automation" else BLUEPRINT_SCHEMA
+            domain = blueprint_info.get("domain", DOMAIN_AUTOMATION)
+            schema = BlueprintUpdateCoordinator._get_blueprint_schema(domain)
             normalized = schema(parsed)
             target_data = BlueprintUpdateCoordinator._stabilize_yaml_structure(parsed, normalized)
         except (vol.Invalid, KeyError, TypeError, ValueError) as err:
@@ -3518,7 +3539,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 ", ".join(ALLOWED_RELOAD_DOMAINS),
             )
 
-        return "automation"
+        return DOMAIN_AUTOMATION
 
     @staticmethod
     def _should_include_blueprint(
@@ -3640,7 +3661,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     def _parse_blueprint_data(
         path: str, content: str, relative_path: str | None = None
     ) -> ParsedBlueprintData | None:
-        """Parse raw YAML content and extract blueprint metadata if valid."""
+        """Parse raw YAML content and extract blueprint metadata if valid.
+
+        If a relative_path is provided, the physical directory structure
+        (automation, script, or template) always takes precedence over the
+        domain declared in metadata. This ensures 100% parity with Home
+        Assistant Core's loading behavior and the integration's background
+        refresh logic.
+
+        """
         bp_info = BlueprintUpdateCoordinator._get_blueprint_block(path, content)
         if bp_info is None:
             return None
@@ -3661,7 +3690,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
         domain = BlueprintUpdateCoordinator._normalize_domain(bp_info.get("domain"))
 
-        if domain == "automation" and relative_path:
+        if relative_path:
             parts = relative_path.split("/")
             if len(parts) >= 2 and parts[0] in ALLOWED_RELOAD_DOMAINS:
                 domain = parts[0]

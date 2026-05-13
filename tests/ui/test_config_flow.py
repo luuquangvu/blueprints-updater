@@ -19,6 +19,7 @@ from custom_components.blueprints_updater.config_flow import (
 from custom_components.blueprints_updater.const import (
     CONF_MAX_BACKUPS,
     CONF_UPDATE_INTERVAL,
+    DOMAIN_AUTOMATION,
 )
 
 
@@ -202,7 +203,7 @@ async def test_config_flow_scanning(hass: HomeAssistant):
         mock_scan.return_value = {
             full_path: {
                 "name": "Test BP",
-                "domain": "automation",
+                "domain": DOMAIN_AUTOMATION,
                 "source_url": "https://example.com/test.yaml",
                 "local_hash": "hash123",
                 "relative_path": "automation/test.yaml",
@@ -233,7 +234,7 @@ async def test_config_flow_scanning_fallback(hass: HomeAssistant):
         mock_scan.return_value = {
             full_path: {
                 "name": "Fallback BP",
-                "domain": "automation",
+                "domain": DOMAIN_AUTOMATION,
                 "local_hash": "hash456",
             }
         }

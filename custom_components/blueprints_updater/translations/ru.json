@@ -162,7 +162,7 @@
     "update_available_short": "Доступно обновление",
     "update_available": "Доступно обновление от {source_url}",
     "update_safety_message": "Совет: Рекомендуется включить опцию резервного копирования перед установкой обновлений.",
-    "usage_warning": "Предупреждение: Это обновление затронет [{count} работающих {domain}](/config/{domain}/dashboard?blueprint={bp_id}).",
+    "usage_warning": "Предупреждение: Это обновление затронет [{count} работающих {domain}]({usage_url}).",
     "up_to_date": "Обновлено",
     "install_error": "Не удалось установить чертеж: {error}. Удаленный файл содержит ошибки и не может быть безопасно применен.",
     "invalid_blueprint": "Недопустимый чертеж: Отсутствует корневой ключ 'blueprint'",

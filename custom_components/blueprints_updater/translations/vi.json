@@ -162,7 +162,7 @@
     "update_available_short": "Có bản cập nhật",
     "update_available": "Có bản cập nhật mới từ {source_url}",
     "update_safety_message": "Lưu ý: Khuyến nghị bạn nên bật tùy chọn sao lưu trước khi cài đặt để đảm bảo có thể khôi phục phiên bản cũ nếu cần thiết.",
-    "usage_warning": "Cảnh báo: Bản cập nhật này sẽ ảnh hưởng đến [{count} {domain} đang chạy](/config/{domain}/dashboard?blueprint={bp_id}).",
+    "usage_warning": "Cảnh báo: Bản cập nhật này sẽ ảnh hưởng đến [{count} {domain} đang chạy]({usage_url}).",
     "up_to_date": "Đã là bản mới nhất",
     "install_error": "Không thể cài đặt blueprint: {error}. Tệp từ xa có lỗi và không thể áp dụng an toàn.",
     "invalid_blueprint": "Blueprint không hợp lệ: Thiếu khóa 'blueprint' gốc",

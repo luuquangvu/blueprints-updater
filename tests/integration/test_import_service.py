@@ -8,7 +8,10 @@ import pytest
 from homeassistant.exceptions import ServiceValidationError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.blueprints_updater.const import DOMAIN, IntegrationService
+from custom_components.blueprints_updater.const import (
+    DOMAIN,
+    IntegrationService,
+)
 
 
 @pytest.fixture

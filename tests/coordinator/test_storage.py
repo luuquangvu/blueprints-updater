@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.blueprints_updater.const import (
+    DOMAIN_AUTOMATION,
+)
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
@@ -93,7 +96,7 @@ async def test_metadata_pruning(coordinator, mock_makedirs):
         path_valid: {
             "name": "Valid",
             "relative_path": "automation/valid.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": "https://url",
             "local_hash": "hash1",
         }
@@ -197,7 +200,7 @@ async def test_cold_start_rehydration(coordinator, mock_makedirs):
         path: {
             "name": "Test",
             "relative_path": "automation/test.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": "https://url",
             "local_hash": local_hash,
         }
@@ -230,7 +233,7 @@ async def test_etag_invalidation_on_mismatch(coordinator, mock_makedirs):
         path: {
             "name": "Test",
             "relative_path": "automation/test.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": "https://url",
             "local_hash": local_hash,
         }
@@ -266,7 +269,7 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator, moc
         path: {
             "name": "Test",
             "relative_path": "automation/test.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": "https://url",
             "local_hash": initial_hash,
         }
@@ -318,7 +321,7 @@ async def test_metadata_preservation_during_scan(coordinator, mock_makedirs):
         path: {
             "name": "Test",
             "relative_path": "automation/test.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": "https://url",
             "local_hash": local_hash,
         }
@@ -448,7 +451,7 @@ async def test_async_restore_blueprint_success(hass, coordinator, mock_makedirs)
     )
     assert result["success"] is True
     assert result["translation_key"] == "success"
-    hass.services.async_call.assert_any_call("automation", "reload")
+    hass.services.async_call.assert_any_call(DOMAIN_AUTOMATION, "reload")
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,11 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.blueprints_updater.update as update_module
-from custom_components.blueprints_updater.const import DOMAIN
+from custom_components.blueprints_updater.const import (
+    DOMAIN,
+    DOMAIN_AUTOMATION,
+    URL_BLUEPRINT_DASHBOARD,
+)
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
     GitDiffResult,
@@ -148,7 +152,7 @@ def coordinator():
             "updatable": True,
             "last_error": None,
             "remote_content": "blueprint:\n  name: Test",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
         }
     }
     comp.config_entry = MagicMock()
@@ -168,8 +172,7 @@ def coordinator():
             ),
             "usage_warning": (
                 f"Warning: This update will affect [{kwargs.get('count')} "
-                f"running {kwargs.get('domain')}(s)](/config/{kwargs.get('domain')}/"
-                f"dashboard?blueprint={kwargs.get('bp_id')})."
+                f"running {kwargs.get('domain')}(s)]({kwargs.get('usage_url')})."
             ),
             "install_error": (
                 f"Cannot install blueprint: {kwargs.get('error')}. "
@@ -222,7 +225,7 @@ async def test_entity_properties(coordinator):
         "before installing updates to ensure you can revert if needed."
     )
     assert entity.extra_state_attributes == {
-        "domain": "automation",
+        "domain": DOMAIN_AUTOMATION,
         "relative_path": "test.yaml",
         "provider_type": "generic",
     }
@@ -245,7 +248,7 @@ async def test_entity_properties(coordinator):
     await await_scheduled_update(entity, coordinator)
     assert entity.extra_state_attributes == {
         "last_error": "Fetch Error",
-        "domain": "automation",
+        "domain": DOMAIN_AUTOMATION,
         "relative_path": "test.yaml",
         "provider_type": "generic",
     }
@@ -420,6 +423,33 @@ async def test_entity_release_summary_with_usage(coordinator):
         assert "/config/script/dashboard?blueprint=test2.yaml" in notes
         assert "1 running script(s)" in notes
         assert "[1 running script(s)](/config/script/dashboard?blueprint=test2.yaml)" in notes
+
+    info_template = {
+        "name": "Test Template",
+        "relative_path": "template/test3.yaml",
+        "source_url": "https://url.com",
+        "updatable": True,
+    }
+    entity_template = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/template/test3.yaml",
+        info_template,
+    )
+    entity_template.entity_id = "update.template"
+    coordinator.data["/config/blueprints/template/test3.yaml"] = info_template
+    entity_template.hass = coordinator.hass
+
+    with (
+        patch.object(update_module, "templates_with_blueprint", return_value=["template1"]),
+        patch.object(entity_template, "async_write_ha_state"),
+    ):
+        await entity_template._async_localize_strings()
+        assert entity_template.release_summary == "Update available"
+        notes = await entity_template.async_release_notes()
+        assert notes is not None
+        assert URL_BLUEPRINT_DASHBOARD in notes
+        assert "1 running template(s)" in notes
+        assert f"[1 running template(s)]({URL_BLUEPRINT_DASHBOARD})" in notes
 
 
 @pytest.mark.asyncio

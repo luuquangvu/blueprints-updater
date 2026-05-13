@@ -24,7 +24,13 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    DOMAIN_AUTOMATION,
+    DOMAIN_SCRIPT,
+    DOMAIN_TEMPLATE,
+    URL_BLUEPRINT_DASHBOARD,
+)
 from .coordinator import BlueprintUpdateCoordinator, StructuredRisk
 from .providers import registry
 
@@ -221,6 +227,25 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         relative_path = self.relative_path
         return relative_path.split("/", 1)[-1] if "/" in relative_path else relative_path
 
+    @staticmethod
+    def _get_usage_url(domain: str, blueprint_id: str) -> str:
+        """Get the URL to the dashboard for the given domain and blueprint.
+
+        Args:
+            domain: The domain of the blueprint (e.g., automation, script).
+            blueprint_id: The ID of the blueprint.
+
+        Returns:
+            The URL to the dashboard. Note that template blueprints don't
+            have a dedicated dashboard, so the main blueprint list is used.
+
+        """
+        if domain == DOMAIN_TEMPLATE:
+            return URL_BLUEPRINT_DASHBOARD
+
+        encoded_id = quote(blueprint_id, safe="")
+        return f"/config/{domain}/dashboard?blueprint={encoded_id}"
+
     @cached_property
     def installed_version(self) -> str | None:
         """Version of the blueprint currently installed on the local system.
@@ -265,11 +290,11 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         total_usage = 0
         try:
-            if domain == "automation":
+            if domain == DOMAIN_AUTOMATION:
                 total_usage = len(automations_with_blueprint(self.coordinator.hass, bp_id))
-            elif domain == "script":
+            elif domain == DOMAIN_SCRIPT:
                 total_usage = len(scripts_with_blueprint(self.coordinator.hass, bp_id))
-            elif domain == "template":
+            elif domain == DOMAIN_TEMPLATE:
                 total_usage = len(templates_with_blueprint(self.coordinator.hass, bp_id))
         except HomeAssistantError as err:
             _LOGGER.warning(
@@ -281,9 +306,10 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             )
 
         if total_usage > 0 and bp_id:
-            encoded_bp_id = quote(bp_id, safe="")
+            usage_url = self._get_usage_url(domain, bp_id)
+
             notes += "\n\n" + await self.coordinator.async_translate(
-                "usage_warning", count=total_usage, domain=domain, bp_id=encoded_bp_id
+                "usage_warning", count=total_usage, domain=domain, usage_url=usage_url
             )
 
         breaking_risks: list[StructuredRisk] = info.get("breaking_risks", [])

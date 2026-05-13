@@ -6,7 +6,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from custom_components.blueprints_updater.const import DOMAIN
+from custom_components.blueprints_updater.const import (
+    DOMAIN,
+)
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 

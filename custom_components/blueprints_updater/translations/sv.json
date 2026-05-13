@@ -162,7 +162,7 @@
     "update_available_short": "Uppdatering tillgänglig",
     "update_available": "Uppdatering tillgänglig från {source_url}",
     "update_safety_message": "Tips: Det rekommenderas att aktivera säkerhetskopieringsalternativet innan du installerar uppdateringar.",
-    "usage_warning": "Varning: Denna uppdatering kommer att påverka [{count} körande {domain}](/config/{domain}/dashboard?blueprint={bp_id}).",
+    "usage_warning": "Varning: Denna uppdatering kommer att påverka [{count} körande {domain}]({usage_url}).",
     "up_to_date": "Uppdaterad",
     "install_error": "Kan inte installera blueprint: {error}. Fjärrfilen har fel och kan inte appliceras säkert.",
     "invalid_blueprint": "Ogiltig blueprint: Root-nyckeln 'blueprint' saknas",

@@ -4,7 +4,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from custom_components.blueprints_updater.const import ALLOWED_RELOAD_DOMAINS, DOMAIN
+from custom_components.blueprints_updater.const import (
+    ALLOWED_RELOAD_DOMAINS,
+    DOMAIN,
+    DOMAIN_AUTOMATION,
+)
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.update import (
     BlueprintUpdateEntity,
@@ -19,11 +23,13 @@ async def test_async_setup_entry_update(hass):
     config_entry.entry_id = "test_entry"
 
     coordinator = MagicMock()
-    coordinator._normalize_domain = lambda d: d if d in ALLOWED_RELOAD_DOMAINS else "automation"
+    coordinator._normalize_domain = lambda d: (
+        d if d in ALLOWED_RELOAD_DOMAINS else DOMAIN_AUTOMATION
+    )
     data = {
         "automation/test.yaml": {
             "name": "Test BP",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "relative_path": "automation/test.yaml",
             "updatable": True,
             "curr_version": "1.0",
@@ -46,11 +52,13 @@ async def test_async_setup_entry_update(hass):
 def test_update_entity_properties():
     """Test properties of BlueprintUpdateEntity."""
     coordinator = MagicMock()
-    coordinator._normalize_domain = lambda d: d if d in ALLOWED_RELOAD_DOMAINS else "automation"
+    coordinator._normalize_domain = lambda d: (
+        d if d in ALLOWED_RELOAD_DOMAINS else DOMAIN_AUTOMATION
+    )
     coordinator.config_entry.entry_id = "test_entry"
     info = {
         "name": "Test BP",
-        "domain": "automation",
+        "domain": DOMAIN_AUTOMATION,
         "relative_path": "automation/test.yaml",
         "updatable": True,
         "curr_version": "1.0",
@@ -72,5 +80,5 @@ def test_update_entity_properties():
     assert entity.latest_version == "remot123"
 
     attrs = entity.extra_state_attributes
-    assert attrs["domain"] == "automation"
+    assert attrs["domain"] == DOMAIN_AUTOMATION
     assert attrs["relative_path"] == "automation/test.yaml"

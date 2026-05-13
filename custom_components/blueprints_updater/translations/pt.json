@@ -162,7 +162,7 @@
     "update_available_short": "Atualização disponível",
     "update_available": "Atualização disponível em {source_url}",
     "update_safety_message": "Dica: Recomenda-se ativar a opção de backup antes de instalar atualizações.",
-    "usage_warning": "Aviso: Esta atualização afetará [{count} {domain} em execução](/config/{domain}/dashboard?blueprint={bp_id}).",
+    "usage_warning": "Aviso: Esta atualização afetará [{count} {domain} em execução]({usage_url}).",
     "up_to_date": "Atualizado",
     "install_error": "Não foi possível instalar o blueprint: {error}. O ficheiro remoto contém erros e não pode ser aplicado em segurança.",
     "invalid_blueprint": "Blueprint inválido: Falta a chave raiz 'blueprint'",
