@@ -151,6 +151,9 @@
     },
     "validation_error": {
       "message": "Errore di validazione: {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Tipo di source_url non valido: {type}. Prevista una stringa (string)."
     }
   },
   "common": {

@@ -151,6 +151,9 @@
     },
     "validation_error": {
       "message": "Błąd walidacji: {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Nieprawidłowy typ source_url: {type}. Oczekiwano ciągu znaków (string)."
     }
   },
   "common": {

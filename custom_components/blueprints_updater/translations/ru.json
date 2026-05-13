@@ -151,6 +151,9 @@
     },
     "validation_error": {
       "message": "Ошибка валидации: {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Неверный тип source_url: {type}. Ожидалась строка (string)."
     }
   },
   "common": {

@@ -151,6 +151,9 @@
     },
     "validation_error": {
       "message": "验证错误：{error}"
+    },
+    "import_invalid_source_type": {
+      "message": "source_url 类型无效：{type}。应为字符串 (string)。"
     }
   },
   "common": {

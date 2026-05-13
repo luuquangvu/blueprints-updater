@@ -151,6 +151,9 @@
     },
     "validation_error": {
       "message": "Lỗi xác thực: {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Kiểu dữ liệu source_url không hợp lệ: {type}. Yêu cầu một chuỗi ký tự (string)."
     }
   },
   "common": {

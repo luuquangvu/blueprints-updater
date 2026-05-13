@@ -151,6 +151,9 @@
     },
     "validation_error": {
       "message": "Validierungsfehler: {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Ungültiger source_url-Typ: {type}. Erwartet wurde eine Zeichenfolge (string)."
     }
   },
   "common": {

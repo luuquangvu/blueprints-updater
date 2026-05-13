@@ -4,6 +4,7 @@ import hashlib
 import html
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -464,11 +465,7 @@ class GenericProvider(SourceProvider):
         last_part = path_parts[-1] if path_parts else ""
 
         if last_part.lower().endswith((".yaml", ".yml")):
-            name = (
-                last_part[:-5]
-                if last_part.lower().endswith(".yaml")
-                else (last_part[:-4] if last_part.lower().endswith(".yml") else last_part)
-            )
+            name = Path(last_part).stem
         elif content:
             try:
                 data = yaml_util.parse_yaml(content)

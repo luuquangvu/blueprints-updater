@@ -1218,6 +1218,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
 
         if existing_url:
+            if not isinstance(existing_url, str):
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="import_invalid_source_type",
+                    translation_placeholders={"type": type(existing_url).__name__},
+                )
             norm_existing = registry.normalize_url(existing_url)
             if norm_existing != canonical_url:
                 raise ServiceValidationError(

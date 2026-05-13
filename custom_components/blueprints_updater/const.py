@@ -115,6 +115,10 @@ RISK_TYPE_TRANSLATIONS = {
     BlueprintRiskType.SYSTEM_ERROR: "risk_system_error",
 }
 
+"""List of MIME types considered valid for YAML blueprint files.
+
+Includes text/plain for compatibility with raw text providers like Gists.
+"""
 ALLOWED_YAML_MIME_TYPES = [
     "application/x-yaml",
     "application/yaml",

@@ -151,6 +151,9 @@
     },
     "validation_error": {
       "message": "Validation Error: {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Invalid source_url type: {type}. Expected a string."
     }
   },
   "common": {

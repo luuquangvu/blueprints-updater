@@ -151,6 +151,9 @@
     },
     "validation_error": {
       "message": "Valideringsfel: {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Ogiltig source_url-typ: {type}. En sträng (string) förväntades."
     }
   },
   "common": {

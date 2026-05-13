@@ -151,6 +151,9 @@
     },
     "validation_error": {
       "message": "Validatiefout: {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Ongeldig source_url-type: {type}. Tekenreeks (string) verwacht."
     }
   },
   "common": {

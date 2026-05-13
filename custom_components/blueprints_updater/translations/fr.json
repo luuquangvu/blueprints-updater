@@ -151,6 +151,9 @@
     },
     "validation_error": {
       "message": "Erreur de validation : {error}"
+    },
+    "import_invalid_source_type": {
+      "message": "Type de source_url non valide : {type}. Une chaîne de caractères (string) est attendue."
     }
   },
   "common": {
