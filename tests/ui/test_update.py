@@ -4,10 +4,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from custom_components.blueprints_updater.const import ALLOWED_RELOAD_DOMAINS, DOMAIN
+from custom_components.blueprints_updater.const import (
+    ALLOWED_RELOAD_DOMAINS,
+    DOMAIN,
+    DOMAIN_AUTOMATION,
+)
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.update import (
-    DOMAIN_AUTOMATION,
     BlueprintUpdateEntity,
     async_setup_entry,
 )
