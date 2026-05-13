@@ -7,6 +7,10 @@ import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.blueprints_updater.const import (
+    DOMAIN_AUTOMATION,
+)
+
 
 @pytest.mark.asyncio
 async def test_metadata_persistence_failures(coordinator, mock_makedirs):
@@ -113,7 +117,7 @@ async def test_notification_handling(coordinator, mock_makedirs):
     coordinator.hass.services.async_call = AsyncMock()
     coordinator.async_translate = AsyncMock(return_value="translated")
 
-    await coordinator._async_handle_notifications(["BP1", "BP2"], {"automation"})
+    await coordinator._async_handle_notifications(["BP1", "BP2"], {DOMAIN_AUTOMATION})
     coordinator.hass.services.async_call.assert_any_call("persistent_notification", "create", ANY)
 
 

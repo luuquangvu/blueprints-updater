@@ -17,7 +17,10 @@ from homeassistant.exceptions import HomeAssistantError
 from custom_components.blueprints_updater.const import (
     ALLOWED_RELOAD_DOMAINS,
     CONF_USE_CDN,
+    DOMAIN_AUTOMATION,
     DOMAIN_JSDELIVR,
+    DOMAIN_SCRIPT,
+    DOMAIN_TEMPLATE,
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
     FILTER_MODE_ALL,
     MAX_CONCURRENT_REQUESTS,
@@ -35,9 +38,9 @@ from custom_components.blueprints_updater.coordinator import (
 async def test_scan_blueprints(coordinator, mock_makedirs):
     """Test scanning for blueprints across all valid domains and ignoring invalid ones."""
     base_path = os.path.normpath("/config/blueprints")
-    auto_path = os.path.join(base_path, "automation")
-    script_path = os.path.join(base_path, "script")
-    temp_path = os.path.join(base_path, "template")
+    auto_path = os.path.join(base_path, DOMAIN_AUTOMATION)
+    script_path = os.path.join(base_path, DOMAIN_SCRIPT)
+    temp_path = os.path.join(base_path, DOMAIN_TEMPLATE)
     invalid_path = os.path.join(base_path, "not_a_domain")
 
     def mock_open_side_effect(path, *args, **kwargs):
@@ -68,11 +71,11 @@ async def test_scan_blueprints(coordinator, mock_makedirs):
             "custom_components.blueprints_updater.coordinator.os.walk",
             side_effect=lambda p: (
                 [(p, [], ["test.yaml", "test.yml"])]
-                if p.endswith("automation")
+                if p.endswith(DOMAIN_AUTOMATION)
                 else [(p, [], ["script1.yaml"])]
-                if p.endswith("script")
+                if p.endswith(DOMAIN_SCRIPT)
                 else [(p, [], ["temp.yaml"])]
-                if p.endswith("template")
+                if p.endswith(DOMAIN_TEMPLATE)
                 else [(p, [], ["ignored.yaml"])]
                 if "not_a_domain" in p
                 else []
@@ -108,9 +111,9 @@ async def test_scan_blueprints(coordinator, mock_makedirs):
 async def test_scan_blueprints_domain_extraction(coordinator, mock_makedirs):
     """Test that domain is extracted correctly from folder structure during scan."""
     base_path = os.path.normpath("/config/blueprints")
-    auto_path = os.path.join(base_path, "automation")
-    script_path = os.path.join(base_path, "script")
-    sub_auto_path = os.path.join(base_path, "automation", "luuquangvu")
+    auto_path = os.path.join(base_path, DOMAIN_AUTOMATION)
+    script_path = os.path.join(base_path, DOMAIN_SCRIPT)
+    sub_auto_path = os.path.join(base_path, DOMAIN_AUTOMATION, "luuquangvu")
 
     def mock_open_side_effect_extraction(path, *args, **kwargs):
         if "a.yaml" in path:
@@ -135,9 +138,9 @@ async def test_scan_blueprints_domain_extraction(coordinator, mock_makedirs):
                     (p, ["luuquangvu"], ["a.yaml"]),
                     (os.path.join(p, "luuquangvu"), [], ["d.yaml"]),
                 ]
-                if p.endswith("automation")
+                if p.endswith(DOMAIN_AUTOMATION)
                 else [(p, [], ["s.yaml"])]
-                if p.endswith("script")
+                if p.endswith(DOMAIN_SCRIPT)
                 else []
             ),
         ),
@@ -153,9 +156,9 @@ async def test_scan_blueprints_domain_extraction(coordinator, mock_makedirs):
     path_s = os.path.normpath(os.path.join(script_path, "s.yaml"))
     path_d = os.path.normpath(os.path.join(sub_auto_path, "d.yaml"))
 
-    assert blueprints[path_a]["domain"] == "automation"
-    assert blueprints[path_s]["domain"] == "script"
-    assert blueprints[path_d]["domain"] == "automation"
+    assert blueprints[path_a]["domain"] == DOMAIN_AUTOMATION
+    assert blueprints[path_s]["domain"] == DOMAIN_SCRIPT
+    assert blueprints[path_d]["domain"] == DOMAIN_AUTOMATION
 
 
 @pytest.mark.asyncio
@@ -167,7 +170,7 @@ async def test_async_fetch_blueprint_force(coordinator, mock_makedirs):
         path: {
             "name": "Test",
             "relative_path": "automation/test.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": url,
             "local_hash": "old_hash",
             "etag": "old_etag",
@@ -206,14 +209,14 @@ async def test_async_update_data_partial_failure(coordinator, mock_makedirs):
         path1: {
             "name": "OK",
             "relative_path": "automation/ok.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": url1,
             "local_hash": "h1",
         },
         path2: {
             "name": "Fail",
             "relative_path": "automation/fail.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": url2,
             "local_hash": "h2",
         },
@@ -283,7 +286,7 @@ async def test_async_update_data_auto_update(mock_translate, coordinator, mock_m
         path: {
             "name": "Test",
             "relative_path": "automation/test.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": url,
             "local_hash": "old",
             "remote_hash": "new",
@@ -335,7 +338,7 @@ async def test_async_update_data_auto_update_multiple_sorted(
         "path1": {
             "name": "A",
             "relative_path": "automation/a.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": u1,
             "updatable": True,
             "remote_content": c1,
@@ -345,7 +348,7 @@ async def test_async_update_data_auto_update_multiple_sorted(
         "path2": {
             "name": "B",
             "relative_path": "automation/b.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": u2,
             "updatable": True,
             "remote_content": c2,
@@ -488,7 +491,7 @@ async def test_async_fetch_blueprint_regression_key_error_hash(coordinator, mock
                     "local_hash": "h",
                     "name": "N",
                     "relative_path": "P",
-                    "domain": "automation",
+                    "domain": DOMAIN_AUTOMATION,
                     "source_url": url,
                 }
             },
@@ -699,7 +702,7 @@ async def test_async_install_blueprint(hass, coordinator, mock_makedirs):
         await coordinator.async_install_blueprint(path, remote_content)
 
     assert hass.services.async_call.call_count == 1
-    hass.services.async_call.assert_any_call("automation", "reload")
+    hass.services.async_call.assert_any_call(DOMAIN_AUTOMATION, "reload")
 
 
 @pytest.mark.asyncio
@@ -746,21 +749,21 @@ async def test_async_install_blueprint_domain_normalization(hass, coordinator, m
     ):
         content_domain = "blueprint:\n  name: Test\n  domain:  script  "
         await coordinator.async_install_blueprint(path, content_domain)
-        hass.services.async_call.assert_called_once_with("script", "reload")
+        hass.services.async_call.assert_called_once_with(DOMAIN_SCRIPT, "reload")
         hass.services.async_call.reset_mock()
         content_no_domain = "blueprint:\n  name: Test"
         await coordinator.async_install_blueprint(path, content_no_domain)
-        hass.services.async_call.assert_called_once_with("script", "reload")
+        hass.services.async_call.assert_called_once_with(DOMAIN_SCRIPT, "reload")
         hass.services.async_call.reset_mock()
         content_empty_domain = "blueprint:\n  name: Test\n  domain: ''"
         await coordinator.async_install_blueprint(path, content_empty_domain)
-        hass.services.async_call.assert_called_once_with("script", "reload")
+        hass.services.async_call.assert_called_once_with(DOMAIN_SCRIPT, "reload")
 
         hass.services.async_call.reset_mock()
         with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
             content_invalid_domain = "blueprint:\n  name: Test\n  domain:  unknown_domain  "
             await coordinator.async_install_blueprint(path, content_invalid_domain)
-            hass.services.async_call.assert_called_once_with("script", "reload")
+            hass.services.async_call.assert_called_once_with(DOMAIN_SCRIPT, "reload")
             mock_logger.warning.assert_called()
             assert "unknown_domain" in mock_logger.warning.call_args[0][2]
 
@@ -783,10 +786,10 @@ async def test_async_install_blueprint_domain_mismatch(hass, coordinator, caplog
     ):
         await coordinator.async_install_blueprint(path, remote_content)
 
-    hass.services.async_call.assert_awaited_once_with("automation", "reload")
+    hass.services.async_call.assert_awaited_once_with(DOMAIN_AUTOMATION, "reload")
 
     assert any(
-        "automation" in record.getMessage() and "script" in record.getMessage()
+        DOMAIN_AUTOMATION in record.getMessage() and DOMAIN_SCRIPT in record.getMessage()
         for record in caplog.records
     )
 
@@ -820,7 +823,7 @@ async def test_async_install_blueprint_reload_fallback(hass, coordinator, mock_m
         patch.object(coordinator, "_rotate_backups", MagicMock()),
     ):
         await coordinator.async_install_blueprint(path, content)
-        hass.services.async_call.assert_called_once_with("automation", "reload")
+        hass.services.async_call.assert_called_once_with(DOMAIN_AUTOMATION, "reload")
 
     coordinator.async_reload_services = AsyncMock()
     coordinator._async_save_metadata = AsyncMock()
@@ -829,18 +832,18 @@ async def test_async_install_blueprint_reload_fallback(hass, coordinator, mock_m
         patch("custom_components.blueprints_updater.coordinator.os.replace"),
     ):
         await coordinator.async_install_blueprint(path, content, reload_services=True)
-    coordinator.async_reload_services.assert_called_once_with(["automation"])
+    coordinator.async_reload_services.assert_called_once_with([DOMAIN_AUTOMATION])
     coordinator._async_save_metadata.assert_not_called()
 
     coordinator.async_reload_services.reset_mock()
     coordinator._async_save_metadata.reset_mock()
-    coordinator.data = {path: {"domain": "script", "name": "Test"}}
+    coordinator.data = {path: {"domain": DOMAIN_SCRIPT, "name": "Test"}}
     with (
         patch("builtins.open", MagicMock()),
         patch("custom_components.blueprints_updater.coordinator.os.replace"),
     ):
         await coordinator.async_install_blueprint(path, content, reload_services=True)
-    coordinator.async_reload_services.assert_called_once_with(["script"])
+    coordinator.async_reload_services.assert_called_once_with([DOMAIN_SCRIPT])
 
 
 @pytest.mark.asyncio
@@ -878,7 +881,7 @@ async def test_async_install_blueprint_missing_cache_fallback(hass, coordinator,
         assert event_name == EVENT_BLUEPRINTS_UPDATER_UPDATED
         payload: BlueprintUpdateEventPayload = event_data
         assert payload["blueprint_name"] == "New BP"
-        assert payload["domain"] == "automation"
+        assert payload["domain"] == DOMAIN_AUTOMATION
         assert payload["relative_path"] == "automation/new_bp.yaml"
         assert payload["source_url"] == "https://example.com/new.yaml"
         assert payload["previous_hash"] is None
@@ -925,7 +928,7 @@ async def test_async_install_blueprint_manual_install_preserves_url(
         assert event_name == EVENT_BLUEPRINTS_UPDATER_UPDATED
         payload: BlueprintUpdateEventPayload = event_data
         assert payload["blueprint_name"] == "Manual Preserve"
-        assert payload["domain"] == "automation"
+        assert payload["domain"] == DOMAIN_AUTOMATION
         assert payload["relative_path"] == "automation/override.yaml"
         assert payload["source_url"] == cached_url
         assert payload["is_auto_update"] is False
@@ -1027,7 +1030,7 @@ async def test_async_install_blueprint_targeted_reload(coordinator, mock_makedir
     ):
         await coordinator.async_install_blueprint(path, content)
 
-    coordinator.hass.services.async_call.assert_called_once_with("script", "reload")
+    coordinator.hass.services.async_call.assert_called_once_with(DOMAIN_SCRIPT, "reload")
 
 
 @pytest.mark.asyncio
@@ -1080,7 +1083,7 @@ async def test_async_update_blueprint(coordinator, mock_makedirs):
         "name": "Test",
         "relative_path": "automation/test.yaml",
         "source_url": "https://github.com/user/repo/blob/main/test.yaml",
-        "domain": "automation",
+        "domain": DOMAIN_AUTOMATION,
         "local_hash": "old_hash",
     }
     results: dict[str, Any] = {path: {"last_error": None, "local_hash": "old_hash"}}
@@ -1246,7 +1249,7 @@ async def test_async_update_blueprint_cdn_gating(coordinator, cdn_config, expect
         "name": "Test",
         "relative_path": "automation/test.yaml",
         "source_url": "https://github.com/user/repo/blob/main/test.yaml",
-        "domain": "automation",
+        "domain": DOMAIN_AUTOMATION,
         "local_hash": "old_hash",
     }
     coordinator.data = {path: info}
@@ -1432,7 +1435,7 @@ async def test_async_update_blueprint_in_place_unsafe_url(coordinator, mock_make
     """Test that updating from an unsafe URL is blocked."""
     coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
     path = "/config/blueprints/automation/test.yaml"
-    info = {"source_url": "http://192.168.1.1/exploit", "domain": "automation"}
+    info = {"source_url": "http://192.168.1.1/exploit", "domain": DOMAIN_AUTOMATION}
 
     coordinator.data = {path: info}
     with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
@@ -1453,7 +1456,7 @@ async def test_async_update_blueprint_not_modified(coordinator, mock_makedirs):
         "name": "Test",
         "relative_path": "automation/test.yaml",
         "source_url": "https://url",
-        "domain": "automation",
+        "domain": DOMAIN_AUTOMATION,
         "local_hash": "old_hash",
     }
     coordinator.data = {
@@ -1518,8 +1521,8 @@ async def test_async_handle_notifications_multiple_domains(coordinator, mock_mak
         )
 
     assert coordinator.hass.services.async_call.call_count >= 2
-    coordinator.hass.services.async_call.assert_any_call("automation", "reload")
-    coordinator.hass.services.async_call.assert_any_call("script", "reload")
+    coordinator.hass.services.async_call.assert_any_call(DOMAIN_AUTOMATION, "reload")
+    coordinator.hass.services.async_call.assert_any_call(DOMAIN_SCRIPT, "reload")
 
 
 @pytest.mark.asyncio
@@ -1532,7 +1535,7 @@ async def test_async_install_blueprint_fires_event(hass, coordinator, mock_maked
         path: {
             "name": "Test Blueprint",
             "relative_path": "automation/test.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": "https://example.com/source.yaml",
             "local_hash": "old_hash",
             "breaking_risks": [{"type": "risk_type", "args": {}}],
@@ -1555,7 +1558,7 @@ async def test_async_install_blueprint_fires_event(hass, coordinator, mock_maked
 
     payload = args[1]
     assert payload["blueprint_name"] == "Test"
-    assert payload["domain"] == "automation"
+    assert payload["domain"] == DOMAIN_AUTOMATION
     assert payload["relative_path"] == "automation/test.yaml"
     assert payload["source_url"] == "https://example.com/source.yaml"
     assert payload["is_auto_update"] is True
@@ -1581,7 +1584,7 @@ async def test_async_update_blueprint_blocks_special_use_tld_home_arpa(coordinat
     info = {
         "name": "Unsafe BP",
         "relative_path": "script/script.yaml",
-        "domain": "script",
+        "domain": DOMAIN_SCRIPT,
         "source_url": unsafe_url,
     }
 
@@ -1618,7 +1621,7 @@ async def test_async_update_blueprint_blocks_special_use_tld_local(coordinator, 
     info = {
         "name": "Unsafe BP Local",
         "relative_path": "automation/automation.yaml",
-        "domain": "automation",
+        "domain": DOMAIN_AUTOMATION,
         "source_url": unsafe_url,
     }
 

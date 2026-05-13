@@ -10,7 +10,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.blueprints_updater.const import DOMAIN
+from custom_components.blueprints_updater.const import (
+    DOMAIN,
+)
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 

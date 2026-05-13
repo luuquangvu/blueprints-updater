@@ -8,6 +8,11 @@ import yaml
 from homeassistant.util import yaml as yaml_util
 
 import custom_components.blueprints_updater.coordinator as coord_mod
+from custom_components.blueprints_updater.const import (
+    DOMAIN_AUTOMATION,
+    DOMAIN_SCRIPT,
+    DOMAIN_TEMPLATE,
+)
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
     GitDiffResult,
@@ -275,7 +280,7 @@ def test_validate_blueprint_valid(coordinator):
     data = {
         "blueprint": {
             "name": "Test",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "input": {},
         },
         "trigger": [],
@@ -283,7 +288,7 @@ def test_validate_blueprint_valid(coordinator):
     }
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain="automation"
+        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
     )
     assert result is None
 
@@ -293,14 +298,14 @@ def test_validate_blueprint_script_valid(coordinator):
     data = {
         "blueprint": {
             "name": "Test Script",
-            "domain": "script",
+            "domain": DOMAIN_SCRIPT,
             "input": {},
         },
         "sequence": [],
     }
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/script.yaml", expected_domain="script"
+        data, "https://example.com/script.yaml", expected_domain=DOMAIN_SCRIPT
     )
     assert result is None
 
@@ -310,13 +315,13 @@ def test_validate_blueprint_template_valid(coordinator):
     data = {
         "blueprint": {
             "name": "Test Template",
-            "domain": "template",
+            "domain": DOMAIN_TEMPLATE,
             "input": {},
         },
     }
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/template.yaml", expected_domain="template"
+        data, "https://example.com/template.yaml", expected_domain=DOMAIN_TEMPLATE
     )
     assert result is None
 
@@ -326,14 +331,14 @@ def test_validate_blueprint_domain_mismatch(coordinator):
     data = {
         "blueprint": {
             "name": "Mismatch",
-            "domain": "script",
+            "domain": DOMAIN_SCRIPT,
             "input": {},
         },
         "sequence": [],
     }
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain="automation"
+        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
     )
     assert result is not None
     assert "Found incorrect blueprint type script, expected automation" in result
@@ -344,7 +349,7 @@ def test_validate_blueprint_incompatible_version(coordinator):
     data = {
         "blueprint": {
             "name": "Test",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "input": {},
             "homeassistant": {"min_version": "2099.1.0"},
         },
@@ -353,7 +358,7 @@ def test_validate_blueprint_incompatible_version(coordinator):
     }
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain="automation"
+        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
     )
     assert result is not None
     assert "incompatible" in result
@@ -365,7 +370,7 @@ def test_validate_blueprint_schema_error(coordinator):
     data = {"blueprint": {"name": "Test"}}
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain="automation"
+        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
     )
     assert result is not None
     assert "validation_error" in result
@@ -375,7 +380,7 @@ def test_validate_blueprint_missing_key(coordinator):
     """Test _validate_blueprint with data missing the 'blueprint' key."""
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        {"not_blueprint": {}}, "https://example.com/bp.yaml", expected_domain="automation"
+        {"not_blueprint": {}}, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
     )
     assert result is not None
     assert "invalid_blueprint" in result
@@ -545,7 +550,7 @@ def test_ensure_source_url_script(coordinator):
     parsed = yaml.safe_load(new_content)
     assert parsed["blueprint"]["source_url"] == source_url
     assert parsed["blueprint"]["name"] == "Test Script"
-    assert parsed["blueprint"]["domain"] == "script"
+    assert parsed["blueprint"]["domain"] == DOMAIN_SCRIPT
 
 
 def test_deterministic_yaml_hashing(coordinator):

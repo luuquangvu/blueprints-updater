@@ -24,7 +24,13 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    DOMAIN_AUTOMATION,
+    DOMAIN_SCRIPT,
+    DOMAIN_TEMPLATE,
+    URL_BLUEPRINT_DASHBOARD,
+)
 from .coordinator import BlueprintUpdateCoordinator, StructuredRisk
 from .providers import registry
 
@@ -234,8 +240,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             have a dedicated dashboard, so the main blueprint list is used.
 
         """
-        if domain == "template":
-            return "/config/blueprint/dashboard"
+        if domain == DOMAIN_TEMPLATE:
+            return URL_BLUEPRINT_DASHBOARD
 
         encoded_id = quote(blueprint_id, safe="")
         return f"/config/{domain}/dashboard?blueprint={encoded_id}"
@@ -284,11 +290,11 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         total_usage = 0
         try:
-            if domain == "automation":
+            if domain == DOMAIN_AUTOMATION:
                 total_usage = len(automations_with_blueprint(self.coordinator.hass, bp_id))
-            elif domain == "script":
+            elif domain == DOMAIN_SCRIPT:
                 total_usage = len(scripts_with_blueprint(self.coordinator.hass, bp_id))
-            elif domain == "template":
+            elif domain == DOMAIN_TEMPLATE:
                 total_usage = len(templates_with_blueprint(self.coordinator.hass, bp_id))
         except HomeAssistantError as err:
             _LOGGER.warning(

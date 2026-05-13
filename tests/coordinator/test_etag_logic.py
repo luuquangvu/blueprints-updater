@@ -9,6 +9,9 @@ import httpx
 import pytest
 from homeassistant.core import HomeAssistant
 
+from custom_components.blueprints_updater.const import (
+    DOMAIN_AUTOMATION,
+)
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 from .protocols import BlueprintCoordinatorProtocol
@@ -59,7 +62,7 @@ async def test_304_response_preserves_updatable_status(
     info = {
         "name": "Test",
         "relative_path": "test.yaml",
-        "domain": "automation",
+        "domain": DOMAIN_AUTOMATION,
         "source_url": "https://github.com/user/repo/test.yaml",
         "local_hash": local_hash,
     }
@@ -68,7 +71,7 @@ async def test_304_response_preserves_updatable_status(
         path: {
             "name": "Test",
             "relative_path": "test.yaml",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "source_url": "https://github.com/user/repo/test.yaml",
             "local_hash": local_hash,
             "updatable": True,
@@ -148,7 +151,7 @@ async def test_etag_migration_forces_download(
     info = {
         "name": "Test",
         "relative_path": "test.yaml",
-        "domain": "automation",
+        "domain": DOMAIN_AUTOMATION,
         "source_url": "https://github.com/user/repo/bp.yaml",
         "local_hash": "stale_hash",
     }
@@ -157,7 +160,7 @@ async def test_etag_migration_forces_download(
     coordinator.data = {
         path: {
             "name": "Test",
-            "domain": "automation",
+            "domain": DOMAIN_AUTOMATION,
             "etag": "old_etag",
             "remote_hash": None,
         }

@@ -5,7 +5,9 @@ from unittest.mock import patch
 from homeassistant import data_entry_flow
 from homeassistant.core import HomeAssistant
 
-from custom_components.blueprints_updater.const import DOMAIN
+from custom_components.blueprints_updater.const import (
+    DOMAIN,
+)
 
 
 async def test_config_flow_user_step(hass: HomeAssistant) -> None:
