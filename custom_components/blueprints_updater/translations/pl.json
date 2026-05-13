@@ -162,7 +162,7 @@
     "update_available_short": "Dostępna aktualizacja",
     "update_available": "Aktualizacja dostępna pod adresem {source_url}",
     "update_safety_message": "Wskazówka: Zaleca się włączenie opcji kopii zapasowej przed instalacją aktualizacji.",
-    "usage_warning": "Ostrzeżenie: Ta aktualizacja wpłynie na [{count} uruchomionych {domain}(ów)](/config/{domain}/dashboard?blueprint={bp_id}).",
+    "usage_warning": "Ostrzeżenie: Ta aktualizacja wpłynie na [{count} uruchomionych {domain}(ów)]({usage_url}).",
     "up_to_date": "Aktualne",
     "install_error": "Nie można zainstalować Blueprint: {error}. Plik zdalny zawiera błędy i nie można go bezpiecznie zastosować.",
     "invalid_blueprint": "Nieprawidłowy Blueprint: Brak klucza głównego 'blueprint'",

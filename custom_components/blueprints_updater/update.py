@@ -282,8 +282,12 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         if total_usage > 0 and bp_id:
             encoded_bp_id = quote(bp_id, safe="")
+            usage_url = f"/config/{domain}/dashboard?blueprint={encoded_bp_id}"
+            if domain == "template":
+                usage_url = "/config/blueprint/dashboard"
+
             notes += "\n\n" + await self.coordinator.async_translate(
-                "usage_warning", count=total_usage, domain=domain, bp_id=encoded_bp_id
+                "usage_warning", count=total_usage, domain=domain, usage_url=usage_url
             )
 
         breaking_risks: list[StructuredRisk] = info.get("breaking_risks", [])

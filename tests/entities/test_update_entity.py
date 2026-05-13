@@ -168,8 +168,7 @@ def coordinator():
             ),
             "usage_warning": (
                 f"Warning: This update will affect [{kwargs.get('count')} "
-                f"running {kwargs.get('domain')}(s)](/config/{kwargs.get('domain')}/"
-                f"dashboard?blueprint={kwargs.get('bp_id')})."
+                f"running {kwargs.get('domain')}(s)]({kwargs.get('usage_url')})."
             ),
             "install_error": (
                 f"Cannot install blueprint: {kwargs.get('error')}. "
