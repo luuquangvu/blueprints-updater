@@ -84,7 +84,15 @@ async def test_import_blueprint_success_github(hass, setup_integration, respx_mo
     content = "blueprint:\n  name: Imported\n  domain: automation\n"
 
     respx_mock.get(raw_url).mock(
-        return_value=httpx.Response(200, content=content, headers={"Content-Type": "text/yaml"})
+        return_value=httpx.Response(
+            200,
+            content=content,
+            headers={
+                "Content-Type": "text/yaml",
+                "ETag": '"abc"',
+                "Last-Modified": "Wed, 13 May 2026 01:00:00 GMT",
+            },
+        )
     )
 
     with patch(
@@ -100,9 +108,12 @@ async def test_import_blueprint_success_github(hass, setup_integration, respx_mo
 
         mock_install.assert_awaited_once()
         assert mock_install.await_args is not None
-        args = mock_install.await_args[0]
+        args, kwargs = mock_install.await_args
         assert "automation/user/test.yaml" in args[0]
         assert args[1] == content
+        assert kwargs["source_url"] == raw_url
+        assert kwargs["etag"] == '"abc"'
+        assert kwargs["last_modified"] == "Wed, 13 May 2026 01:00:00 GMT"
 
 
 @pytest.mark.asyncio
@@ -113,7 +124,15 @@ async def test_import_blueprint_invalid_yaml(hass, setup_integration, respx_mock
     content = "invalid: yaml: :"
 
     respx_mock.get(raw_url).mock(
-        return_value=httpx.Response(200, content=content, headers={"Content-Type": "text/yaml"})
+        return_value=httpx.Response(
+            200,
+            content=content,
+            headers={
+                "Content-Type": "text/yaml",
+                "ETag": '"abc"',
+                "Last-Modified": "Wed, 13 May 2026 01:00:00 GMT",
+            },
+        )
     )
 
     with pytest.raises(ServiceValidationError):
@@ -152,7 +171,14 @@ async def test_import_blueprint_success_generic(hass, setup_integration, respx_m
     content = "blueprint:\n  name: Generic Blueprint\n  domain: automation\n"
 
     respx_mock.get(url).mock(
-        return_value=httpx.Response(200, content=content, headers={"Content-Type": "text/plain"})
+        return_value=httpx.Response(
+            200,
+            content=content,
+            headers={
+                "Content-Type": "text/plain",
+                "ETag": '"xyz"',
+            },
+        )
     )
 
     with patch(
@@ -168,6 +194,9 @@ async def test_import_blueprint_success_generic(hass, setup_integration, respx_m
 
         mock_install.assert_awaited_once()
         assert mock_install.await_args is not None
-        args = mock_install.await_args[0]
+        args, kwargs = mock_install.await_args
         assert "automation/pastebin.com/generic_blueprint.yaml" in args[0]
         assert args[1] == content
+        assert kwargs["source_url"] == url
+        assert kwargs["etag"] == '"xyz"'
+        assert kwargs.get("last_modified") is None

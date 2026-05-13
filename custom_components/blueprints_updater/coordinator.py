@@ -1126,13 +1126,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             response = await self._execute_with_redirect_guard(session, canonical_url, {})
 
             if provider.provider_type == SourceProviderType.GENERIC:
-                content_type = response.headers.get("Content-Type", "").lower()
+                content_type_raw = response.headers.get("Content-Type", "").lower()
+                media_type = content_type_raw.split(";")[0].strip()
                 allowed = ALLOWED_YAML_MIME_TYPES
-                if not any(t in content_type for t in allowed):
+                if media_type not in allowed:
                     raise ServiceValidationError(
                         translation_domain=DOMAIN,
                         translation_key="invalid_content_type",
-                        translation_placeholders={"content_type": content_type},
+                        translation_placeholders={"content_type": content_type_raw},
                     )
 
             content = await self._parse_provider_response(response, canonical_url)

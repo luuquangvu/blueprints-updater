@@ -140,7 +140,11 @@ class GitHubProvider(SourceProvider):
         path_parts = parsed.path.strip("/").split("/")
         author = path_parts[0] if len(path_parts) > 0 else "unknown"
         filename = path_parts[-1] if len(path_parts) > 0 else "blueprint.yaml"
-        name = filename.removesuffix(".yaml").removesuffix(".yml")
+        name = (
+            filename[:-5]
+            if filename.lower().endswith(".yaml")
+            else (filename[:-4] if filename.lower().endswith(".yml") else filename)
+        )
         return {"author": author, "name": name}
 
     def get_cdn_url(self, url: str) -> str | None:
@@ -234,7 +238,11 @@ class GistProvider(SourceProvider):
         filename = path_parts[-1] if len(path_parts) > 0 else "blueprint.yaml"
         if filename == "raw" and len(path_parts) > 1:
             filename = path_parts[-2]
-        name = filename.removesuffix(".yaml").removesuffix(".yml")
+        name = (
+            filename[:-5]
+            if filename.lower().endswith(".yaml")
+            else (filename[:-4] if filename.lower().endswith(".yml") else filename)
+        )
         return {"author": author, "name": name}
 
 
@@ -359,7 +367,11 @@ class GitLabProvider(SourceProvider):
         author = parsed.hostname.lower() if parsed.hostname else "imported"
         path_parts = parsed.path.strip("/").split("/")
         filename = path_parts[-1] if path_parts else "blueprint.yaml"
-        name = filename.removesuffix(".yaml").removesuffix(".yml")
+        name = (
+            filename[:-5]
+            if filename.lower().endswith(".yaml")
+            else (filename[:-4] if filename.lower().endswith(".yml") else filename)
+        )
         return {"author": author, "name": name}
 
 
@@ -387,7 +399,11 @@ class CodebergProvider(SourceProvider):
         author = parsed.hostname.lower() if parsed.hostname else "imported"
         path_parts = parsed.path.strip("/").split("/")
         filename = path_parts[-1] if path_parts else "blueprint.yaml"
-        name = filename.removesuffix(".yaml").removesuffix(".yml")
+        name = (
+            filename[:-5]
+            if filename.lower().endswith(".yaml")
+            else (filename[:-4] if filename.lower().endswith(".yml") else filename)
+        )
         return {"author": author, "name": name}
 
 
@@ -415,7 +431,11 @@ class BitbucketProvider(SourceProvider):
         author = parsed.hostname.lower() if parsed.hostname else "imported"
         path_parts = parsed.path.strip("/").split("/")
         filename = path_parts[-1] if path_parts else "blueprint.yaml"
-        name = filename.removesuffix(".yaml").removesuffix(".yml")
+        name = (
+            filename[:-5]
+            if filename.lower().endswith(".yaml")
+            else (filename[:-4] if filename.lower().endswith(".yml") else filename)
+        )
         return {"author": author, "name": name}
 
 
@@ -444,7 +464,11 @@ class GenericProvider(SourceProvider):
         last_part = path_parts[-1] if path_parts else ""
 
         if last_part.lower().endswith((".yaml", ".yml")):
-            name = last_part.removesuffix(".yaml").removesuffix(".yml")
+            name = (
+                last_part[:-5]
+                if last_part.lower().endswith(".yaml")
+                else (last_part[:-4] if last_part.lower().endswith(".yml") else last_part)
+            )
         elif content:
             try:
                 data = yaml_util.parse_yaml(content)
