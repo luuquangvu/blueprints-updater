@@ -202,19 +202,19 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         provider = registry.get_provider(source_url)
         return provider.provider_type if provider else None
 
-    @property
+    @cached_property
     def domain(self) -> str:
         """Return the domain of the blueprint (e.g. automation, script)."""
         info = self.coordinator.data.get(self._path, {})
         raw_domain = info.get("domain") or self.relative_path.split("/", 1)[0]
         return self.coordinator._normalize_domain(raw_domain)
 
-    @property
+    @cached_property
     def relative_path(self) -> str:
         """Return the relative path of the blueprint."""
         return self.coordinator.data.get(self._path, {}).get("relative_path", "")
 
-    @property
+    @cached_property
     def blueprint_id(self) -> str:
         """Return the internal ID of the blueprint (path without domain)."""
         relative_path = self.relative_path
