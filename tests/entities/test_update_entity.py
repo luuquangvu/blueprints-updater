@@ -449,7 +449,7 @@ async def test_entity_release_summary_with_usage(coordinator):
         assert notes is not None
         assert URL_BLUEPRINT_DASHBOARD in notes
         assert "1 running template(s)" in notes
-        assert "[1 running template(s)](/config/blueprint/dashboard)" in notes
+        assert f"[1 running template(s)]({URL_BLUEPRINT_DASHBOARD})" in notes
 
 
 @pytest.mark.asyncio

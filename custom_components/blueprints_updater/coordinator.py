@@ -3653,7 +3653,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     def _parse_blueprint_data(
         path: str, content: str, relative_path: str | None = None
     ) -> ParsedBlueprintData | None:
-        """Parse raw YAML content and extract blueprint metadata if valid."""
+        """Parse raw YAML content and extract blueprint metadata if valid.
+
+        If a relative_path is provided, the physical directory structure
+        (automation, script, or template) always takes precedence over the
+        domain declared in metadata. This ensures 100% parity with Home
+        Assistant Core's loading behavior and the integration's background
+        refresh logic.
+
+        """
         bp_info = BlueprintUpdateCoordinator._get_blueprint_block(path, content)
         if bp_info is None:
             return None
