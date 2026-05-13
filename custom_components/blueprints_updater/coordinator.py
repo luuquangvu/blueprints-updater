@@ -1714,11 +1714,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     entry["etag"] = None
                     entry["remote_hash"] = None
 
-                domain = DOMAIN_AUTOMATION
+                domain = self._get_functional_domain(real_path)
                 if self.data and real_path in self.data:
                     self.data[real_path]["etag"] = None
                     self.data[real_path]["remote_hash"] = None
-                    domain = self.data[real_path].get("domain", DOMAIN_AUTOMATION)
                 await self.async_reload_services([domain])
                 self.hass.async_create_background_task(
                     self._async_save_metadata(force=True),
@@ -1823,15 +1822,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         configs: dict[str, dict[str, Any]] = {}
         for domain in ALLOWED_RELOAD_DOMAINS:
-            domain_ids = {eid for eid in entity_ids if eid.startswith(f"{domain}.")}
-            if not domain_ids:
-                continue
-
             if domain == DOMAIN_TEMPLATE:
                 for platform in async_get_platforms(self.hass, DOMAIN_TEMPLATE):
                     for entity_id, entity in platform.entities.items():
-                        if entity_id in domain_ids:
+                        if entity_id in entity_ids:
                             self._populate_config_from_entity(entity, entity_id, configs)
+                continue
+
+            domain_ids = {eid for eid in entity_ids if eid.startswith(f"{domain}.")}
+            if not domain_ids:
                 continue
 
             if domain not in self.hass.data:
