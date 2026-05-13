@@ -1821,18 +1821,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         configs: dict[str, dict[str, Any]] = {}
-        entity_ids_set = set(entity_ids)
-        for domain in ALLOWED_RELOAD_DOMAINS:
-            if domain == DOMAIN_TEMPLATE:
-                for platform in async_get_platforms(self.hass, DOMAIN_TEMPLATE):
-                    for entity_id, entity in platform.entities.items():
-                        if entity_id in entity_ids_set:
-                            self._populate_config_from_entity(entity, entity_id, configs)
-                continue
+        remaining_ids = set(entity_ids)
 
-            domain_ids = {eid for eid in entity_ids_set if eid.startswith(f"{domain}.")}
+        for domain in (DOMAIN_AUTOMATION, DOMAIN_SCRIPT):
+            if not remaining_ids:
+                break
+
+            domain_ids = {eid for eid in remaining_ids if eid.startswith(f"{domain}.")}
             if not domain_ids:
                 continue
+
+            remaining_ids -= domain_ids
 
             if domain not in self.hass.data:
                 continue
@@ -1854,6 +1853,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 for entity_id in domain_ids:
                     if entity := entity_map.get(entity_id):
                         self._populate_config_from_entity(entity, entity_id, configs)
+
+        if remaining_ids:
+            for platform in async_get_platforms(self.hass, DOMAIN_TEMPLATE):
+                for entity_id, entity in platform.entities.items():
+                    if entity_id in remaining_ids:
+                        self._populate_config_from_entity(entity, entity_id, configs)
+                        remaining_ids.remove(entity_id)
+                        if not remaining_ids:
+                            return configs
 
         return configs
 
