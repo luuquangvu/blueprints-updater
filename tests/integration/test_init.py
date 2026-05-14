@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import httpx
+import pytest
 from homeassistant.components.update import SERVICE_INSTALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -16,6 +17,7 @@ from custom_components.blueprints_updater.const import (
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
+@pytest.mark.asyncio
 async def test_setup_integration(hass: HomeAssistant) -> None:
     """Test setting up the integration."""
     entry = MockConfigEntry(
@@ -47,6 +49,7 @@ async def test_setup_integration(hass: HomeAssistant) -> None:
     assert entry.entry_id not in hass.data[DOMAIN]["coordinators"]
 
 
+@pytest.mark.asyncio
 async def test_full_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
     """Test the full lifecycle from discovery to update via entity service."""
     blueprints_dir = Path(hass.config.path("blueprints"))

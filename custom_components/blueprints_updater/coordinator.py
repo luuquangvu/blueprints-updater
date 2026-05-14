@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import difflib
 import hashlib
+import inspect
 import ipaddress
 import logging
 import os
@@ -36,9 +37,6 @@ from homeassistant.components.script.config import (
     async_validate_config_item as async_validate_script_config,
 )
 from homeassistant.components.template.config import (
-    TEMPLATE_BLUEPRINT_SCHEMA,
-)
-from homeassistant.components.template.config import (
     async_validate_config_section as async_validate_template_config,
 )
 from homeassistant.components.template.helpers import templates_with_blueprint
@@ -52,7 +50,18 @@ from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import slugify
 from homeassistant.util import yaml as yaml_util
-from homeassistant.util.ssl import SSL_ALPN_HTTP11_HTTP2
+
+try:
+    from homeassistant.components.template.config import (
+        TEMPLATE_BLUEPRINT_SCHEMA,
+    )
+except ImportError:
+    TEMPLATE_BLUEPRINT_SCHEMA: Any = None
+
+try:
+    from homeassistant.util.ssl import SSL_ALPN_HTTP11_HTTP2
+except ImportError:
+    SSL_ALPN_HTTP11_HTTP2 = None
 
 from .const import (
     ALLOWED_RELOAD_DOMAINS,
@@ -802,7 +811,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 for path, info in blueprints.items():
                     queue.put_nowait((path, info))
 
-                session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
+                client_kwargs = self._get_client_kwargs()
+                session = get_async_client(self.hass, **client_kwargs)
 
                 async def _worker() -> None:
                     """Process blueprints from the queue."""
@@ -946,6 +956,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         so that future falsy-but-meaningful values (e.g. 0 or False) are not discarded.
         """
         return any(entry.get(field) for field in METADATA_STORAGE_FIELDS)
+
+    @staticmethod
+    def _get_client_kwargs() -> dict[str, Any]:
+        """Get the default httpx client kwargs with ALPN support if available."""
+        client_kwargs: dict[str, Any] = {}
+        if SSL_ALPN_HTTP11_HTTP2 is not None:
+            sig = inspect.signature(get_async_client)
+            if "alpn_protocols" in sig.parameters:
+                client_kwargs["alpn_protocols"] = SSL_ALPN_HTTP11_HTTP2
+        return client_kwargs
 
     async def _async_handle_notifications(
         self, auto_updated_names: list[str], domains: set[str] | None = None
@@ -1131,7 +1151,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 translation_placeholders={"url": redact_url(canonical_url)},
             )
 
-        session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
+        client_kwargs = self._get_client_kwargs()
+        session = get_async_client(self.hass, **client_kwargs)
         try:
             response = await self._execute_with_redirect_guard(session, canonical_url, {})
 
@@ -1272,7 +1293,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not info.get("source_url"):
             return
 
-        session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
+        client_kwargs = self._get_client_kwargs()
+        session = get_async_client(self.hass, **client_kwargs)
 
         results_to_notify: list[str] = []
         updated_domains: set[str] = set()
@@ -2311,7 +2333,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             self._update_error_state(path, "unsafe_url", source_url)
             return None
 
-        session = get_async_client(self.hass, alpn_protocols=SSL_ALPN_HTTP11_HTTP2)
+        client_kwargs = self._get_client_kwargs()
+        session = get_async_client(self.hass, **client_kwargs)
         cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
         remote_content, _, _ = await self._async_fetch_with_cdn_fallback(
@@ -3365,7 +3388,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if domain == DOMAIN_AUTOMATION:
             return AUTOMATION_BLUEPRINT_SCHEMA
         if domain == DOMAIN_TEMPLATE:
-            return TEMPLATE_BLUEPRINT_SCHEMA
+            return TEMPLATE_BLUEPRINT_SCHEMA or BLUEPRINT_SCHEMA
         return BLUEPRINT_SCHEMA
 
     @staticmethod

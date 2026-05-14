@@ -31,6 +31,11 @@ def run_pipeline() -> None:
         sys.exit(1)
 
     try:
+        if not os.path.exists(".venv"):
+            print("STEP_START: uv sync", flush=True)
+            subprocess.run(["uv", "sync"], check=True)
+            print("STEP_OK: uv sync", flush=True)
+
         print("STEP_START: uv run ruff format", flush=True)
         subprocess.run(["uv", "run", "ruff", "format"], check=True)
         print("STEP_OK: uv run ruff format", flush=True)

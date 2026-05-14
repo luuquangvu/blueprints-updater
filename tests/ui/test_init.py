@@ -24,6 +24,7 @@ def _setup_test_coordinator(hass: HomeAssistant, entry_id: str, coordinator: Any
     hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})[entry_id] = coordinator
 
 
+@pytest.mark.asyncio
 async def test_setup_entry(hass: HomeAssistant):
     """Test setting up the entry."""
     entry = MagicMock()
@@ -51,6 +52,7 @@ async def test_setup_entry(hass: HomeAssistant):
     assert hass.config_entries.async_forward_entry_setups.called
 
 
+@pytest.mark.asyncio
 async def test_service_registration(hass: HomeAssistant):
     """Test that services are registered."""
     entry = MagicMock()
@@ -115,6 +117,7 @@ async def test_service_registration(hass: HomeAssistant):
         mock_register.assert_not_called()
 
 
+@pytest.mark.asyncio
 async def test_service_handlers(hass: HomeAssistant):
     """Test service handlers' logic."""
     entry = MagicMock()
@@ -182,6 +185,7 @@ async def test_service_handlers(hass: HomeAssistant):
         assert coordinator_mock.async_install_blueprint.called
 
 
+@pytest.mark.asyncio
 async def test_restore_blueprint_handler(hass: HomeAssistant):
     """Test restore_blueprint handler specifically."""
     entry = MagicMock()
@@ -314,6 +318,7 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
             assert coordinator_mock.async_restore_blueprint.called
 
 
+@pytest.mark.asyncio
 async def test_unload_entry(hass: HomeAssistant):
     """Test unloading the entry and service cleanup."""
     entry = MagicMock()
@@ -441,7 +446,6 @@ async def test_restore_handler_multi_coordinator_selection(hass: HomeAssistant):
         coordinator_one.async_restore_blueprint.assert_not_called()
 
         hass.data[DOMAIN]["coordinators"].pop("entry_two")
-        assert restore_handler is not None
         with pytest.raises(ServiceValidationError) as exc:
             await restore_handler(
                 ServiceCall(hass, DOMAIN, "restore_blueprint", {"entity_id": "update.two"})
@@ -589,6 +593,7 @@ async def test_async_update_all_handler_continues_on_failure(hass: HomeAssistant
         mock_coordinator.async_request_refresh.assert_called_once()
 
 
+@pytest.mark.asyncio
 async def test_async_update_options_refreshes_coordinator(hass: HomeAssistant):
     """Test that async_update_options refreshes the coordinator's config entry and interval."""
     entry = MagicMock()
