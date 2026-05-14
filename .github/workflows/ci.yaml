@@ -8,7 +8,7 @@ on:
       - "**.py"
       - "pyproject.toml"
       - "uv.lock"
-      - ".github/workflows/python_check.yaml"
+      - ".github/workflows/ci.yaml"
   pull_request:
     branches:
       - main
@@ -16,7 +16,7 @@ on:
       - "**.py"
       - "pyproject.toml"
       - "uv.lock"
-      - ".github/workflows/python_check.yaml"
+      - ".github/workflows/ci.yaml"
 
 permissions:
   contents: read
