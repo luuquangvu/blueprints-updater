@@ -16,14 +16,16 @@ import shutil
 import subprocess
 import sys
 
-with open("tools/compatibility_matrix.json", encoding="utf-8") as f:
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+with open(os.path.join(REPO_ROOT, "tools", "compatibility_matrix.json"), encoding="utf-8") as f:
     _MATRIX_DATA = json.load(f)
 
 TEST_MATRIX = [
     {"ha_ver": entry["ha_version"], "python_ver": entry["python_version"]} for entry in _MATRIX_DATA
 ]
 
-VENV_BASE = ".venv_homeassistant"
+VENV_BASE = ".venv"
 
 REQUIRED_TEST_DEPS = [
     "pytest-homeassistant-custom-component",
@@ -36,7 +38,8 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
     ha_ver_display = ha_ver
     print(f"Testing Home Assistant {ha_ver} (Python {py_ver})...", flush=True)
 
-    venv_path = f"{VENV_BASE}_{ha_ver.replace('.', '_')}"
+    venv_suffix = f"homeassistant_{ha_ver.replace('.', '_')}_python_{py_ver.replace('.', '_')}"
+    venv_path = os.path.join(REPO_ROOT, f"{VENV_BASE}_{venv_suffix}")
     python_bin = os.path.join(venv_path, "bin", "python")
     pytest_bin = os.path.join(venv_path, "bin", "pytest")
 
@@ -60,13 +63,27 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
             subprocess.run(
                 [
                     "uv",
+                    "--no-config",
                     "pip",
                     "install",
                     "--python",
                     python_bin,
                     ha_spec,
                     *REQUIRED_TEST_DEPS,
-                    "--quiet",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                [
+                    python_bin,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--ignore-requires-python",
+                    "-e",
+                    ".",
                 ],
                 check=True,
                 capture_output=True,
@@ -116,7 +133,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
         ha_ver_display = f"{ha_ver} ({actual_ver})" if ha_ver == "latest" else actual_ver
 
         env = os.environ.copy()
-        env["PYTHONPATH"] = os.getcwd()
+        env["PYTHONPATH"] = REPO_ROOT
         env["PYTHONDONTWRITEBYTECODE"] = "1"
 
         print(f"STEP_START: pytest (Home Assistant {ha_ver_display})", flush=True)
@@ -184,12 +201,12 @@ def main() -> None:
         ha_ver = config["ha_ver"]
         py_ver = config["python_ver"]
         success, ha_version = run_tests_for_version(ha_ver, py_ver, args.reinstall)
-        results[ha_version] = "PASSED" if success else "FAILED"
+        results[(ha_ver, py_ver)] = (ha_version, "PASSED" if success else "FAILED")
 
     print("\n", flush=True)
     all_ok = True
-    for ha_version, status in results.items():
-        print(f"Home Assistant {ha_version}: {status}", flush=True)
+    for (_, py_ver), (ha_version, status) in results.items():
+        print(f"Home Assistant {ha_version} (Python {py_ver}): {status}", flush=True)
         if status != "PASSED":
             all_ok = False
 

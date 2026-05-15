@@ -11,12 +11,11 @@ def patch_service_call_compat():
     if getattr(ServiceCall, "_compat_patched", False):
         return
 
-    cast(Any, ServiceCall)._compat_patched = True
-
     _original_init = ServiceCall.__init__
     try:
         sig = inspect.signature(_original_init)
     except (ValueError, TypeError, AttributeError):
+        cast(Any, ServiceCall)._compat_patched = True
         return
 
     if "hass" not in sig.parameters:
@@ -27,6 +26,8 @@ def patch_service_call_compat():
             return _original_init(self, *args, **kwargs)
 
         cast(Any, ServiceCall).__init__ = _compat_init
+
+    cast(Any, ServiceCall)._compat_patched = True
 
 
 def create_service_call(hass, domain, service, data=None):

@@ -84,13 +84,16 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv venv --python ${{ matrix.python_version }}
+          uv --no-config venv --python ${{ matrix.python_version }}
           HA_SPEC="homeassistant==${{ matrix.ha_version }}"
           if [ "${{ matrix.ha_version }}" = "latest" ]; then
             HA_SPEC="homeassistant"
           fi
-          uv pip install $HA_SPEC pytest-homeassistant-custom-component h2
-          uv pip install -e .
+          uv --no-config pip install $HA_SPEC pytest-homeassistant-custom-component h2
+          source .venv/bin/activate
+          python -m pip install --ignore-requires-python -e .
 
       - name: Run Tests
-        run: uv run pytest --quiet --no-cov
+        run: |
+          source .venv/bin/activate
+          python -m pytest
