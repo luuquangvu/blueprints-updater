@@ -1,5 +1,6 @@
 """Test the services provided by Blueprints Updater."""
 
+import inspect
 import socket
 from pathlib import Path
 from unittest.mock import patch
@@ -7,8 +8,8 @@ from unittest.mock import patch
 import httpx
 import pytest
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.service import async_register_admin_service
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blueprints_updater.const import (
@@ -145,7 +146,10 @@ async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> Non
     entity_id = ent_reg.async_get_entity_id("update", DOMAIN, unique_id)
     assert entity_id is not None
 
-    try:
+    admin_svc_sig = inspect.signature(async_register_admin_service)
+    supports_response_available = "supports_response" in admin_svc_sig.parameters
+
+    if supports_response_available:
         response = await hass.services.async_call(
             DOMAIN,
             "restore_blueprint",
@@ -155,7 +159,7 @@ async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> Non
         )
         assert response is not None
         assert response.get("success") is True
-    except (ServiceValidationError, TypeError):
+    else:
         await hass.services.async_call(
             DOMAIN,
             "restore_blueprint",

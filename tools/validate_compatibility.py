@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -106,7 +107,12 @@ def _get_latest_ha_version() -> str:
             data = json.loads(response.read().decode("utf-8"))
             version = data["info"]["version"]
             return _validate_version_label("pypi_version", version)
-    except Exception:
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError) as err:
+        print(
+            f"Failed to fetch latest Home Assistant version from PyPI, "
+            f"falling back to 'latest': {err}",
+            flush=True,
+        )
         return "latest"
 
 

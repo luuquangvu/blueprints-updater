@@ -971,8 +971,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 sig = inspect.signature(get_async_client)
                 if "alpn_protocols" in sig.parameters:
                     client_kwargs["alpn_protocols"] = SSL_ALPN_HTTP11_HTTP2
-            except (ValueError, TypeError, AttributeError):
-                pass
+            except (ValueError, TypeError, AttributeError) as err:
+                _LOGGER.debug(
+                    "Disabling ALPN for blueprints_updater; "
+                    "failed to inspect get_async_client signature: %s",
+                    err,
+                )
 
         BlueprintUpdateCoordinator._client_kwargs_cache = client_kwargs
         return client_kwargs
