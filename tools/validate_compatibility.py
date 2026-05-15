@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+from pathlib import Path
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -51,11 +52,11 @@ def validate_version_label(label_name: str, label_value: str) -> str:
 
 def ensure_within_root(root_path: str, candidate_path: str) -> str:
     """Return canonical candidate path only if it is contained in canonical root_path."""
-    root_real = os.path.realpath(root_path)
-    candidate_real = os.path.realpath(candidate_path)
-    if os.path.commonpath([root_real, candidate_real]) != root_real:
-        raise ValueError(f"Resolved path {candidate_real!r} escapes allowed root {root_real!r}.")
-    return candidate_real
+    root = Path(root_path).resolve()
+    candidate = Path(candidate_path).resolve()
+    if not candidate.is_relative_to(root):
+        raise ValueError(f"Resolved path {candidate!s} escapes allowed root {root!s}.")
+    return str(candidate)
 
 
 def get_latest_ha_version() -> str:
@@ -73,11 +74,15 @@ def get_latest_ha_version() -> str:
 
 def get_venv_path(ha_ver: str, py_ver: str) -> str:
     """Construct the virtual environment path for a specific version."""
-    safe_ha_ver = validate_version_label("ha_ver", ha_ver)
-    safe_py_ver = validate_version_label("py_ver", py_ver)
-    venv_name = f"homeassistant_{safe_ha_ver}_python_{safe_py_ver}"
-    candidate = os.path.join(VENVS_ROOT, venv_name)
-    return ensure_within_root(VENVS_ROOT, candidate)
+    ha = validate_version_label("ha_ver", ha_ver)
+    py = validate_version_label("py_ver", py_ver)
+    venv_name = f"homeassistant_{ha}_python_{py}"
+
+    if os.path.basename(venv_name) != venv_name:
+        raise ValueError(f"Invalid venv name: {venv_name}")
+
+    candidate = Path(VENVS_ROOT).joinpath(venv_name)
+    return ensure_within_root(VENVS_ROOT, str(candidate))
 
 
 def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bool, str]:
@@ -92,12 +97,12 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
     ha_ver_display = ha_ver_to_install
     print(f"TESTING Home Assistant {ha_ver_to_install} (Python {py_ver})", flush=True)
 
-    venv_path = get_venv_path(ha_ver, py_ver)
-    python_bin = os.path.join(venv_path, "bin", "python")
-    pytest_bin = os.path.join(venv_path, "bin", "pytest")
+    venv_path = Path(get_venv_path(ha_ver, py_ver))
+    python_bin = venv_path / "bin" / "python"
+    pytest_bin = venv_path / "bin" / "pytest"
 
     try:
-        if not os.path.exists(venv_path):
+        if not venv_path.exists():
             print(f"STEP_START: uv venv {venv_path} (Python {py_ver})", flush=True)
             subprocess.run(
                 [
@@ -119,6 +124,10 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
             needs_install = True
         else:
             needs_install = reinstall or ha_ver == "latest"
+
+        if not python_bin.exists():
+            print(f"VALIDATION_ERROR: python not found at {python_bin}", flush=True)
+            return False, ha_ver_display
 
         if needs_install:
             if ha_ver_to_install == "latest":
@@ -167,7 +176,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
             )
             print("STEP_OK: cleanup __pycache__", flush=True)
 
-        if not os.path.exists(pytest_bin):
+        if not pytest_bin.exists():
             print(f"VALIDATION_ERROR: pytest not found at {pytest_bin}", flush=True)
             return False, ha_ver_display
 
@@ -263,8 +272,8 @@ def main() -> None:
             for config in TEST_MATRIX:
                 ha_ver = config["ha_ver"]
                 py_ver = config["python_ver"]
-                venv_path = get_venv_path(ha_ver, py_ver)
-                if os.path.exists(venv_path):
+                venv_path = Path(get_venv_path(ha_ver, py_ver))
+                if venv_path.exists():
                     shutil.rmtree(venv_path)
 
         for config in TEST_MATRIX:
