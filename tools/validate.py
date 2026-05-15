@@ -12,6 +12,7 @@ to command injection that occur when iterating over dynamic command sequences.
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 
 def run_pipeline() -> None:
@@ -31,7 +32,9 @@ def run_pipeline() -> None:
         sys.exit(1)
 
     try:
-        if not os.path.exists(".venv"):
+        repo_root = str(Path(__file__).resolve().parent.parent)
+        venv_path = os.path.join(repo_root, ".venv")
+        if not os.path.exists(venv_path):
             print("STEP_START: uv sync --all-groups", flush=True)
             subprocess.run(["uv", "sync", "--all-groups"], check=True)
             print("STEP_OK: uv sync --all-groups", flush=True)

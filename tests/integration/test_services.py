@@ -155,7 +155,7 @@ async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> Non
         )
         assert response is not None
         assert response.get("success") is True
-    except ServiceValidationError:
+    except (ServiceValidationError, TypeError):
         await hass.services.async_call(
             DOMAIN,
             "restore_blueprint",

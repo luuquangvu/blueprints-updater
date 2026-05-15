@@ -19,7 +19,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 
 _VENVS_ROOT = os.path.join(_REPO_ROOT, ".venvs")
 
