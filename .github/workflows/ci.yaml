@@ -65,7 +65,7 @@ jobs:
       - name: Set matrix
         id: set-matrix
         run: |
-          MATRIX_JSON=$(cat tools/compatibility_matrix.json | jq -c '{include: .}')
+          MATRIX_JSON=$(jq -c '{include: .}' tools/compatibility_matrix.json)
           echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
 
   compatibility:
@@ -84,12 +84,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv --no-config venv --python ${{ matrix.python_version }}
+          uv --no-config venv --no-project --python ${{ matrix.python_version }}
           HA_SPEC="homeassistant==${{ matrix.ha_version }}"
           if [ "${{ matrix.ha_version }}" = "latest" ]; then
             HA_SPEC="homeassistant"
           fi
-          uv --no-config pip install $HA_SPEC pytest-homeassistant-custom-component h2
+          uv --no-config pip install --python .venv/bin/python h2 pytest pytest-homeassistant-custom-component
 
       - name: Run Tests
-        run: uv run pytest --quiet --no-cov
+        run: uv run --no-project --python .venv/bin/python pytest --quiet --no-cov

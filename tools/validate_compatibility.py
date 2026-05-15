@@ -12,6 +12,7 @@ false positives related to command injection.
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -28,21 +29,37 @@ TEST_MATRIX = [
 VENV_BASE = ".venv"
 
 REQUIRED_TEST_DEPS = [
-    "pytest-homeassistant-custom-component",
     "h2",
+    "pytest",
+    "pytest-homeassistant-custom-component",
 ]
+
+SAFE_VERSION_LABEL_RE = re.compile(r"^[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*$")
+
+
+def validate_version_label(label_name: str, label_value: str) -> str:
+    """Validate a matrix version label before using it in paths or commands."""
+    if not isinstance(label_value, str):
+        raise ValueError(f"Invalid {label_name} value {label_value!r}; expected a string.")
+    if not SAFE_VERSION_LABEL_RE.fullmatch(label_value):
+        raise ValueError(
+            f"Invalid {label_name} value {label_value!r}; only letters, digits and '.' are allowed."
+        )
+    return label_value
 
 
 def get_venv_path(ha_ver: str, py_ver: str) -> str:
     """Construct the virtual environment path for a specific version."""
-    venv_suffix = f"homeassistant_{ha_ver.replace('.', '_')}_python_{py_ver.replace('.', '_')}"
+    safe_ha_ver = validate_version_label("ha_ver", ha_ver)
+    safe_py_ver = validate_version_label("py_ver", py_ver)
+    venv_suffix = f"homeassistant_{safe_ha_ver}_python_{safe_py_ver}"
     return os.path.join(REPO_ROOT, f"{VENV_BASE}_{venv_suffix}")
 
 
 def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bool, str]:
     """Run the test suite for a specific Home Assistant version."""
     ha_ver_display = ha_ver
-    print(f"Testing Home Assistant {ha_ver} (Python {py_ver})...", flush=True)
+    print(f"TESTING Home Assistant {ha_ver} (Python {py_ver})", flush=True)
 
     venv_path = get_venv_path(ha_ver, py_ver)
     python_bin = os.path.join(venv_path, "bin", "python")
@@ -52,13 +69,22 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
         if not os.path.exists(venv_path):
             print(f"STEP_START: uv venv {venv_path} (Python {py_ver})", flush=True)
             subprocess.run(
-                ["uv", "venv", "--no-project", "--python", py_ver, venv_path, "--quiet"],
+                [
+                    "uv",
+                    "--no-config",
+                    "venv",
+                    "--no-project",
+                    "--python",
+                    py_ver,
+                    venv_path,
+                    "--quiet",
+                ],
                 check=True,
                 capture_output=True,
                 text=True,
                 cwd=REPO_ROOT,
             )
-            print(f"STEP_OK: uv venv {venv_path}", flush=True)
+            print(f"STEP_OK: uv venv {venv_path} (Python {py_ver})", flush=True)
             needs_install = True
         else:
             needs_install = reinstall
@@ -82,6 +108,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
                 text=True,
                 cwd=REPO_ROOT,
             )
+            print(f"STEP_OK: uv pip install {ha_spec}", flush=True)
 
             print("STEP_START: cleanup __pycache__", flush=True)
             subprocess.run(
@@ -112,7 +139,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
         actual_ver = "unknown"
         try:
             result = subprocess.run(
-                ["uv", "pip", "show", "--python", python_bin, "homeassistant"],
+                ["uv", "--no-config", "pip", "show", "--python", python_bin, "homeassistant"],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -131,16 +158,26 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
         env["PYTHONPATH"] = REPO_ROOT
         env["PYTHONDONTWRITEBYTECODE"] = "1"
 
-        print(f"STEP_START: pytest (Home Assistant {ha_ver_display})", flush=True)
+        print(f"STEP_START: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
         subprocess.run(
-            ["uv", "run", "--no-project", "--python", python_bin, "pytest", "--quiet", "--no-cov"],
+            [
+                "uv",
+                "--no-config",
+                "run",
+                "--no-project",
+                "--python",
+                python_bin,
+                "pytest",
+                "--quiet",
+                "--no-cov",
+            ],
             env=env,
             check=True,
             capture_output=True,
             text=True,
             cwd=REPO_ROOT,
         )
-        print(f"STEP_OK: pytest (Home Assistant {ha_ver_display})", flush=True)
+        print(f"STEP_OK: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
         return True, ha_ver_display
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
@@ -185,20 +222,24 @@ def main() -> None:
         print("VALIDATION_ERROR: 'uv' is not installed.", flush=True)
         sys.exit(1)
 
-    if args.clean:
-        print("Cleaning up all test venvs...", flush=True)
+    try:
+        if args.clean:
+            print("Cleaning up all test venvs...", flush=True)
+            for config in TEST_MATRIX:
+                ha_ver = config["ha_ver"]
+                py_ver = config["python_ver"]
+                venv_path = get_venv_path(ha_ver, py_ver)
+                if os.path.exists(venv_path):
+                    shutil.rmtree(venv_path)
+
         for config in TEST_MATRIX:
             ha_ver = config["ha_ver"]
             py_ver = config["python_ver"]
-            venv_path = get_venv_path(ha_ver, py_ver)
-            if os.path.exists(venv_path):
-                shutil.rmtree(venv_path)
-
-    for config in TEST_MATRIX:
-        ha_ver = config["ha_ver"]
-        py_ver = config["python_ver"]
-        success, ha_version = run_tests_for_version(ha_ver, py_ver, args.reinstall)
-        results[(ha_ver, py_ver)] = (ha_version, "PASSED" if success else "FAILED")
+            success, ha_version = run_tests_for_version(ha_ver, py_ver, args.reinstall)
+            results[(ha_ver, py_ver)] = (ha_version, "PASSED" if success else "FAILED")
+    except ValueError as exc:
+        print(f"VALIDATION_ERROR: {exc}", flush=True)
+        sys.exit(1)
 
     print("\n", flush=True)
     all_ok = True
