@@ -19,13 +19,8 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-with open(os.path.join(REPO_ROOT, "tools", "compatibility_matrix.json"), encoding="utf-8") as f:
-    _MATRIX_DATA = json.load(f)
-
-TEST_MATRIX = [
-    {"ha_ver": entry["ha_version"], "python_ver": entry["python_version"]} for entry in _MATRIX_DATA
-]
+TOOLS_ROOT = os.path.join(REPO_ROOT, "tools")
+MATRIX_FILENAME = "compatibility_matrix.json"
 
 VENVS_ROOT = os.path.join(REPO_ROOT, ".venvs")
 
@@ -73,6 +68,21 @@ def ensure_within_root(root_path: str, candidate_path: str) -> str:
     if not candidate.startswith(prefix):
         raise ValueError(f"Resolved path {candidate!r} escapes allowed root {root!r}.")
     return candidate
+
+
+def load_matrix_data() -> list[dict[str, str]]:
+    """Load compatibility matrix from tools directory after path safety checks."""
+    candidate = os.path.join(TOOLS_ROOT, MATRIX_FILENAME)
+    matrix_path = ensure_within_root(TOOLS_ROOT, candidate)
+    with open(matrix_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+_MATRIX_DATA = load_matrix_data()
+
+TEST_MATRIX = [
+    {"ha_ver": entry["ha_version"], "python_ver": entry["python_version"]} for entry in _MATRIX_DATA
+]
 
 
 def get_latest_ha_version() -> str:
