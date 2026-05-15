@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.request
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -57,6 +58,19 @@ def ensure_within_root(root_path: str, candidate_path: str) -> str:
     return candidate_real
 
 
+def get_latest_ha_version() -> str:
+    """Fetch the latest Home Assistant version from PyPI."""
+    url = "https://pypi.org/pypi/homeassistant/json"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            if response.status != 200:
+                return "latest"
+            data = json.loads(response.read().decode("utf-8"))
+            return data["info"]["version"]
+    except Exception:
+        return "latest"
+
+
 def get_venv_path(ha_ver: str, py_ver: str) -> str:
     """Construct the virtual environment path for a specific version."""
     safe_ha_ver = validate_version_label("ha_ver", ha_ver)
@@ -68,8 +82,15 @@ def get_venv_path(ha_ver: str, py_ver: str) -> str:
 
 def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bool, str]:
     """Run the test suite for a specific Home Assistant version."""
-    ha_ver_display = ha_ver
-    print(f"TESTING Home Assistant {ha_ver} (Python {py_ver})", flush=True)
+    ha_ver_to_install = ha_ver
+    if ha_ver == "latest":
+        latest_ver = get_latest_ha_version()
+        if latest_ver != "latest":
+            ha_ver_to_install = latest_ver
+            print(f"Latest Home Assistant version: {latest_ver}", flush=True)
+
+    ha_ver_display = ha_ver_to_install
+    print(f"TESTING Home Assistant {ha_ver_to_install} (Python {py_ver})", flush=True)
 
     venv_path = get_venv_path(ha_ver, py_ver)
     python_bin = os.path.join(venv_path, "bin", "python")
@@ -97,10 +118,13 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
             print(f"STEP_OK: uv venv {venv_path} (Python {py_ver})", flush=True)
             needs_install = True
         else:
-            needs_install = reinstall
+            needs_install = reinstall or ha_ver == "latest"
 
         if needs_install:
-            ha_spec = "homeassistant" if ha_ver == "latest" else f"homeassistant=={ha_ver}"
+            if ha_ver_to_install == "latest":
+                ha_spec = "homeassistant"
+            else:
+                ha_spec = f"homeassistant=={ha_ver_to_install}"
             print(f"STEP_START: uv pip install {ha_spec}", flush=True)
             subprocess.run(
                 [
@@ -108,6 +132,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
                     "--no-config",
                     "pip",
                     "install",
+                    "--upgrade",
                     "--python",
                     python_bin,
                     ha_spec,
@@ -162,7 +187,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
         except subprocess.CalledProcessError:
             pass
 
-        ha_ver_display = f"{ha_ver} ({actual_ver})" if ha_ver == "latest" else actual_ver
+        ha_ver_display = actual_ver
 
         env = os.environ.copy()
         env["PYTHONPATH"] = REPO_ROOT

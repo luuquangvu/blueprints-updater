@@ -65,12 +65,14 @@ jobs:
       - name: Set matrix
         id: set-matrix
         run: |
-          MATRIX_JSON=$(jq -c '{include: .}' tools/compatibility_matrix.json)
+          LATEST_HA=$(curl -s https://pypi.org/pypi/homeassistant/json | jq -r .info.version)
+          MATRIX_JSON=$(jq -c --arg latest "$LATEST_HA" 'map(if .ha_version == "latest" then . + {ha_version: ("latest (" + $latest + ")"), ha_real_version: $latest} else . + {ha_real_version: .ha_version} end) | {include: .}' tools/compatibility_matrix.json)
           echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
 
   compatibility:
     needs: setup-matrix
     runs-on: ubuntu-latest
+    name: compatibility (${{ matrix.ha_version }}, ${{ matrix.python_version }})
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup-matrix.outputs.matrix) }}
@@ -85,10 +87,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv --no-config venv --no-project --python ${{ matrix.python_version }}
-          HA_SPEC="homeassistant==${{ matrix.ha_version }}"
-          if [ "${{ matrix.ha_version }}" = "latest" ]; then
-            HA_SPEC="homeassistant"
-          fi
+          HA_SPEC="homeassistant==${{ matrix.ha_real_version }}"
           uv --no-config pip install --python .venv/bin/python $HA_SPEC h2 pytest pytest-homeassistant-custom-component
 
       - name: Run Tests
