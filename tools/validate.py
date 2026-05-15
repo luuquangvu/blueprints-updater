@@ -36,35 +36,37 @@ def run_pipeline() -> None:
         venv_path = os.path.join(repo_root, ".venv")
         if not os.path.exists(venv_path):
             print("STEP_START: uv sync --all-groups", flush=True)
-            subprocess.run(["uv", "sync", "--all-groups"], check=True)
+            subprocess.run(["uv", "sync", "--all-groups"], check=True, cwd=repo_root)
             print("STEP_OK: uv sync --all-groups", flush=True)
 
         print("STEP_START: uv run ruff format", flush=True)
-        subprocess.run(["uv", "run", "ruff", "format"], check=True)
+        subprocess.run(["uv", "run", "ruff", "format"], check=True, cwd=repo_root)
         print("STEP_OK: uv run ruff format", flush=True)
 
         print("STEP_START: uv run ruff check --fix", flush=True)
-        subprocess.run(["uv", "run", "ruff", "check", "--fix"], check=True)
+        subprocess.run(["uv", "run", "ruff", "check", "--fix"], check=True, cwd=repo_root)
         print("STEP_OK: uv run ruff check --fix", flush=True)
 
         print("STEP_START: uv run ty check", flush=True)
-        subprocess.run(["uv", "run", "ty", "check"], check=True)
+        subprocess.run(["uv", "run", "ty", "check"], check=True, cwd=repo_root)
         print("STEP_OK: uv run ty check", flush=True)
 
         print("STEP_START: uv run pyright", flush=True)
-        subprocess.run(["uv", "run", "pyright"], check=True)
+        subprocess.run(["uv", "run", "pyright"], check=True, cwd=repo_root)
         print("STEP_OK: uv run pyright", flush=True)
 
         print("STEP_START: uv run interrogate", flush=True)
-        subprocess.run(["uv", "run", "interrogate"], check=True)
+        subprocess.run(["uv", "run", "interrogate"], check=True, cwd=repo_root)
         print("STEP_OK: uv run interrogate", flush=True)
 
         print("STEP_START: npx prettier --log-level warn --write .", flush=True)
-        subprocess.run(["npx", "prettier", "--log-level", "warn", "--write", "."], check=True)
+        subprocess.run(
+            ["npx", "prettier", "--log-level", "warn", "--write", "."], check=True, cwd=repo_root
+        )
         print("STEP_OK: npx prettier --log-level warn --write .", flush=True)
 
         print("STEP_START: uv run pytest --quiet", flush=True)
-        subprocess.run(["uv", "run", "pytest", "--quiet"], check=True)
+        subprocess.run(["uv", "run", "pytest", "--quiet"], check=True, cwd=repo_root)
         print("STEP_OK: uv run pytest --quiet", flush=True)
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
