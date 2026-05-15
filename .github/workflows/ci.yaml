@@ -90,10 +90,6 @@ jobs:
             HA_SPEC="homeassistant"
           fi
           uv --no-config pip install $HA_SPEC pytest-homeassistant-custom-component h2
-          source .venv/bin/activate
-          python -m pip install --ignore-requires-python -e .
 
       - name: Run Tests
-        run: |
-          source .venv/bin/activate
-          python -m pytest
+        run: uv run pytest --quiet --no-cov

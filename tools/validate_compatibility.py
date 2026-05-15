@@ -33,13 +33,18 @@ REQUIRED_TEST_DEPS = [
 ]
 
 
+def get_venv_path(ha_ver: str, py_ver: str) -> str:
+    """Construct the virtual environment path for a specific version."""
+    venv_suffix = f"homeassistant_{ha_ver.replace('.', '_')}_python_{py_ver.replace('.', '_')}"
+    return os.path.join(REPO_ROOT, f"{VENV_BASE}_{venv_suffix}")
+
+
 def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bool, str]:
     """Run the test suite for a specific Home Assistant version."""
     ha_ver_display = ha_ver
     print(f"Testing Home Assistant {ha_ver} (Python {py_ver})...", flush=True)
 
-    venv_suffix = f"homeassistant_{ha_ver.replace('.', '_')}_python_{py_ver.replace('.', '_')}"
-    venv_path = os.path.join(REPO_ROOT, f"{VENV_BASE}_{venv_suffix}")
+    venv_path = get_venv_path(ha_ver, py_ver)
     python_bin = os.path.join(venv_path, "bin", "python")
     pytest_bin = os.path.join(venv_path, "bin", "pytest")
 
@@ -51,6 +56,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
                 check=True,
                 capture_output=True,
                 text=True,
+                cwd=REPO_ROOT,
             )
             print(f"STEP_OK: uv venv {venv_path}", flush=True)
             needs_install = True
@@ -74,20 +80,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
                 check=True,
                 capture_output=True,
                 text=True,
-            )
-            subprocess.run(
-                [
-                    python_bin,
-                    "-m",
-                    "pip",
-                    "install",
-                    "--ignore-requires-python",
-                    "-e",
-                    ".",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
+                cwd=REPO_ROOT,
             )
 
             print("STEP_START: cleanup __pycache__", flush=True)
@@ -108,6 +101,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
                 check=True,
                 capture_output=True,
                 text=True,
+                cwd=REPO_ROOT,
             )
             print("STEP_OK: cleanup __pycache__", flush=True)
 
@@ -122,6 +116,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
                 capture_output=True,
                 text=True,
                 check=True,
+                cwd=REPO_ROOT,
             )
             for line in result.stdout.splitlines():
                 if line.startswith("Version:"):
@@ -143,6 +138,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
             check=True,
             capture_output=True,
             text=True,
+            cwd=REPO_ROOT,
         )
         print(f"STEP_OK: pytest (Home Assistant {ha_ver_display})", flush=True)
         return True, ha_ver_display
@@ -193,7 +189,8 @@ def main() -> None:
         print("Cleaning up all test venvs...", flush=True)
         for config in TEST_MATRIX:
             ha_ver = config["ha_ver"]
-            venv_path = f"{VENV_BASE}_{ha_ver.replace('.', '_')}"
+            py_ver = config["python_ver"]
+            venv_path = get_venv_path(ha_ver, py_ver)
             if os.path.exists(venv_path):
                 shutil.rmtree(venv_path)
 
