@@ -26,7 +26,7 @@ TEST_MATRIX = [
     {"ha_ver": entry["ha_version"], "python_ver": entry["python_version"]} for entry in _MATRIX_DATA
 ]
 
-VENV_BASE = ".venv"
+VENVS_ROOT = os.path.join(REPO_ROOT, ".venvs")
 
 REQUIRED_TEST_DEPS = [
     "h2",
@@ -48,12 +48,22 @@ def validate_version_label(label_name: str, label_value: str) -> str:
     return label_value
 
 
+def ensure_within_root(root_path: str, candidate_path: str) -> str:
+    """Return canonical candidate path only if it is contained in canonical root_path."""
+    root_real = os.path.realpath(root_path)
+    candidate_real = os.path.realpath(candidate_path)
+    if os.path.commonpath([root_real, candidate_real]) != root_real:
+        raise ValueError(f"Resolved path {candidate_real!r} escapes allowed root {root_real!r}.")
+    return candidate_real
+
+
 def get_venv_path(ha_ver: str, py_ver: str) -> str:
     """Construct the virtual environment path for a specific version."""
     safe_ha_ver = validate_version_label("ha_ver", ha_ver)
     safe_py_ver = validate_version_label("py_ver", py_ver)
-    venv_suffix = f"homeassistant_{safe_ha_ver}_python_{safe_py_ver}"
-    return os.path.join(REPO_ROOT, f"{VENV_BASE}_{venv_suffix}")
+    venv_name = f"homeassistant_{safe_ha_ver}_python_{safe_py_ver}"
+    candidate = os.path.join(VENVS_ROOT, venv_name)
+    return ensure_within_root(VENVS_ROOT, candidate)
 
 
 def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bool, str]:

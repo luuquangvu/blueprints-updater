@@ -89,7 +89,7 @@ jobs:
           if [ "${{ matrix.ha_version }}" = "latest" ]; then
             HA_SPEC="homeassistant"
           fi
-          uv --no-config pip install --python .venv/bin/python h2 pytest pytest-homeassistant-custom-component
+          uv --no-config pip install --python .venv/bin/python $HA_SPEC h2 pytest pytest-homeassistant-custom-component
 
       - name: Run Tests
         run: uv run --no-project --python .venv/bin/python pytest --quiet --no-cov
