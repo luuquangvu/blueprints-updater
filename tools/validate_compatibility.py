@@ -19,35 +19,35 @@ import sys
 import urllib.request
 from pathlib import Path
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-VENVS_ROOT = os.path.join(REPO_ROOT, ".venvs")
+_VENVS_ROOT = os.path.join(_REPO_ROOT, ".venvs")
 
-REQUIRED_TEST_DEPS = [
+_REQUIRED_TEST_DEPS = [
     "h2",
     "pytest",
     "pytest-homeassistant-custom-component",
 ]
 
-MATRIX_FILE = os.path.join(REPO_ROOT, "tools", "compatibility_matrix.json")
+_MATRIX_FILE = os.path.join(_REPO_ROOT, "tools", "compatibility_matrix.json")
 
-SAFE_LABEL_PATTERN = re.compile(r"^[a-zA-Z0-9.]+$")
+_SAFE_LABEL_PATTERN = re.compile(r"^[a-zA-Z0-9.]+$")
 
 
-def load_matrix_data() -> list[dict[str, str]]:
+def _load_matrix_data() -> list[dict[str, str]]:
     """Load compatibility matrix from the repository tools directory."""
-    with open(MATRIX_FILE, encoding="utf-8") as f:
+    with open(_MATRIX_FILE, encoding="utf-8") as f:
         return json.load(f)
 
 
-_MATRIX_DATA = load_matrix_data()
+_MATRIX_DATA = _load_matrix_data()
 
-TEST_MATRIX = [
+_TEST_MATRIX = [
     {"ha_ver": entry["ha_version"], "python_ver": entry["python_version"]} for entry in _MATRIX_DATA
 ]
 
 
-def validate_version_label(label_name: str, label_value: str) -> str:
+def _validate_version_label(label_name: str, label_value: str) -> str:
     """Validate and sanitize a matrix version label to prevent path injection.
 
     Uses a strict regex and explicit character mapping to sever static
@@ -56,7 +56,7 @@ def validate_version_label(label_name: str, label_value: str) -> str:
     if not isinstance(label_value, str):
         raise ValueError(f"Invalid {label_name} value {label_value!r}; expected a string.")
 
-    if not SAFE_LABEL_PATTERN.match(label_value):
+    if not _SAFE_LABEL_PATTERN.match(label_value):
         raise ValueError(
             f"Invalid {label_name} value {label_value!r}; only alphanumeric and '.' are allowed."
         )
@@ -79,7 +79,7 @@ def validate_version_label(label_name: str, label_value: str) -> str:
     return os.path.basename(safe_val)
 
 
-def ensure_within_root(root_path: str, candidate_path: str) -> str:
+def _ensure_within_root(root_path: str, candidate_path: str) -> str:
     """Return canonical candidate path only if it is contained in canonical root_path.
 
     Uses os.path.abspath and startswith in a specific pattern recognized by
@@ -96,7 +96,7 @@ def ensure_within_root(root_path: str, candidate_path: str) -> str:
     return candidate
 
 
-def get_latest_ha_version() -> str:
+def _get_latest_ha_version() -> str:
     """Fetch the latest Home Assistant version from PyPI."""
     url = "https://pypi.org/pypi/homeassistant/json"
     try:
@@ -105,30 +105,30 @@ def get_latest_ha_version() -> str:
                 return "latest"
             data = json.loads(response.read().decode("utf-8"))
             version = data["info"]["version"]
-            return validate_version_label("pypi_version", version)
+            return _validate_version_label("pypi_version", version)
     except Exception:
         return "latest"
 
 
-def get_venv_path(ha_ver: str, py_ver: str) -> str:
+def _get_venv_path(ha_ver: str, py_ver: str) -> str:
     """Construct the virtual environment path for a specific version."""
-    ha = validate_version_label("ha_ver", ha_ver)
-    py = validate_version_label("py_ver", py_ver)
+    ha = _validate_version_label("ha_ver", ha_ver)
+    py = _validate_version_label("py_ver", py_ver)
 
     venv_name = os.path.basename(f"homeassistant_{ha}_python_{py}")
 
     if os.path.basename(venv_name) != venv_name:
         raise ValueError(f"Invalid venv name: {venv_name}")
 
-    candidate = os.path.join(VENVS_ROOT, venv_name)
-    return ensure_within_root(VENVS_ROOT, candidate)
+    candidate = os.path.join(_VENVS_ROOT, venv_name)
+    return _ensure_within_root(_VENVS_ROOT, candidate)
 
 
-def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bool, str]:
+def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bool, str]:
     """Run the test suite for a specific Home Assistant version."""
     ha_ver_to_install = ha_ver
     if ha_ver == "latest":
-        latest_ver = get_latest_ha_version()
+        latest_ver = _get_latest_ha_version()
         if latest_ver != "latest":
             ha_ver_to_install = latest_ver
             print(f"Latest Home Assistant version: {latest_ver}", flush=True)
@@ -136,7 +136,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
     ha_ver_display = ha_ver_to_install
     print(f"TESTING Home Assistant {ha_ver_to_install} (Python {py_ver})", flush=True)
 
-    venv_path = Path(get_venv_path(ha_ver, py_ver))
+    venv_path = Path(_get_venv_path(ha_ver, py_ver))
     python_bin = venv_path / "bin" / "python"
     pytest_bin = venv_path / "bin" / "pytest"
 
@@ -157,7 +157,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
                 check=True,
                 capture_output=True,
                 text=True,
-                cwd=REPO_ROOT,
+                cwd=_REPO_ROOT,
             )
             print(f"STEP_OK: uv venv {venv_path} (Python {py_ver})", flush=True)
             needs_install = True
@@ -184,12 +184,12 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
                     "--python",
                     python_bin,
                     ha_spec,
-                    *REQUIRED_TEST_DEPS,
+                    *_REQUIRED_TEST_DEPS,
                 ],
                 check=True,
                 capture_output=True,
                 text=True,
-                cwd=REPO_ROOT,
+                cwd=_REPO_ROOT,
             )
             print(f"STEP_OK: uv pip install {ha_spec}", flush=True)
 
@@ -211,7 +211,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
                 check=True,
                 capture_output=True,
                 text=True,
-                cwd=REPO_ROOT,
+                cwd=_REPO_ROOT,
             )
             print("STEP_OK: cleanup __pycache__", flush=True)
 
@@ -226,7 +226,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
                 capture_output=True,
                 text=True,
                 check=True,
-                cwd=REPO_ROOT,
+                cwd=_REPO_ROOT,
             )
             for line in result.stdout.splitlines():
                 if line.startswith("Version:"):
@@ -238,7 +238,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
         ha_ver_display = actual_ver
 
         env = os.environ.copy()
-        env["PYTHONPATH"] = REPO_ROOT
+        env["PYTHONPATH"] = _REPO_ROOT
         env["PYTHONDONTWRITEBYTECODE"] = "1"
 
         print(f"STEP_START: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
@@ -258,7 +258,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bo
             check=True,
             capture_output=True,
             text=True,
-            cwd=REPO_ROOT,
+            cwd=_REPO_ROOT,
         )
         print(f"STEP_OK: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
         return True, ha_ver_display
@@ -308,17 +308,17 @@ def main() -> None:
     try:
         if args.clean:
             print("Cleaning up all test venvs...", flush=True)
-            for config in TEST_MATRIX:
+            for config in _TEST_MATRIX:
                 ha_ver = config["ha_ver"]
                 py_ver = config["python_ver"]
-                venv_path = Path(get_venv_path(ha_ver, py_ver))
+                venv_path = Path(_get_venv_path(ha_ver, py_ver))
                 if venv_path.exists():
                     shutil.rmtree(venv_path)
 
-        for config in TEST_MATRIX:
+        for config in _TEST_MATRIX:
             ha_ver = config["ha_ver"]
             py_ver = config["python_ver"]
-            success, ha_version = run_tests_for_version(ha_ver, py_ver, args.reinstall)
+            success, ha_version = _run_tests_for_version(ha_ver, py_ver, args.reinstall)
             results[(ha_ver, py_ver)] = (ha_version, "PASSED" if success else "FAILED")
     except ValueError as exc:
         print(f"VALIDATION_ERROR: {exc}", flush=True)
