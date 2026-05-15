@@ -1,12 +1,15 @@
 """Test the services provided by Blueprints Updater."""
 
+import inspect
 import socket
 from pathlib import Path
 from unittest.mock import patch
 
 import httpx
+import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.service import async_register_admin_service
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blueprints_updater.const import (
@@ -24,6 +27,7 @@ def _create_blueprint(hass: HomeAssistant, relative_path: str, content: str) -> 
     return str(full_path)
 
 
+@pytest.mark.asyncio
 async def test_reload_service(hass: HomeAssistant) -> None:
     """Test the reload service."""
     entry = MockConfigEntry(
@@ -60,6 +64,7 @@ async def test_reload_service(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
 
 
+@pytest.mark.asyncio
 async def test_update_all_service(hass: HomeAssistant, respx_mock) -> None:
     """Test the update_all service."""
     content = "blueprint:\n  name: Test\n  domain: automation\n  source_url: https://raw.githubusercontent.com/user/repo/main/test.yaml\n"
@@ -106,6 +111,7 @@ async def test_update_all_service(hass: HomeAssistant, respx_mock) -> None:
     await hass.async_block_till_done()
 
 
+@pytest.mark.asyncio
 async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> None:
     """Test the restore_blueprint service."""
     relative_path = "automation/restore.yaml"
@@ -140,16 +146,26 @@ async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> Non
     entity_id = ent_reg.async_get_entity_id("update", DOMAIN, unique_id)
     assert entity_id is not None
 
-    response = await hass.services.async_call(
-        DOMAIN,
-        "restore_blueprint",
-        {"entity_id": entity_id, "version": 1},
-        blocking=True,
-        return_response=True,
-    )
+    admin_svc_sig = inspect.signature(async_register_admin_service)
+    supports_response_available = "supports_response" in admin_svc_sig.parameters
 
-    assert response is not None
-    assert response.get("success") is True
+    if supports_response_available:
+        response = await hass.services.async_call(
+            DOMAIN,
+            "restore_blueprint",
+            {"entity_id": entity_id, "version": 1},
+            blocking=True,
+            return_response=True,
+        )
+        assert response is not None
+        assert response.get("success") is True
+    else:
+        await hass.services.async_call(
+            DOMAIN,
+            "restore_blueprint",
+            {"entity_id": entity_id, "version": 1},
+            blocking=True,
+        )
 
     restored_content = Path(bp_path).read_text(encoding="utf-8")
     assert "Original" in restored_content

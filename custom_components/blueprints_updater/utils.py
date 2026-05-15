@@ -74,7 +74,7 @@ def retry_async(
         """Decorator for retry_async."""
         try:
             sig = inspect.signature(func)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, AttributeError):
             sig = None
 
         @wraps(func)
@@ -84,7 +84,7 @@ def retry_async(
                 try:
                     bound_args = sig.bind(*args, **kwargs)
                     context = bound_args.arguments.get("url", "unknown")
-                except (ValueError, TypeError):
+                except (ValueError, TypeError, AttributeError):
                     context = getattr(func, "__name__", "unknown")
             else:
                 context = getattr(func, "__name__", "unknown")

@@ -11,6 +11,10 @@ from homeassistant.core import HomeAssistant
 from custom_components.blueprints_updater.const import SPECIAL_USE_TLDS
 from custom_components.blueprints_updater.utils import is_ip_safe
 
+from .compat import patch_service_call_compat
+
+patch_service_call_compat()
+
 
 @pytest.fixture(autouse=True)
 def mock_asyncio_sleep():

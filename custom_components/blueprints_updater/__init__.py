@@ -1,6 +1,7 @@
 """Blueprints Updater integration for Home Assistant."""
 
 import asyncio
+import inspect
 import logging
 from datetime import timedelta
 
@@ -24,6 +25,12 @@ from homeassistant.helpers.typing import ConfigType
 from .const import DOMAIN, IntegrationService
 from .coordinator import BlueprintUpdateCoordinator
 from .utils import get_max_backups, get_update_interval
+
+try:
+    _ADMIN_SVC_SIG = inspect.signature(async_register_admin_service)
+    _SUPPORTS_RESPONSE_AVAILABLE = "supports_response" in _ADMIN_SVC_SIG.parameters
+except (ValueError, TypeError, AttributeError):
+    _SUPPORTS_RESPONSE_AVAILABLE = False
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -381,13 +388,15 @@ def _async_register_services(hass: HomeAssistant) -> None:
             registered_services.append(IntegrationService.RELOAD)
 
         if not hass.services.has_service(DOMAIN, IntegrationService.RESTORE_BLUEPRINT):
+            restore_kwargs: dict = {"schema": restore_schema}
+            if _SUPPORTS_RESPONSE_AVAILABLE:
+                restore_kwargs["supports_response"] = SupportsResponse.ONLY
             async_register_admin_service(
                 hass,
                 DOMAIN,
                 IntegrationService.RESTORE_BLUEPRINT,
                 async_restore_blueprint_handler,
-                schema=restore_schema,
-                supports_response=SupportsResponse.ONLY,
+                **restore_kwargs,
             )
             registered_services.append(IntegrationService.RESTORE_BLUEPRINT)
 

@@ -1,1 +1,1 @@
-"""Tests for the utils module."""
+"""Test utilities for Blueprints Updater."""
