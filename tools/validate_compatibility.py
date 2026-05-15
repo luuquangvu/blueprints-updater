@@ -19,8 +19,6 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TOOLS_ROOT = os.path.join(REPO_ROOT, "tools")
-MATRIX_FILENAME = "compatibility_matrix.json"
 
 VENVS_ROOT = os.path.join(REPO_ROOT, ".venvs")
 
@@ -71,10 +69,8 @@ def ensure_within_root(root_path: str, candidate_path: str) -> str:
 
 
 def load_matrix_data() -> list[dict[str, str]]:
-    """Load compatibility matrix from tools directory after path safety checks."""
-    candidate = os.path.join(TOOLS_ROOT, MATRIX_FILENAME)
-    matrix_path = ensure_within_root(TOOLS_ROOT, candidate)
-    with open(matrix_path, encoding="utf-8") as f:
+    """Load compatibility matrix from the repository tools directory."""
+    with open("tools/compatibility_matrix.json", encoding="utf-8") as f:
         return json.load(f)
 
 
