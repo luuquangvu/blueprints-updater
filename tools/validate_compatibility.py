@@ -12,7 +12,6 @@ false positives related to command injection.
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -36,41 +35,42 @@ REQUIRED_TEST_DEPS = [
     "pytest-homeassistant-custom-component",
 ]
 
-SAFE_VERSION_LABEL_RE = re.compile(r"^[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*$")
-
 
 def validate_version_label(label_name: str, label_value: str) -> str:
     """Validate and sanitize a matrix version label to prevent path injection.
 
-    Re-encodes the value to bleach taint by only allowing alphanumeric characters
-    and dots, satisfying static analysis security tools.
+    Builds a fresh string from a whitelist of allowed characters to ensure
+    no tainted data flows into path expressions.
     """
     if not isinstance(label_value, str):
         raise ValueError(f"Invalid {label_name} value {label_value!r}; expected a string.")
 
-    sanitized = re.sub(r"[^A-Za-z0-9.]", "", label_value)
-    if not sanitized or sanitized != label_value:
+    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789."
+    safe_chars = [c for c in label_value if c in allowed]
+    safe_val = "".join(safe_chars)
+
+    if not safe_val or safe_val != label_value:
         raise ValueError(
-            f"Invalid {label_name} value {label_value!r}; only letters, digits and '.' are allowed."
+            f"Invalid {label_name} value {label_value!r}; only alphanumeric and '.' are allowed."
         )
 
-    match = SAFE_VERSION_LABEL_RE.fullmatch(sanitized)
-    if not match:
-        raise ValueError(f"Validation failed for {label_name}")
-    return match.group(0)
+    return safe_val
 
 
 def ensure_within_root(root_path: str, candidate_path: str) -> str:
     """Return canonical candidate path only if it is contained in canonical root_path.
 
-    Uses abspath and startswith for compatibility with security scanners,
-    ensuring the candidate is strictly under root (or is the root itself).
+    Uses realpath and startswith to prevent path traversal and ensure the
+    candidate is strictly under root (or is the root itself).
     """
-    root = os.path.abspath(root_path)
-    candidate = os.path.abspath(candidate_path)
+    root = os.path.realpath(root_path)
+    candidate = os.path.realpath(candidate_path)
 
-    root_with_sep = root if root.endswith(os.sep) else root + os.sep
-    if not candidate.startswith(root_with_sep) and candidate != root:
+    if candidate == root:
+        return candidate
+
+    prefix = root if root.endswith(os.sep) else root + os.sep
+    if not candidate.startswith(prefix):
         raise ValueError(f"Resolved path {candidate!r} escapes allowed root {root!r}.")
     return candidate
 
@@ -83,7 +83,8 @@ def get_latest_ha_version() -> str:
             if response.status != 200:
                 return "latest"
             data = json.loads(response.read().decode("utf-8"))
-            return data["info"]["version"]
+            version = data["info"]["version"]
+            return validate_version_label("pypi_version", version)
     except Exception:
         return "latest"
 
@@ -97,8 +98,8 @@ def get_venv_path(ha_ver: str, py_ver: str) -> str:
     if os.path.basename(venv_name) != venv_name:
         raise ValueError(f"Invalid venv name: {venv_name}")
 
-    candidate = Path(VENVS_ROOT).joinpath(venv_name)
-    return ensure_within_root(VENVS_ROOT, str(candidate))
+    candidate = os.path.join(VENVS_ROOT, venv_name)
+    return ensure_within_root(VENVS_ROOT, candidate)
 
 
 def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bool, str]:
