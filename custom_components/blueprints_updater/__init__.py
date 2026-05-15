@@ -26,8 +26,11 @@ from .const import DOMAIN, IntegrationService
 from .coordinator import BlueprintUpdateCoordinator
 from .utils import get_max_backups, get_update_interval
 
-_ADMIN_SVC_SIG = inspect.signature(async_register_admin_service)
-_SUPPORTS_RESPONSE_AVAILABLE = "supports_response" in _ADMIN_SVC_SIG.parameters
+try:
+    _ADMIN_SVC_SIG = inspect.signature(async_register_admin_service)
+    _SUPPORTS_RESPONSE_AVAILABLE = "supports_response" in _ADMIN_SVC_SIG.parameters
+except (ValueError, TypeError, AttributeError):
+    _SUPPORTS_RESPONSE_AVAILABLE = False
 
 _LOGGER = logging.getLogger(__name__)
 

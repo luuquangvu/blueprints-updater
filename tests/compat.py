@@ -8,8 +8,16 @@ from homeassistant.core import ServiceCall
 
 def patch_service_call_compat():
     """Monkeypatch ServiceCall.__init__ if needed for backward compatibility."""
+    if getattr(ServiceCall, "_compat_patched", False):
+        return
+
+    cast(Any, ServiceCall)._compat_patched = True
+
     _original_init = ServiceCall.__init__
-    sig = inspect.signature(_original_init)
+    try:
+        sig = inspect.signature(_original_init)
+    except (ValueError, TypeError, AttributeError):
+        return
 
     if "hass" not in sig.parameters:
 

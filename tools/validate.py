@@ -32,9 +32,9 @@ def run_pipeline() -> None:
 
     try:
         if not os.path.exists(".venv"):
-            print("STEP_START: uv sync", flush=True)
-            subprocess.run(["uv", "sync"], check=True)
-            print("STEP_OK: uv sync", flush=True)
+            print("STEP_START: uv sync --all-groups", flush=True)
+            subprocess.run(["uv", "sync", "--all-groups"], check=True)
+            print("STEP_OK: uv sync --all-groups", flush=True)
 
         print("STEP_START: uv run ruff format", flush=True)
         subprocess.run(["uv", "run", "ruff", "format"], check=True)

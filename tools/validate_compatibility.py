@@ -10,37 +10,30 @@ false positives related to command injection.
 """
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
 import sys
-import tomllib
+
+with open("tools/compatibility_matrix.json", encoding="utf-8") as f:
+    _MATRIX_DATA = json.load(f)
 
 TEST_MATRIX = [
-    ("2024.12", "3.13"),
-    ("2026.2", "3.13"),
-    ("2026.4", "3.14"),
-    ("latest", "3.14"),
+    {"ha_ver": entry["ha_version"], "python_ver": entry["python_version"]} for entry in _MATRIX_DATA
 ]
 
 VENV_BASE = ".venv_homeassistant"
 
-
-def get_dev_dependencies() -> list[str]:
-    """Extract dev dependencies from pyproject.toml."""
-    try:
-        with open("pyproject.toml", "rb") as f:
-            data = tomllib.load(f)
-            dev_deps = data.get("dependency-groups", {}).get("dev", [])
-            exclude = ["homeassistant", "pytest"]
-            return [d for d in dev_deps if not any(d.startswith(ex) for ex in exclude)]
-    except Exception as e:
-        print(f"VALIDATION_ERROR: Could not parse pyproject.toml: {e}", flush=True)
-        return []
+REQUIRED_TEST_DEPS = [
+    "pytest-homeassistant-custom-component",
+    "h2",
+]
 
 
-def run_tests_for_version(ha_ver: str, py_ver: str, dev_deps: list[str], reinstall: bool) -> bool:
+def run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bool, str]:
     """Run the test suite for a specific Home Assistant version."""
+    ha_ver_display = ha_ver
     print(f"Testing Home Assistant {ha_ver} (Python {py_ver})...", flush=True)
 
     venv_path = f"{VENV_BASE}_{ha_ver.replace('.', '_')}"
@@ -49,16 +42,7 @@ def run_tests_for_version(ha_ver: str, py_ver: str, dev_deps: list[str], reinsta
 
     try:
         if not os.path.exists(venv_path):
-            print(f"STEP_START: uv python install {py_ver}", flush=True)
-            subprocess.run(
-                ["uv", "python", "install", py_ver, "--quiet"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            print(f"STEP_OK: uv python install {py_ver}", flush=True)
-
-            print(f"STEP_START: uv venv {venv_path}", flush=True)
+            print(f"STEP_START: uv venv {venv_path} (Python {py_ver})", flush=True)
             subprocess.run(
                 ["uv", "venv", "--no-project", "--python", py_ver, venv_path, "--quiet"],
                 check=True,
@@ -80,17 +64,14 @@ def run_tests_for_version(ha_ver: str, py_ver: str, dev_deps: list[str], reinsta
                     "install",
                     "--python",
                     python_bin,
-                    *dev_deps,
-                    "pytest",
-                    "pytest-homeassistant-custom-component",
                     ha_spec,
+                    *REQUIRED_TEST_DEPS,
                     "--quiet",
                 ],
                 check=True,
                 capture_output=True,
                 text=True,
             )
-            print(f"STEP_OK: uv pip install {ha_spec}", flush=True)
 
             print("STEP_START: cleanup __pycache__", flush=True)
             subprocess.run(
@@ -115,22 +96,39 @@ def run_tests_for_version(ha_ver: str, py_ver: str, dev_deps: list[str], reinsta
 
         if not os.path.exists(pytest_bin):
             print(f"VALIDATION_ERROR: pytest not found at {pytest_bin}", flush=True)
-            return False
+            return False, ha_ver_display
+
+        actual_ver = "unknown"
+        try:
+            result = subprocess.run(
+                ["uv", "pip", "show", "--python", python_bin, "homeassistant"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            for line in result.stdout.splitlines():
+                if line.startswith("Version:"):
+                    actual_ver = line.split(":", 1)[1].strip()
+                    break
+        except subprocess.CalledProcessError:
+            pass
+
+        ha_ver_display = f"{ha_ver} ({actual_ver})" if ha_ver == "latest" else actual_ver
 
         env = os.environ.copy()
         env["PYTHONPATH"] = os.getcwd()
         env["PYTHONDONTWRITEBYTECODE"] = "1"
 
-        print(f"STEP_START: pytest (Home Assistant {ha_ver})", flush=True)
+        print(f"STEP_START: pytest (Home Assistant {ha_ver_display})", flush=True)
         subprocess.run(
-            [pytest_bin, "--quiet", "--no-cov"],
+            ["uv", "run", "--no-project", "--python", python_bin, "pytest", "--quiet", "--no-cov"],
             env=env,
             check=True,
             capture_output=True,
             text=True,
         )
-        print(f"STEP_OK: pytest (Home Assistant {ha_ver})", flush=True)
-        return True
+        print(f"STEP_OK: pytest (Home Assistant {ha_ver_display})", flush=True)
+        return True, ha_ver_display
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         ret_code = getattr(e, "returncode", 1)
@@ -151,12 +149,13 @@ def run_tests_for_version(ha_ver: str, py_ver: str, dev_deps: list[str], reinsta
         else:
             cmd_str = getattr(e, "filename", "Unknown command")
             print(f"VALIDATION_ERROR: '{cmd_str}' not found.", flush=True)
-        return False
+        return False, ha_ver_display
 
 
 def main() -> None:
     """Main entry point for the multi-version test script."""
     os.environ["NO_COLOR"] = "1"
+    results = {}
 
     if os.name != "posix":
         print("VALIDATION_ERROR: Non-POSIX environment detected", flush=True)
@@ -175,22 +174,22 @@ def main() -> None:
 
     if args.clean:
         print("Cleaning up all test venvs...", flush=True)
-        for ha_ver, _ in TEST_MATRIX:
+        for config in TEST_MATRIX:
+            ha_ver = config["ha_ver"]
             venv_path = f"{VENV_BASE}_{ha_ver.replace('.', '_')}"
             if os.path.exists(venv_path):
                 shutil.rmtree(venv_path)
 
-    dev_deps = get_dev_dependencies()
-    results = {}
-
-    for ha_ver, py_ver in TEST_MATRIX:
-        success = run_tests_for_version(ha_ver, py_ver, dev_deps, args.reinstall)
-        results[ha_ver] = "PASSED" if success else "FAILED"
+    for config in TEST_MATRIX:
+        ha_ver = config["ha_ver"]
+        py_ver = config["python_ver"]
+        success, ha_version = run_tests_for_version(ha_ver, py_ver, args.reinstall)
+        results[ha_version] = "PASSED" if success else "FAILED"
 
     print("\n", flush=True)
     all_ok = True
-    for ver, status in results.items():
-        print(f"Home Assistant {ver:12}: {status}", flush=True)
+    for ha_version, status in results.items():
+        print(f"Home Assistant {ha_version}: {status}", flush=True)
         if status != "PASSED":
             all_ok = False
 

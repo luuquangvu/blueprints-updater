@@ -1,0 +1,18 @@
+[
+  {
+    "ha_version": "2024.12",
+    "python_version": "3.13"
+  },
+  {
+    "ha_version": "2026.2",
+    "python_version": "3.13"
+  },
+  {
+    "ha_version": "2026.4",
+    "python_version": "3.14"
+  },
+  {
+    "ha_version": "latest",
+    "python_version": "3.14"
+  }
+]

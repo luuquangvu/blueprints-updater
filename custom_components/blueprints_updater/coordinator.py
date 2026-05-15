@@ -166,6 +166,8 @@ class GitDiffResult:
 class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Class to manage fetching blueprint updates."""
 
+    _client_kwargs_cache: dict[str, Any] | None = None
+
     @staticmethod
     def generate_unique_id(entry_id: str, relative_path: str) -> str:
         """Generate a deterministic unique ID from an entry ID and a blueprint's relative path.
@@ -960,11 +962,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     @staticmethod
     def _get_client_kwargs() -> dict[str, Any]:
         """Get the default httpx client kwargs with ALPN support if available."""
+        if BlueprintUpdateCoordinator._client_kwargs_cache is not None:
+            return BlueprintUpdateCoordinator._client_kwargs_cache
+
         client_kwargs: dict[str, Any] = {}
         if SSL_ALPN_HTTP11_HTTP2 is not None:
-            sig = inspect.signature(get_async_client)
-            if "alpn_protocols" in sig.parameters:
-                client_kwargs["alpn_protocols"] = SSL_ALPN_HTTP11_HTTP2
+            try:
+                sig = inspect.signature(get_async_client)
+                if "alpn_protocols" in sig.parameters:
+                    client_kwargs["alpn_protocols"] = SSL_ALPN_HTTP11_HTTP2
+            except (ValueError, TypeError, AttributeError):
+                pass
+
+        BlueprintUpdateCoordinator._client_kwargs_cache = client_kwargs
         return client_kwargs
 
     async def _async_handle_notifications(
