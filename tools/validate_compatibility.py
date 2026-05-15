@@ -29,6 +29,19 @@ REQUIRED_TEST_DEPS = [
 ]
 
 
+def load_matrix_data() -> list[dict[str, str]]:
+    """Load compatibility matrix from the repository tools directory."""
+    with open("tools/compatibility_matrix.json", encoding="utf-8") as f:
+        return json.load(f)
+
+
+_MATRIX_DATA = load_matrix_data()
+
+TEST_MATRIX = [
+    {"ha_ver": entry["ha_version"], "python_ver": entry["python_version"]} for entry in _MATRIX_DATA
+]
+
+
 def validate_version_label(label_name: str, label_value: str) -> str:
     """Validate and sanitize a matrix version label to prevent path injection.
 
@@ -66,19 +79,6 @@ def ensure_within_root(root_path: str, candidate_path: str) -> str:
     if not candidate.startswith(prefix):
         raise ValueError(f"Resolved path {candidate!r} escapes allowed root {root!r}.")
     return candidate
-
-
-def load_matrix_data() -> list[dict[str, str]]:
-    """Load compatibility matrix from the repository tools directory."""
-    with open("tools/compatibility_matrix.json", encoding="utf-8") as f:
-        return json.load(f)
-
-
-_MATRIX_DATA = load_matrix_data()
-
-TEST_MATRIX = [
-    {"ha_ver": entry["ha_version"], "python_ver": entry["python_version"]} for entry in _MATRIX_DATA
-]
 
 
 def get_latest_ha_version() -> str:
