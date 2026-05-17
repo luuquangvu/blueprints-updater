@@ -12,13 +12,13 @@ false positives related to command injection.
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from string import ascii_letters, digits
 
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 
@@ -30,9 +30,9 @@ _REQUIRED_TEST_DEPS = [
     "pytest-homeassistant-custom-component",
 ]
 
-_MATRIX_FILE = os.path.join(_REPO_ROOT, "tools", "compatibility_matrix.json")
+_ALLOWED_CHARS = ascii_letters + digits + "."
 
-_SAFE_LABEL_PATTERN = re.compile(r"^[a-zA-Z0-9.]+$")
+_MATRIX_FILE = os.path.join(_REPO_ROOT, "tools", "compatibility_matrix.json")
 
 
 def _load_matrix_data() -> list[dict[str, str]]:
@@ -57,27 +57,12 @@ def _validate_version_label(label_name: str, label_value: str) -> str:
     if not isinstance(label_value, str):
         raise ValueError(f"Invalid {label_name} value {label_value!r}; expected a string.")
 
-    if not _SAFE_LABEL_PATTERN.match(label_value):
+    if not label_value or not all(char in _ALLOWED_CHARS for char in label_value):
         raise ValueError(
             f"Invalid {label_name} value {label_value!r}; only alphanumeric and '.' are allowed."
         )
 
-    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789."
-
-    safe_chars = []
-    for char in label_value:
-        idx = allowed.find(char)
-        if idx != -1:
-            safe_chars.append(allowed[idx])
-
-    safe_val = "".join(safe_chars)
-
-    if not safe_val or safe_val != label_value:
-        raise ValueError(
-            f"Invalid {label_name} value {label_value!r}; only alphanumeric and '.' are allowed."
-        )
-
-    return os.path.basename(safe_val)
+    return os.path.basename(label_value)
 
 
 def _ensure_within_root(root_path: str, candidate_path: str) -> str:
@@ -98,22 +83,27 @@ def _ensure_within_root(root_path: str, candidate_path: str) -> str:
 
 
 def _get_latest_ha_version() -> str:
-    """Fetch the latest Home Assistant version from PyPI."""
+    """Fetch the latest Home Assistant version from PyPI.
+
+    Returns:
+        The latest version string from PyPI.
+
+    Raises:
+        ValueError: If fetching or parsing the version fails.
+    """
     url = "https://pypi.org/pypi/homeassistant/json"
     try:
-        with urllib.request.urlopen(url, timeout=15) as response:
+        with urllib.request.urlopen(url, timeout=20) as response:
             if response.status != 200:
-                return "latest"
+                raise ValueError(
+                    f"Failed to fetch latest Home Assistant version from PyPI: "
+                    f"HTTP status {response.status}"
+                )
             data = json.loads(response.read().decode("utf-8"))
             version = data["info"]["version"]
             return _validate_version_label("pypi_version", version)
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError) as err:
-        print(
-            f"Failed to fetch latest Home Assistant version from PyPI, "
-            f"falling back to 'latest': {err}",
-            flush=True,
-        )
-        return "latest"
+    except Exception as err:
+        raise ValueError(f"Failed to fetch latest Home Assistant version from PyPI: {err}") from err
 
 
 def _get_venv_path(ha_ver: str, py_ver: str) -> str:
@@ -135,14 +125,13 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
     ha_ver_to_install = ha_ver
     if ha_ver == "latest":
         latest_ver = _get_latest_ha_version()
-        if latest_ver != "latest":
-            ha_ver_to_install = latest_ver
-            print(f"Latest Home Assistant version: {latest_ver}", flush=True)
+        ha_ver_to_install = latest_ver
+        print(f"LATEST HOME ASSISTANT VERSION: {latest_ver}", flush=True)
 
     ha_ver_display = ha_ver_to_install
     print(f"TESTING Home Assistant {ha_ver_to_install} (Python {py_ver})", flush=True)
 
-    venv_path = Path(_get_venv_path(ha_ver, py_ver))
+    venv_path = Path(_get_venv_path(ha_ver_to_install, py_ver))
     python_bin = venv_path / "bin" / "python"
     pytest_bin = venv_path / "bin" / "pytest"
 
@@ -168,17 +157,14 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
             print(f"STEP_OK: uv venv {venv_path} (Python {py_ver})", flush=True)
             needs_install = True
         else:
-            needs_install = reinstall or ha_ver == "latest"
+            needs_install = reinstall
 
         if not python_bin.exists():
             print(f"VALIDATION_ERROR: python not found at {python_bin}", flush=True)
             return False, ha_ver_display
 
         if needs_install:
-            if ha_ver_to_install == "latest":
-                ha_spec = "homeassistant"
-            else:
-                ha_spec = f"homeassistant=={ha_ver_to_install}"
+            ha_spec = f"homeassistant=={ha_ver_to_install}"
             print(f"STEP_START: uv pip install {ha_spec}", flush=True)
             subprocess.run(
                 [
@@ -314,12 +300,8 @@ def main() -> None:
     try:
         if args.clean:
             print("Cleaning up all test venvs...", flush=True)
-            for config in _TEST_MATRIX:
-                ha_ver = config["ha_ver"]
-                py_ver = config["python_ver"]
-                venv_path = Path(_get_venv_path(ha_ver, py_ver))
-                if venv_path.exists():
-                    shutil.rmtree(venv_path)
+            if os.path.exists(_VENVS_ROOT):
+                shutil.rmtree(_VENVS_ROOT)
 
         for config in _TEST_MATRIX:
             ha_ver = config["ha_ver"]
