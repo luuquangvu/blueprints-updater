@@ -19,6 +19,7 @@ on:
       - "uv.lock"
       - ".github/workflows/ci.yaml"
       - "tools/compatibility_matrix.json"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,7 +27,7 @@ permissions:
 jobs:
   static-checks:
     runs-on: ubuntu-latest
-
+    name: "Static Checks (Synced with Local Environment)"
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -57,6 +58,7 @@ jobs:
 
   setup-matrix:
     runs-on: ubuntu-latest
+    name: "Setup Compatibility Matrix"
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
@@ -71,13 +73,19 @@ jobs:
             echo "::error::Failed to fetch latest Home Assistant version"
             exit 1
           fi
+
+          if [[ ! "$LATEST_HA" =~ ^[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*$ ]]; then
+            echo "::error::Invalid Home Assistant version format: $LATEST_HA"
+            exit 1
+          fi
+
           MATRIX_JSON=$(jq -c --arg latest "$LATEST_HA" 'map(if .ha_version == "latest" then . + {ha_version: ("latest (" + $latest + ")"), ha_real_version: $latest} else . + {ha_real_version: .ha_version} end) | {include: .}' tools/compatibility_matrix.json)
           echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
 
   compatibility:
     needs: setup-matrix
     runs-on: ubuntu-latest
-    name: ${{ matrix.ha_version && format('compatibility ({0}, {1})', matrix.ha_version, matrix.python_version) || 'compatibility' }}
+    name: ${{ matrix.ha_version && format('Compatibility ({0}, {1})', matrix.ha_version, matrix.python_version) || 'Compatibility' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup-matrix.outputs.matrix) }}
@@ -93,7 +101,7 @@ jobs:
         run: |
           uv --no-config venv --no-project --python ${{ matrix.python_version }}
           HA_SPEC="homeassistant==${{ matrix.ha_real_version }}"
-          uv --no-config pip install --python .venv/bin/python $HA_SPEC h2 pytest pytest-homeassistant-custom-component
+          uv --no-config pip install --python .venv/bin/python "$HA_SPEC" h2 pytest pytest-homeassistant-custom-component
 
       - name: Run Tests
         run: uv run --no-project --python .venv/bin/python pytest --quiet --no-cov
