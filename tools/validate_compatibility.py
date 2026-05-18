@@ -31,9 +31,11 @@ _REQUIRED_TEST_DEPS = [
     "pytest-homeassistant-custom-component",
 ]
 
-_VERSION_PATTERN = re.compile(r"^[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*$")
+_ALNUM_CHARS = ascii_letters + digits
+_SEP_CHAR = "."
+_ALLOWED_VERSION_CHARS = _ALNUM_CHARS + _SEP_CHAR
 
-_ALLOWED_VERSION_CHARS = ascii_letters + digits + "."
+_VERSION_PATTERN = re.compile(rf"^[{_ALNUM_CHARS}]+(?:{re.escape(_SEP_CHAR)}[{_ALNUM_CHARS}]+)*$")
 
 _MATRIX_FILE = os.path.join(_REPO_ROOT, "tools", "compatibility_matrix.json")
 
@@ -59,12 +61,13 @@ def _validate_version_label(label_name: str, label_value: str) -> str:
     Uses a strict regex check to enforce structural validity.
 
     SECURITY NOTE:
+    - The regex is derived directly from `_ALLOWED_VERSION_CHARS` to prevent them
+      from drifting out of sync.
     - DO NOT simplify the character reconstruction loop (e.g., via comprehension).
       Mapping via integer index to the static `_ALLOWED_VERSION_CHARS` is required
       to completely sever the CodeQL data-flow taint chain.
     - `os.path.basename` is retained to satisfy CodeQL's hardcoded AST sanitizer rules.
-    - The final validation check prevents silent character mutation if the regex
-      and allowed characters ever drift out of sync.
+    - The loop fails fast on unknown characters, acting as an extra safety net.
     """
     if not isinstance(label_value, str):
         raise ValueError(f"Invalid {label_name} value {label_value!r}; expected a string.")
@@ -78,17 +81,13 @@ def _validate_version_label(label_name: str, label_value: str) -> str:
     safe_chars = []
     for char in label_value:
         idx = _ALLOWED_VERSION_CHARS.find(char)
-        if idx != -1:
-            safe_chars.append(_ALLOWED_VERSION_CHARS[idx])
+        if idx == -1:
+            raise ValueError(
+                f"Invalid {label_name} value {label_value!r}; character {char!r} is not allowed."
+            )
+        safe_chars.append(_ALLOWED_VERSION_CHARS[idx])
 
     safe_val = "".join(safe_chars)
-
-    if safe_val != label_value:
-        raise ValueError(
-            f"Invalid {label_name} value {label_value!r}; character mapping mismatch. "
-            "Ensure _VERSION_PATTERN and _ALLOWED_VERSION_CHARS are synchronized."
-        )
-
     return os.path.basename(safe_val)
 
 
