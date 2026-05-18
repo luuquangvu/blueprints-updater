@@ -6,6 +6,7 @@ on:
 
 jobs:
   stale:
+    name: "Stale Issue Manager"
     runs-on: ubuntu-latest
     permissions:
       issues: write

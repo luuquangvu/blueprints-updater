@@ -19,6 +19,7 @@ on:
 
 jobs:
   release:
+    name: "Automatic Release Pipeline"
     runs-on: ubuntu-latest
     permissions:
       contents: write
