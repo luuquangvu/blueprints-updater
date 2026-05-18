@@ -12,13 +12,13 @@ false positives related to command injection.
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from string import ascii_letters, digits
 
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 
@@ -30,9 +30,11 @@ _REQUIRED_TEST_DEPS = [
     "pytest-homeassistant-custom-component",
 ]
 
-_ALLOWED_CHARS = ascii_letters + digits + "."
+_VERSION_PATTERN = re.compile(r"^[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*$")
 
 _MATRIX_FILE = os.path.join(_REPO_ROOT, "tools", "compatibility_matrix.json")
+
+_PYPI_HA_JSON_URL = "https://pypi.org/pypi/homeassistant/json"
 
 
 def _load_matrix_data() -> list[dict[str, str]]:
@@ -51,15 +53,16 @@ _TEST_MATRIX = [
 def _validate_version_label(label_name: str, label_value: str) -> str:
     """Validate and sanitize a matrix version label to prevent path injection.
 
-    Uses a strict regex and explicit character mapping to sever static
-    analysis taint chains (CodeQL), ensuring the value is trusted.
+    Uses a strict regex check to enforce structural validity and ensure that
+    the value is fully trusted and safe against path traversal.
     """
     if not isinstance(label_value, str):
         raise ValueError(f"Invalid {label_name} value {label_value!r}; expected a string.")
 
-    if not label_value or not all(char in _ALLOWED_CHARS for char in label_value):
+    if not _VERSION_PATTERN.match(label_value):
         raise ValueError(
-            f"Invalid {label_name} value {label_value!r}; only alphanumeric and '.' are allowed."
+            f"Invalid {label_name} value {label_value!r}; must be alphanumeric blocks "
+            "separated by a single dot, and cannot contain consecutive, leading, or trailing dots."
         )
 
     return os.path.basename(label_value)
@@ -91,9 +94,8 @@ def _get_latest_ha_version() -> str:
     Raises:
         ValueError: If fetching or parsing the version fails.
     """
-    url = "https://pypi.org/pypi/homeassistant/json"
     try:
-        with urllib.request.urlopen(url, timeout=20) as response:
+        with urllib.request.urlopen(_PYPI_HA_JSON_URL, timeout=20) as response:
             if response.status != 200:
                 raise ValueError(
                     f"Failed to fetch latest Home Assistant version from PyPI: "
@@ -126,7 +128,6 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
     if ha_ver == "latest":
         latest_ver = _get_latest_ha_version()
         ha_ver_to_install = latest_ver
-        print(f"LATEST HOME ASSISTANT VERSION: {latest_ver}", flush=True)
 
     ha_ver_display = ha_ver_to_install
     print(f"TESTING Home Assistant {ha_ver_to_install} (Python {py_ver})", flush=True)
@@ -314,8 +315,9 @@ def main() -> None:
 
     print("\n", flush=True)
     all_ok = True
-    for (_, py_ver), (ha_version, status) in results.items():
-        print(f"Home Assistant {ha_version} (Python {py_ver}): {status}", flush=True)
+    for (ha_ver, py_ver), (ha_version, status) in results.items():
+        display_ver = ha_version if ha_version == ha_ver else f"{ha_ver} → {ha_version}"
+        print(f"Home Assistant {display_ver} (Python {py_ver}): {status}", flush=True)
         if status != "PASSED":
             all_ok = False
 
