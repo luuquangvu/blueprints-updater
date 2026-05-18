@@ -96,11 +96,6 @@ def _get_latest_ha_version() -> str:
     """
     try:
         with urllib.request.urlopen(_PYPI_HA_JSON_URL, timeout=20) as response:
-            if response.status != 200:
-                raise ValueError(
-                    f"Failed to fetch latest Home Assistant version from PyPI: "
-                    f"HTTP status {response.status}"
-                )
             data = json.loads(response.read().decode("utf-8"))
             version = data["info"]["version"]
     except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError) as err:
