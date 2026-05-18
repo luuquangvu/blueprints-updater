@@ -103,9 +103,10 @@ def _get_latest_ha_version() -> str:
                 )
             data = json.loads(response.read().decode("utf-8"))
             version = data["info"]["version"]
-            return _validate_version_label("pypi_version", version)
-    except Exception as err:
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError) as err:
         raise ValueError(f"Failed to fetch latest Home Assistant version from PyPI: {err}") from err
+
+    return _validate_version_label("pypi_version", version)
 
 
 def _get_venv_path(ha_ver: str, py_ver: str) -> str:
