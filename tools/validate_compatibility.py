@@ -61,8 +61,9 @@ def _validate_version_label(label_name: str, label_value: str) -> str:
     Uses a strict regex check to enforce structural validity.
 
     SECURITY NOTE:
-    - The regex is derived directly from `_ALLOWED_VERSION_CHARS` to prevent them
-      from drifting out of sync.
+    - The regex and `_ALLOWED_VERSION_CHARS` share underlying constant components
+      to ensure synchronization while still allowing the regex to enforce strict
+      structural validity (e.g., prohibiting consecutive dots).
     - DO NOT simplify the character reconstruction loop (e.g., via comprehension).
       Mapping via integer index to the static `_ALLOWED_VERSION_CHARS` is required
       to completely sever the CodeQL data-flow taint chain.
