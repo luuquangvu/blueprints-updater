@@ -71,6 +71,12 @@ jobs:
             echo "::error::Failed to fetch latest Home Assistant version"
             exit 1
           fi
+
+          if [[ ! "$LATEST_HA" =~ ^[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*$ ]]; then
+            echo "::error::Invalid Home Assistant version format: $LATEST_HA"
+            exit 1
+          fi
+
           MATRIX_JSON=$(jq -c --arg latest "$LATEST_HA" 'map(if .ha_version == "latest" then . + {ha_version: ("latest (" + $latest + ")"), ha_real_version: $latest} else . + {ha_real_version: .ha_version} end) | {include: .}' tools/compatibility_matrix.json)
           echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
 
@@ -93,7 +99,7 @@ jobs:
         run: |
           uv --no-config venv --no-project --python ${{ matrix.python_version }}
           HA_SPEC="homeassistant==${{ matrix.ha_real_version }}"
-          uv --no-config pip install --python .venv/bin/python $HA_SPEC h2 pytest pytest-homeassistant-custom-component
+          uv --no-config pip install --python .venv/bin/python "$HA_SPEC" h2 pytest pytest-homeassistant-custom-component
 
       - name: Run Tests
         run: uv run --no-project --python .venv/bin/python pytest --quiet --no-cov
