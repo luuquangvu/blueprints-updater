@@ -10,6 +10,7 @@ false positives related to command injection.
 """
 
 import argparse
+import contextlib
 import json
 import os
 import re
@@ -187,31 +188,35 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
         if needs_install:
             overrides_dir = os.path.join(_REPO_ROOT, "scratch")
             os.makedirs(overrides_dir, exist_ok=True)
-            overrides_file = os.path.join(overrides_dir, "overrides.txt")
+            overrides_file = os.path.join(overrides_dir, f"overrides_{ha_ver_to_install}.txt")
             with open(overrides_file, "w", encoding="utf-8") as f:
                 f.write(f"homeassistant == {ha_ver_to_install}\n")
 
             ha_spec = f"homeassistant=={ha_ver_to_install}"
             print(f"STEP_START: uv pip install {ha_spec}", flush=True)
-            subprocess.run(
-                [
-                    "uv",
-                    "--no-config",
-                    "pip",
-                    "install",
-                    "--upgrade",
-                    "--python",
-                    python_bin,
-                    ha_spec,
-                    *_REQUIRED_TEST_DEPS,
-                    "--overrides",
-                    overrides_file,
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=_REPO_ROOT,
-            )
+            try:
+                subprocess.run(
+                    [
+                        "uv",
+                        "--no-config",
+                        "pip",
+                        "install",
+                        "--upgrade",
+                        "--overrides",
+                        overrides_file,
+                        "--python",
+                        python_bin,
+                        ha_spec,
+                        *_REQUIRED_TEST_DEPS,
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    cwd=_REPO_ROOT,
+                )
+            finally:
+                with contextlib.suppress(OSError):
+                    os.remove(overrides_file)
             print(f"STEP_OK: uv pip install {ha_spec}", flush=True)
 
             print("STEP_START: cleanup __pycache__", flush=True)

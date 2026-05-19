@@ -166,6 +166,17 @@ class GitDiffResult:
     is_semantic_sync: bool
 
 
+@cache
+def _count_backups_sync_helper(file_path: str, max_bak: int) -> int:
+    """Count the number of existing backup files for a given blueprint path."""
+    count = 0
+    for i in range(1, max_bak + 1):
+        bak_path = f"{file_path}.bak.{i}"
+        if os.path.isfile(bak_path):
+            count += 1
+    return count
+
+
 class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Class to manage fetching blueprint updates."""
 
@@ -1331,15 +1342,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return f"{file_path}.bak.{version}"
 
     @staticmethod
-    @cache
     def _count_backups_sync(file_path: str, max_bak: int) -> int:
         """Count the number of existing backup files for a given blueprint path."""
-        count = 0
-        for i in range(1, max_bak + 1):
-            bak_path = BlueprintUpdateCoordinator._get_backup_path(file_path, i)
-            if os.path.isfile(bak_path):
-                count += 1
-        return count
+        return _count_backups_sync_helper(file_path, max_bak)
 
     @staticmethod
     def _check_backup_exists_sync(file_path: str, version: int) -> bool:
@@ -1368,7 +1373,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             max_bak: Maximum number of backups to keep.
 
         """
-        BlueprintUpdateCoordinator._count_backups_sync.cache_clear()
+        _count_backups_sync_helper.cache_clear()
         try:
             file_exists = os.path.isfile(file_path)
             if not file_exists:
@@ -1788,8 +1793,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             return {
                 "success": False,
-                "translation_key": "system_error",
-                "translation_kwargs": {"error": f"Invalid backup version {version} requested"},
+                "translation_key": "invalid_version",
+                "translation_kwargs": {},
             }
 
         try:
@@ -3839,7 +3844,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         max_backups: int = DEFAULT_MAX_BACKUPS,
     ) -> dict[str, BlueprintMetadata]:
         """Scan the blueprints directory for YAML files with source_url."""
-        BlueprintUpdateCoordinator._count_backups_sync.cache_clear()
+        _count_backups_sync_helper.cache_clear()
         blueprint_path: str = hass.config.path(BLUEPRINTS_DATA_DIR)
         found_blueprints = {}
 
