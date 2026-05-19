@@ -100,7 +100,11 @@ async def test_restore_blueprint_registration(hass: HomeAssistant):
     coordinator_mock.data = {}
 
     _, mock_register = await _setup_restore_test_context(hass, entry, coordinator_mock)
-    assert mock_register.called
+    assert any(
+        (len(call.args) > 2 and call.args[2] == "restore_blueprint")
+        or call.kwargs.get("service") == "restore_blueprint"
+        for call in mock_register.call_args_list
+    )
 
 
 @pytest.mark.asyncio
@@ -154,6 +158,9 @@ async def test_restore_blueprint_validation_fails_on_missing_backup(
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
     coordinator_mock._count_backups_sync = BlueprintUpdateCoordinator._count_backups_sync
     coordinator_mock.async_check_backup_exists = AsyncMock(return_value=False)
+    coordinator_mock.async_restore_blueprint = AsyncMock(
+        return_value={"success": False, "translation_key": "missing_backup"}
+    )
 
     with patch("homeassistant.helpers.entity_registry.async_get") as mock_er:
         handler, _ = await _setup_restore_test_context(hass, entry, coordinator_mock)

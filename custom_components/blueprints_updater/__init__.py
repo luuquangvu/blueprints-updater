@@ -276,13 +276,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 translation_key="invalid_version",
             )
 
-        if not await active_coordinator.async_check_backup_exists(target_path, version):
+        result = await active_coordinator.async_restore_blueprint(target_path, version=version)
+        if not result.get("success"):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
-                translation_key="missing_backup",
+                translation_key=result.get("translation_key", "system_error"),
             )
 
-        result = await active_coordinator.async_restore_blueprint(target_path, version=version)
         key = result.pop("translation_key", result.pop("message", "system_error"))
         kwargs = result.pop("translation_kwargs", {})
         result["message"] = await _translate(key, **kwargs)

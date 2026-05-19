@@ -1805,6 +1805,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     "blueprints_updater_save_after_restore",
                 )
                 await self.async_request_refresh()
+            else:
+                if message == "missing_backup":
+                    _LOGGER.error(
+                        "Backup version %s requested for %s does not exist on disk",
+                        version,
+                        real_path,
+                    )
+                else:
+                    _LOGGER.error(
+                        "Failed to restore blueprint at %s: %s",
+                        real_path,
+                        message,
+                    )
 
             return {
                 "success": success,
@@ -3878,9 +3891,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Atomic filesystem operation for restoration (runs in executor)."""
         bak_path = BlueprintUpdateCoordinator._get_backup_path(real_path, version)
 
-        if not os.path.isfile(bak_path):
-            return False, "missing_backup", 0
-
         try:
             with open(bak_path, encoding="utf-8") as f:
                 content = f.read()
@@ -3892,6 +3902,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             os.replace(tmp_path, real_path)
             new_cnt = BlueprintUpdateCoordinator._count_backups_sync(real_path, max_backups)
             return True, "success", new_cnt
+        except FileNotFoundError:
+            return False, "missing_backup", 0
         except (OSError, ValueError) as err:
             _LOGGER.exception("Filesystem error during blueprint restoration: %s", err)
             return False, "system_error", 0
