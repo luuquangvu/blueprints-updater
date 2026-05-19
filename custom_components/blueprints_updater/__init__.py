@@ -267,6 +267,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="system_error",
+                translation_placeholders={"error": "Config entry not found"},
             )
 
         max_backups = get_max_backups(active_coordinator.config_entry)
@@ -281,6 +282,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key=result.get("translation_key", "system_error"),
+                translation_placeholders=result.get("translation_kwargs", {}),
             )
 
         key = result.pop("translation_key", result.pop("message", "system_error"))

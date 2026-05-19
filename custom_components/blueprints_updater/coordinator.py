@@ -16,6 +16,7 @@ from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from functools import lru_cache
 from http import HTTPStatus
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
@@ -1330,6 +1331,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return f"{file_path}.bak.{version}"
 
     @staticmethod
+    @lru_cache(maxsize=1024)
     def _count_backups_sync(file_path: str, max_bak: int) -> int:
         """Count the number of existing backup files for a given blueprint path."""
         count = 0
@@ -1366,6 +1368,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             max_bak: Maximum number of backups to keep.
 
         """
+        BlueprintUpdateCoordinator._count_backups_sync.cache_clear()
         try:
             file_exists = os.path.isfile(file_path)
             if not file_exists:
@@ -1767,7 +1770,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         real_path = os.path.realpath(path)
         if not self._is_safe_path(real_path):
             _LOGGER.error("Security violation: Attempted to restore unsafe path: %s", real_path)
-            return {"success": False, "translation_key": "system_error"}
+            return {
+                "success": False,
+                "translation_key": "system_error",
+                "translation_kwargs": {
+                    "error": "Security violation: Attempted to restore unsafe path"
+                },
+            }
 
         max_backups = get_max_backups(self.config_entry)
         if version < 1 or version > max_backups:
@@ -1777,7 +1786,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 real_path,
                 max_backups,
             )
-            return {"success": False, "translation_key": "system_error"}
+            return {
+                "success": False,
+                "translation_key": "system_error",
+                "translation_kwargs": {"error": f"Invalid backup version {version} requested"},
+            }
 
         try:
             success, message, new_backups_count = await self.hass.async_add_executor_job(
@@ -1819,9 +1832,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         message,
                     )
 
+            translation_kwargs = {}
+            if not success and message == "system_error":
+                translation_kwargs = {"error": "Filesystem error during restoration"}
+
             return {
                 "success": success,
                 "translation_key": message,
+                "translation_kwargs": translation_kwargs,
             }
         except Exception as err:
             _LOGGER.exception("Failed to restore blueprint at %s", real_path)
