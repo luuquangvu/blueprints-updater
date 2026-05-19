@@ -1325,11 +1325,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.async_set_updated_data(self.data)
 
     @staticmethod
+    def _get_backup_path(file_path: str, version: int | str) -> str:
+        """Construct the path to a specific backup file version."""
+        return f"{file_path}.bak.{version}"
+
+    @staticmethod
     def _count_backups_sync(file_path: str, max_bak: int) -> int:
         """Count the number of existing backup files for a given blueprint path."""
         count = 0
         for i in range(1, max_bak + 1):
-            bak_path = f"{file_path}.bak.{i}"
+            bak_path = BlueprintUpdateCoordinator._get_backup_path(file_path, i)
             if os.path.isfile(bak_path):
                 count += 1
         return count
@@ -1337,7 +1342,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     @staticmethod
     def _check_backup_exists_sync(file_path: str, version: int) -> bool:
         """Check if a specific backup file exists."""
-        bak_path = f"{file_path}.bak.{version}"
+        bak_path = BlueprintUpdateCoordinator._get_backup_path(file_path, version)
         return os.path.isfile(bak_path)
 
     async def async_check_backup_exists(self, path: str, version: int) -> bool:
@@ -1345,8 +1350,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         Runs the check in the executor to avoid blocking the event loop.
         """
+        real_path = os.path.realpath(path)
+        if not self._is_safe_path(real_path):
+            return False
         return await self.hass.async_add_executor_job(
-            BlueprintUpdateCoordinator._check_backup_exists_sync, path, version
+            BlueprintUpdateCoordinator._check_backup_exists_sync, real_path, version
         )
 
     @staticmethod
@@ -1364,8 +1372,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 return
 
             for i in range(max_bak, 0, -1):
-                src = f"{file_path}.bak.{i}"
-                dst = f"{file_path}.bak.{i + 1}"
+                src = BlueprintUpdateCoordinator._get_backup_path(file_path, i)
+                dst = BlueprintUpdateCoordinator._get_backup_path(file_path, i + 1)
                 try:
                     os.replace(src, dst)
                 except FileNotFoundError:
@@ -1374,11 +1382,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     _LOGGER.warning("Error rotating backup %s to %s: %s", src, dst, err)
 
             try:
-                shutil.copy2(file_path, f"{file_path}.bak.1")
+                shutil.copy2(
+                    file_path,
+                    BlueprintUpdateCoordinator._get_backup_path(file_path, 1),
+                )
             except OSError as err:
                 _LOGGER.warning("Error creating new backup for %s: %s", file_path, err)
 
-            stale_bak = f"{file_path}.bak.{max_bak + 1}"
+            stale_bak = BlueprintUpdateCoordinator._get_backup_path(file_path, max_bak + 1)
             try:
                 os.remove(stale_bak)
             except OSError as err:
@@ -3865,7 +3876,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         real_path: str, version: int, max_backups: int
     ) -> tuple[bool, str, int]:
         """Atomic filesystem operation for restoration (runs in executor)."""
-        bak_path = f"{real_path}.bak.{version}"
+        bak_path = BlueprintUpdateCoordinator._get_backup_path(real_path, version)
 
         if not os.path.isfile(bak_path):
             return False, "missing_backup", 0
