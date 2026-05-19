@@ -3839,6 +3839,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         max_backups: int = DEFAULT_MAX_BACKUPS,
     ) -> dict[str, BlueprintMetadata]:
         """Scan the blueprints directory for YAML files with source_url."""
+        BlueprintUpdateCoordinator._count_backups_sync.cache_clear()
         blueprint_path: str = hass.config.path(BLUEPRINTS_DATA_DIR)
         found_blueprints = {}
 
