@@ -71,6 +71,7 @@ async def test_service_registration(hass: HomeAssistant):
     coordinator_mock.config_entry = entry
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.async_check_backup_exists = AsyncMock(return_value=True)
 
     _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
 
@@ -132,6 +133,7 @@ async def test_service_handlers(hass: HomeAssistant):
     coordinator_mock.config_entry = entry
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.async_check_backup_exists = AsyncMock(return_value=True)
     coordinator_mock.async_request_refresh = AsyncMock()
 
     _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
@@ -200,6 +202,7 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
     coordinator_mock.config_entry = entry
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.async_check_backup_exists = AsyncMock(return_value=True)
 
     _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
 
@@ -390,6 +393,7 @@ async def test_restore_handler_multi_coordinator_selection(hass: HomeAssistant):
     coordinator_two = MagicMock(spec=BlueprintUpdateCoordinator)
     coordinator_two.config_entry = entry_two
     coordinator_two.data = {}
+    coordinator_two.async_check_backup_exists = AsyncMock(return_value=True)
 
     _setup_test_coordinator(hass, entry_one.entry_id, coordinator_one)
     _setup_test_coordinator(hass, entry_two.entry_id, coordinator_two)

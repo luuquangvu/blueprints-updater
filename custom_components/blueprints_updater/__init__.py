@@ -276,17 +276,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 translation_key="invalid_version",
             )
 
-        backups_count = (
-            active_coordinator.data[target_path].get("backups_count", 0)
-            if active_coordinator.data and target_path in active_coordinator.data
-            else 0
-        )
-        if backups_count == 0:
-            backups_count = await active_coordinator.hass.async_add_executor_job(
-                BlueprintUpdateCoordinator._count_backups_sync, target_path, max_backups
-            )
-
-        if version > backups_count:
+        if not await active_coordinator.async_check_backup_exists(target_path, version):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="missing_backup",

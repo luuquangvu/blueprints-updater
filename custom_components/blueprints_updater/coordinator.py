@@ -1335,6 +1335,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return count
 
     @staticmethod
+    def _check_backup_exists_sync(file_path: str, version: int) -> bool:
+        """Check if a specific backup file exists."""
+        bak_path = f"{file_path}.bak.{version}"
+        return os.path.isfile(bak_path)
+
+    async def async_check_backup_exists(self, path: str, version: int) -> bool:
+        """Check if a specific backup version exists on disk.
+
+        Runs the check in the executor to avoid blocking the event loop.
+        """
+        return await self.hass.async_add_executor_job(
+            BlueprintUpdateCoordinator._check_backup_exists_sync, path, version
+        )
+
+    @staticmethod
     def _rotate_backups(file_path: str, max_bak: int) -> None:
         """Rotate backup files for a given file path with robust error handling.
 
@@ -1753,20 +1768,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             return {"success": False, "translation_key": "system_error"}
 
-        backups_count = 0
-        if self.data and real_path in self.data:
-            backups_count = self.data[real_path].get("backups_count", 0)
-        if backups_count == 0:
-            backups_count = await self.hass.async_add_executor_job(
-                self._count_backups_sync, real_path, max_backups
-            )
-
-        if version > backups_count:
+        if not await self.async_check_backup_exists(real_path, version):
             _LOGGER.error(
-                "Backup version %s requested for %s exceeds available backups count %s",
+                "Backup version %s requested for %s does not exist on disk",
                 version,
                 real_path,
-                backups_count,
             )
             return {"success": False, "translation_key": "missing_backup"}
 
