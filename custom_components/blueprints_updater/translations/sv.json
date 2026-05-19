@@ -111,7 +111,7 @@
       "message": "Backupfil saknas. En backup kanske inte skapades under föregående uppdatering."
     },
     "invalid_version": {
-      "message": "Ogiltig backupversion. Måste vara mellan 1 och konfigurerat max-antal."
+      "message": "Ogiltig backupversion {version}. Måste vara mellan 1 och {max_backups}."
     },
     "system_error": {
       "message": "Systemfel under återställning: {error}"

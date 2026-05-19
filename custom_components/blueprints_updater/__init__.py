@@ -275,6 +275,10 @@ def _async_register_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="invalid_version",
+                translation_placeholders={
+                    "version": str(version),
+                    "max_backups": str(max_backups),
+                },
             )
 
         result = await active_coordinator.async_restore_blueprint(target_path, version=version)

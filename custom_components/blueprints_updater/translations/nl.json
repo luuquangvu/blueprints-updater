@@ -111,7 +111,7 @@
       "message": "Back-upbestand ontbreekt. Er is mogelijk geen back-up gemaakt tijdens de vorige update."
     },
     "invalid_version": {
-      "message": "Ongeldige back-upversie. Moet tussen 1 en het geconfigureerde maximum aantal back-ups liggen."
+      "message": "Ongeldige back-upversie {version}. Moet tussen 1 en {max_backups} liggen."
     },
     "system_error": {
       "message": "Systeemfout tijdens herstel: {error}"

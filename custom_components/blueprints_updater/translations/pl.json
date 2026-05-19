@@ -111,7 +111,7 @@
       "message": "Brak pliku kopii zapasowej. Kopia zapasowa mogła nie zostać utworzona podczas poprzedniej aktualizacji."
     },
     "invalid_version": {
-      "message": "Nieprawidłowa wersja kopii zapasowej. Musi mieścić się w przedziale od 1 do skonfigurowanego maksimum."
+      "message": "Nieprawidłowa wersja kopii zapasowej {version}. Musi mieścić się w przedziale od 1 do {max_backups}."
     },
     "system_error": {
       "message": "Błąd systemu podczas przywracania: {error}"

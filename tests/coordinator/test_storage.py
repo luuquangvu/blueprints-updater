@@ -479,3 +479,15 @@ async def test_restore_versioned(coordinator, tmp_path):
     assert result["success"] is True
     assert bp_file.read_text() == "backup_v2"
     assert (tmp_path / "test.yaml.bak.2").read_text() == "backup_v1"
+
+
+@pytest.mark.asyncio
+async def test_restore_invalid_version_details(coordinator):
+    """Test that invalid backup version returns version and max_backups details."""
+    result = await coordinator.async_restore_blueprint(
+        "/config/blueprints/automation/test.yaml", version=999
+    )
+    assert result["success"] is False
+    assert result["translation_key"] == "invalid_version"
+    assert result["translation_kwargs"]["version"] == "999"
+    assert "max_backups" in result["translation_kwargs"]

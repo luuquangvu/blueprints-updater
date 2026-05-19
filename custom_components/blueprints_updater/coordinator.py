@@ -1797,7 +1797,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return {
                 "success": False,
                 "translation_key": "invalid_version",
-                "translation_kwargs": {},
+                "translation_kwargs": {
+                    "version": str(version),
+                    "max_backups": str(max_backups),
+                },
             }
 
         try:

@@ -111,7 +111,7 @@
       "message": "Ficheiro de cópia de segurança em falta. Pode não ter sido criada uma cópia de segurança durante a atualização anterior."
     },
     "invalid_version": {
-      "message": "Versão da cópia de segurança inválida. Deve estar entre 1 e o máximo configurado."
+      "message": "Versão da cópia de segurança inválida {version}. Deve estar entre 1 e {max_backups}."
     },
     "system_error": {
       "message": "Erro de sistema durante o restauro: {error}"

@@ -293,6 +293,9 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
                     )
                 )
             assert exc.value.translation_key == "invalid_version"
+            assert exc.value.translation_placeholders is not None
+            assert exc.value.translation_placeholders["version"] == "0"
+            assert exc.value.translation_placeholders["max_backups"] == "3"
 
             with pytest.raises(ServiceValidationError) as exc:
                 await restore_handler(
@@ -304,6 +307,9 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
                     )
                 )
             assert exc.value.translation_key == "invalid_version"
+            assert exc.value.translation_placeholders is not None
+            assert exc.value.translation_placeholders["version"] == "5"
+            assert exc.value.translation_placeholders["max_backups"] == "3"
 
             coordinator_mock.async_restore_blueprint = AsyncMock(
                 return_value={"success": True, "translation_key": "success"}
