@@ -171,7 +171,7 @@ def _count_backups_sync_helper(file_path: str, max_bak: int) -> int:
     """Count the number of existing backup files for a given blueprint path."""
     count = 0
     for i in range(1, max_bak + 1):
-        bak_path = f"{file_path}.bak.{i}"
+        bak_path = BlueprintUpdateCoordinator._get_backup_path(file_path, i)
         if os.path.isfile(bak_path):
             count += 1
     return count

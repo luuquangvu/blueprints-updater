@@ -285,7 +285,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 translation_placeholders=result.get("translation_kwargs", {}),
             )
 
-        key = result.pop("translation_key", result.pop("message", "system_error"))
+        key = result.pop("translation_key", "success")
         kwargs = result.pop("translation_kwargs", {})
         result["message"] = await _translate(key, **kwargs)
         return result
