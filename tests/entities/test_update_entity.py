@@ -227,6 +227,7 @@ async def test_entity_properties(coordinator):
     assert entity.extra_state_attributes == {
         "domain": DOMAIN_AUTOMATION,
         "relative_path": "test.yaml",
+        "backups_count": 0,
         "provider_type": "generic",
     }
 
@@ -250,6 +251,7 @@ async def test_entity_properties(coordinator):
         "last_error": "Fetch Error",
         "domain": DOMAIN_AUTOMATION,
         "relative_path": "test.yaml",
+        "backups_count": 0,
         "provider_type": "generic",
     }
 
