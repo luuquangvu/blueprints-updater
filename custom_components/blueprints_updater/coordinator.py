@@ -16,7 +16,7 @@ from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
-from functools import lru_cache
+from functools import cache
 from http import HTTPStatus
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
@@ -1331,7 +1331,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return f"{file_path}.bak.{version}"
 
     @staticmethod
-    @lru_cache(maxsize=1024)
+    @cache
     def _count_backups_sync(file_path: str, max_bak: int) -> int:
         """Count the number of existing backup files for a given blueprint path."""
         count = 0
