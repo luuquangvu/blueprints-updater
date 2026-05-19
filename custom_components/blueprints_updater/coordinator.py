@@ -16,7 +16,7 @@ from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
-from functools import cache
+from functools import lru_cache
 from http import HTTPStatus
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
@@ -166,7 +166,7 @@ class GitDiffResult:
     is_semantic_sync: bool
 
 
-@cache
+@lru_cache(maxsize=512)
 def _count_backups_sync_helper(file_path: str, max_bak: int) -> int:
     """Count the number of existing backup files for a given blueprint path."""
     count = 0
