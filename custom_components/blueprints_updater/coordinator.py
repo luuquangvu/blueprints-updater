@@ -1357,6 +1357,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         Runs the check in the executor to avoid blocking the event loop.
         """
+        max_backups = get_max_backups(self.config_entry)
+        if version < 1 or version > max_backups:
+            return False
         real_path = os.path.realpath(path)
         if not self._is_safe_path(real_path):
             return False
@@ -3895,7 +3898,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                                 ):
                                     continue
                                 backups_count = BlueprintUpdateCoordinator._count_backups_sync(
-                                    full_path, max_backups
+                                    real_full_path, max_backups
                                 )
                                 found_blueprints[full_path] = {
                                     **parsed_data,
