@@ -185,6 +185,12 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
             return False, ha_ver_display
 
         if needs_install:
+            overrides_dir = os.path.join(_REPO_ROOT, "scratch")
+            os.makedirs(overrides_dir, exist_ok=True)
+            overrides_file = os.path.join(overrides_dir, "overrides.txt")
+            with open(overrides_file, "w", encoding="utf-8") as f:
+                f.write(f"homeassistant == {ha_ver_to_install}\n")
+
             ha_spec = f"homeassistant=={ha_ver_to_install}"
             print(f"STEP_START: uv pip install {ha_spec}", flush=True)
             subprocess.run(
@@ -198,6 +204,8 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
                     python_bin,
                     ha_spec,
                     *_REQUIRED_TEST_DEPS,
+                    "--overrides",
+                    overrides_file,
                 ],
                 check=True,
                 capture_output=True,
