@@ -1768,14 +1768,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             return {"success": False, "translation_key": "system_error"}
 
-        if not await self.async_check_backup_exists(real_path, version):
-            _LOGGER.error(
-                "Backup version %s requested for %s does not exist on disk",
-                version,
-                real_path,
-            )
-            return {"success": False, "translation_key": "missing_backup"}
-
         try:
             success, message, new_backups_count = await self.hass.async_add_executor_job(
                 BlueprintUpdateCoordinator._execute_restore_file,
