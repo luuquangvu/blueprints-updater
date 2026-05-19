@@ -111,7 +111,7 @@
       "message": "Không tìm thấy tệp sao lưu. Có thể bản sao lưu đã không được tạo trong lần cập nhật trước."
     },
     "invalid_version": {
-      "message": "Phiên bản sao lưu không hợp lệ. Phải nằm trong khoảng từ 1 đến số bản sao lưu tối đa đã cấu hình."
+      "message": "Phiên bản sao lưu {version} không hợp lệ. Phải nằm trong khoảng từ 1 đến {max_backups}."
     },
     "system_error": {
       "message": "Lỗi hệ thống khi khôi phục: {error}"

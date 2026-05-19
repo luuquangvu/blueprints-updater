@@ -111,7 +111,7 @@
       "message": "Falta el archivo de copia de seguridad. Es posible que no se haya creado una copia de seguridad durante la actualización anterior."
     },
     "invalid_version": {
-      "message": "Versión de copia de seguridad no válida. Debe estar entre 1 y el máximo de copias de seguridad configurado."
+      "message": "Versión de copia de seguridad no válida {version}. Debe estar entre 1 y {max_backups}."
     },
     "system_error": {
       "message": "Error del sistema durante la restauración: {error}"

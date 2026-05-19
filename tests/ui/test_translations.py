@@ -119,6 +119,7 @@ async def test_entity_localized_error(hass, coordinator):
             "domain": DOMAIN_AUTOMATION,
             "last_error": "yaml_syntax_error|Line 5",
             "relative_path": "test.yaml",
+            "backups_count": 0,
             "provider_type": None,
         }
 
@@ -128,6 +129,7 @@ async def test_entity_localized_error(hass, coordinator):
             "domain": DOMAIN_AUTOMATION,
             "last_error": "Lỗi cú pháp: Line 5",
             "relative_path": "test.yaml",
+            "backups_count": 0,
             "provider_type": None,
         }
         assert entity.release_summary == "Có bản cập nhật"

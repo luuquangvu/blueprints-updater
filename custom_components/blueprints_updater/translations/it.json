@@ -111,7 +111,7 @@
       "message": "File di backup mancante. Un backup potrebbe non essere stato creato durante l'aggiornamento precedente."
     },
     "invalid_version": {
-      "message": "Versione backup non valida. Deve essere compresa tra 1 e il numero massimo di backup configurato."
+      "message": "Versione backup non valida {version}. Deve essere compresa tra 1 e {max_backups}."
     },
     "system_error": {
       "message": "Errore di sistema durante il ripristino: {error}"

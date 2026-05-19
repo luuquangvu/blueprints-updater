@@ -71,6 +71,7 @@ async def test_service_registration(hass: HomeAssistant):
     coordinator_mock.config_entry = entry
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.async_check_backup_exists = AsyncMock(return_value=True)
 
     _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
 
@@ -132,6 +133,7 @@ async def test_service_handlers(hass: HomeAssistant):
     coordinator_mock.config_entry = entry
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.async_check_backup_exists = AsyncMock(return_value=True)
     coordinator_mock.async_request_refresh = AsyncMock()
 
     _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
@@ -200,6 +202,7 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
     coordinator_mock.config_entry = entry
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.async_check_backup_exists = AsyncMock(return_value=True)
 
     _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)
 
@@ -274,10 +277,20 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
                 )
             assert exc.value.translation_key == "not_found"
 
-            coordinator_mock.data = {"test.yaml": {"relative_path": "test.yaml", "updatable": True}}
+            coordinator_mock.data = {
+                "test.yaml": {"relative_path": "test.yaml", "updatable": True, "backups_count": 3}
+            }
             good_entity.unique_id = BlueprintUpdateCoordinator.generate_unique_id(
                 "test_entry", "test.yaml"
             )
+            coordinator_mock.async_restore_blueprint = AsyncMock(
+                side_effect=lambda path, version=1: {
+                    "success": False,
+                    "translation_key": "invalid_version",
+                    "translation_kwargs": {"version": str(version), "max_backups": "3"},
+                }
+            )
+
             with pytest.raises(ServiceValidationError) as exc:
                 await restore_handler(
                     ServiceCall(
@@ -288,6 +301,9 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
                     )
                 )
             assert exc.value.translation_key == "invalid_version"
+            assert exc.value.translation_placeholders is not None
+            assert exc.value.translation_placeholders["version"] == "0"
+            assert exc.value.translation_placeholders["max_backups"] == "3"
 
             with pytest.raises(ServiceValidationError) as exc:
                 await restore_handler(
@@ -299,6 +315,29 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
                     )
                 )
             assert exc.value.translation_key == "invalid_version"
+            assert exc.value.translation_placeholders is not None
+            assert exc.value.translation_placeholders["version"] == "5"
+            assert exc.value.translation_placeholders["max_backups"] == "3"
+
+            coordinator_mock.async_restore_blueprint = AsyncMock(
+                return_value={
+                    "success": False,
+                    "translation_key": "system_error",
+                    "translation_kwargs": {"error": "Disk write failed"},
+                }
+            )
+            with pytest.raises(ServiceValidationError) as exc:
+                await restore_handler(
+                    ServiceCall(
+                        hass,
+                        DOMAIN,
+                        "restore_blueprint",
+                        {"entity_id": "update.test", "version": 1},
+                    )
+                )
+            assert exc.value.translation_key == "system_error"
+            assert exc.value.translation_placeholders is not None
+            assert exc.value.translation_placeholders["error"] == "Disk write failed"
 
             coordinator_mock.async_restore_blueprint = AsyncMock(
                 return_value={"success": True, "translation_key": "success"}
@@ -388,6 +427,7 @@ async def test_restore_handler_multi_coordinator_selection(hass: HomeAssistant):
     coordinator_two = MagicMock(spec=BlueprintUpdateCoordinator)
     coordinator_two.config_entry = entry_two
     coordinator_two.data = {}
+    coordinator_two.async_check_backup_exists = AsyncMock(return_value=True)
 
     _setup_test_coordinator(hass, entry_one.entry_id, coordinator_one)
     _setup_test_coordinator(hass, entry_two.entry_id, coordinator_two)
@@ -433,7 +473,7 @@ async def test_restore_handler_multi_coordinator_selection(hass: HomeAssistant):
         )
         mock_entity_registry.async_get.return_value = entity_entry
 
-        coordinator_two.data = {"two.yaml": {"relative_path": "two.yaml"}}
+        coordinator_two.data = {"two.yaml": {"relative_path": "two.yaml", "backups_count": 3}}
         coordinator_two.async_restore_blueprint = AsyncMock(
             return_value={"success": True, "message": "Success"}
         )

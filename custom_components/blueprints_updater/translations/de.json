@@ -111,7 +111,7 @@
       "message": "Backup-Datei fehlt. Möglicherweise wurde beim vorherigen Update kein Backup erstellt."
     },
     "invalid_version": {
-      "message": "Ungültige Backup-Version. Muss zwischen 1 und der konfigurierten maximalen Anzahl an Backups liegen."
+      "message": "Ungültige Backup-Version {version}. Muss zwischen 1 und {max_backups} liegen."
     },
     "system_error": {
       "message": "Systemfehler bei der Wiederherstellung: {error}"

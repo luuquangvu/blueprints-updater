@@ -111,7 +111,7 @@
       "message": "Missing backup file. A backup may not have been created during the previous update."
     },
     "invalid_version": {
-      "message": "Invalid backup version. Must be between 1 and the configured max backups."
+      "message": "Invalid backup version {version}. Must be between 1 and {max_backups}."
     },
     "system_error": {
       "message": "System error during restore: {error}"

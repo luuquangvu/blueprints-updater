@@ -1504,7 +1504,7 @@ async def test_async_update_data_uses_current_options(coordinator, mock_makedirs
         patch.object(coordinator, "_async_save_metadata"),
     ):
         await coordinator._async_update_data()
-        mock_scan.assert_called_once_with(ANY, "whitelist", ["test.yaml"])
+        mock_scan.assert_called_once_with(ANY, "whitelist", ["test.yaml"], ANY)
 
 
 @pytest.mark.asyncio

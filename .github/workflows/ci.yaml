@@ -101,7 +101,8 @@ jobs:
         run: |
           uv --no-config venv --no-project --python ${{ matrix.python_version }}
           HA_SPEC="homeassistant==${{ matrix.ha_real_version }}"
-          uv --no-config pip install --python .venv/bin/python "$HA_SPEC" h2 pytest pytest-homeassistant-custom-component
+          echo "homeassistant == ${{ matrix.ha_real_version }}" > overrides.txt
+          uv --no-config pip install --overrides overrides.txt --python .venv/bin/python "$HA_SPEC" h2 pytest pytest-homeassistant-custom-component
 
       - name: Run Tests
         run: uv run --no-project --python .venv/bin/python pytest --quiet --no-cov

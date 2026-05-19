@@ -16,6 +16,7 @@ from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from functools import lru_cache
 from http import HTTPStatus
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
@@ -72,6 +73,7 @@ from .const import (
     CONF_SELECTED_BLUEPRINTS,
     CONF_USE_CDN,
     DEFAULT_AUTO_UPDATE,
+    DEFAULT_MAX_BACKUPS,
     DEFAULT_USE_CDN,
     DOMAIN,
     DOMAIN_AUTOMATION,
@@ -153,6 +155,7 @@ class BlueprintMetadata(ParsedBlueprintData):
     """Augmented blueprint data from file scanning."""
 
     relative_path: str
+    backups_count: int
 
 
 @dataclass(frozen=True)
@@ -161,6 +164,17 @@ class GitDiffResult:
 
     diff_text: str
     is_semantic_sync: bool
+
+
+@lru_cache(maxsize=512)
+def _count_backups_sync_helper(file_path: str, max_bak: int) -> int:
+    """Count the number of existing backup files for a given blueprint path."""
+    count = 0
+    for i in range(1, max_bak + 1):
+        bak_path = BlueprintUpdateCoordinator._get_backup_path(file_path, i)
+        if os.path.isfile(bak_path):
+            count += 1
+    return count
 
 
 class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
@@ -521,6 +535,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 if self._first_update_done
                 else persisted.get("last_modified"),
                 "persisted_source_url": persisted.get("source_url"),
+                "backups_count": info.get("backups_count", 0),
             }
         return results
 
@@ -570,6 +585,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         "update_blocking_reason": prev.get("update_blocking_reason")
                         if is_updatable
                         else None,
+                        "backups_count": info.get("backups_count", prev.get("backups_count", 0)),
                         "breaking_risks": prev.get("breaking_risks", []) if is_updatable else [],
                     }
                 )
@@ -594,11 +610,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
 
         try:
+            max_backups = get_max_backups(self.config_entry)
             blueprints = await self.hass.async_add_executor_job(
                 self.scan_blueprints,
                 self.hass,
                 filter_mode,
                 selected,
+                max_backups,
             )
         except Exception as err:
             _LOGGER.exception("Blueprint scan failed: %s", err)
@@ -1319,6 +1337,37 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self.async_set_updated_data(self.data)
 
     @staticmethod
+    def _get_backup_path(file_path: str, version: int | str) -> str:
+        """Construct the path to a specific backup file version."""
+        return f"{file_path}.bak.{version}"
+
+    @staticmethod
+    def _count_backups_sync(file_path: str, max_bak: int) -> int:
+        """Count the number of existing backup files for a given blueprint path."""
+        return _count_backups_sync_helper(file_path, max_bak)
+
+    @staticmethod
+    def _check_backup_exists_sync(file_path: str, version: int) -> bool:
+        """Check if a specific backup file exists."""
+        bak_path = BlueprintUpdateCoordinator._get_backup_path(file_path, version)
+        return os.path.isfile(bak_path)
+
+    async def async_check_backup_exists(self, path: str, version: int) -> bool:
+        """Check if a specific backup version exists on disk.
+
+        Runs the check in the executor to avoid blocking the event loop.
+        """
+        max_backups = get_max_backups(self.config_entry)
+        if version < 1 or version > max_backups:
+            return False
+        real_path = os.path.realpath(path)
+        if not self._is_safe_path(real_path):
+            return False
+        return await self.hass.async_add_executor_job(
+            BlueprintUpdateCoordinator._check_backup_exists_sync, real_path, version
+        )
+
+    @staticmethod
     def _rotate_backups(file_path: str, max_bak: int) -> None:
         """Rotate backup files for a given file path with robust error handling.
 
@@ -1327,14 +1376,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             max_bak: Maximum number of backups to keep.
 
         """
+        _count_backups_sync_helper.cache_clear()
         try:
             file_exists = os.path.isfile(file_path)
             if not file_exists:
                 return
 
             for i in range(max_bak, 0, -1):
-                src = f"{file_path}.bak.{i}"
-                dst = f"{file_path}.bak.{i + 1}"
+                src = BlueprintUpdateCoordinator._get_backup_path(file_path, i)
+                dst = BlueprintUpdateCoordinator._get_backup_path(file_path, i + 1)
                 try:
                     os.replace(src, dst)
                 except FileNotFoundError:
@@ -1343,11 +1393,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     _LOGGER.warning("Error rotating backup %s to %s: %s", src, dst, err)
 
             try:
-                shutil.copy2(file_path, f"{file_path}.bak.1")
+                shutil.copy2(
+                    file_path,
+                    BlueprintUpdateCoordinator._get_backup_path(file_path, 1),
+                )
             except OSError as err:
                 _LOGGER.warning("Error creating new backup for %s: %s", file_path, err)
 
-            stale_bak = f"{file_path}.bak.{max_bak + 1}"
+            stale_bak = BlueprintUpdateCoordinator._get_backup_path(file_path, max_bak + 1)
             try:
                 os.remove(stale_bak)
             except OSError as err:
@@ -1411,7 +1464,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         try:
 
-            def _save_file(file_path: str, content: str, max_bak: int) -> None:
+            def _save_file(file_path: str, content: str, max_bak: int) -> int:
                 """Local helper for _save_file."""
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 tmp_path = f"{file_path}.tmp"
@@ -1423,6 +1476,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     self._rotate_backups(file_path, max_bak)
 
                 os.replace(tmp_path, file_path)
+                return BlueprintUpdateCoordinator._count_backups_sync(file_path, max_bak)
 
             parsed_raw = None
             try:
@@ -1451,7 +1505,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             else:
                 final_content = self._normalize_content(remote_content)
 
-            await self.hass.async_add_executor_job(
+            new_backups_count = await self.hass.async_add_executor_job(
                 _save_file, real_path, final_content, max_backups
             )
 
@@ -1516,6 +1570,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "update_blocking_reason": None,
                 "etag": final_etag,
                 "last_modified": final_last_modified,
+                "backups_count": new_backups_count,
             }
 
             if self.data and path in self.data:
@@ -1723,7 +1778,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         real_path = os.path.realpath(path)
         if not self._is_safe_path(real_path):
             _LOGGER.error("Security violation: Attempted to restore unsafe path: %s", real_path)
-            return {"success": False, "translation_key": "system_error"}
+            return {
+                "success": False,
+                "translation_key": "system_error",
+                "translation_kwargs": {
+                    "error": "Security violation: Attempted to restore unsafe path"
+                },
+            }
 
         max_backups = get_max_backups(self.config_entry)
         if version < 1 or version > max_backups:
@@ -1733,10 +1794,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 real_path,
                 max_backups,
             )
-            return {"success": False, "translation_key": "system_error"}
+            return {
+                "success": False,
+                "translation_key": "invalid_version",
+                "translation_kwargs": {
+                    "version": str(version),
+                    "max_backups": str(max_backups),
+                },
+            }
 
         try:
-            success, message = await self.hass.async_add_executor_job(
+            success, message, new_backups_count = await self.hass.async_add_executor_job(
                 BlueprintUpdateCoordinator._execute_restore_file,
                 real_path,
                 version,
@@ -1754,16 +1822,35 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 if self.data and real_path in self.data:
                     self.data[real_path]["etag"] = None
                     self.data[real_path]["remote_hash"] = None
+                    self.data[real_path]["backups_count"] = new_backups_count
                 await self.async_reload_services([domain])
                 self.hass.async_create_background_task(
                     self._async_save_metadata(force=True),
                     "blueprints_updater_save_after_restore",
                 )
                 await self.async_request_refresh()
+            else:
+                if message == "missing_backup":
+                    _LOGGER.error(
+                        "Backup version %s requested for %s does not exist on disk",
+                        version,
+                        real_path,
+                    )
+                else:
+                    _LOGGER.error(
+                        "Failed to restore blueprint at %s: %s",
+                        real_path,
+                        message,
+                    )
+
+            translation_kwargs = {}
+            if not success and message == "system_error":
+                translation_kwargs = {"error": "Filesystem error during restoration"}
 
             return {
                 "success": success,
                 "translation_key": message,
+                "translation_kwargs": translation_kwargs,
             }
         except Exception as err:
             _LOGGER.exception("Failed to restore blueprint at %s", real_path)
@@ -3760,8 +3847,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         hass: HomeAssistant,
         filter_mode: str,
         selected_blueprints: list[str],
+        max_backups: int = DEFAULT_MAX_BACKUPS,
     ) -> dict[str, BlueprintMetadata]:
         """Scan the blueprints directory for YAML files with source_url."""
+        _count_backups_sync_helper.cache_clear()
         blueprint_path: str = hass.config.path(BLUEPRINTS_DATA_DIR)
         found_blueprints = {}
 
@@ -3811,9 +3900,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                                     relative_path, filter_mode, selected_set
                                 ):
                                     continue
+                                backups_count = BlueprintUpdateCoordinator._count_backups_sync(
+                                    real_full_path, max_backups
+                                )
                                 found_blueprints[full_path] = {
                                     **parsed_data,
                                     "relative_path": relative_path,
+                                    "backups_count": backups_count,
                                 }
 
                         except OSError:
@@ -3822,17 +3915,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return found_blueprints
 
     @staticmethod
-    def _execute_restore_file(real_path: str, version: int, max_backups: int) -> tuple[bool, str]:
+    def _execute_restore_file(
+        real_path: str, version: int, max_backups: int
+    ) -> tuple[bool, str, int]:
         """Atomic filesystem operation for restoration (runs in executor)."""
-        bak_path = f"{real_path}.bak.{version}"
-        if version == 1 and not os.path.isfile(bak_path):
-            legacy_name = f".{os.path.basename(real_path)}.bak"
-            legacy_bak = os.path.join(os.path.dirname(real_path), legacy_name)
-            if os.path.isfile(legacy_bak):
-                bak_path = legacy_bak
-
-        if not os.path.isfile(bak_path):
-            return False, "missing_backup"
+        bak_path = BlueprintUpdateCoordinator._get_backup_path(real_path, version)
 
         try:
             with open(bak_path, encoding="utf-8") as f:
@@ -3843,7 +3930,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             BlueprintUpdateCoordinator._rotate_backups(real_path, max_backups)
             os.replace(tmp_path, real_path)
-            return True, "success"
+            new_cnt = BlueprintUpdateCoordinator._count_backups_sync(real_path, max_backups)
+            return True, "success", new_cnt
+        except FileNotFoundError:
+            return False, "missing_backup", 0
         except (OSError, ValueError) as err:
             _LOGGER.exception("Filesystem error during blueprint restoration: %s", err)
-            return False, "system_error"
+            return False, "system_error", 0

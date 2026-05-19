@@ -111,7 +111,7 @@
       "message": "Fichier de sauvegarde manquant. Une sauvegarde n'a peut-être pas été créée lors de la mise à jour précédente."
     },
     "invalid_version": {
-      "message": "Version de sauvegarde non valide. Doit être comprise entre 1 et le nombre maximal de sauvegardes configuré."
+      "message": "Version de sauvegarde non valide {version}. Doit être comprise entre 1 et {max_backups}."
     },
     "system_error": {
       "message": "Erreur système lors de la restauration : {error}"

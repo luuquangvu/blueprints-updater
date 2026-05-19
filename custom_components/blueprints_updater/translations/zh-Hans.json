@@ -111,7 +111,7 @@
       "message": "缺少备份文件。之前的更新期间可能未创建备份。"
     },
     "invalid_version": {
-      "message": "无效的备份版本。必须在 1 到配置的最大备份数之间。"
+      "message": "无效的备份版本 {version}。必须在 1 到 {max_backups} 之间。"
     },
     "system_error": {
       "message": "还原期间发生系统错误：{error}"
