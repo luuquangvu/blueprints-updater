@@ -24,7 +24,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, IntegrationService
 from .coordinator import BlueprintUpdateCoordinator
-from .utils import get_max_backups, get_update_interval
+from .utils import get_update_interval
 
 try:
     _ADMIN_SVC_SIG = inspect.signature(async_register_admin_service)
@@ -268,17 +268,6 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 translation_domain=DOMAIN,
                 translation_key="system_error",
                 translation_placeholders={"error": "Config entry not found"},
-            )
-
-        max_backups = get_max_backups(active_coordinator.config_entry)
-        if version < 1 or version > max_backups:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="invalid_version",
-                translation_placeholders={
-                    "version": str(version),
-                    "max_backups": str(max_backups),
-                },
             )
 
         result = await active_coordinator.async_restore_blueprint(target_path, version=version)

@@ -283,6 +283,14 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
             good_entity.unique_id = BlueprintUpdateCoordinator.generate_unique_id(
                 "test_entry", "test.yaml"
             )
+            coordinator_mock.async_restore_blueprint = AsyncMock(
+                side_effect=lambda path, version=1: {
+                    "success": False,
+                    "translation_key": "invalid_version",
+                    "translation_kwargs": {"version": str(version), "max_backups": "3"},
+                }
+            )
+
             with pytest.raises(ServiceValidationError) as exc:
                 await restore_handler(
                     ServiceCall(
@@ -310,6 +318,26 @@ async def test_restore_blueprint_handler(hass: HomeAssistant):
             assert exc.value.translation_placeholders is not None
             assert exc.value.translation_placeholders["version"] == "5"
             assert exc.value.translation_placeholders["max_backups"] == "3"
+
+            coordinator_mock.async_restore_blueprint = AsyncMock(
+                return_value={
+                    "success": False,
+                    "translation_key": "system_error",
+                    "translation_kwargs": {"error": "Disk write failed"},
+                }
+            )
+            with pytest.raises(ServiceValidationError) as exc:
+                await restore_handler(
+                    ServiceCall(
+                        hass,
+                        DOMAIN,
+                        "restore_blueprint",
+                        {"entity_id": "update.test", "version": 1},
+                    )
+                )
+            assert exc.value.translation_key == "system_error"
+            assert exc.value.translation_placeholders is not None
+            assert exc.value.translation_placeholders["error"] == "Disk write failed"
 
             coordinator_mock.async_restore_blueprint = AsyncMock(
                 return_value={"success": True, "translation_key": "success"}
