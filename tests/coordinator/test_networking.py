@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import (
     MAX_RETRIES,
@@ -292,3 +293,99 @@ async def test_execute_with_redirect_guard_304_https_enforcement(coordinator):
         await coordinator._execute_with_redirect_guard(
             mock_session, "http://unsafe.com/bp.yaml", {}
         )
+
+
+@pytest.mark.parametrize(
+    (
+        "provider_available",
+        "content_type",
+        "body",
+        "url",
+        "expected_match",
+        "should_parse",
+        "expected_json",
+    ),
+    [
+        (
+            False,
+            "application/json",
+            b"{}",
+            "https://example.com/data",
+            "Unsupported content type",
+            False,
+            None,
+        ),
+        (
+            True,
+            "application/json",
+            b"{",
+            "https://community.home-assistant.io/t/1.json",
+            "Invalid JSON response",
+            False,
+            None,
+        ),
+        (
+            True,
+            "application/json",
+            b'{"post_stream": {"posts": []}}',
+            "https://community.home-assistant.io/t/1.json",
+            "Failed to extract blueprint content from JSON",
+            True,
+            {"post_stream": {"posts": []}},
+        ),
+        (
+            True,
+            "text/html",
+            b"<html></html>",
+            "https://example.com/page",
+            "Failed to extract blueprint content from response",
+            True,
+            None,
+        ),
+    ],
+    ids=[
+        "unsupported-unowned-content",
+        "invalid-json",
+        "empty-json-provider-content",
+        "empty-non-json-provider-content",
+    ],
+)
+@pytest.mark.asyncio
+async def test_parse_provider_response_rejects_invalid_content(
+    coordinator,
+    provider_available,
+    content_type,
+    body,
+    url,
+    expected_match,
+    should_parse,
+    expected_json,
+):
+    """Verify invalid provider responses raise behavior-specific errors."""
+    provider = MagicMock() if provider_available else None
+    if provider is not None:
+        provider.parse_content.return_value = None
+
+    response = httpx.Response(
+        200,
+        headers={"Content-Type": content_type},
+        content=body,
+        request=httpx.Request("GET", url),
+    )
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.registry.get_provider",
+            return_value=provider,
+        ),
+        pytest.raises(HomeAssistantError, match=expected_match),
+    ):
+        await coordinator._parse_provider_response(response, url)
+
+    if provider is None:
+        return
+
+    if should_parse:
+        provider.parse_content.assert_called_once_with(response.text, expected_json)
+    else:
+        provider.parse_content.assert_not_called()

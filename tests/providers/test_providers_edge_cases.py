@@ -11,6 +11,7 @@ from custom_components.blueprints_updater.providers import (
     GitHubProvider,
     GitLabProvider,
     HAForumProvider,
+    ProviderRegistry,
 )
 
 
@@ -154,3 +155,38 @@ def test_gist_metadata_normalization():
     metadata_raw = provider.get_metadata(normalized_url)
     assert metadata_raw["author"] == "author"
     assert metadata_raw["name"] == "gist_id"
+
+
+def test_gitlab_normalization_keeps_empty_path_unchanged():
+    """Verify GitLab normalization is inert when there is no path to inspect."""
+    assert GitLabProvider().normalize_url("https://gitlab.com") == "https://gitlab.com"
+
+
+def test_provider_registry_returns_original_url_without_matching_provider():
+    """Verify registry normalization returns invalid sources unchanged."""
+    assert ProviderRegistry().normalize_url("not-a-url") == "not-a-url"
+
+
+def test_ha_forum_metadata_prefers_post_containing_blueprint():
+    """Verify forum metadata uses the post that actually contains blueprint YAML."""
+    provider = HAForumProvider()
+    url = "https://community.home-assistant.io/t/topic/123"
+    content = json.dumps(
+        {
+            "slug": "target-blueprint",
+            "post_stream": {
+                "posts": [
+                    None,
+                    {"username": "intro_author", "cooked": "<p>No YAML here</p>"},
+                    {
+                        "username": "blueprint_author",
+                        "cooked": "<pre><code>blueprint:\n  name: Real</code></pre>",
+                    },
+                ]
+            },
+        }
+    )
+
+    metadata = provider.get_metadata(url, content=content)
+
+    assert metadata == {"author": "blueprint_author", "name": "target-blueprint"}

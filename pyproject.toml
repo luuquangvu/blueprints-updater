@@ -63,6 +63,7 @@ filterwarnings = ["ignore::DeprecationWarning"]
 addopts = [
   "--cov=custom_components",
   "--cov-fail-under=90",
+  "--cov-branch",
   "--timeout=60",
   "--strict-markers",
 ]

@@ -491,3 +491,34 @@ async def test_restore_invalid_version_details(coordinator):
     assert result["translation_key"] == "invalid_version"
     assert result["translation_kwargs"]["version"] == "999"
     assert "max_backups" in result["translation_kwargs"]
+
+
+@pytest.mark.asyncio
+async def test_async_check_backup_exists_rejects_invalid_version_and_unsafe_path(coordinator):
+    """Verify backup existence checks reject invalid versions and unsafe paths."""
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.options = MappingProxyType({"max_backups": 2})
+    coordinator.hass.async_add_executor_job = AsyncMock()
+    coordinator._is_safe_path = MagicMock(return_value=True)
+
+    assert await coordinator.async_check_backup_exists("/safe.yaml", 0) is False
+    assert await coordinator.async_check_backup_exists("/safe.yaml", 3) is False
+    coordinator.hass.async_add_executor_job.assert_not_called()
+
+    coordinator._is_safe_path = MagicMock(return_value=False)
+    assert await coordinator.async_check_backup_exists("/unsafe.yaml", 1) is False
+    coordinator.hass.async_add_executor_job.assert_not_called()
+
+
+def test_execute_restore_file_returns_system_error_on_oserror(tmp_path):
+    """Verify restore executor reports filesystem failures as system_error."""
+    target = tmp_path / "restore.yaml"
+
+    with patch("builtins.open", side_effect=OSError("disk failure")):
+        success, message, count = BlueprintUpdateCoordinator._execute_restore_file(
+            str(target), 1, 3
+        )
+
+    assert success is False
+    assert message == "system_error"
+    assert count == 0

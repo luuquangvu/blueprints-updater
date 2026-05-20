@@ -26,6 +26,7 @@ from custom_components.blueprints_updater.const import (
     MAX_CONCURRENT_REQUESTS,
     REQUEST_TIMEOUT,
     RISK_TYPE_TRANSLATIONS,
+    BlueprintBlockingReason,
     BlueprintRiskType,
 )
 from custom_components.blueprints_updater.coordinator import (
@@ -1640,3 +1641,178 @@ async def test_async_update_blueprint_blocks_special_use_tld_local(coordinator, 
         mock_logger.warning.assert_called()
         warning_args = mock_logger.warning.call_args.args
         assert any("Blocking update from untrusted URL" in str(arg) for arg in warning_args)
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_blueprint_returns_without_data_or_source_url(coordinator):
+    """Verify fetch exits before networking when path data or source_url is missing."""
+    coord: Any = coordinator
+
+    with patch("custom_components.blueprints_updater.coordinator.get_async_client") as mock_client:
+        await coord.async_fetch_blueprint("/missing.yaml", force=True)
+        mock_client.assert_not_called()
+
+    path = "/config/blueprints/automation/no_source.yaml"
+    coord.data = {path: {"name": "No Source"}}
+
+    with patch("custom_components.blueprints_updater.coordinator.get_async_client") as mock_client:
+        await coord.async_fetch_blueprint(path, force=True)
+        mock_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_not_modified_updates_conditionals_and_skips_without_remote_hash(coordinator):
+    """Verify 304 handling updates validators but does not fetch without a remote hash."""
+    coord: Any = coordinator
+    path = "/config/blueprints/automation/not_modified.yaml"
+    coord.data = {
+        path: {
+            "name": "Not Modified",
+            "local_hash": "local",
+            "remote_hash": None,
+            "updatable": True,
+        }
+    }
+
+    result = await coord._handle_not_modified_case(
+        MagicMock(),
+        path,
+        coord.data[path],
+        "https://example.com/not_modified.yaml",
+        new_etag="etag-new",
+        new_last_modified="Wed, 20 May 2026 00:00:00 GMT",
+    )
+
+    assert result == (None, "etag-new", "Wed, 20 May 2026 00:00:00 GMT")
+    assert coord.data[path]["etag"] == "etag-new"
+    assert coord.data[path]["last_modified"] == "Wed, 20 May 2026 00:00:00 GMT"
+    assert coord.data[path]["updatable"] is True
+
+
+@pytest.mark.asyncio
+async def test_handle_not_modified_returns_without_data(coordinator):
+    """Verify 304 handling is inert when coordinator data no longer contains the path."""
+    coord: Any = coordinator
+    coord.data = {}
+
+    result = await coord._handle_not_modified_case(
+        MagicMock(),
+        "/missing.yaml",
+        {"name": "Missing", "local_hash": "local"},
+        "https://example.com/missing.yaml",
+        new_etag="etag",
+        new_last_modified="last-modified",
+    )
+
+    assert result == (None, "etag", "last-modified")
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_diff_content_rejects_invalid_remote_yaml(coordinator):
+    """Verify invalid remote diff content is not cached for installation."""
+    coord: Any = coordinator
+    path = "/config/blueprints/automation/diff.yaml"
+    coord.data = {
+        path: {
+            "name": "Diff",
+            "relative_path": "automation/diff.yaml",
+            "source_url": "https://example.com/diff.yaml",
+            "local_hash": "local",
+            "remote_hash": "remote",
+            "updatable": True,
+        }
+    }
+    coord._async_fetch_with_cdn_fallback = AsyncMock(return_value=("invalid: yaml: [", None, None))
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_async_client",
+            return_value=MagicMock(),
+        ),
+        patch.object(coord, "_is_safe_url", AsyncMock(return_value=True)),
+    ):
+        result = await coord.async_fetch_diff_content(path)
+
+    assert result is None
+    assert coord.data[path].get("remote_content") is None
+    last_error = coord.data[path]["last_error"]
+    assert isinstance(last_error, str)
+    assert last_error.startswith("yaml_syntax_error|")
+
+
+@pytest.mark.asyncio
+async def test_async_get_git_diff_returns_none_on_diff_io_error(coordinator):
+    """Verify diff generation I/O errors do not surface stale diff data."""
+    coord: Any = coordinator
+    path = "/config/blueprints/automation/diff_io.yaml"
+    coord.data = {
+        path: {
+            "source_url": "https://example.com/diff_io.yaml",
+            "local_hash": "local",
+            "remote_hash": "remote",
+            "remote_content": "blueprint:\n  name: Remote\n  domain: automation\n",
+            "updatable": True,
+        }
+    }
+    coord.hass.async_add_executor_job = AsyncMock(side_effect=OSError("disk unavailable"))
+
+    result = await coord.async_get_git_diff(path)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_handle_auto_update_step_rejects_missing_remote_hash(coordinator):
+    """Verify auto-update refuses to install when remote_hash is unexpectedly missing."""
+    coord: Any = coordinator
+    coord.async_install_blueprint = AsyncMock()
+
+    result = await coord._handle_auto_update_step(
+        "/config/blueprints/automation/auto.yaml",
+        {"name": "Auto", "relative_path": "automation/auto.yaml"},
+        "remote content",
+        [],
+        [],
+        set(),
+        remote_hash=None,
+    )
+
+    assert result is False
+    coord.async_install_blueprint.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_auto_update_step_preserves_failure_state(coordinator):
+    """Verify failed auto-update records blocking state and keeps remote content."""
+    coord: Any = coordinator
+    path = "/config/blueprints/automation/auto_fail.yaml"
+    coord.data = {path: {}}
+    coord.async_install_blueprint = AsyncMock(side_effect=RuntimeError("install exploded"))
+    results_to_notify: list[str] = []
+    updated_domains: set[str] = set()
+
+    result = await coord._handle_auto_update_step(
+        path,
+        {
+            "name": "Auto Fail",
+            "relative_path": "automation/auto_fail.yaml",
+            "domain": DOMAIN_AUTOMATION,
+        },
+        "remote content",
+        [],
+        results_to_notify,
+        updated_domains,
+        remote_hash="remote-hash",
+        new_etag="etag-new",
+        new_last_modified="Wed, 20 May 2026 00:00:00 GMT",
+        source_url="https://example.com/auto_fail.yaml",
+    )
+
+    assert result is False
+    assert results_to_notify == []
+    assert updated_domains == set()
+    assert coord.data[path]["updatable"] is True
+    assert coord.data[path]["remote_hash"] == "remote-hash"
+    assert coord.data[path]["remote_content"] == "remote content"
+    assert coord.data[path]["update_blocking_reason"] == BlueprintBlockingReason.SYSTEM_ERROR
+    assert coord.data[path]["auto_update_last_error"] == "install exploded"

@@ -8,15 +8,19 @@ import pytest
 
 from custom_components.blueprints_updater.const import CONF_MAX_BACKUPS, CONF_UPDATE_INTERVAL
 from custom_components.blueprints_updater.utils import (
+    get_cdn_url,
     get_config_bool,
     get_config_int,
     get_config_str,
     get_config_value,
     get_max_backups,
+    get_relative_path,
     get_update_interval,
+    normalize_url,
     redact_url,
     retry_async,
     sanitize_error_detail,
+    should_include_blueprint,
 )
 
 
@@ -304,3 +308,48 @@ def test_sanitize_error_detail():
     sanitized = sanitize_error_detail(long_msg, max_length=50)
     assert len(sanitized) <= 50
     assert sanitized.endswith("...")
+
+
+def test_retry_async_rejects_bool_max_retries():
+    """Verify retry_async rejects bool values instead of accepting them as integers."""
+    with pytest.raises(TypeError, match="max_retries must be an integer"):
+        retry_async(True, (Exception,))
+
+
+def test_source_url_helpers_return_safe_defaults_for_unknown_sources():
+    """Verify URL helpers keep unknown malformed sources inert."""
+    assert normalize_url("not-a-url") == "not-a-url"
+    assert get_cdn_url("not-a-url") is None
+
+
+def test_should_include_blueprint_filter_modes():
+    """Verify whitelist and blacklist filtering make opposite inclusion decisions."""
+    selected = {"automation/blocked.yaml"}
+
+    assert not should_include_blueprint("automation/blocked.yaml", "blacklist", selected)
+    assert should_include_blueprint("automation/allowed.yaml", "blacklist", selected)
+    assert should_include_blueprint("automation/blocked.yaml", "whitelist", selected)
+    assert not should_include_blueprint("automation/allowed.yaml", "whitelist", selected)
+    assert should_include_blueprint("automation/allowed.yaml", "all", selected)
+
+
+def test_redact_url_rejects_non_url_objects():
+    """Verify redaction falls back safely for values httpx cannot parse."""
+    assert redact_url(cast(str, object())) == "[REDACTED/INVALID URL]"
+
+
+def test_get_relative_path_reports_commonpath_failures(hass, monkeypatch):
+    """Verify invalid platform path comparisons are reported as unsafe paths."""
+    hass.config.path.return_value = "/config/blueprints"
+
+    def raise_commonpath_error(paths):
+        """Simulate os.path.commonpath failing on incompatible paths."""
+        raise ValueError(f"bad paths: {paths}")
+
+    monkeypatch.setattr(
+        "custom_components.blueprints_updater.utils.os.path.commonpath",
+        raise_commonpath_error,
+    )
+
+    with pytest.raises(ValueError, match="Invalid or unsafe path"):
+        get_relative_path(hass, "/config/blueprints/test.yaml")
