@@ -1,12 +1,14 @@
 """Tests for async_import_blueprint failure handling."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import httpx
 import pytest
 from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.blueprints_updater.const import BLUEPRINTS_DATA_DIR, SourceProviderType
+
+PROVIDER_LOOKUP = "custom_components.blueprints_updater.coordinator.registry.get_provider"
 
 
 def _provider(canonical_url: str = "https://example.com/bp.yaml") -> MagicMock:
@@ -16,6 +18,11 @@ def _provider(canonical_url: str = "https://example.com/bp.yaml") -> MagicMock:
     provider.normalize_url.return_value = canonical_url
     provider.get_metadata.return_value = {"author": "author", "name": "name"}
     return provider
+
+
+def _patched_provider(provider):
+    """Patch provider lookup for an import attempt."""
+    return patch(PROVIDER_LOOKUP, return_value=provider)
 
 
 def _response(url: str = "https://example.com/bp.yaml") -> httpx.Response:
@@ -32,10 +39,7 @@ def _response(url: str = "https://example.com/bp.yaml") -> httpx.Response:
 async def test_async_import_blueprint_rejects_unsupported_provider(coordinator):
     """Verify unsupported import sources fail before fetching."""
     with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.registry.get_provider",
-            return_value=None,
-        ),
+        _patched_provider(None),
         pytest.raises(ServiceValidationError) as err,
     ):
         await coordinator.async_import_blueprint("not-a-url", confirm=True)
@@ -49,10 +53,7 @@ async def test_async_import_blueprint_rejects_unsafe_canonical_url(coordinator):
     provider = _provider("http://unsafe.example/bp.yaml")
 
     with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.registry.get_provider",
-            return_value=provider,
-        ),
+        _patched_provider(provider),
         patch.object(coordinator, "_is_safe_url", AsyncMock(side_effect=[True, False])),
         pytest.raises(ServiceValidationError) as err,
     ):
@@ -67,10 +68,7 @@ async def test_async_import_blueprint_rejects_empty_provider_content(coordinator
     provider = _provider()
 
     with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.registry.get_provider",
-            return_value=provider,
-        ),
+        _patched_provider(provider),
         patch.object(
             coordinator, "_execute_with_redirect_guard", AsyncMock(return_value=_response())
         ),
@@ -89,10 +87,7 @@ async def test_async_import_blueprint_wraps_fetch_errors(coordinator):
     provider = _provider()
 
     with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.registry.get_provider",
-            return_value=provider,
-        ),
+        _patched_provider(provider),
         patch.object(
             coordinator,
             "_execute_with_redirect_guard",
@@ -113,10 +108,7 @@ async def test_async_import_blueprint_rejects_malformed_provider_metadata(coordi
     provider.get_metadata.return_value = {"author": "author"}
 
     with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.registry.get_provider",
-            return_value=provider,
-        ),
+        _patched_provider(provider),
         patch.object(
             coordinator, "_execute_with_redirect_guard", AsyncMock(return_value=_response())
         ),
@@ -141,10 +133,7 @@ async def test_async_import_blueprint_rejects_yaml_without_blueprint_block(coord
     provider = _provider()
 
     with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.registry.get_provider",
-            return_value=provider,
-        ),
+        _patched_provider(provider),
         patch.object(
             coordinator, "_execute_with_redirect_guard", AsyncMock(return_value=_response())
         ),
@@ -169,10 +158,7 @@ async def test_async_import_blueprint_rejects_existing_non_string_source_url(coo
     coordinator.data[full_path] = {"source_url": 123}
 
     with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.registry.get_provider",
-            return_value=provider,
-        ),
+        _patched_provider(provider),
         patch.object(
             coordinator, "_execute_with_redirect_guard", AsyncMock(return_value=_response())
         ),
@@ -187,3 +173,114 @@ async def test_async_import_blueprint_rejects_existing_non_string_source_url(coo
 
     assert err.value.translation_key == "import_invalid_source_type"
     assert err.value.translation_placeholders == {"type": "int"}
+
+
+@pytest.mark.asyncio
+async def test_async_import_blueprint_rejects_unsafe_destination_path(coordinator):
+    """Verify imported metadata cannot write outside the safe blueprint root."""
+    provider = _provider()
+
+    with (
+        _patched_provider(provider),
+        patch.object(
+            coordinator, "_execute_with_redirect_guard", AsyncMock(return_value=_response())
+        ),
+        patch.object(
+            coordinator,
+            "_parse_provider_response",
+            AsyncMock(return_value="blueprint:\n  name: Imported\n  domain: automation\n"),
+        ),
+        patch.object(coordinator, "_is_safe_path", return_value=False),
+        pytest.raises(ServiceValidationError) as err,
+    ):
+        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+
+    assert err.value.translation_key == "unsafe_path"
+
+
+@pytest.mark.asyncio
+async def test_async_import_blueprint_rejects_existing_data_with_conflicting_source(
+    coordinator, tmp_path
+):
+    """Verify existing coordinator data with a different source_url blocks import."""
+    provider = _provider()
+    provider.normalize_url.side_effect = lambda url: (
+        "https://example.com/bp.yaml" if url == "https://example.com/bp.yaml" else url
+    )
+    existing_path = tmp_path / "name.yaml"
+    coordinator.data[str(existing_path)] = {"source_url": "https://other.example/bp.yaml"}
+
+    with (
+        _patched_provider(provider),
+        patch.object(coordinator.hass.config, "path", return_value=str(existing_path)),
+        patch.object(
+            coordinator, "_execute_with_redirect_guard", AsyncMock(return_value=_response())
+        ),
+        patch.object(
+            coordinator,
+            "_parse_provider_response",
+            AsyncMock(return_value="blueprint:\n  name: Imported\n  domain: automation\n"),
+        ),
+        pytest.raises(ServiceValidationError) as err,
+    ):
+        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+
+    assert err.value.translation_key == "import_path_conflict"
+    placeholders = err.value.translation_placeholders
+    assert placeholders is not None
+    assert placeholders["existing_url"] == "https://other.example/bp.yaml"
+
+
+@pytest.mark.asyncio
+async def test_async_import_blueprint_rejects_existing_file_without_source_url(coordinator):
+    """Verify an existing destination without source_url is treated as a conflict."""
+    provider = _provider()
+    existing_path = "/config/blueprints/automation/author/name.yaml"
+
+    with (
+        _patched_provider(provider),
+        patch.object(coordinator.hass.config, "path", return_value=existing_path),
+        patch.object(
+            coordinator, "_execute_with_redirect_guard", AsyncMock(return_value=_response())
+        ),
+        patch.object(
+            coordinator,
+            "_parse_provider_response",
+            AsyncMock(return_value="blueprint:\n  name: Imported\n  domain: automation\n"),
+        ),
+        patch("custom_components.blueprints_updater.coordinator.os.path.exists", return_value=True),
+        patch(
+            "builtins.open",
+            mock_open(read_data="blueprint:\n  name: Existing\n  domain: automation\n"),
+        ),
+        pytest.raises(ServiceValidationError) as err,
+    ):
+        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+
+    assert err.value.translation_key == "import_path_conflict"
+
+
+@pytest.mark.asyncio
+async def test_async_import_blueprint_surfaces_blueprint_validation_error(coordinator):
+    """Verify schema validation errors keep their translation key and detail."""
+    provider = _provider()
+
+    with (
+        _patched_provider(provider),
+        patch.object(
+            coordinator, "_execute_with_redirect_guard", AsyncMock(return_value=_response())
+        ),
+        patch.object(
+            coordinator,
+            "_parse_provider_response",
+            AsyncMock(return_value="blueprint:\n  name: Imported\n  domain: automation\n"),
+        ),
+        patch.object(
+            coordinator, "_validate_blueprint", return_value="validation_error|bad schema"
+        ),
+        pytest.raises(ServiceValidationError) as err,
+    ):
+        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+
+    assert err.value.translation_key == "validation_error"
+    assert err.value.translation_placeholders == {"error": "bad schema"}

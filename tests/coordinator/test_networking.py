@@ -295,35 +295,82 @@ async def test_execute_with_redirect_guard_304_https_enforcement(coordinator):
         )
 
 
-@pytest.mark.asyncio
-async def test_parse_provider_response_rejects_unsupported_unowned_content(coordinator):
-    """Verify unsupported content is rejected when no provider owns the response URL."""
-    response = httpx.Response(
-        200,
-        headers={"Content-Type": "application/json"},
-        content=b"{}",
-        request=httpx.Request("GET", "https://example.com/data"),
-    )
-
-    with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.registry.get_provider",
-            return_value=None,
+@pytest.mark.parametrize(
+    (
+        "provider_available",
+        "content_type",
+        "body",
+        "url",
+        "expected_match",
+        "should_parse",
+        "expected_json",
+    ),
+    [
+        (
+            False,
+            "application/json",
+            b"{}",
+            "https://example.com/data",
+            "Unsupported content type",
+            False,
+            None,
         ),
-        pytest.raises(HomeAssistantError, match="Unsupported content type"),
-    ):
-        await coordinator._parse_provider_response(response, "https://example.com/data")
-
-
+        (
+            True,
+            "application/json",
+            b"{",
+            "https://community.home-assistant.io/t/1.json",
+            "Invalid JSON response",
+            False,
+            None,
+        ),
+        (
+            True,
+            "application/json",
+            b'{"post_stream": {"posts": []}}',
+            "https://community.home-assistant.io/t/1.json",
+            "Failed to extract blueprint content from JSON",
+            True,
+            {"post_stream": {"posts": []}},
+        ),
+        (
+            True,
+            "text/html",
+            b"<html></html>",
+            "https://example.com/page",
+            "Failed to extract blueprint content from response",
+            True,
+            None,
+        ),
+    ],
+    ids=[
+        "unsupported-unowned-content",
+        "invalid-json",
+        "empty-json-provider-content",
+        "empty-non-json-provider-content",
+    ],
+)
 @pytest.mark.asyncio
-async def test_parse_provider_response_rejects_invalid_json_before_provider_parse(coordinator):
-    """Verify provider JSON responses fail before parsing when the body is malformed."""
-    provider = MagicMock()
+async def test_parse_provider_response_rejects_invalid_content(
+    coordinator,
+    provider_available,
+    content_type,
+    body,
+    url,
+    expected_match,
+    should_parse,
+    expected_json,
+):
+    """Verify invalid provider responses raise behavior-specific errors."""
+    provider = MagicMock() if provider_available else None
+    if provider is not None:
+        provider.parse_content.return_value = None
+
     response = httpx.Response(
         200,
-        headers={"Content-Type": "application/json"},
-        content=b"{",
-        request=httpx.Request("GET", "https://community.home-assistant.io/t/1.json"),
+        headers={"Content-Type": content_type},
+        content=body,
+        request=httpx.Request("GET", url),
     )
 
     with (
@@ -331,62 +378,14 @@ async def test_parse_provider_response_rejects_invalid_json_before_provider_pars
             "custom_components.blueprints_updater.coordinator.registry.get_provider",
             return_value=provider,
         ),
-        pytest.raises(HomeAssistantError, match="Invalid JSON response"),
+        pytest.raises(HomeAssistantError, match=expected_match),
     ):
-        await coordinator._parse_provider_response(
-            response, "https://community.home-assistant.io/t/1.json"
-        )
+        await coordinator._parse_provider_response(response, url)
 
-    provider.parse_content.assert_not_called()
+    if provider is None:
+        return
 
-
-@pytest.mark.asyncio
-async def test_parse_provider_response_rejects_empty_json_provider_content(coordinator):
-    """Verify JSON providers must extract blueprint content from valid JSON."""
-    provider = MagicMock()
-    provider.parse_content.return_value = None
-    response = httpx.Response(
-        200,
-        headers={"Content-Type": "application/json"},
-        content=b'{"post_stream": {"posts": []}}',
-        request=httpx.Request("GET", "https://community.home-assistant.io/t/1.json"),
-    )
-
-    with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.registry.get_provider",
-            return_value=provider,
-        ),
-        pytest.raises(HomeAssistantError, match="Failed to extract blueprint content from JSON"),
-    ):
-        await coordinator._parse_provider_response(
-            response, "https://community.home-assistant.io/t/1.json"
-        )
-
-    provider.parse_content.assert_called_once_with(response.text, {"post_stream": {"posts": []}})
-
-
-@pytest.mark.asyncio
-async def test_parse_provider_response_rejects_empty_non_json_provider_content(coordinator):
-    """Verify non-JSON providers must extract blueprint content from the response body."""
-    provider = MagicMock()
-    provider.parse_content.return_value = None
-    response = httpx.Response(
-        200,
-        headers={"Content-Type": "text/html"},
-        content=b"<html></html>",
-        request=httpx.Request("GET", "https://example.com/page"),
-    )
-
-    with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.registry.get_provider",
-            return_value=provider,
-        ),
-        pytest.raises(
-            HomeAssistantError, match="Failed to extract blueprint content from response"
-        ),
-    ):
-        await coordinator._parse_provider_response(response, "https://example.com/page")
-
-    provider.parse_content.assert_called_once_with(response.text, None)
+    if should_parse:
+        provider.parse_content.assert_called_once_with(response.text, expected_json)
+    else:
+        provider.parse_content.assert_not_called()
