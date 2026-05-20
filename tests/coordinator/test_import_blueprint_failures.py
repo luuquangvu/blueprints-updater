@@ -9,9 +9,14 @@ from homeassistant.exceptions import ServiceValidationError
 from custom_components.blueprints_updater.const import BLUEPRINTS_DATA_DIR, SourceProviderType
 
 PROVIDER_LOOKUP = "custom_components.blueprints_updater.coordinator.registry.get_provider"
+IMPORT_URL = "https://example.com/bp.yaml"
+CONFLICTING_SOURCE_URL = "https://other.example/bp.yaml"
+IMPORTED_BLUEPRINT = "blueprint:\n  name: Imported\n  domain: automation\n"
+EXISTING_BLUEPRINT = "blueprint:\n  name: Existing\n  domain: automation\n"
+EXISTING_IMPORT_PATH = "/config/blueprints/automation/author/name.yaml"
 
 
-def _provider(canonical_url: str = "https://example.com/bp.yaml") -> MagicMock:
+def _provider(canonical_url: str = IMPORT_URL) -> MagicMock:
     """Build a provider mock that owns a canonical blueprint URL."""
     provider = MagicMock()
     provider.provider_type = SourceProviderType.GITHUB
@@ -25,11 +30,11 @@ def _patched_provider(provider):
     return patch(PROVIDER_LOOKUP, return_value=provider)
 
 
-def _response(url: str = "https://example.com/bp.yaml") -> httpx.Response:
+def _response(url: str = IMPORT_URL) -> httpx.Response:
     """Build a successful YAML response for import tests."""
     return httpx.Response(
         200,
-        content=b"blueprint:\n  name: Imported\n  domain: automation\n",
+        content=IMPORTED_BLUEPRINT.encode("utf-8"),
         headers={"Content-Type": "text/yaml"},
         request=httpx.Request("GET", url),
     )
@@ -57,7 +62,7 @@ async def test_async_import_blueprint_rejects_unsafe_canonical_url(coordinator):
         patch.object(coordinator, "_is_safe_url", AsyncMock(side_effect=[True, False])),
         pytest.raises(ServiceValidationError) as err,
     ):
-        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
     assert err.value.translation_key == "unsafe_url"
 
@@ -75,7 +80,7 @@ async def test_async_import_blueprint_rejects_empty_provider_content(coordinator
         patch.object(coordinator, "_parse_provider_response", AsyncMock(return_value="")),
         pytest.raises(ServiceValidationError) as err,
     ):
-        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
     assert err.value.translation_key == "empty_content"
     provider.get_metadata.assert_not_called()
@@ -95,7 +100,7 @@ async def test_async_import_blueprint_wraps_fetch_errors(coordinator):
         ),
         pytest.raises(ServiceValidationError) as err,
     ):
-        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
     assert err.value.translation_key == "fetch_error"
     assert err.value.translation_placeholders == {"error": "network down"}
@@ -115,11 +120,11 @@ async def test_async_import_blueprint_rejects_malformed_provider_metadata(coordi
         patch.object(
             coordinator,
             "_parse_provider_response",
-            AsyncMock(return_value="blueprint:\n  name: Imported\n  domain: automation\n"),
+            AsyncMock(return_value=IMPORTED_BLUEPRINT),
         ),
         pytest.raises(ServiceValidationError) as err,
     ):
-        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
     assert err.value.translation_key == "fetch_error"
     placeholders = err.value.translation_placeholders
@@ -142,7 +147,7 @@ async def test_async_import_blueprint_rejects_yaml_without_blueprint_block(coord
         ),
         pytest.raises(ServiceValidationError) as err,
     ):
-        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
     assert err.value.translation_key == "invalid_yaml"
 
@@ -165,11 +170,11 @@ async def test_async_import_blueprint_rejects_existing_non_string_source_url(coo
         patch.object(
             coordinator,
             "_parse_provider_response",
-            AsyncMock(return_value="blueprint:\n  name: Imported\n  domain: automation\n"),
+            AsyncMock(return_value=IMPORTED_BLUEPRINT),
         ),
         pytest.raises(ServiceValidationError) as err,
     ):
-        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
     assert err.value.translation_key == "import_invalid_source_type"
     assert err.value.translation_placeholders == {"type": "int"}
@@ -188,12 +193,12 @@ async def test_async_import_blueprint_rejects_unsafe_destination_path(coordinato
         patch.object(
             coordinator,
             "_parse_provider_response",
-            AsyncMock(return_value="blueprint:\n  name: Imported\n  domain: automation\n"),
+            AsyncMock(return_value=IMPORTED_BLUEPRINT),
         ),
         patch.object(coordinator, "_is_safe_path", return_value=False),
         pytest.raises(ServiceValidationError) as err,
     ):
-        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
     assert err.value.translation_key == "unsafe_path"
 
@@ -204,11 +209,9 @@ async def test_async_import_blueprint_rejects_existing_data_with_conflicting_sou
 ):
     """Verify existing coordinator data with a different source_url blocks import."""
     provider = _provider()
-    provider.normalize_url.side_effect = lambda url: (
-        "https://example.com/bp.yaml" if url == "https://example.com/bp.yaml" else url
-    )
+    provider.normalize_url.side_effect = lambda url: IMPORT_URL if url == IMPORT_URL else url
     existing_path = tmp_path / "name.yaml"
-    coordinator.data[str(existing_path)] = {"source_url": "https://other.example/bp.yaml"}
+    coordinator.data[str(existing_path)] = {"source_url": CONFLICTING_SOURCE_URL}
 
     with (
         _patched_provider(provider),
@@ -219,23 +222,23 @@ async def test_async_import_blueprint_rejects_existing_data_with_conflicting_sou
         patch.object(
             coordinator,
             "_parse_provider_response",
-            AsyncMock(return_value="blueprint:\n  name: Imported\n  domain: automation\n"),
+            AsyncMock(return_value=IMPORTED_BLUEPRINT),
         ),
         pytest.raises(ServiceValidationError) as err,
     ):
-        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
     assert err.value.translation_key == "import_path_conflict"
     placeholders = err.value.translation_placeholders
     assert placeholders is not None
-    assert placeholders["existing_url"] == "https://other.example/bp.yaml"
+    assert placeholders["existing_url"] == CONFLICTING_SOURCE_URL
 
 
 @pytest.mark.asyncio
 async def test_async_import_blueprint_rejects_existing_file_without_source_url(coordinator):
     """Verify an existing destination without source_url is treated as a conflict."""
     provider = _provider()
-    existing_path = "/config/blueprints/automation/author/name.yaml"
+    existing_path = EXISTING_IMPORT_PATH
 
     with (
         _patched_provider(provider),
@@ -246,16 +249,16 @@ async def test_async_import_blueprint_rejects_existing_file_without_source_url(c
         patch.object(
             coordinator,
             "_parse_provider_response",
-            AsyncMock(return_value="blueprint:\n  name: Imported\n  domain: automation\n"),
+            AsyncMock(return_value=IMPORTED_BLUEPRINT),
         ),
         patch("custom_components.blueprints_updater.coordinator.os.path.exists", return_value=True),
         patch(
             "builtins.open",
-            mock_open(read_data="blueprint:\n  name: Existing\n  domain: automation\n"),
+            mock_open(read_data=EXISTING_BLUEPRINT),
         ),
         pytest.raises(ServiceValidationError) as err,
     ):
-        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
     assert err.value.translation_key == "import_path_conflict"
 
@@ -273,14 +276,14 @@ async def test_async_import_blueprint_surfaces_blueprint_validation_error(coordi
         patch.object(
             coordinator,
             "_parse_provider_response",
-            AsyncMock(return_value="blueprint:\n  name: Imported\n  domain: automation\n"),
+            AsyncMock(return_value=IMPORTED_BLUEPRINT),
         ),
         patch.object(
             coordinator, "_validate_blueprint", return_value="validation_error|bad schema"
         ),
         pytest.raises(ServiceValidationError) as err,
     ):
-        await coordinator.async_import_blueprint("https://example.com/bp.yaml", confirm=True)
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
     assert err.value.translation_key == "validation_error"
     assert err.value.translation_placeholders == {"error": "bad schema"}
