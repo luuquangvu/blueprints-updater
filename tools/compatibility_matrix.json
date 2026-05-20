@@ -1,14 +1,18 @@
 [
   {
     "ha_version": "2024.12.0",
+    "python_version": "3.12"
+  },
+  {
+    "ha_version": "2025.2.0",
     "python_version": "3.13"
   },
   {
-    "ha_version": "2026.2.3",
+    "ha_version": "2026.2.0",
     "python_version": "3.13"
   },
   {
-    "ha_version": "2026.3.1",
+    "ha_version": "2026.3.0",
     "python_version": "3.14"
   },
   {
