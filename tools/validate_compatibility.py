@@ -80,7 +80,7 @@ def _validate_version_label(label_name: str, label_value: str) -> str:
             "separated by a single dot, and cannot contain consecutive, leading, or trailing dots."
         )
 
-    safe_chars = []
+    safe_chars: list[str] = []
     for char in label_value:
         idx = _ALLOWED_VERSION_CHARS.find(char)
         if idx == -1:
@@ -314,7 +314,7 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
 def main() -> None:
     """Main entry point for the multi-version test script."""
     os.environ["NO_COLOR"] = "1"
-    results = {}
+    results: dict[tuple[str, str], tuple[str, str]] = {}
 
     if os.name != "posix":
         print("VALIDATION_ERROR: Non-POSIX environment detected", flush=True)
