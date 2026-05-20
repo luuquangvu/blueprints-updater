@@ -499,6 +499,7 @@ async def test_async_check_backup_exists_rejects_invalid_version_and_unsafe_path
     coordinator.config_entry = MagicMock()
     coordinator.config_entry.options = MappingProxyType({"max_backups": 2})
     coordinator.hass.async_add_executor_job = AsyncMock()
+    coordinator._is_safe_path = MagicMock(return_value=True)
 
     assert await coordinator.async_check_backup_exists("/safe.yaml", 0) is False
     assert await coordinator.async_check_backup_exists("/safe.yaml", 3) is False
