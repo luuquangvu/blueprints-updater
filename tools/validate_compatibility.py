@@ -27,7 +27,7 @@ _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 _VENVS_ROOT = os.path.join(_REPO_ROOT, ".venvs")
 
 _REQUIRED_TEST_DEPS = [
-    "h2",
+    "httpx[http2]",
     "pytest",
     "pytest-homeassistant-custom-component",
 ]
