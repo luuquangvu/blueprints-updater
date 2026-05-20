@@ -22,7 +22,7 @@ from custom_components.blueprints_updater.utils import (
 )
 
 
-def test_normalize_url(coordinator):
+def test_normalize_url():
     """Test URL normalization."""
     assert (
         normalize_url("https://github.com/user/repo/blob/main/blueprints/test.yaml")

@@ -251,7 +251,7 @@ async def test_is_safe_url_dns_resolution(coordinator):
         assert not await coord._is_safe_url("https://unresolvable.com/bp.yaml")
 
 
-def test_get_validated_filter_mode_normalization(coordinator):
+def test_get_validated_filter_mode_normalization():
     """Test that filter mode is normalized (lowercase and stripped)."""
     assert get_validated_filter_mode("  All  ") == "all"
     assert get_validated_filter_mode("WHITELIST") == "whitelist"
@@ -261,7 +261,7 @@ def test_get_validated_filter_mode_normalization(coordinator):
     assert get_validated_filter_mode(123) == "all"
 
 
-def test_get_validated_selected_blueprints_hardening(coordinator):
+def test_get_validated_selected_blueprints_hardening():
     """Test the hardening of _get_validated_selected_blueprints."""
     assert get_validated_selected_blueprints(None) == []
 

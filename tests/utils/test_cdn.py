@@ -78,7 +78,7 @@ def coordinator(hass):
         ("https://raw.githubusercontent.com/short", None),
     ],
 )
-def test_get_cdn_url(coordinator, source_url, expected_cdn_url):
+def test_get_cdn_url(source_url, expected_cdn_url):
     """Test GitHub to jsDelivr URL transformation."""
     assert get_cdn_url(source_url) == expected_cdn_url
 
