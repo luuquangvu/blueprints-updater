@@ -7,8 +7,11 @@ for type-safe test access.
 from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
-from homeassistant.core import HomeAssistant
+import httpx
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 
+from custom_components.blueprints_updater.const import DEFAULT_MAX_BACKUPS
 from custom_components.blueprints_updater.coordinator import (
     BlueprintMetadata,
     GitDiffResult,
@@ -20,9 +23,9 @@ from custom_components.blueprints_updater.coordinator import (
 class BlueprintCoordinatorPublic(Protocol):
     """Stable public API for the coordinator."""
 
-    hass: Any
-    config_entry: Any
-    data: dict[str, Any]
+    hass: HomeAssistant
+    config_entry: ConfigEntry
+    data: dict[str, dict[str, Any]]
     setup_complete: bool
     last_update_success: bool
 
@@ -34,11 +37,11 @@ class BlueprintCoordinatorPublic(Protocol):
         """Gracefully terminate background tasks."""
         ...
 
-    async def async_translate(self, key: str, **kwargs: Any) -> str:
+    async def async_translate(self, key: str, category: str = "common", **kwargs: Any) -> str:
         """Translate a localizable string."""
         ...
 
-    async def async_fetch_blueprint(self, path: str, *, force: bool = False) -> None:
+    async def async_fetch_blueprint(self, path: str, force: bool = False) -> None:
         """Force a network refresh for a specific blueprint."""
         ...
 
@@ -48,11 +51,16 @@ class BlueprintCoordinatorPublic(Protocol):
         remote_content: str,
         reload_services: bool = True,
         backup: bool = True,
+        remote_hash: str | None = None,
+        etag: str | None = None,
+        last_modified: str | None = None,
+        is_auto_update: bool = False,
+        source_url: str | None = None,
     ) -> None:
         """Install a new blueprint or update an existing one."""
         ...
 
-    async def async_reload_services(self, domains: list[str]) -> None:
+    async def async_reload_services(self, domains: list[str] | set[str] | None = None) -> None:
         """Reload services associated with defined domains."""
         ...
 
@@ -90,21 +98,25 @@ class BlueprintCoordinatorPublic(Protocol):
         hass: HomeAssistant,
         filter_mode: str,
         selected_blueprints: list[str],
+        max_backups: int = DEFAULT_MAX_BACKUPS,
     ) -> dict[str, BlueprintMetadata]:
         """Statically scan local blueprints directory."""
         ...
 
-    def async_add_listener(self, cb: Callable[[], None]) -> Callable[[], None]:
+    def async_add_listener(
+        self, update_callback: CALLBACK_TYPE, context: Any = None
+    ) -> Callable[[], None]:
         """Register a callback for data updates."""
         ...
 
 
 @runtime_checkable
 class BlueprintCoordinatorInternal(Protocol):
-    """Internal methods and state used in detailed integration tests.
+    """Minimal internal surface used by shared typed test fixtures.
 
-    WARNING: These members are implementation details and may change without notice.
-    Tests coupling to these should be localized and well-justified.
+    This protocol is intentionally not an exhaustive contract for every private
+    coordinator helper used by focused tests. Add members here only when they are
+    required by shared fixture typing or runtime protocol conformance checks.
     """
 
     _listeners: dict[Any, Any]
@@ -114,7 +126,9 @@ class BlueprintCoordinatorInternal(Protocol):
     _background_task: Any
 
     @staticmethod
-    def _hash_content(content: str, source_url: str | None = None) -> str:
+    def _hash_content(
+        content: str, source_url: str | None = None, already_normalized: bool = False
+    ) -> str:
         """Compute SHA256 hash of content."""
         ...
 
@@ -122,7 +136,7 @@ class BlueprintCoordinatorInternal(Protocol):
         """Fetch blueprint update data (internal handler)."""
         ...
 
-    def async_set_updated_data(self, data: dict[str, Any]) -> None:
+    def async_set_updated_data(self, data: dict[str, dict[str, Any]]) -> None:
         """Set the data in the coordinator."""
         ...
 
@@ -130,23 +144,24 @@ class BlueprintCoordinatorInternal(Protocol):
         """Update any listeners with new data."""
         ...
 
-    async def _async_save_metadata(self) -> None:
+    async def _async_save_metadata(self, force: bool = False, skip_filter: bool = False) -> None:
         """Save coordinator metadata to persistent storage."""
         ...
 
     async def _async_fetch_content(
         self,
-        session: Any,
+        session: httpx.AsyncClient,
         url: str,
         etag: str | None = None,
+        last_modified: str | None = None,
         force: bool = False,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, str | None]:
         """Perform raw network fetch with pacing and retry logic."""
         ...
 
     async def _async_update_blueprint_in_place(
         self,
-        session: Any,
+        session: httpx.AsyncClient,
         path: str,
         info: dict[str, Any],
         results_to_notify: list[str],
@@ -161,10 +176,11 @@ class BlueprintCoordinatorInternal(Protocol):
         path: str,
         info: dict[str, Any],
         remote_content: str,
-        new_etag: str | None,
         source_url: str,
         results_to_notify: list[str],
         updated_domains: set[str],
+        new_etag: str | None = None,
+        new_last_modified: str | None = None,
     ) -> None:
         """Process results of a network fetch for a blueprint."""
         ...
@@ -192,13 +208,8 @@ class BlueprintCoordinatorInternal(Protocol):
         ...
 
     @staticmethod
-    def _validate_blueprint(data: Any, source_url: str) -> str | None:
+    def _validate_blueprint(data: Any, source_url: str, expected_domain: str) -> str | None:
         """Validate blueprint structure and return error tag if invalid."""
-        ...
-
-    @staticmethod
-    def _normalize_url(url: str) -> str:
-        """Normalize URL for consistent identifier usage."""
         ...
 
     @staticmethod

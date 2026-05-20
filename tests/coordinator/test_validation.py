@@ -18,6 +18,10 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import DOMAIN_AUTOMATION, BlueprintRiskType
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.utils import (
+    get_validated_filter_mode,
+    get_validated_selected_blueprints,
+)
 
 
 @pytest.fixture
@@ -249,30 +253,30 @@ async def test_is_safe_url_dns_resolution(coordinator):
 
 def test_get_validated_filter_mode_normalization(coordinator):
     """Test that filter mode is normalized (lowercase and stripped)."""
-    assert coordinator._get_validated_filter_mode("  All  ") == "all"
-    assert coordinator._get_validated_filter_mode("WHITELIST") == "whitelist"
-    assert coordinator._get_validated_filter_mode("Blacklist") == "blacklist"
-    assert coordinator._get_validated_filter_mode("invalid") == "all"
-    assert coordinator._get_validated_filter_mode(None) == "all"
-    assert coordinator._get_validated_filter_mode(123) == "all"
+    assert get_validated_filter_mode("  All  ") == "all"
+    assert get_validated_filter_mode("WHITELIST") == "whitelist"
+    assert get_validated_filter_mode("Blacklist") == "blacklist"
+    assert get_validated_filter_mode("invalid") == "all"
+    assert get_validated_filter_mode(None) == "all"
+    assert get_validated_filter_mode(123) == "all"
 
 
 def test_get_validated_selected_blueprints_hardening(coordinator):
     """Test the hardening of _get_validated_selected_blueprints."""
-    assert coordinator._get_validated_selected_blueprints(None) == []
+    assert get_validated_selected_blueprints(None) == []
 
-    res = coordinator._get_validated_selected_blueprints("  path/to/bp.yaml  ")
+    res = get_validated_selected_blueprints("  path/to/bp.yaml  ")
     assert res == ["path/to/bp.yaml"]
-    assert coordinator._get_validated_selected_blueprints("   ") == []
-    assert coordinator._get_validated_selected_blueprints(["a", " b ", None, ""]) == ["a", "b"]
-    assert coordinator._get_validated_selected_blueprints(("a", "b")) == ["a", "b"]
+    assert get_validated_selected_blueprints("   ") == []
+    assert get_validated_selected_blueprints(["a", " b ", None, ""]) == ["a", "b"]
+    assert get_validated_selected_blueprints(("a", "b")) == ["a", "b"]
 
-    with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
-        assert coordinator._get_validated_selected_blueprints({"key": "value"}) == []
+    with patch("custom_components.blueprints_updater.utils._LOGGER") as mock_logger:
+        assert get_validated_selected_blueprints({"key": "value"}) == []
         mock_logger.error.assert_called()
         assert "mapping" in mock_logger.error.call_args[0][0]
-    with patch("custom_components.blueprints_updater.coordinator._LOGGER") as mock_logger:
-        assert coordinator._get_validated_selected_blueprints(123) == []
+    with patch("custom_components.blueprints_updater.utils._LOGGER") as mock_logger:
+        assert get_validated_selected_blueprints(123) == []
         mock_logger.error.assert_called()
         assert "Invalid type" in mock_logger.error.call_args[0][0]
 

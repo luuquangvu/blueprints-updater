@@ -19,17 +19,23 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 from .const import (
+    ALLOWED_RELOAD_DOMAINS,
     BLUEPRINTS_DATA_DIR,
     CONF_MAX_BACKUPS,
     CONF_UPDATE_INTERVAL,
     DEFAULT_MAX_BACKUPS,
     DEFAULT_UPDATE_INTERVAL_HOURS,
+    DOMAIN_AUTOMATION,
+    FILTER_MODE_ALL,
+    FILTER_MODE_BLACKLIST,
+    FILTER_MODE_WHITELIST,
     MAX_BACKUPS,
     MAX_UPDATE_INTERVAL_HOURS,
     MIN_BACKUPS,
     MIN_UPDATE_INTERVAL,
     RE_URL_REDACTION,
 )
+from .providers import registry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -254,6 +260,150 @@ def get_max_backups(config: Any) -> int:
         min_val=MIN_BACKUPS,
         max_val=MAX_BACKUPS,
     )
+
+
+def normalize_url(url: str) -> str:
+    """Convert known source URLs to their raw or API endpoints.
+
+    Args:
+        url: The user-provided source URL.
+
+    Returns:
+        The normalized URL for direct content fetching.
+
+    """
+    if provider := registry.get_provider(url):
+        return provider.normalize_url(url)
+    return url
+
+
+def get_cdn_url(url: str) -> str | None:
+    """Convert a source URL to a supported CDN URL.
+
+    Args:
+        url: The source URL, preferably already normalized.
+
+    Returns:
+        The CDN URL, or None if no provider can produce one.
+
+    """
+    if provider := registry.get_provider(url):
+        return provider.get_cdn_url(url)
+    return None
+
+
+def normalize_domain(domain: Any) -> str:
+    """Normalize and validate the blueprint domain, defaulting to automation.
+
+    Args:
+        domain: The domain to normalize.
+
+    Returns:
+        The normalized lowercase domain string.
+
+    """
+    if isinstance(domain, str):
+        norm_domain = domain.strip().lower()
+        if norm_domain in ALLOWED_RELOAD_DOMAINS:
+            return norm_domain
+
+    if domain and str(domain).strip():
+        _LOGGER.warning(
+            "Unsupported or unknown blueprint domain '%s' encountered; "
+            "falling back to 'automation'. Supported: %s",
+            domain,
+            ", ".join(ALLOWED_RELOAD_DOMAINS),
+        )
+
+    return DOMAIN_AUTOMATION
+
+
+def get_validated_filter_mode(filter_mode: Any) -> str:
+    """Normalize and validate filter mode.
+
+    Args:
+        filter_mode: The filter mode to validate.
+
+    Returns:
+        A valid filter mode, using all as fallback.
+
+    """
+    if not isinstance(filter_mode, str):
+        if filter_mode is not None:
+            _LOGGER.warning(
+                "Invalid filter mode type '%s'; falling back to all", type(filter_mode).__name__
+            )
+        return FILTER_MODE_ALL
+
+    normalized_mode = filter_mode.strip().lower()
+    if normalized_mode in (FILTER_MODE_ALL, FILTER_MODE_WHITELIST, FILTER_MODE_BLACKLIST):
+        return normalized_mode
+
+    _LOGGER.warning("Invalid filter mode '%s' in config; falling back to all", filter_mode)
+    return FILTER_MODE_ALL
+
+
+def get_validated_selected_blueprints(selected: Any) -> list[str]:
+    """Validate and coerce selected blueprints into a list of strings.
+
+    Args:
+        selected: The selection value to validate.
+
+    Returns:
+        A valid list of blueprint paths.
+
+    """
+    if selected is None:
+        return []
+
+    if isinstance(selected, str):
+        stripped = selected.strip()
+        return [stripped] if stripped else []
+
+    if isinstance(selected, (list, tuple)):
+        return [str(item).strip() for item in selected if item and str(item).strip()]
+
+    if isinstance(selected, dict):
+        _LOGGER.error(
+            "Invalid type for selected blueprints: mapping (%s) provided; "
+            "expected string or sequence of strings. Ignoring value.",
+            type(selected).__name__,
+        )
+        return []
+
+    _LOGGER.error(
+        "Invalid type for selected blueprints: %s; expected string or sequence of strings. "
+        "Ignoring value.",
+        type(selected).__name__,
+    )
+    return []
+
+
+def should_include_blueprint(relative_path: str, filter_mode: str, selected_set: set[str]) -> bool:
+    """Check if a blueprint should be included based on filtering rules."""
+    if filter_mode == FILTER_MODE_BLACKLIST:
+        return relative_path not in selected_set
+
+    if filter_mode == FILTER_MODE_WHITELIST:
+        return relative_path in selected_set
+
+    return True
+
+
+def read_local_file(full_path: str) -> str | None:
+    """Read a local UTF-8 file if it exists and is a regular file.
+
+    Args:
+        full_path: Absolute path to the file.
+
+    Returns:
+        The file content string, or None if the file does not exist or is not a file.
+
+    """
+    if not os.path.isfile(full_path):
+        return None
+    with open(full_path, encoding="utf-8") as file:
+        return file.read()
 
 
 def redact_url(url: str | None) -> str:

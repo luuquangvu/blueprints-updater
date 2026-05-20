@@ -10,6 +10,9 @@ from custom_components.blueprints_updater.const import (
     DOMAIN_JSDELIVR,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.utils import (
+    get_cdn_url,
+)
 
 
 @pytest.fixture
@@ -77,7 +80,7 @@ def coordinator(hass):
 )
 def test_get_cdn_url(coordinator, source_url, expected_cdn_url):
     """Test GitHub to jsDelivr URL transformation."""
-    assert coordinator._get_cdn_url(source_url) == expected_cdn_url
+    assert get_cdn_url(source_url) == expected_cdn_url
 
 
 @pytest.mark.asyncio

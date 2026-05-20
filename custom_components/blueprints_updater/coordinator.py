@@ -81,8 +81,6 @@ from .const import (
     DOMAIN_TEMPLATE,
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
     FILTER_MODE_ALL,
-    FILTER_MODE_BLACKLIST,
-    FILTER_MODE_WHITELIST,
     MAX_CONCURRENT_REQUESTS,
     MAX_RETRIES,
     MAX_SEND_INTERVAL,
@@ -101,12 +99,19 @@ from .const import (
 from .providers import registry
 from .utils import (
     get_blueprint_relative_path,
+    get_cdn_url,
     get_config_bool,
     get_max_backups,
+    get_validated_filter_mode,
+    get_validated_selected_blueprints,
     is_ip_safe,
+    normalize_domain,
+    normalize_url,
+    read_local_file,
     redact_url,
     retry_async,
     sanitize_error_detail,
+    should_include_blueprint,
     verify_https_enforcement,
 )
 
@@ -386,12 +391,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A tuple of (filter_mode, selected_blueprints).
 
         """
-        filter_mode = self._get_validated_filter_mode(
+        filter_mode = get_validated_filter_mode(
             self.config_entry.options.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
             if self.config_entry
             else FILTER_MODE_ALL
         )
-        selected_blueprints = self._get_validated_selected_blueprints(
+        selected_blueprints = get_validated_selected_blueprints(
             self.config_entry.options.get(CONF_SELECTED_BLUEPRINTS, []) if self.config_entry else []
         )
         return filter_mode, selected_blueprints
@@ -522,7 +527,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             results[path] = {
                 "name": info["name"],
                 "relative_path": relative_path,
-                "domain": self._normalize_domain(info["domain"]),
+                "domain": normalize_domain(info["domain"]),
                 "source_url": info["source_url"],
                 "local_hash": info["local_hash"],
                 "updatable": False,
@@ -1117,7 +1122,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         bp_block = self._get_blueprint_block(path, content, parsed_data=parsed_data)
         if bp_block:
-            return self._normalize_domain(bp_block.get("domain"))
+            return normalize_domain(bp_block.get("domain"))
 
         return DOMAIN_AUTOMATION
 
@@ -2425,7 +2430,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return None
 
         source_url = info.get("source_url", "")
-        normalized_url = self._normalize_url(source_url)
+        normalized_url = normalize_url(source_url)
         if not normalized_url:
             return None
 
@@ -2436,7 +2441,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         client_kwargs = self._get_client_kwargs()
         session = get_async_client(self.hass, **client_kwargs)
-        cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
+        cdn_url = get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
         remote_content, _, _ = await self._async_fetch_with_cdn_fallback(
             session,
@@ -2668,11 +2673,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             self._update_error_state(path, "unsafe_url", source_url, clear_etag=True)
             return
 
-        normalized_url = self._normalize_url(source_url)
+        normalized_url = normalize_url(source_url)
         if not normalized_url:
             return
 
-        cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
+        cdn_url = get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
         stored_etag = self.data.get(path, {}).get("etag")
         stored_last_modified = self.data.get(path, {}).get("last_modified")
@@ -2775,7 +2780,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "Auto-update enabled for '%s', fetching on-demand",
                 info["name"],
             )
-            cdn_url = self._get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
+            cdn_url = get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
             return await self._async_fetch_with_cdn_fallback(
                 session,
                 path,
@@ -2914,9 +2919,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     for eid, cfg in full_configs.items()
                 }
 
-                old_content = await self.hass.async_add_executor_job(
-                    self._read_local_file, local_file
-                )
+                old_content = await self.hass.async_add_executor_job(read_local_file, local_file)
                 if old_content:
                     risks = self._detect_breaking_changes(old_content, remote_content, configs)
 
@@ -3386,36 +3389,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content
 
     @staticmethod
-    def _normalize_url(url: str) -> str:
-        """Convert standard GitHub/Gist/Forum URLs to their raw/API endpoints.
-
-        Args:
-            url: The user-provided source URL.
-
-        Returns:
-            The normalized URL for direct content fetching.
-
-        """
-        if provider := registry.get_provider(url):
-            return provider.normalize_url(url)
-        return url
-
-    @staticmethod
-    def _get_cdn_url(url: str) -> str | None:
-        """Convert a GitHub URL to a jsDelivr CDN URL.
-
-        Args:
-            url: The GitHub source URL (preferably normalized).
-
-        Returns:
-            The jsDelivr CDN URL or None if not applicable.
-
-        """
-        if provider := registry.get_provider(url):
-            return provider.get_cdn_url(url)
-        return None
-
-    @staticmethod
     def _normalize_content(content: str) -> str:
         r"""Normalize blueprint content for consistent hashing.
 
@@ -3640,106 +3613,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
 
     @staticmethod
-    def _normalize_domain(domain: Any) -> str:
-        """Normalize and validate the blueprint domain, defaulting to 'automation'.
-
-        Args:
-            domain: The domain to normalize.
-
-        Returns:
-            The normalized lowercase domain string.
-
-        """
-        if isinstance(domain, str):
-            norm_domain = domain.strip().lower()
-            if norm_domain in ALLOWED_RELOAD_DOMAINS:
-                return norm_domain
-
-        if domain and str(domain).strip():
-            _LOGGER.warning(
-                "Unsupported or unknown blueprint domain '%s' encountered; "
-                "falling back to 'automation'. Supported: %s",
-                domain,
-                ", ".join(ALLOWED_RELOAD_DOMAINS),
-            )
-
-        return DOMAIN_AUTOMATION
-
-    @staticmethod
-    def _should_include_blueprint(
-        relative_path: str, filter_mode: str, selected_set: set[str]
-    ) -> bool:
-        """Check if a blueprint should be included based on filtering rules."""
-        if filter_mode == FILTER_MODE_BLACKLIST:
-            return relative_path not in selected_set
-
-        if filter_mode == FILTER_MODE_WHITELIST:
-            return relative_path in selected_set
-
-        return True
-
-    @staticmethod
-    def _get_validated_filter_mode(filter_mode: Any) -> str:
-        """Normalize and validate filter mode.
-
-        Args:
-            filter_mode: The filter mode to validate.
-
-        Returns:
-            A valid filter mode (FILTER_MODE_ALL as fallback).
-
-        """
-        if not isinstance(filter_mode, str):
-            if filter_mode is not None:
-                _LOGGER.warning(
-                    "Invalid filter mode type '%s'; falling back to all", type(filter_mode).__name__
-                )
-            return FILTER_MODE_ALL
-
-        normalized_mode = filter_mode.strip().lower()
-        if normalized_mode in (FILTER_MODE_ALL, FILTER_MODE_WHITELIST, FILTER_MODE_BLACKLIST):
-            return normalized_mode
-
-        _LOGGER.warning("Invalid filter mode '%s' in config; falling back to all", filter_mode)
-        return FILTER_MODE_ALL
-
-    @staticmethod
-    def _get_validated_selected_blueprints(selected: Any) -> list[str]:
-        """Validate and coerce selected blueprints into a list of strings.
-
-        Args:
-            selected: The selection value to validate.
-
-        Returns:
-            A valid list of blueprint paths.
-
-        """
-        if selected is None:
-            return []
-
-        if isinstance(selected, str):
-            stripped = selected.strip()
-            return [stripped] if stripped else []
-
-        if isinstance(selected, (list, tuple)):
-            return [str(item).strip() for item in selected if item and str(item).strip()]
-
-        if isinstance(selected, dict):
-            _LOGGER.error(
-                "Invalid type for selected blueprints: mapping (%s) provided; "
-                "expected string or sequence of strings. Ignoring value.",
-                type(selected).__name__,
-            )
-            return []
-
-        _LOGGER.error(
-            "Invalid type for selected blueprints: %s; expected string or sequence of strings. "
-            "Ignoring value.",
-            type(selected).__name__,
-        )
-        return []
-
-    @staticmethod
     def _get_blueprint_block(
         path: str,
         content: str | None = None,
@@ -3812,7 +3685,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if isinstance(raw_name, str) and raw_name.strip()
             else os.path.basename(path)
         )
-        domain = BlueprintUpdateCoordinator._normalize_domain(bp_info.get("domain"))
+        domain = normalize_domain(bp_info.get("domain"))
 
         if relative_path:
             parts = relative_path.split("/")
@@ -3825,22 +3698,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             "source_url": source_url.strip(),
             "local_hash": BlueprintUpdateCoordinator._hash_content(content, source_url),
         }
-
-    @staticmethod
-    def _read_local_file(full_path: str) -> str | None:
-        """Read a local file in the executor.
-
-        Args:
-            full_path: Absolute path to the file.
-
-        Returns:
-            The file content string, or None if the file does not exist or
-            is not a file.
-        """
-        if not os.path.isfile(full_path):
-            return None
-        with open(full_path, encoding="utf-8") as f:
-            return f.read()
 
     @staticmethod
     def scan_blueprints(
@@ -3896,7 +3753,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                             if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
                                 full_path, content, relative_path
                             ):
-                                if not BlueprintUpdateCoordinator._should_include_blueprint(
+                                if not should_include_blueprint(
                                     relative_path, filter_mode, selected_set
                                 ):
                                     continue
