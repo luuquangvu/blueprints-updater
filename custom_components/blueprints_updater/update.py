@@ -33,6 +33,7 @@ from .const import (
 )
 from .coordinator import BlueprintUpdateCoordinator, StructuredRisk
 from .providers import registry
+from .utils import normalize_domain
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -214,7 +215,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         """Return the domain of the blueprint (e.g. automation, script)."""
         info = self.coordinator.data.get(self._path, {})
         raw_domain = info.get("domain") or self.relative_path.split("/", 1)[0]
-        return self.coordinator._normalize_domain(raw_domain)
+        return normalize_domain(raw_domain)
 
     @cached_property
     def relative_path(self) -> str:

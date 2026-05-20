@@ -17,33 +17,35 @@ from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
     GitDiffResult,
 )
+from custom_components.blueprints_updater.utils import (
+    normalize_url,
+)
 
 
-def test_normalize_url(coordinator):
+def test_normalize_url():
     """Test URL normalization."""
     assert (
-        coordinator._normalize_url("https://github.com/user/repo/blob/main/blueprints/test.yaml")
+        normalize_url("https://github.com/user/repo/blob/main/blueprints/test.yaml")
         == "https://raw.githubusercontent.com/user/repo/main/blueprints/test.yaml"
     )
 
     assert (
-        coordinator._normalize_url("https://gist.github.com/user/gist_id")
+        normalize_url("https://gist.github.com/user/gist_id")
         == "https://gist.github.com/user/gist_id/raw"
     )
 
     assert (
-        coordinator._normalize_url("https://gist.github.com/user/gist_id/raw")
+        normalize_url("https://gist.github.com/user/gist_id/raw")
         == "https://gist.github.com/user/gist_id/raw"
     )
 
     assert (
-        coordinator._normalize_url("https://community.home-assistant.io/t/topic-slug/12345")
+        normalize_url("https://community.home-assistant.io/t/topic-slug/12345")
         == "https://community.home-assistant.io/t/12345.json"
     )
 
     assert (
-        coordinator._normalize_url("https://example.com/blueprint.yaml")
-        == "https://example.com/blueprint.yaml"
+        normalize_url("https://example.com/blueprint.yaml") == "https://example.com/blueprint.yaml"
     )
 
 
