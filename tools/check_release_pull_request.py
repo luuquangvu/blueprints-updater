@@ -116,45 +116,49 @@ def _safe_resolve_env_path(env_var: str) -> Path:
     fully contained within a designated set of allowed system directories.
     """
     raw_path = os.environ.get(env_var)
-    if not raw_path:
+    if raw_path is None:
         raise ValueError(f"Environment variable {env_var!r} is not set")
 
-    try:
-        candidate = Path(raw_path).expanduser().resolve(strict=True)
-    except FileNotFoundError as exc:
-        raise ValueError(
-            f"Path from {env_var!r} must exist and be resolvable: {raw_path!r}"
-        ) from exc
-    if not candidate.is_absolute():
-        raise ValueError(f"Path from {env_var!r} must be absolute: {candidate}")
+    sanitized_path = raw_path.strip()
+    if not sanitized_path:
+        raise ValueError(f"Environment variable {env_var!r} is empty")
+    if "\x00" in sanitized_path:
+        raise ValueError(f"Path from {env_var!r} contains invalid null bytes")
 
-    allowed_roots: list[Path] = [
-        Path("/home/runner").resolve(strict=False),
-        Path("/github").resolve(strict=False),
-        Path("/Users/runner").resolve(strict=False),
-        Path(os.getcwd()).resolve(strict=False),
-        Path(tempfile.gettempdir()).resolve(strict=False),
+    expanded_path = os.path.expanduser(sanitized_path)
+    candidate_realpath = os.path.realpath(expanded_path)
+    if not os.path.isabs(candidate_realpath):
+        raise ValueError(
+            f"Path from {env_var!r} must resolve to an absolute path: {candidate_realpath!r}"
+        )
+
+    if not os.path.exists(candidate_realpath):
+        raise ValueError(
+            f"Path from {env_var!r} must exist and be resolvable: {sanitized_path!r}"
+        )
+
+    allowed_roots: list[str] = [
+        os.path.realpath("/home/runner"),
+        os.path.realpath("/github"),
+        os.path.realpath("/Users/runner"),
+        os.path.realpath(os.getcwd()),
+        os.path.realpath(tempfile.gettempdir()),
     ]
 
     # Do not extend trusted roots with environment-provided paths.
     # Environment variables are untrusted input and must not influence
     # the authorization boundary for path validation.
-
-    is_safe = False
-    for root in allowed_roots:
-        try:
-            candidate.relative_to(root)
-            is_safe = True
-            break
-        except ValueError:
-            continue
+    is_safe = any(
+        os.path.commonpath([candidate_realpath, root]) == root for root in allowed_roots
+    )
 
     if not is_safe:
         raise PermissionError(
-            f"Security Exception: Path {str(candidate)!r} from environment variable "
+            f"Security Exception: Path {candidate_realpath!r} from environment variable "
             f"{env_var!r} is outside permitted secure directories"
         )
 
+    candidate = Path(candidate_realpath)
     if not candidate.is_file():
         raise ValueError(
             f"Path from {env_var!r} must point to a regular file: {candidate!r}"
