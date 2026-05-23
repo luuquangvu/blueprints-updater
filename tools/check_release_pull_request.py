@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 VERSION_PATTERN = r"(([0-9]+\.[0-9]+\.[0-9]+)(?:-rc\.[0-9]+)?)"
+SAFE_PATH_PATTERN = re.compile(r"^[A-Za-z0-9._/\-~]+$")
 
 
 @dataclass(frozen=True)
@@ -123,9 +124,15 @@ def _safe_resolve_env_path(env_var: str) -> Path:
         raise ValueError(f"Environment variable {env_var!r} is empty")
     if "\x00" in sanitized_path:
         raise ValueError(f"Path from {env_var!r} contains invalid null bytes")
+    if not SAFE_PATH_PATTERN.fullmatch(sanitized_path):
+        raise ValueError(f"Path from {env_var!r} contains unsupported characters")
+    if ".." in sanitized_path:
+        raise ValueError(f"Path from {env_var!r} must not contain traversal segments")
+
+    normalized_input = os.fsdecode(sanitized_path)
 
     try:
-        candidate = Path(sanitized_path).expanduser().resolve(strict=True)
+        candidate = Path(normalized_input).expanduser().resolve(strict=True)
     except OSError as exc:
         raise ValueError(
             f"Path from {env_var!r} must exist and be resolvable: {sanitized_path!r}"
