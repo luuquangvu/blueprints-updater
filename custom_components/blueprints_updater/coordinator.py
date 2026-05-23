@@ -2043,7 +2043,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         new_schema: dict[str, Any], configs: dict[str, dict[str, Any]]
     ) -> list[StructuredRisk]:
         """Detect missing mandatory inputs for existing entities."""
-        risks = []
+        risks: list[StructuredRisk] = []
         for entity_id, inputs in configs.items():
             risks.extend(
                 {
@@ -2062,7 +2062,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         configs: dict[str, dict[str, Any]],
     ) -> list[StructuredRisk]:
         """Detect changes in selectors for existing inputs."""
-        risks = []
+        risks: list[StructuredRisk] = []
         for key in old_schema:
             if key in new_schema:
                 old_selector = old_schema[key].get("selector")
@@ -2090,7 +2090,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         configs: dict[str, dict[str, Any]],
     ) -> list[StructuredRisk]:
         """Detect inputs that were removed but are still used."""
-        risks = []
+        risks: list[StructuredRisk] = []
         for key in old_schema:
             if key not in new_schema and (affected := self._get_affected_entities(configs, key)):
                 risks.append(
@@ -2246,7 +2246,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A list of compatibility risks or system errors if validation fails.
 
         """
-        risks = []
+        risks: list[StructuredRisk] = []
         try:
             blueprint_dict = yaml_util.parse_yaml(blueprint_content)
             if not isinstance(blueprint_dict, dict):
@@ -3709,7 +3709,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Scan the blueprints directory for YAML files with source_url."""
         _count_backups_sync_helper.cache_clear()
         blueprint_path: str = hass.config.path(BLUEPRINTS_DATA_DIR)
-        found_blueprints = {}
+        found_blueprints: dict[str, BlueprintMetadata] = {}
 
         if not os.path.isdir(blueprint_path):
             _LOGGER.debug("Blueprints directory not found: %s", blueprint_path)
