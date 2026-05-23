@@ -5,7 +5,7 @@ import os
 import re
 import tempfile
 import tomllib
-from contextlib import suppress
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -136,10 +136,9 @@ def _safe_resolve_env_path(env_var: str) -> Path:
         Path(tempfile.gettempdir()).resolve(strict=False),
     ]
 
-    for var in ("GITHUB_WORKSPACE", "RUNNER_TEMP", "RUNNER_WORKSPACE", "GITHUB_HOME"):
-        if val := os.environ.get(var):
-            with suppress(Exception):
-                allowed_roots.append(Path(val).expanduser().resolve(strict=False))
+    # Do not extend trusted roots with environment-provided paths.
+    # Environment variables are untrusted input and must not influence
+    # the authorization boundary for path validation.
 
     is_safe = False
     for root in allowed_roots:
