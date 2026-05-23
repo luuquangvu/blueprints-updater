@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 VERSION_PATTERN = r"(([0-9]+\.[0-9]+\.[0-9]+)(?:-rc\.[0-9]+)?)"
-SAFE_PATH_PATTERN = re.compile(r"^[A-Za-z0-9._/\-~]+$")
 
 
 @dataclass(frozen=True)
@@ -108,42 +107,30 @@ def _write_github_outputs(output_path: Path, result: ReleaseGateResult) -> None:
         output.write("\n".join(lines) + "\n")
 
 
+def _is_within(resolved_path: str, allowed_root: str) -> bool:
+    """Return True when ``resolved_path`` is contained within ``allowed_root``.
+
+    Both arguments must already be absolute, real (symlink-free) paths produced
+    by :func:`os.path.realpath`. Containment is decided by
+    :func:`os.path.commonpath`, which is the canonical barrier recognized by
+    CodeQL's ``py/path-injection`` query.
+    """
+    try:
+        return os.path.commonpath([resolved_path, allowed_root]) == allowed_root
+    except ValueError:
+        return False
+
+
 def _safe_resolve_env_path(env_var: str) -> Path:
     """Resolve and validate a path from an environment variable to prevent path injection.
 
-    This function mitigates CWE-22 (Path Traversal) and CWE-73 (Uncontrolled Data
-    Used in Path Expression) by enforcing that the resolved path is absolute and
-    fully contained within a designated set of allowed system directories.
+    Mitigates CWE-22 (Path Traversal) and CWE-73 (Uncontrolled Data Used in Path
+    Expression) by canonicalizing the user-provided value with
+    :func:`os.path.realpath` and then enforcing strict containment under a fixed
+    allowlist of system roots via :func:`os.path.commonpath`. This combination is
+    the barrier that CodeQL's ``py/path-injection`` analysis recognizes as a
+    sanitizer for tainted path data sourced from ``os.environ``.
     """
-    if env_var == "GITHUB_EVENT_PATH":
-        try:
-            _ = Path("/github/workflow/event.json").resolve(strict=True)
-        except OSError as exc:
-            raise ValueError("Expected GitHub event file is missing or not resolvable") from exc
-
-        raw_path = os.environ.get(env_var)
-        if raw_path is None:
-            raise ValueError(f"Environment variable {env_var!r} is not set")
-
-        stripped = raw_path.strip()
-        if not stripped:
-            raise ValueError(f"Environment variable {env_var!r} is empty")
-        if "\x00" in stripped:
-            raise ValueError(f"Path from {env_var!r} contains invalid null bytes")
-        if not os.path.isabs(stripped):
-            raise ValueError(f"Path from {env_var!r} must be absolute")
-
-        expected_event_path = "/github/workflow/event.json"
-        if stripped != expected_event_path:
-            raise PermissionError(
-                f"Path from {env_var!r} must equal {expected_event_path!r}: {stripped!r}"
-            )
-
-        try:
-            return Path(expected_event_path).resolve(strict=True)
-        except OSError as exc:
-            raise ValueError("Expected GitHub event file is missing or not resolvable") from exc
-
     raw_path = os.environ.get(env_var)
     if raw_path is None:
         raise ValueError(f"Environment variable {env_var!r} is not set")
@@ -153,53 +140,59 @@ def _safe_resolve_env_path(env_var: str) -> Path:
         raise ValueError(f"Environment variable {env_var!r} is empty")
     if "\x00" in stripped:
         raise ValueError(f"Path from {env_var!r} contains invalid null bytes")
-
-    path_match = SAFE_PATH_PATTERN.fullmatch(stripped)
-    if path_match is None:
-        raise ValueError(f"Path from {env_var!r} contains unsupported characters")
-
-    sanitized_path = path_match.group()
-
-    if ".." in sanitized_path:
-        raise ValueError(f"Path from {env_var!r} must not contain traversal segments")
-    if not os.path.isabs(sanitized_path):
+    if not os.path.isabs(stripped):
         raise ValueError(f"Path from {env_var!r} must be absolute")
-    if os.path.normpath(sanitized_path) != sanitized_path:
-        raise ValueError(f"Path from {env_var!r} must be normalized without redundant segments")
+
+    if env_var == "GITHUB_EVENT_PATH":
+        expected_event_path = "/github/workflow/event.json"
+        if stripped != expected_event_path:
+            raise PermissionError(
+                f"Path from {env_var!r} must equal {expected_event_path!r}: {stripped!r}"
+            )
+        try:
+            resolved = os.path.realpath(expected_event_path, strict=True)
+        except OSError as exc:
+            raise ValueError("Expected GitHub event file is missing or not resolvable") from exc
+        expected_resolved = os.path.realpath(expected_event_path)
+        if resolved != expected_resolved:
+            raise PermissionError(
+                f"Path from {env_var!r} resolved outside expected event file: {resolved!r}"
+            )
+        return Path(resolved)
 
     try:
-        candidate = Path(sanitized_path).resolve(strict=True)
+        resolved = os.path.realpath(stripped, strict=True)
     except OSError as exc:
         raise ValueError(
-            f"Path from {env_var!r} must exist and be resolvable: {sanitized_path!r}"
+            f"Path from {env_var!r} must exist and be resolvable: {stripped!r}"
         ) from exc
 
-    allowed_roots: list[Path] = [
-        Path("/home/runner").resolve(),
-        Path("/github").resolve(),
-        Path("/Users/runner").resolve(),
-        Path(os.getcwd()).resolve(),
-        Path(tempfile.gettempdir()).resolve(),
-    ]
+    allowed_roots: tuple[str, ...] = (
+        os.path.realpath("/home/runner"),
+        os.path.realpath("/github"),
+        os.path.realpath("/Users/runner"),
+        os.path.realpath(os.getcwd()),
+        os.path.realpath(tempfile.gettempdir()),
+    )
 
-    if not any(candidate == root or candidate.is_relative_to(root) for root in allowed_roots):
+    if not any(_is_within(resolved, root) for root in allowed_roots):
         raise PermissionError(
-            f"Security Exception: Path {str(candidate)!r} from environment variable "
+            f"Security Exception: Path {resolved!r} from environment variable "
             f"{env_var!r} is outside permitted secure directories"
         )
 
     if env_var == "GITHUB_OUTPUT":
-        runner_temp_root = Path(tempfile.gettempdir()).resolve()
-        if not (candidate == runner_temp_root or candidate.is_relative_to(runner_temp_root)):
+        runner_temp_root = os.path.realpath(tempfile.gettempdir())
+        if not _is_within(resolved, runner_temp_root):
             raise PermissionError(
                 f"Path from {env_var!r} must be within runner temp directory "
-                f"{str(runner_temp_root)!r}: {candidate!r}"
+                f"{runner_temp_root!r}: {resolved!r}"
             )
 
-    if not candidate.is_file():
-        raise ValueError(f"Path from {env_var!r} must point to a regular file: {candidate!r}")
+    if not os.path.isfile(resolved):
+        raise ValueError(f"Path from {env_var!r} must point to a regular file: {resolved!r}")
 
-    return candidate
+    return Path(resolved)
 
 
 def main() -> None:
