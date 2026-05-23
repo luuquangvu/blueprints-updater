@@ -22,6 +22,7 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Check release pull request
         id: gate
@@ -45,9 +46,9 @@ jobs:
           manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
           manifest_version = manifest.get("version", "")
           manifest_version_match = re.fullmatch(r"(([0-9]+\.[0-9]+\.[0-9]+)(?:-rc\.[0-9]+)?)", manifest_version)
-          manifest_version_core = manifest_version_match.group(1) if manifest_version_match else None
+          manifest_version_full = manifest_version_match.group(1) if manifest_version_match else None
 
-          version_matches = branch_version is not None and manifest_version_core is not None and branch_version == manifest_version_core
+          version_matches = branch_version is not None and manifest_version_full is not None and branch_version == manifest_version_full
 
           should_publish = "release" in labels and version_matches
 
@@ -81,14 +82,19 @@ jobs:
           TAG="${{ steps.gate.outputs.tag }}"
           git fetch --tags
 
-          if git rev-parse --quiet --verify "refs/tags/$TAG" >/dev/null; then
+          if git rev-parse --quiet --verify "refs/tags/$TAG" >/dev/null 2>&1; then
             echo "::error::Release tag $TAG already exists"
             exit 1
           fi
 
           COMMIT_SHA="$(git rev-parse HEAD)"
+
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git tag "$TAG" "$COMMIT_SHA"
-          git push origin "$TAG"
+          git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git push origin "refs/tags/$TAG"
+
           echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
