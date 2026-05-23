@@ -4,6 +4,8 @@ on:
   pull_request:
     types:
       - closed
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -12,7 +14,7 @@ jobs:
   publish-release:
     name: "Publish GitHub Release"
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.merged == true && github.event.pull_request.base.ref == github.event.repository.default_branch }}
+    if: ${{ github.event.pull_request.merged == true }}
 
     steps:
       - name: Checkout merged release commit
@@ -24,51 +26,7 @@ jobs:
 
       - name: Check release pull request
         id: gate
-        shell: bash
-        run: |
-          python3 <<'PY'
-          import json
-          import os
-          import re
-          from pathlib import Path
-
-          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
-          pull_request = event["pull_request"]
-          branch = pull_request["head"]["ref"]
-          labels = {label["name"] for label in pull_request.get("labels", [])}
-
-          branch_match = re.fullmatch(r"release/(([0-9]+\.[0-9]+\.[0-9]+)(?:-rc\.[0-9]+)?)", branch)
-          branch_version = branch_match.group(1) if branch_match else None
-
-          manifest_path = Path("custom_components/blueprints_updater/manifest.json")
-          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-          manifest_version = manifest.get("version", "")
-          manifest_version_match = re.fullmatch(r"(([0-9]+\.[0-9]+\.[0-9]+)(?:-rc\.[0-9]+)?)", manifest_version)
-          manifest_version_full = manifest_version_match.group(1) if manifest_version_match else None
-
-          version_matches = branch_version is not None and manifest_version_full is not None and branch_version == manifest_version_full
-
-          should_publish = "release" in labels and version_matches
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"should_publish={str(should_publish).lower()}\n")
-
-          if should_publish:
-              print(f"Release publishing enabled for branch {branch} with manifest version {manifest_version}")
-              tag = manifest_version
-              prerelease = "rc" in manifest_version
-              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-                  output.write(f"version={manifest_version}\n")
-                  output.write(f"tag={tag}\n")
-                  output.write(f"prerelease={str(prerelease).lower()}\n")
-          else:
-              print(
-                  "Skipping publish because PR must have label 'release', "
-                  "branch release/X.Y.Z or release/X.Y.Z-rc.N, and manifest.json "
-                  f"version matching the branch; got branch {branch!r} and "
-                  f"manifest version {manifest_version!r}"
-              )
-          PY
+        run: uv run tools/check_release_pull_request.py
 
       - name: Create and push tag
         if: ${{ steps.gate.outputs.should_publish == 'true' }}
@@ -78,14 +36,20 @@ jobs:
           set -euo pipefail
 
           TAG="${{ steps.gate.outputs.tag }}"
+          COMMIT_SHA="${{ github.event.pull_request.merge_commit_sha }}"
           git fetch --tags
 
           if git rev-parse --quiet --verify "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "::error::Release tag $TAG already exists"
+            EXISTING_SHA="$(git rev-list -n 1 "refs/tags/$TAG")"
+            if [[ "$EXISTING_SHA" == "$COMMIT_SHA" ]]; then
+              echo "Release tag $TAG already points at $COMMIT_SHA"
+              echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "::error::Release tag $TAG already exists at $EXISTING_SHA, expected $COMMIT_SHA"
             exit 1
           fi
-
-          COMMIT_SHA="${{ github.event.pull_request.merge_commit_sha }}"
 
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
