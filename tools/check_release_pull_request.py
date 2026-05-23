@@ -3,7 +3,9 @@
 import json
 import os
 import re
+import tempfile
 import tomllib
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -45,7 +47,7 @@ def _read_pyproject_version(pyproject_path: Path) -> tuple[str, str | None]:
     return str(raw_version), _normalized_version(raw_version)
 
 
-def evaluate_release_gate(
+def _evaluate_release_gate(
     event_path: Path,
     manifest_path: Path,
     pyproject_path: Path,
@@ -91,7 +93,7 @@ def evaluate_release_gate(
     return ReleaseGateResult(should_publish=False, message=message)
 
 
-def write_github_outputs(output_path: Path, result: ReleaseGateResult) -> None:
+def _write_github_outputs(output_path: Path, result: ReleaseGateResult) -> None:
     """Append release gate outputs for downstream GitHub Actions steps."""
     lines = [f"should_publish={str(result.should_publish).lower()}"]
     if result.should_publish:
@@ -106,17 +108,61 @@ def write_github_outputs(output_path: Path, result: ReleaseGateResult) -> None:
         output.write("\n".join(lines) + "\n")
 
 
+def _safe_resolve_env_path(env_var: str) -> Path:
+    """Resolve and validate a path from an environment variable to prevent path injection.
+
+    This function mitigates CWE-22 (Path Traversal) and CWE-73 (Uncontrolled Data
+    Used in Path Expression) by enforcing that the resolved path is absolute and
+    fully contained within a designated set of allowed system directories.
+    """
+    raw_path = os.environ.get(env_var)
+    if not raw_path:
+        raise ValueError(f"Environment variable {env_var!r} is not set")
+
+    candidate = os.path.abspath(raw_path)
+    if not os.path.isabs(candidate):
+        raise ValueError(f"Path from {env_var!r} must be absolute: {candidate}")
+
+    allowed_roots = [
+        "/home/runner",
+        "/github",
+        "/Users/runner",
+        os.path.abspath(os.getcwd()),
+        os.path.abspath(tempfile.gettempdir()),
+    ]
+
+    for var in ("GITHUB_WORKSPACE", "RUNNER_TEMP", "RUNNER_WORKSPACE", "GITHUB_HOME"):
+        if val := os.environ.get(var):
+            with suppress(Exception):
+                allowed_roots.append(os.path.abspath(val))
+
+    is_safe = False
+    for root_dir in allowed_roots:
+        root = os.path.abspath(root_dir)
+        if candidate == root or candidate.startswith(root + os.sep):
+            is_safe = True
+            break
+
+    if not is_safe:
+        raise PermissionError(
+            f"Security Exception: Path {candidate!r} from environment variable "
+            f"{env_var!r} is outside permitted secure directories"
+        )
+
+    return Path(candidate)
+
+
 def main() -> None:
     """Evaluate release gate inputs from the GitHub Actions environment."""
-    event_path = Path(os.environ["GITHUB_EVENT_PATH"])
-    output_path = Path(os.environ["GITHUB_OUTPUT"])
-    result = evaluate_release_gate(
+    event_path = _safe_resolve_env_path("GITHUB_EVENT_PATH")
+    output_path = _safe_resolve_env_path("GITHUB_OUTPUT")
+    result = _evaluate_release_gate(
         event_path=event_path,
         manifest_path=Path("custom_components/blueprints_updater/manifest.json"),
         pyproject_path=Path("pyproject.toml"),
     )
     print(result.message)
-    write_github_outputs(output_path, result)
+    _write_github_outputs(output_path, result)
 
 
 if __name__ == "__main__":

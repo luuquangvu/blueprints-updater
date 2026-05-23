@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 
-def run_pipeline() -> None:
+def _run_pipeline() -> None:
     """Execute the full validation pipeline.
 
     Each step is explicitly defined to ensure security scanners can verify
@@ -92,7 +92,7 @@ def run_pipeline() -> None:
 def main() -> None:
     """Main entry point."""
     try:
-        run_pipeline()
+        _run_pipeline()
     except KeyboardInterrupt:
         print("VALIDATION_INTERRUPTED", flush=True)
         sys.exit(1)

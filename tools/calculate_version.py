@@ -19,7 +19,7 @@ DEFAULT_VERSION = "0.0.0"
 DEFAULT_PREFIX = "v"
 
 
-def normalize_version(version_str: str, prefix: str) -> str:
+def _normalize_version(version_str: str, prefix: str) -> str:
     """Strip prefixes and return a clean version string for parsing.
 
     The function enforces consistency: if a version string does not start
@@ -162,7 +162,7 @@ def main() -> None:
         prefix = "v" if latest_stable_str.startswith("v") else ""
 
     try:
-        stable_baseline_str = normalize_version(latest_stable_str, prefix)
+        stable_baseline_str = _normalize_version(latest_stable_str, prefix)
         parsed_stable = parse(stable_baseline_str)
         v = [parsed_stable.major, parsed_stable.minor, parsed_stable.micro]
     except Exception as e:
@@ -197,9 +197,9 @@ def main() -> None:
         result_str = _calculate_next_rc(prefix, target_stable, all_tags, configured_prefix is None)
 
     try:
-        norm_result = parse(normalize_version(result_str, prefix))
-        norm_latest = parse(normalize_version(latest_stable_str, prefix))
-        norm_current = parse(normalize_version(current_any_str, prefix))
+        norm_result = parse(_normalize_version(result_str, prefix))
+        norm_latest = parse(_normalize_version(latest_stable_str, prefix))
+        norm_current = parse(_normalize_version(current_any_str, prefix))
     except Exception as e:
         print(f"Error: Verification parsing failed: {e}", file=sys.stderr)
         sys.exit(1)
@@ -214,7 +214,7 @@ def main() -> None:
 
     if (
         is_prerelease
-        and normalize_version(current_any_str, prefix).startswith(target_stable)
+        and _normalize_version(current_any_str, prefix).startswith(target_stable)
         and norm_result <= norm_current
     ):
         print(
