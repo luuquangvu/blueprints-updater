@@ -31,16 +31,32 @@ jobs:
           pull_request = event["pull_request"]
           branch = pull_request["head"]["ref"]
           labels = {label["name"] for label in pull_request.get("labels", [])}
-          branch_matches = bool(re.fullmatch(r"release/[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?", branch))
-          should_publish = "release" in labels and branch_matches
+
+          branch_match = re.fullmatch(r"release/(([0-9]+\.[0-9]+\.[0-9]+)(?:-rc\.[0-9]+)?)", branch)
+          branch_matches = bool(branch_match)
+          branch_version = branch_match.group(1) if branch_match else None
+
+          manifest = json.loads(Path("manifest.json").read_text(encoding="utf-8"))
+          manifest_version = manifest.get("version", "")
+          manifest_version_match = re.match(r"(([0-9]+\.[0-9]+\.[0-9]+)(?:-rc\.[0-9]+)?)", manifest_version)
+          manifest_version_core = manifest_version_match.group(1) if manifest_version_match else manifest_version
+
+          version_matches = branch_version is not None and branch_version == manifest_version_core
+
+          should_publish = "release" in labels and branch_matches and version_matches
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"should_publish={str(should_publish).lower()}\n")
 
           if should_publish:
-              print(f"Release publishing enabled for branch {branch}")
+              print(f"Release publishing enabled for branch {branch} with manifest version {manifest_version}")
           else:
-              print(f"Skipping publish because PR must have label 'release' and branch release/X.Y.Z or release/X.Y.Z-rc.N; got branch {branch!r}")
+              print(
+                  "Skipping publish because PR must have label 'release', "
+                  "branch release/X.Y.Z or release/X.Y.Z-rc.N, and manifest.json "
+                  f"version matching the branch; got branch {branch!r} and "
+                  f"manifest version {manifest_version!r}"
+              )
           PY
 
       - name: Checkout main

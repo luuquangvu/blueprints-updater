@@ -52,7 +52,6 @@ jobs:
 
           export BUMP_TYPE="${{ github.event.inputs.bump_type }}"
           export IS_PRERELEASE="${{ github.event.inputs.prerelease || 'false' }}"
-          export TAG_PREFIX=""
           LATEST_STABLE="$(git tag --list --sort=-creatordate | grep -E '^(v?[0-9]+\.[0-9]+\.[0-9]+)$' | head -n 1 || true)"
           export LATEST_STABLE="${LATEST_STABLE:-0.0.0}"
           CURRENT_ANY="$(git tag --list --sort=-creatordate | grep -E '^(v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?)$' | head -n 1 || true)"
