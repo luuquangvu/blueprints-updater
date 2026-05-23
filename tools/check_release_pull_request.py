@@ -159,6 +159,22 @@ def _safe_resolve_env_path(env_var: str) -> Path:
             f"{env_var!r} is outside permitted secure directories"
         )
 
+    if env_var == "GITHUB_EVENT_PATH":
+        github_workflow_root = Path("/github/workflow").resolve()
+        if not (candidate == github_workflow_root or candidate.is_relative_to(github_workflow_root)):
+            raise PermissionError(
+                f"Path from {env_var!r} must be within {str(github_workflow_root)!r}: {candidate!r}"
+            )
+        if candidate.name != "event.json":
+            raise ValueError(f"Path from {env_var!r} must point to 'event.json': {candidate!r}")
+    elif env_var == "GITHUB_OUTPUT":
+        runner_temp_root = Path(tempfile.gettempdir()).resolve()
+        if not (candidate == runner_temp_root or candidate.is_relative_to(runner_temp_root)):
+            raise PermissionError(
+                f"Path from {env_var!r} must be within runner temp directory "
+                f"{str(runner_temp_root)!r}: {candidate!r}"
+            )
+
     if not candidate.is_file():
         raise ValueError(f"Path from {env_var!r} must point to a regular file: {candidate!r}")
 
