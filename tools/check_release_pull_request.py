@@ -115,6 +115,39 @@ def _safe_resolve_env_path(env_var: str) -> Path:
     Used in Path Expression) by enforcing that the resolved path is absolute and
     fully contained within a designated set of allowed system directories.
     """
+    if env_var == "GITHUB_EVENT_PATH":
+        try:
+            expected_event_path = Path("/github/workflow/event.json").resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("Expected GitHub event file is missing or not resolvable") from exc
+
+        raw_path = os.environ.get(env_var)
+        if raw_path is None:
+            raise ValueError(f"Environment variable {env_var!r} is not set")
+
+        stripped = raw_path.strip()
+        if not stripped:
+            raise ValueError(f"Environment variable {env_var!r} is empty")
+        if "\x00" in stripped:
+            raise ValueError(f"Path from {env_var!r} contains invalid null bytes")
+        if not os.path.isabs(stripped):
+            raise ValueError(f"Path from {env_var!r} must be absolute")
+
+        try:
+            supplied_event_path = Path(stripped).resolve(strict=True)
+        except OSError as exc:
+            raise ValueError(
+                f"Path from {env_var!r} must exist and be resolvable: {stripped!r}"
+            ) from exc
+
+        if supplied_event_path != expected_event_path:
+            raise PermissionError(
+                f"Path from {env_var!r} must equal {str(expected_event_path)!r}: "
+                f"{supplied_event_path!r}"
+            )
+
+        return expected_event_path
+
     raw_path = os.environ.get(env_var)
     if raw_path is None:
         raise ValueError(f"Environment variable {env_var!r} is not set")
@@ -159,15 +192,7 @@ def _safe_resolve_env_path(env_var: str) -> Path:
             f"{env_var!r} is outside permitted secure directories"
         )
 
-    if env_var == "GITHUB_EVENT_PATH":
-        github_workflow_root = Path("/github/workflow").resolve()
-        if not (candidate == github_workflow_root or candidate.is_relative_to(github_workflow_root)):
-            raise PermissionError(
-                f"Path from {env_var!r} must be within {str(github_workflow_root)!r}: {candidate!r}"
-            )
-        if candidate.name != "event.json":
-            raise ValueError(f"Path from {env_var!r} must point to 'event.json': {candidate!r}")
-    elif env_var == "GITHUB_OUTPUT":
+    if env_var == "GITHUB_OUTPUT":
         runner_temp_root = Path(tempfile.gettempdir()).resolve()
         if not (candidate == runner_temp_root or candidate.is_relative_to(runner_temp_root)):
             raise PermissionError(
