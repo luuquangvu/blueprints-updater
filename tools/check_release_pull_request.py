@@ -133,20 +133,17 @@ def _safe_resolve_env_path(env_var: str) -> Path:
         if not os.path.isabs(stripped):
             raise ValueError(f"Path from {env_var!r} must be absolute")
 
-        try:
-            supplied_event_path = Path(stripped).resolve(strict=True)
-        except OSError as exc:
-            raise ValueError(
-                f"Path from {env_var!r} must exist and be resolvable: {stripped!r}"
-            ) from exc
-
-        if supplied_event_path != expected_event_path:
+        expected_event_path_str = "/github/workflow/event.json"
+        if stripped != expected_event_path_str:
             raise PermissionError(
-                f"Path from {env_var!r} must equal {str(expected_event_path)!r}: "
-                f"{supplied_event_path!r}"
+                f"Path from {env_var!r} must equal {expected_event_path_str!r}: "
+                f"{stripped!r}"
             )
 
-        return expected_event_path
+        try:
+            return Path(expected_event_path_str).resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("Expected GitHub event file is missing or not resolvable") from exc
 
     raw_path = os.environ.get(env_var)
     if raw_path is None:
