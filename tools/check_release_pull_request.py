@@ -5,7 +5,6 @@ import os
 import re
 import tempfile
 import tomllib
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -145,9 +144,6 @@ def _safe_resolve_env_path(env_var: str) -> Path:
         Path(tempfile.gettempdir()).resolve(),
     ]
 
-    # Do not extend trusted roots with environment-provided paths.
-    # Environment variables are untrusted input and must not influence
-    # the authorization boundary for path validation.
     is_safe = False
     for root in allowed_roots:
         try:
@@ -164,9 +160,7 @@ def _safe_resolve_env_path(env_var: str) -> Path:
         )
 
     if not candidate.is_file():
-        raise ValueError(
-            f"Path from {env_var!r} must point to a regular file: {candidate!r}"
-        )
+        raise ValueError(f"Path from {env_var!r} must point to a regular file: {candidate!r}")
 
     return candidate
 
