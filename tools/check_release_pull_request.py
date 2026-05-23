@@ -119,7 +119,12 @@ def _safe_resolve_env_path(env_var: str) -> Path:
     if not raw_path:
         raise ValueError(f"Environment variable {env_var!r} is not set")
 
-    candidate = Path(raw_path).expanduser().resolve(strict=False)
+    try:
+        candidate = Path(raw_path).expanduser().resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise ValueError(
+            f"Path from {env_var!r} must exist and be resolvable: {raw_path!r}"
+        ) from exc
     if not candidate.is_absolute():
         raise ValueError(f"Path from {env_var!r} must be absolute: {candidate}")
 
@@ -149,6 +154,11 @@ def _safe_resolve_env_path(env_var: str) -> Path:
         raise PermissionError(
             f"Security Exception: Path {str(candidate)!r} from environment variable "
             f"{env_var!r} is outside permitted secure directories"
+        )
+
+    if not candidate.is_file():
+        raise ValueError(
+            f"Path from {env_var!r} must point to a regular file: {candidate!r}"
         )
 
     return candidate
