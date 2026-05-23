@@ -128,8 +128,13 @@ def _safe_resolve_env_path(env_var: str) -> Path:
         raise ValueError(f"Path from {env_var!r} contains unsupported characters")
     if ".." in sanitized_path:
         raise ValueError(f"Path from {env_var!r} must not contain traversal segments")
+    if not os.path.isabs(sanitized_path):
+        raise ValueError(f"Path from {env_var!r} must be absolute")
 
-    normalized_input = os.fsdecode(sanitized_path)
+    normalized_input = os.path.normpath(os.fsdecode(sanitized_path))
+
+    if normalized_input != sanitized_path:
+        raise ValueError(f"Path from {env_var!r} must be normalized without redundant segments")
 
     try:
         candidate = Path(normalized_input).expanduser().resolve(strict=True)

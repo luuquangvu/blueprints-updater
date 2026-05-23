@@ -96,7 +96,7 @@ def _calculate_next_rc(
     for raw_tag in all_tags:
         tag = raw_tag.strip()
         for pattern, det_prefix in patterns:
-            if match := pattern.match(tag):
+            if match := pattern.fullmatch(tag):
                 rc_numbers.append(int(match[1]))
                 detected_prefixes.add(det_prefix)
                 break
