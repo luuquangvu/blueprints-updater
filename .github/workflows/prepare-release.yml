@@ -53,9 +53,10 @@ jobs:
 
           export BUMP_TYPE="${{ github.event.inputs.bump_type }}"
           export IS_PRERELEASE="${{ github.event.inputs.prerelease || 'false' }}"
-          LATEST_STABLE="$(git tag --list --sort=-creatordate | grep -E '^(v?[0-9]+\.[0-9]+\.[0-9]+)$' | head -n 1 || true)"
+          export TAG_PREFIX=""
+          LATEST_STABLE="$(git tag --list --sort=-v:refname | grep -E '^([0-9]+\.[0-9]+\.[0-9]+)$' | head -n 1 || true)"
           export LATEST_STABLE="${LATEST_STABLE:-0.0.0}"
-          CURRENT_ANY="$(git tag --list --sort=-creatordate | grep -E '^(v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?)$' | head -n 1 || true)"
+          CURRENT_ANY="$(git tag --list --sort=-v:refname | grep -E '^([0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?)$' | head -n 1 || true)"
           export CURRENT_ANY="${CURRENT_ANY:-0.0.0}"
           ALL_TAGS="$(git tag --list)"
           export ALL_TAGS
@@ -63,7 +64,7 @@ jobs:
           CALCULATED_VERSION="$(uv run tools/calculate_version.py)"
           VERSION="${CALCULATED_VERSION}"
 
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+          if [[ ! "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?)$ ]]; then
             echo "::error::Calculated release version $VERSION is not valid"
             exit 1
           fi
