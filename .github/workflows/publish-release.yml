@@ -1,0 +1,107 @@
+name: Publish Release
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  publish-release:
+    name: "Publish GitHub Release"
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+
+    steps:
+      - name: Check release pull request
+        id: gate
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+          pull_request = event["pull_request"]
+          branch = pull_request["head"]["ref"]
+          labels = {label["name"] for label in pull_request.get("labels", [])}
+          branch_matches = bool(re.fullmatch(r"release/[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?", branch))
+          should_publish = "release" in labels and branch_matches
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"should_publish={str(should_publish).lower()}\n")
+
+          if should_publish:
+              print(f"Release publishing enabled for branch {branch}")
+          else:
+              print(f"Skipping publish because PR must have label 'release' and branch release/X.Y.Z or release/X.Y.Z-rc.N; got branch {branch!r}")
+          PY
+
+      - name: Checkout main
+        if: steps.gate.outputs.should_publish == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Read version from manifest
+        if: steps.gate.outputs.should_publish == 'true'
+        id: version
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          manifest_path = Path("custom_components/blueprints_updater/manifest.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          version = manifest.get("version")
+
+          if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?", version):
+              raise SystemExit(f"Invalid manifest version {version!r}; expected major.minor.patch or major.minor.patch-rc.N")
+
+          tag = version
+          prerelease = "-" in version
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={version}\n")
+              output.write(f"tag={tag}\n")
+              output.write(f"prerelease={str(prerelease).lower()}\n")
+          PY
+
+      - name: Create and push tag
+        if: steps.gate.outputs.should_publish == 'true'
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.version.outputs.tag }}"
+          git fetch --tags
+
+          if git rev-parse --quiet --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Release tag $TAG already exists"
+            exit 1
+          fi
+
+          COMMIT_SHA="$(git rev-parse HEAD)"
+          git tag "$TAG" "$COMMIT_SHA"
+          git push origin "$TAG"
+          echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: steps.gate.outputs.should_publish == 'true'
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
+        with:
+          tag: ${{ steps.version.outputs.tag }}
+          commit: ${{ steps.tag.outputs.commit_sha }}
+          generateReleaseNotes: true
+          prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
