@@ -109,19 +109,23 @@ def _write_github_outputs(output_path: Path, result: ReleaseGateResult) -> None:
 def _safe_resolve_env_path(env_var: str) -> Path:
     """Resolve and validate a path from an environment variable to prevent path injection.
 
-    Mitigates CWE-22 (Path Traversal) and CWE-73 (Uncontrolled Data Used in Path
-    Expression) by gating the user-provided value with sanitizer patterns that
-    CodeQL's ``py/path-injection`` query recognizes as barriers:
+    Mitigates CWE-22 (Path Traversal) and CWE-73 (Uncontrolled Data Used in
+    Path Expression) by gating the tainted environment value with sanitizer
+    patterns that CodeQL's ``py/path-injection`` query recognizes as barriers
+    BEFORE any call into :mod:`os.path` or :class:`pathlib.Path` is made:
 
-    - For ``GITHUB_EVENT_PATH``, the value is compared for strict equality
-      against a string literal and the returned :class:`~pathlib.Path` is
-      constructed from that literal, so the tainted environment value never
-      flows into a path expression.
-    - For ``GITHUB_OUTPUT``, the value is gated by an inline ``or``-chain of
-      :py:meth:`str.startswith` calls against string literals before being used
-      in any path expression. After resolution, the same literal-prefix chain
-      is reapplied to the canonicalized path as defense-in-depth against
-      symlink escape.
+    - For ``GITHUB_EVENT_PATH``, equality against the string literal
+      ``"/github/workflow/event.json"`` gates execution and the returned
+      :class:`~pathlib.Path` is constructed from that same literal, so the
+      tainted value never reaches a path expression.
+    - For every other variable, an inline :py:meth:`str.startswith` call
+      against a tuple of string literals is applied before the value is
+      passed to :class:`~pathlib.Path`. Absoluteness and traversal checks are
+      performed with pure string operations to avoid using the tainted value
+      in any path expression prior to the barrier.
+    - After canonicalization with :py:meth:`Path.resolve`, the same literal
+      prefix tuple is reapplied to the resolved path string as
+      defense-in-depth against symlink escape.
     """
     raw_path = os.environ.get(env_var)
     if raw_path is None:
@@ -132,8 +136,6 @@ def _safe_resolve_env_path(env_var: str) -> Path:
         raise ValueError(f"Environment variable {env_var!r} is empty")
     if "\x00" in stripped:
         raise ValueError(f"Path from {env_var!r} contains invalid null bytes")
-    if not os.path.isabs(stripped):
-        raise ValueError(f"Path from {env_var!r} must be absolute")
 
     if env_var == "GITHUB_EVENT_PATH":
         if stripped != "/github/workflow/event.json":
@@ -160,10 +162,15 @@ def _safe_resolve_env_path(env_var: str) -> Path:
             f"outside permitted secure directories: {stripped!r}"
         )
 
-    if ".." in stripped.split("/"):
-        raise ValueError(f"Path from {env_var!r} must not contain traversal segments")
-    if os.path.normpath(stripped) != stripped:
-        raise ValueError(f"Path from {env_var!r} must be normalized without redundant segments")
+    if (
+        "/../" in stripped
+        or "/./" in stripped
+        or "//" in stripped
+        or stripped.endswith(("/..", "/."))
+    ):
+        raise ValueError(
+            f"Path from {env_var!r} must be normalized without redundant or traversal segments"
+        )
 
     try:
         candidate = Path(stripped).resolve(strict=True)
