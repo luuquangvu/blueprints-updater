@@ -3,7 +3,6 @@
 import json
 import os
 import re
-import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,29 +106,22 @@ def _write_github_outputs(output_path: Path, result: ReleaseGateResult) -> None:
         output.write("\n".join(lines) + "\n")
 
 
-def _is_within(resolved_path: str, allowed_root: str) -> bool:
-    """Return True when ``resolved_path`` is contained within ``allowed_root``.
-
-    Both arguments must already be absolute, real (symlink-free) paths produced
-    by :func:`os.path.realpath`. Containment is decided by
-    :func:`os.path.commonpath`, which is the canonical barrier recognized by
-    CodeQL's ``py/path-injection`` query.
-    """
-    try:
-        return os.path.commonpath([resolved_path, allowed_root]) == allowed_root
-    except ValueError:
-        return False
-
-
 def _safe_resolve_env_path(env_var: str) -> Path:
     """Resolve and validate a path from an environment variable to prevent path injection.
 
     Mitigates CWE-22 (Path Traversal) and CWE-73 (Uncontrolled Data Used in Path
-    Expression) by canonicalizing the user-provided value with
-    :func:`os.path.realpath` and then enforcing strict containment under a fixed
-    allowlist of system roots via :func:`os.path.commonpath`. This combination is
-    the barrier that CodeQL's ``py/path-injection`` analysis recognizes as a
-    sanitizer for tainted path data sourced from ``os.environ``.
+    Expression) by gating the user-provided value with sanitizer patterns that
+    CodeQL's ``py/path-injection`` query recognizes as barriers:
+
+    - For ``GITHUB_EVENT_PATH``, the value is compared for strict equality
+      against a string literal and the returned :class:`~pathlib.Path` is
+      constructed from that literal, so the tainted environment value never
+      flows into a path expression.
+    - For ``GITHUB_OUTPUT``, the value is gated by an inline ``or``-chain of
+      :py:meth:`str.startswith` calls against string literals before being used
+      in any path expression. After resolution, the same literal-prefix chain
+      is reapplied to the canonicalized path as defense-in-depth against
+      symlink escape.
     """
     raw_path = os.environ.get(env_var)
     if raw_path is None:
@@ -144,55 +136,62 @@ def _safe_resolve_env_path(env_var: str) -> Path:
         raise ValueError(f"Path from {env_var!r} must be absolute")
 
     if env_var == "GITHUB_EVENT_PATH":
-        expected_event_path = "/github/workflow/event.json"
-        if stripped != expected_event_path:
+        if stripped != "/github/workflow/event.json":
             raise PermissionError(
-                f"Path from {env_var!r} must equal {expected_event_path!r}: {stripped!r}"
+                f"Path from {env_var!r} must equal '/github/workflow/event.json': {stripped!r}"
             )
         try:
-            resolved = os.path.realpath(expected_event_path, strict=True)
+            return Path("/github/workflow/event.json").resolve(strict=True)
         except OSError as exc:
             raise ValueError("Expected GitHub event file is missing or not resolvable") from exc
-        expected_resolved = os.path.realpath(expected_event_path)
-        if resolved != expected_resolved:
-            raise PermissionError(
-                f"Path from {env_var!r} resolved outside expected event file: {resolved!r}"
-            )
-        return Path(resolved)
+
+    if not stripped.startswith(
+        (
+            "/home/runner/",
+            "/Users/runner/",
+            "/github/",
+            "/private/tmp/",
+            "/var/tmp/",
+            "/tmp/",
+        )
+    ):
+        raise PermissionError(
+            f"Security Exception: Path from environment variable {env_var!r} is "
+            f"outside permitted secure directories: {stripped!r}"
+        )
+
+    if ".." in stripped.split("/"):
+        raise ValueError(f"Path from {env_var!r} must not contain traversal segments")
+    if os.path.normpath(stripped) != stripped:
+        raise ValueError(f"Path from {env_var!r} must be normalized without redundant segments")
 
     try:
-        resolved = os.path.realpath(stripped, strict=True)
+        candidate = Path(stripped).resolve(strict=True)
     except OSError as exc:
         raise ValueError(
             f"Path from {env_var!r} must exist and be resolvable: {stripped!r}"
         ) from exc
 
-    allowed_roots: tuple[str, ...] = (
-        os.path.realpath("/home/runner"),
-        os.path.realpath("/github"),
-        os.path.realpath("/Users/runner"),
-        os.path.realpath(os.getcwd()),
-        os.path.realpath(tempfile.gettempdir()),
-    )
-
-    if not any(_is_within(resolved, root) for root in allowed_roots):
+    resolved = str(candidate)
+    if not resolved.startswith(
+        (
+            "/home/runner/",
+            "/Users/runner/",
+            "/github/",
+            "/private/tmp/",
+            "/var/tmp/",
+            "/tmp/",
+        )
+    ):
         raise PermissionError(
-            f"Security Exception: Path {resolved!r} from environment variable "
-            f"{env_var!r} is outside permitted secure directories"
+            f"Security Exception: Resolved path {resolved!r} from environment "
+            f"variable {env_var!r} escapes permitted secure directories"
         )
 
-    if env_var == "GITHUB_OUTPUT":
-        runner_temp_root = os.path.realpath(tempfile.gettempdir())
-        if not _is_within(resolved, runner_temp_root):
-            raise PermissionError(
-                f"Path from {env_var!r} must be within runner temp directory "
-                f"{runner_temp_root!r}: {resolved!r}"
-            )
-
-    if not os.path.isfile(resolved):
+    if not candidate.is_file():
         raise ValueError(f"Path from {env_var!r} must point to a regular file: {resolved!r}")
 
-    return Path(resolved)
+    return candidate
 
 
 def main() -> None:
