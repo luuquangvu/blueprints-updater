@@ -119,37 +119,39 @@ def _safe_resolve_env_path(env_var: str) -> Path:
     if not raw_path:
         raise ValueError(f"Environment variable {env_var!r} is not set")
 
-    candidate = os.path.abspath(raw_path)
-    if not os.path.isabs(candidate):
+    candidate = Path(raw_path).expanduser().resolve(strict=False)
+    if not candidate.is_absolute():
         raise ValueError(f"Path from {env_var!r} must be absolute: {candidate}")
 
-    allowed_roots = [
-        "/home/runner",
-        "/github",
-        "/Users/runner",
-        os.path.abspath(os.getcwd()),
-        os.path.abspath(tempfile.gettempdir()),
+    allowed_roots: list[Path] = [
+        Path("/home/runner").resolve(strict=False),
+        Path("/github").resolve(strict=False),
+        Path("/Users/runner").resolve(strict=False),
+        Path(os.getcwd()).resolve(strict=False),
+        Path(tempfile.gettempdir()).resolve(strict=False),
     ]
 
     for var in ("GITHUB_WORKSPACE", "RUNNER_TEMP", "RUNNER_WORKSPACE", "GITHUB_HOME"):
         if val := os.environ.get(var):
             with suppress(Exception):
-                allowed_roots.append(os.path.abspath(val))
+                allowed_roots.append(Path(val).expanduser().resolve(strict=False))
 
     is_safe = False
-    for root_dir in allowed_roots:
-        root = os.path.abspath(root_dir)
-        if candidate == root or candidate.startswith(root + os.sep):
+    for root in allowed_roots:
+        try:
+            candidate.relative_to(root)
             is_safe = True
             break
+        except ValueError:
+            continue
 
     if not is_safe:
         raise PermissionError(
-            f"Security Exception: Path {candidate!r} from environment variable "
+            f"Security Exception: Path {str(candidate)!r} from environment variable "
             f"{env_var!r} is outside permitted secure directories"
         )
 
-    return Path(candidate)
+    return candidate
 
 
 def main() -> None:
