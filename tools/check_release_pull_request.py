@@ -119,34 +119,31 @@ def _safe_resolve_env_path(env_var: str) -> Path:
     if raw_path is None:
         raise ValueError(f"Environment variable {env_var!r} is not set")
 
-    sanitized_path = raw_path.strip()
-    if not sanitized_path:
+    stripped = raw_path.strip()
+    if not stripped:
         raise ValueError(f"Environment variable {env_var!r} is empty")
-    if "\x00" in sanitized_path:
+    if "\x00" in stripped:
         raise ValueError(f"Path from {env_var!r} contains invalid null bytes")
-    if not SAFE_PATH_PATTERN.fullmatch(sanitized_path):
+
+    path_match = SAFE_PATH_PATTERN.fullmatch(stripped)
+    if path_match is None:
         raise ValueError(f"Path from {env_var!r} contains unsupported characters")
+
+    sanitized_path = path_match.group()
+
     if ".." in sanitized_path:
         raise ValueError(f"Path from {env_var!r} must not contain traversal segments")
     if not os.path.isabs(sanitized_path):
         raise ValueError(f"Path from {env_var!r} must be absolute")
-
-    normalized_input = os.path.normpath(os.fsdecode(sanitized_path))
-
-    if normalized_input != sanitized_path:
+    if os.path.normpath(sanitized_path) != sanitized_path:
         raise ValueError(f"Path from {env_var!r} must be normalized without redundant segments")
 
     try:
-        candidate = Path(normalized_input).expanduser().resolve(strict=True)
+        candidate = Path(sanitized_path).resolve(strict=True)
     except OSError as exc:
         raise ValueError(
             f"Path from {env_var!r} must exist and be resolvable: {sanitized_path!r}"
         ) from exc
-
-    if not candidate.is_absolute():
-        raise ValueError(
-            f"Path from {env_var!r} must resolve to an absolute path: {str(candidate)!r}"
-        )
 
     allowed_roots: list[Path] = [
         Path("/home/runner").resolve(),
@@ -156,16 +153,7 @@ def _safe_resolve_env_path(env_var: str) -> Path:
         Path(tempfile.gettempdir()).resolve(),
     ]
 
-    is_safe = False
-    for root in allowed_roots:
-        try:
-            candidate.relative_to(root)
-            is_safe = True
-            break
-        except ValueError:
-            continue
-
-    if not is_safe:
+    if not any(candidate == root or candidate.is_relative_to(root) for root in allowed_roots):
         raise PermissionError(
             f"Security Exception: Path {str(candidate)!r} from environment variable "
             f"{env_var!r} is outside permitted secure directories"
