@@ -14,7 +14,7 @@ import tomlkit
 from tomlkit.items import Table
 
 
-def update_manifest(version: str) -> None:
+def _update_manifest(version: str) -> None:
     """Update the Home Assistant integration manifest.
 
     Args:
@@ -34,7 +34,7 @@ def update_manifest(version: str) -> None:
         f.write(json.dumps(manifest, indent=2) + "\n")
 
 
-def update_pyproject(version: str) -> None:
+def _update_pyproject(version: str) -> None:
     """Update the pyproject.toml file.
 
     This function defensively navigates the TOML schema to ensure that
@@ -104,8 +104,8 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        update_manifest(version)
-        update_pyproject(version)
+        _update_manifest(version)
+        _update_pyproject(version)
     except Exception as e:
         print(f"Error updating project metadata: {e}", file=sys.stderr)
         sys.exit(1)

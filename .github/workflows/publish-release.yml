@@ -1,0 +1,75 @@
+name: Publish Release
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  publish-release:
+    name: "Publish GitHub Release"
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.merged == true }}
+
+    steps:
+      - name: Checkout merged release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Check release pull request
+        id: gate
+        env:
+          RELEASE_PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          RELEASE_PR_LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: uv run tools/check_release_pull_request.py >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        if: ${{ steps.gate.outputs.should_publish == 'true' }}
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.gate.outputs.tag }}"
+          COMMIT_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+          git fetch --tags
+
+          if git rev-parse --quiet --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            EXISTING_SHA="$(git rev-list -n 1 "refs/tags/$TAG")"
+            if [[ "$EXISTING_SHA" == "$COMMIT_SHA" ]]; then
+              echo "Release tag $TAG already points at $COMMIT_SHA"
+              echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "::error::Release tag $TAG already exists at $EXISTING_SHA, expected $COMMIT_SHA"
+            exit 1
+          fi
+
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG" "$COMMIT_SHA"
+          git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git push origin "refs/tags/$TAG"
+
+          echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: ${{ steps.gate.outputs.should_publish == 'true' }}
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
+        with:
+          tag: ${{ steps.gate.outputs.tag }}
+          commit: ${{ steps.tag.outputs.commit_sha }}
+          generateReleaseNotes: true
+          prerelease: ${{ steps.gate.outputs.prerelease == 'true' }}

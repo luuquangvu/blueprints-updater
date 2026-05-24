@@ -74,7 +74,7 @@ def _validate_version_label(label_name: str, label_value: str) -> str:
     if not isinstance(label_value, str):
         raise ValueError(f"Invalid {label_name} value {label_value!r}; expected a string.")
 
-    if not _VERSION_PATTERN.match(label_value):
+    if not _VERSION_PATTERN.fullmatch(label_value):
         raise ValueError(
             f"Invalid {label_name} value {label_value!r}; must be alphanumeric blocks "
             "separated by a single dot, and cannot contain consecutive, leading, or trailing dots."
