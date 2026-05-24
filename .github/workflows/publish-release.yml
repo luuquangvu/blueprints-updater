@@ -29,7 +29,10 @@ jobs:
 
       - name: Check release pull request
         id: gate
-        run: uv run tools/check_release_pull_request.py
+        env:
+          RELEASE_PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          RELEASE_PR_LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: uv run tools/check_release_pull_request.py >> "$GITHUB_OUTPUT"
 
       - name: Create and push tag
         if: ${{ steps.gate.outputs.should_publish == 'true' }}
