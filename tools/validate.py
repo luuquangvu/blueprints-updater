@@ -17,70 +17,88 @@ import textwrap
 from pathlib import Path
 
 
-def _print_uv_dependency_update_notice(
+def _report_dependency_check_failure(
     command_label: str,
     completed_process: subprocess.CompletedProcess[str],
 ) -> None:
-    """Print informational details from uv sync dry-run output in JSON format."""
-    if completed_process.returncode != 0:
-        error_msg = completed_process.stderr.strip() or completed_process.stdout.strip()
+    """Report a non-fatal dependency check process failure."""
+    error_msg = completed_process.stderr.strip() or completed_process.stdout.strip()
+    print(
+        f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} failed "
+        f"with exit code {completed_process.returncode}; informational only",
+        flush=True,
+    )
+    if error_msg:
         print(
-            f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} failed "
-            f"with exit code {completed_process.returncode}; informational only",
+            f"  Error details: {textwrap.shorten(error_msg, width=150, placeholder='...')}",
             flush=True,
         )
-        if error_msg:
-            print(
-                f"  Error details: {textwrap.shorten(error_msg, width=150, placeholder='...')}",
-                flush=True,
-            )
-        return
+
+
+def _report_invalid_json_failure(command_label: str) -> None:
+    """Report that a dependency check command produced invalid JSON output."""
+    print(
+        f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} produced invalid JSON output",
+        flush=True,
+    )
+
+
+def _print_uv_dependency_update_notice(
+    command_label: str,
+    completed_process: subprocess.CompletedProcess[str],
+) -> bool:
+    """Print informational details from uv sync dry-run output in JSON format.
+
+    Returns:
+        bool: True if the process completed successfully (exit code 0), False otherwise.
+    """
+    if completed_process.returncode != 0:
+        _report_dependency_check_failure(command_label, completed_process)
+        return False
 
     try:
         data = json.loads(completed_process.stdout)
-        changes = data.get("sync", {}).get("changes", [])
-        if not changes:
-            print(
-                f"DEPENDENCY_UPDATE_CHECK_OK: {command_label!r} reported no updates",
-                flush=True,
-            )
-            return
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        _report_invalid_json_failure(command_label)
+        return False
 
+    if not isinstance(data, dict):
+        _report_invalid_json_failure(command_label)
+        return False
+
+    changes = data.get("sync", {}).get("changes", [])
+    if not changes:
         print(
-            f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} found possible dependency updates; "
-            "informational only",
+            f"DEPENDENCY_UPDATE_CHECK_OK: {command_label!r} reported no updates",
             flush=True,
         )
-        for change in changes:
-            name = change.get("name", "unknown")
-            prev = change.get("previous_version", "unknown")
-            curr = change.get("version", "unknown")
-            print(f"  - {name}: {prev} → {curr}", flush=True)
-    except (json.JSONDecodeError, TypeError):
-        print(
-            f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} produced invalid JSON output",
-            flush=True,
-        )
+        return True
+
+    print(
+        f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} found possible dependency updates; "
+        "informational only",
+        flush=True,
+    )
+    for change in changes:
+        name = change.get("name", "unknown")
+        prev = change.get("previous_version", "unknown")
+        curr = change.get("version", "unknown")
+        print(f"  - {name}: {prev} → {curr}", flush=True)
+    return True
 
 
 def _print_npm_dependency_update_notice(
     command_label: str,
     completed_process: subprocess.CompletedProcess[str],
-) -> None:
-    """Print informational details from npm update dry-run output in JSON format."""
+) -> bool:
+    """Print informational details from npm update dry-run output in JSON format.
+
+    Returns:
+        bool: True if the process completed successfully (exit code 0), False otherwise.
+    """
     if completed_process.returncode != 0:
-        error_msg = completed_process.stderr.strip() or completed_process.stdout.strip()
-        print(
-            f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} failed "
-            f"with exit code {completed_process.returncode}; informational only",
-            flush=True,
-        )
-        if error_msg:
-            print(
-                f"  Error details: {textwrap.shorten(error_msg, width=150, placeholder='...')}",
-                flush=True,
-            )
-        return
+        _report_dependency_check_failure(command_label, completed_process)
+        return False
 
     try:
         data = json.loads(completed_process.stdout)
@@ -88,43 +106,43 @@ def _print_npm_dependency_update_notice(
         stdout = completed_process.stdout
         first_index = next((i for i, c in enumerate(stdout) if c in "{["), -1)
         if first_index == -1:
-            print(
-                f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} produced invalid JSON output",
-                flush=True,
-            )
-            return
+            _report_invalid_json_failure(command_label)
+            return False
         try:
             payload = stdout[first_index:]
             data = json.loads(payload)
         except (json.JSONDecodeError, TypeError):
-            print(
-                f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} produced invalid JSON output",
-                flush=True,
-            )
-            return
+            _report_invalid_json_failure(command_label)
+            return False
     except TypeError:
-        print(
-            f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} produced invalid JSON output",
-            flush=True,
-        )
-        return
+        _report_invalid_json_failure(command_label)
+        return False
 
-    added = data.get("added", 0)
-    changed = data.get("changed", 0)
-    removed = data.get("removed", 0)
+    if not isinstance(data, dict):
+        _report_invalid_json_failure(command_label)
+        return False
+
+    try:
+        added = int(data.get("added", 0))
+        changed = int(data.get("changed", 0))
+        removed = int(data.get("removed", 0))
+    except (ValueError, TypeError):
+        _report_invalid_json_failure(command_label)
+        return False
 
     if added == 0 and changed == 0 and removed == 0:
         print(
             f"DEPENDENCY_UPDATE_CHECK_OK: {command_label!r} reported no updates",
             flush=True,
         )
-        return
+        return True
 
     print(
         f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} found possible dependency updates "
         f"(Added: {added}, Changed: {changed}, Removed: {removed}); informational only",
         flush=True,
     )
+    return True
 
 
 def _run_pipeline() -> None:
@@ -164,8 +182,14 @@ def _run_pipeline() -> None:
             text=True,
             cwd=repo_root,
         )
-        _print_uv_dependency_update_notice(uv_upgrade_label, uv_upgrade_check)
-        print(f"STEP_OK: {uv_upgrade_label}", flush=True)
+        uv_ok = _print_uv_dependency_update_notice(uv_upgrade_label, uv_upgrade_check)
+        if uv_ok:
+            print(f"STEP_OK: {uv_upgrade_label}", flush=True)
+        else:
+            print(
+                f"STEP_WARNING: {uv_upgrade_label} exited with code {uv_upgrade_check.returncode}",
+                flush=True,
+            )
 
         npm_update_label = "npm update --dry-run --no-audit --no-fund --json"
         print(f"STEP_START: {npm_update_label}", flush=True)
@@ -176,8 +200,14 @@ def _run_pipeline() -> None:
             text=True,
             cwd=repo_root,
         )
-        _print_npm_dependency_update_notice(npm_update_label, npm_update_check)
-        print(f"STEP_OK: {npm_update_label}", flush=True)
+        npm_ok = _print_npm_dependency_update_notice(npm_update_label, npm_update_check)
+        if npm_ok:
+            print(f"STEP_OK: {npm_update_label}", flush=True)
+        else:
+            print(
+                f"STEP_WARNING: {npm_update_label} exited with code {npm_update_check.returncode}",
+                flush=True,
+            )
 
         ruff_format_label = "uv run ruff format"
         print(f"STEP_START: {ruff_format_label}", flush=True)
