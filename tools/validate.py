@@ -43,6 +43,34 @@ def _report_invalid_json_failure(command_label: str) -> None:
     )
 
 
+def _parse_dependency_json(command_label: str, stdout: str) -> dict | None:
+    """Parse and validate JSON dictionary from command stdout.
+
+    Returns None if parsing or validation fails.
+    """
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        idx = stdout.find("{")
+        if idx == -1:
+            idx = stdout.find("[")
+        if idx != -1:
+            try:
+                data = json.loads(stdout[idx:])
+            except (json.JSONDecodeError, TypeError):
+                _report_invalid_json_failure(command_label)
+                return None
+        else:
+            _report_invalid_json_failure(command_label)
+            return None
+
+    if not isinstance(data, dict):
+        _report_invalid_json_failure(command_label)
+        return None
+
+    return data
+
+
 def _print_uv_dependency_update_notice(
     command_label: str,
     completed_process: subprocess.CompletedProcess[str],
@@ -56,14 +84,8 @@ def _print_uv_dependency_update_notice(
         _report_dependency_check_failure(command_label, completed_process)
         return False
 
-    try:
-        data = json.loads(completed_process.stdout)
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        _report_invalid_json_failure(command_label)
-        return False
-
-    if not isinstance(data, dict):
-        _report_invalid_json_failure(command_label)
+    data = _parse_dependency_json(command_label, completed_process.stdout)
+    if data is None:
         return False
 
     changes = data.get("sync", {}).get("changes", [])
@@ -100,26 +122,8 @@ def _print_npm_dependency_update_notice(
         _report_dependency_check_failure(command_label, completed_process)
         return False
 
-    try:
-        data = json.loads(completed_process.stdout)
-    except json.JSONDecodeError:
-        stdout = completed_process.stdout
-        first_index = next((i for i, c in enumerate(stdout) if c in "{["), -1)
-        if first_index == -1:
-            _report_invalid_json_failure(command_label)
-            return False
-        try:
-            payload = stdout[first_index:]
-            data = json.loads(payload)
-        except (json.JSONDecodeError, TypeError):
-            _report_invalid_json_failure(command_label)
-            return False
-    except TypeError:
-        _report_invalid_json_failure(command_label)
-        return False
-
-    if not isinstance(data, dict):
-        _report_invalid_json_failure(command_label)
+    data = _parse_dependency_json(command_label, completed_process.stdout)
+    if data is None:
         return False
 
     try:
