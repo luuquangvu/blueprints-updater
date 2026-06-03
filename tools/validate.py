@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 
@@ -21,6 +22,20 @@ def _print_uv_dependency_update_notice(
     completed_process: subprocess.CompletedProcess[str],
 ) -> None:
     """Print informational details from uv sync dry-run output in JSON format."""
+    if completed_process.returncode != 0:
+        error_msg = completed_process.stderr.strip() or completed_process.stdout.strip()
+        print(
+            f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} failed "
+            f"with exit code {completed_process.returncode}; informational only",
+            flush=True,
+        )
+        if error_msg:
+            print(
+                f"  Error details: {textwrap.shorten(error_msg, width=150, placeholder='...')}",
+                flush=True,
+            )
+        return
+
     try:
         data = json.loads(completed_process.stdout)
         changes = data.get("sync", {}).get("changes", [])
@@ -53,29 +68,63 @@ def _print_npm_dependency_update_notice(
     completed_process: subprocess.CompletedProcess[str],
 ) -> None:
     """Print informational details from npm update dry-run output in JSON format."""
+    if completed_process.returncode != 0:
+        error_msg = completed_process.stderr.strip() or completed_process.stdout.strip()
+        print(
+            f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} failed "
+            f"with exit code {completed_process.returncode}; informational only",
+            flush=True,
+        )
+        if error_msg:
+            print(
+                f"  Error details: {textwrap.shorten(error_msg, width=150, placeholder='...')}",
+                flush=True,
+            )
+        return
+
     try:
         data = json.loads(completed_process.stdout)
-        added = data.get("added", 0)
-        changed = data.get("changed", 0)
-        removed = data.get("removed", 0)
-
-        if added == 0 and changed == 0 and removed == 0:
+    except json.JSONDecodeError:
+        stdout = completed_process.stdout
+        first_index = next((i for i, c in enumerate(stdout) if c in "{["), -1)
+        if first_index == -1:
             print(
-                f"DEPENDENCY_UPDATE_CHECK_OK: {command_label!r} reported no updates",
+                f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} produced invalid JSON output",
                 flush=True,
             )
             return
-
-        print(
-            f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} found possible dependency updates "
-            f"(Added: {added}, Changed: {changed}, Removed: {removed}); informational only",
-            flush=True,
-        )
-    except (json.JSONDecodeError, TypeError):
+        try:
+            payload = stdout[first_index:]
+            data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            print(
+                f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} produced invalid JSON output",
+                flush=True,
+            )
+            return
+    except TypeError:
         print(
             f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} produced invalid JSON output",
             flush=True,
         )
+        return
+
+    added = data.get("added", 0)
+    changed = data.get("changed", 0)
+    removed = data.get("removed", 0)
+
+    if added == 0 and changed == 0 and removed == 0:
+        print(
+            f"DEPENDENCY_UPDATE_CHECK_OK: {command_label!r} reported no updates",
+            flush=True,
+        )
+        return
+
+    print(
+        f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} found possible dependency updates "
+        f"(Added: {added}, Changed: {changed}, Removed: {removed}); informational only",
+        flush=True,
+    )
 
 
 def _run_pipeline() -> None:
@@ -110,7 +159,7 @@ def _run_pipeline() -> None:
         print(f"STEP_START: {uv_upgrade_label}", flush=True)
         uv_upgrade_check = subprocess.run(
             ["uv", "sync", "--all-groups", "--upgrade", "--dry-run", "--output-format", "json"],
-            check=True,
+            check=False,
             capture_output=True,
             text=True,
             cwd=repo_root,
@@ -122,7 +171,7 @@ def _run_pipeline() -> None:
         print(f"STEP_START: {npm_update_label}", flush=True)
         npm_update_check = subprocess.run(
             ["npm", "update", "--dry-run", "--no-audit", "--no-fund", "--json"],
-            check=True,
+            check=False,
             capture_output=True,
             text=True,
             cwd=repo_root,
