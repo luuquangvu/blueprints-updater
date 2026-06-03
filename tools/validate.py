@@ -41,7 +41,7 @@ def _print_uv_dependency_update_notice(
             prev = change.get("previous_version", "unknown")
             curr = change.get("version", "unknown")
             print(f"  - {name}: {prev} → {curr}", flush=True)
-    except (json.JSONDecodeError, TypeError, KeyError):
+    except (json.JSONDecodeError, TypeError):
         print(
             f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} produced invalid JSON output",
             flush=True,
@@ -101,81 +101,71 @@ def _run_pipeline() -> None:
         repo_root = str(Path(__file__).resolve().parent.parent)
         venv_path = os.path.join(repo_root, ".venv")
         if not os.path.exists(venv_path):
-            uv_sync_command = ["uv", "sync", "--all-groups"]
-            print(f"STEP_START: {' '.join(uv_sync_command)}", flush=True)
-            subprocess.run(uv_sync_command, check=True, cwd=repo_root)
-            print(f"STEP_OK: {' '.join(uv_sync_command)}", flush=True)
+            uv_sync_label = "uv sync --all-groups"
+            print(f"STEP_START: {uv_sync_label}", flush=True)
+            subprocess.run(["uv", "sync", "--all-groups"], check=True, cwd=repo_root)
+            print(f"STEP_OK: {uv_sync_label}", flush=True)
 
-        uv_upgrade_command = [
-            "uv",
-            "sync",
-            "--all-groups",
-            "--upgrade",
-            "--dry-run",
-            "--output-format",
-            "json",
-        ]
-        print(f"STEP_START: {' '.join(uv_upgrade_command)}", flush=True)
+        uv_upgrade_label = "uv sync --all-groups --upgrade --dry-run --output-format json"
+        print(f"STEP_START: {uv_upgrade_label}", flush=True)
         uv_upgrade_check = subprocess.run(
-            uv_upgrade_command,
+            ["uv", "sync", "--all-groups", "--upgrade", "--dry-run", "--output-format", "json"],
             check=True,
             capture_output=True,
             text=True,
             cwd=repo_root,
         )
-        _print_uv_dependency_update_notice(" ".join(uv_upgrade_command), uv_upgrade_check)
-        print(f"STEP_OK: {' '.join(uv_upgrade_command)}", flush=True)
+        _print_uv_dependency_update_notice(uv_upgrade_label, uv_upgrade_check)
+        print(f"STEP_OK: {uv_upgrade_label}", flush=True)
 
-        npm_update_command = ["npm", "update", "--dry-run", "--no-audit", "--no-fund", "--json"]
-        print(f"STEP_START: {' '.join(npm_update_command)}", flush=True)
+        npm_update_label = "npm update --dry-run --no-audit --no-fund --json"
+        print(f"STEP_START: {npm_update_label}", flush=True)
         npm_update_check = subprocess.run(
-            npm_update_command,
+            ["npm", "update", "--dry-run", "--no-audit", "--no-fund", "--json"],
             check=True,
             capture_output=True,
             text=True,
             cwd=repo_root,
         )
-        _print_npm_dependency_update_notice(" ".join(npm_update_command), npm_update_check)
-        print(f"STEP_OK: {' '.join(npm_update_command)}", flush=True)
+        _print_npm_dependency_update_notice(npm_update_label, npm_update_check)
+        print(f"STEP_OK: {npm_update_label}", flush=True)
 
-        ruff_format_command = ["uv", "run", "ruff", "format"]
-        print(f"STEP_START: {' '.join(ruff_format_command)}", flush=True)
-        subprocess.run(ruff_format_command, check=True, cwd=repo_root)
-        print(f"STEP_OK: {' '.join(ruff_format_command)}", flush=True)
+        ruff_format_label = "uv run ruff format"
+        print(f"STEP_START: {ruff_format_label}", flush=True)
+        subprocess.run(["uv", "run", "ruff", "format"], check=True, cwd=repo_root)
+        print(f"STEP_OK: {ruff_format_label}", flush=True)
 
-        ruff_check_command = ["uv", "run", "ruff", "check", "--fix"]
-        print(f"STEP_START: {' '.join(ruff_check_command)}", flush=True)
-        subprocess.run(ruff_check_command, check=True, cwd=repo_root)
-        print(f"STEP_OK: {' '.join(ruff_check_command)}", flush=True)
+        ruff_check_label = "uv run ruff check --fix"
+        print(f"STEP_START: {ruff_check_label}", flush=True)
+        subprocess.run(["uv", "run", "ruff", "check", "--fix"], check=True, cwd=repo_root)
+        print(f"STEP_OK: {ruff_check_label}", flush=True)
 
-        ty_check_command = ["uv", "run", "ty", "check"]
-        print(f"STEP_START: {' '.join(ty_check_command)}", flush=True)
-        subprocess.run(ty_check_command, check=True, cwd=repo_root)
-        print(f"STEP_OK: {' '.join(ty_check_command)}", flush=True)
+        ty_check_label = "uv run ty check"
+        print(f"STEP_START: {ty_check_label}", flush=True)
+        subprocess.run(["uv", "run", "ty", "check"], check=True, cwd=repo_root)
+        print(f"STEP_OK: {ty_check_label}", flush=True)
 
-        pyright_command = ["uv", "run", "pyright"]
-        print(f"STEP_START: {' '.join(pyright_command)}", flush=True)
-        subprocess.run(pyright_command, check=True, cwd=repo_root)
-        print(f"STEP_OK: {' '.join(pyright_command)}", flush=True)
+        pyright_label = "uv run pyright"
+        print(f"STEP_START: {pyright_label}", flush=True)
+        subprocess.run(["uv", "run", "pyright"], check=True, cwd=repo_root)
+        print(f"STEP_OK: {pyright_label}", flush=True)
 
-        interrogate_command = ["uv", "run", "interrogate"]
-        print(f"STEP_START: {' '.join(interrogate_command)}", flush=True)
-        subprocess.run(interrogate_command, check=True, cwd=repo_root)
-        print(f"STEP_OK: {' '.join(interrogate_command)}", flush=True)
+        interrogate_label = "uv run interrogate"
+        print(f"STEP_START: {interrogate_label}", flush=True)
+        subprocess.run(["uv", "run", "interrogate"], check=True, cwd=repo_root)
+        print(f"STEP_OK: {interrogate_label}", flush=True)
 
-        prettier_command = ["npx", "prettier", "--log-level", "warn", "--write", "."]
-        print(f"STEP_START: {' '.join(prettier_command)}", flush=True)
+        prettier_label = "npx prettier --log-level warn --write ."
+        print(f"STEP_START: {prettier_label}", flush=True)
         subprocess.run(
-            prettier_command,
-            check=True,
-            cwd=repo_root,
+            ["npx", "prettier", "--log-level", "warn", "--write", "."], check=True, cwd=repo_root
         )
-        print(f"STEP_OK: {' '.join(prettier_command)}", flush=True)
+        print(f"STEP_OK: {prettier_label}", flush=True)
 
-        pytest_command = ["uv", "run", "pytest", "--quiet"]
-        print(f"STEP_START: {' '.join(pytest_command)}", flush=True)
-        subprocess.run(pytest_command, check=True, cwd=repo_root)
-        print(f"STEP_OK: {' '.join(pytest_command)}", flush=True)
+        pytest_label = "uv run pytest --quiet"
+        print(f"STEP_START: {pytest_label}", flush=True)
+        subprocess.run(["uv", "run", "pytest", "--quiet"], check=True, cwd=repo_root)
+        print(f"STEP_OK: {pytest_label}", flush=True)
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         ret_code = getattr(e, "returncode", 1)
@@ -188,8 +178,8 @@ def _run_pipeline() -> None:
             )
             print(f"STEP_FAILED: {cmd_str} EXIT_CODE={ret_code}", flush=True)
         else:
-            cmd_str = getattr(e, "filename", "Unknown command")
-            print(f"VALIDATION_ERROR: '{cmd_str}' not found.", flush=True)
+            cmd_val = getattr(e, "filename", "Unknown command")
+            print(f"VALIDATION_ERROR: {cmd_val!r} not found.", flush=True)
 
         print("VALIDATION_FAILED", flush=True)
         sys.exit(ret_code)
