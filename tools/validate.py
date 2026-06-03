@@ -15,6 +15,27 @@ import sys
 from pathlib import Path
 
 
+def _print_dependency_update_notice(
+    command_label: str,
+    completed_process: subprocess.CompletedProcess[str],
+    no_update_marker: str,
+) -> None:
+    """Print dry-run details when dependency updates are available."""
+    output_parts = [completed_process.stdout.strip(), completed_process.stderr.strip()]
+    output = "\n".join(part for part in output_parts if part)
+
+    if no_update_marker in output:
+        print(f"DEPENDENCY_UPDATE_CHECK_OK: {command_label} reported no updates", flush=True)
+        return
+
+    if output:
+        print(f"DEPENDENCY_UPDATE_AVAILABLE: {command_label}", flush=True)
+        print(output, flush=True)
+        return
+
+    print(f"DEPENDENCY_UPDATE_CHECK_OK: {command_label} produced no update output", flush=True)
+
+
 def _run_pipeline() -> None:
     """Execute the full validation pipeline.
 
@@ -33,13 +54,41 @@ def _run_pipeline() -> None:
 
     try:
         repo_root = str(Path(__file__).resolve().parent.parent)
-        print("STEP_START: uv sync --all-groups --upgrade", flush=True)
-        subprocess.run(["uv", "sync", "--all-groups", "--upgrade"], check=True, cwd=repo_root)
-        print("STEP_OK: uv sync --all-groups --upgrade", flush=True)
+        venv_path = os.path.join(repo_root, ".venv")
+        if not os.path.exists(venv_path):
+            print("STEP_START: uv sync --all-groups", flush=True)
+            subprocess.run(["uv", "sync", "--all-groups"], check=True, cwd=repo_root)
+            print("STEP_OK: uv sync --all-groups", flush=True)
 
-        print("STEP_START: npm update", flush=True)
-        subprocess.run(["npm", "update"], check=True, cwd=repo_root)
-        print("STEP_OK: npm update", flush=True)
+        print("STEP_START: uv sync --all-groups --upgrade --dry-run", flush=True)
+        uv_upgrade_check = subprocess.run(
+            ["uv", "sync", "--all-groups", "--upgrade", "--dry-run"],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=repo_root,
+        )
+        _print_dependency_update_notice(
+            "uv sync --all-groups --upgrade --dry-run",
+            uv_upgrade_check,
+            "Would make no changes",
+        )
+        print("STEP_OK: uv sync --all-groups --upgrade --dry-run", flush=True)
+
+        print("STEP_START: npm update --dry-run --no-audit --no-fund", flush=True)
+        npm_update_check = subprocess.run(
+            ["npm", "update", "--dry-run", "--no-audit", "--no-fund"],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=repo_root,
+        )
+        _print_dependency_update_notice(
+            "npm update --dry-run --no-audit --no-fund",
+            npm_update_check,
+            "up to date",
+        )
+        print("STEP_OK: npm update --dry-run --no-audit --no-fund", flush=True)
 
         print("STEP_START: uv run ruff format", flush=True)
         subprocess.run(["uv", "run", "ruff", "format"], check=True, cwd=repo_root)
