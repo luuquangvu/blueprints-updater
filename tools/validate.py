@@ -20,7 +20,7 @@ def _print_dependency_update_notice(
     completed_process: subprocess.CompletedProcess[str],
     no_update_marker: str,
 ) -> None:
-    """Print dry-run details when dependency updates are available."""
+    """Print informational dry-run details when dependency updates are available."""
     output_parts = [completed_process.stdout.strip(), completed_process.stderr.strip()]
     output = "\n".join(part for part in output_parts if part)
 
@@ -29,7 +29,11 @@ def _print_dependency_update_notice(
         return
 
     if output:
-        print(f"DEPENDENCY_UPDATE_AVAILABLE: {command_label}", flush=True)
+        print(
+            f"DEPENDENCY_UPDATE_NOTICE: {command_label} found possible dependency updates; "
+            "informational only",
+            flush=True,
+        )
         print(output, flush=True)
         return
 
@@ -42,6 +46,9 @@ def _run_pipeline() -> None:
     Each step is explicitly defined to ensure security scanners can verify
     the static nature of the commands being executed, avoiding dynamic
     variable execution in subprocess calls.
+
+    Dependency update checks use dry-run commands and are informational only;
+    available updates are reported without failing validation.
     """
     os.environ["NO_COLOR"] = "1"
 
