@@ -33,11 +33,13 @@ def _run_pipeline() -> None:
 
     try:
         repo_root = str(Path(__file__).resolve().parent.parent)
-        venv_path = os.path.join(repo_root, ".venv")
-        if not os.path.exists(venv_path):
-            print("STEP_START: uv sync --all-groups", flush=True)
-            subprocess.run(["uv", "sync", "--all-groups"], check=True, cwd=repo_root)
-            print("STEP_OK: uv sync --all-groups", flush=True)
+        print("STEP_START: uv sync --all-groups --upgrade", flush=True)
+        subprocess.run(["uv", "sync", "--all-groups", "--upgrade"], check=True, cwd=repo_root)
+        print("STEP_OK: uv sync --all-groups --upgrade", flush=True)
+
+        print("STEP_START: npm update", flush=True)
+        subprocess.run(["npm", "update"], check=True, cwd=repo_root)
+        print("STEP_OK: npm update", flush=True)
 
         print("STEP_START: uv run ruff format", flush=True)
         subprocess.run(["uv", "run", "ruff", "format"], check=True, cwd=repo_root)
