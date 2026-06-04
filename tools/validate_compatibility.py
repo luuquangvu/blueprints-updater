@@ -277,7 +277,6 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
                 "--python",
                 python_bin,
                 "pytest",
-                "--quiet",
                 "--no-cov",
             ],
             env=env,
@@ -353,6 +352,7 @@ def main() -> None:
         print(f"Home Assistant {display_ver} (Python {py_ver}): {status}", flush=True)
         if status != "PASSED":
             all_ok = False
+    print("\n", flush=True)
 
     if all_ok:
         print("VALIDATION_SUCCESS", flush=True)

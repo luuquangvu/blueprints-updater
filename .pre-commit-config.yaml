@@ -45,7 +45,15 @@ repos:
 
       - id: pytest
         name: pytest
-        entry: uv run pytest --quiet
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      - id: compatibility
+        name: compatibility
+        entry: uv run tools/validate_compatibility.py
         language: system
         pass_filenames: false
         always_run: true

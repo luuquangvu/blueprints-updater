@@ -53,7 +53,7 @@ jobs:
         run: uv run pyright
 
       - name: Run Interrogate
-        run: uv run interrogate -v
+        run: uv run interrogate
 
       - name: Run Tests
         run: uv run pytest
@@ -118,4 +118,4 @@ jobs:
           uv --no-config pip install --overrides overrides.txt --python .venv/bin/python "$HA_SPEC" 'httpx[http2]' pytest pytest-homeassistant-custom-component
 
       - name: Run Tests
-        run: uv run --no-project --python .venv/bin/python pytest --quiet --no-cov
+        run: uv run --no-project --python .venv/bin/python pytest --no-cov
