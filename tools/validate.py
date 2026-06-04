@@ -193,7 +193,6 @@ def _run_pipeline() -> None:
 
     if os.name != "posix":
         print("VALIDATION_ERROR: Non-POSIX environment detected", flush=True)
-        print("VALIDATION_FAILED", flush=True)
         sys.exit(1)
 
     try:
@@ -292,9 +291,11 @@ def _run_pipeline() -> None:
             cmd_val = getattr(e, "filename", "Unknown command")
             print(f"VALIDATION_ERROR: {cmd_val!r} not found.", flush=True)
 
+        print(flush=True)
         print("VALIDATION_FAILED", flush=True)
         sys.exit(ret_code)
 
+    print(flush=True)
     print("VALIDATION_SUCCESS", flush=True)
 
 
