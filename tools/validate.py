@@ -98,6 +98,9 @@ def _print_uv_dependency_update_notice(
         )
         return True
 
+    installed_action = "installed"
+    uninstalled_action = "uninstalled"
+    allowed_actions = {installed_action, uninstalled_action}
     actions_by_name: dict[str, set[str]] = {}
     for change in changes:
         if not isinstance(change, dict):
@@ -108,22 +111,23 @@ def _print_uv_dependency_update_notice(
         if not isinstance(name, str) or not isinstance(action, str):
             _report_invalid_json_failure(command_label)
             return False
+        if action not in allowed_actions:
+            _report_invalid_json_failure(command_label)
+            return False
         actions_by_name.setdefault(name, set()).add(action)
 
     added = 0
     changed = 0
     removed = 0
     for actions in actions_by_name.values():
-        installed = "installed" in actions
-        uninstalled = "uninstalled" in actions
+        installed = installed_action in actions
+        uninstalled = uninstalled_action in actions
         if installed and uninstalled:
             changed += 1
         elif installed:
             added += 1
         elif uninstalled:
             removed += 1
-        else:
-            changed += 1
 
     print(
         f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} found possible dependency updates "
