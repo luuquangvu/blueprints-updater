@@ -23,6 +23,9 @@ dev = [
   "ty",
 ]
 
+[tool.uv]
+override-dependencies = ["homeassistant>=2026.5.0"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py313"
@@ -61,6 +64,7 @@ pythonpath = ["."]
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
 addopts = [
+  "--quiet",
   "--cov=custom_components",
   "--cov-fail-under=90",
   "--cov-branch",

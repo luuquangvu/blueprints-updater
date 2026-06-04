@@ -277,7 +277,6 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
                 "--python",
                 python_bin,
                 "pytest",
-                "--quiet",
                 "--no-cov",
             ],
             env=env,
@@ -346,7 +345,7 @@ def main() -> None:
         print(f"VALIDATION_ERROR: {exc}", flush=True)
         sys.exit(1)
 
-    print("\n", flush=True)
+    print(flush=True)
     all_ok = True
     for (ha_ver, py_ver), (ha_version, status) in results.items():
         display_ver = ha_version if ha_version == ha_ver else f"{ha_ver} → {ha_version}"
@@ -354,6 +353,7 @@ def main() -> None:
         if status != "PASSED":
             all_ok = False
 
+    print(flush=True)
     if all_ok:
         print("VALIDATION_SUCCESS", flush=True)
     else:

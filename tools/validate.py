@@ -77,6 +77,8 @@ def _print_uv_dependency_update_notice(
 ) -> bool:
     """Print informational details from uv sync dry-run output in JSON format.
 
+    uv change entries expose per-package install and uninstall actions.
+
     Returns:
         bool: True if the process completed successfully (exit code 0), False otherwise.
     """
@@ -96,16 +98,42 @@ def _print_uv_dependency_update_notice(
         )
         return True
 
+    installed_action = "installed"
+    uninstalled_action = "uninstalled"
+    allowed_actions = {installed_action, uninstalled_action}
+    actions_by_name: dict[str, set[str]] = {}
+    for change in changes:
+        if not isinstance(change, dict):
+            _report_invalid_json_failure(command_label)
+            return False
+        name = change.get("name")
+        action = change.get("action")
+        if not isinstance(name, str) or not isinstance(action, str):
+            _report_invalid_json_failure(command_label)
+            return False
+        if action not in allowed_actions:
+            _report_invalid_json_failure(command_label)
+            return False
+        actions_by_name.setdefault(name, set()).add(action)
+
+    added = 0
+    changed = 0
+    removed = 0
+    for actions in actions_by_name.values():
+        installed = installed_action in actions
+        uninstalled = uninstalled_action in actions
+        if installed and uninstalled:
+            changed += 1
+        elif installed:
+            added += 1
+        elif uninstalled:
+            removed += 1
+
     print(
-        f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} found possible dependency updates; "
-        "informational only",
+        f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} found possible dependency updates "
+        f"(Added: {added}, Changed: {changed}, Removed: {removed}); informational only",
         flush=True,
     )
-    for change in changes:
-        name = change.get("name", "unknown")
-        prev = change.get("previous_version", "unknown")
-        curr = change.get("version", "unknown")
-        print(f"  - {name}: {prev} → {curr}", flush=True)
     return True
 
 
@@ -165,7 +193,6 @@ def _run_pipeline() -> None:
 
     if os.name != "posix":
         print("VALIDATION_ERROR: Non-POSIX environment detected", flush=True)
-        print("VALIDATION_FAILED", flush=True)
         sys.exit(1)
 
     try:
@@ -245,9 +272,9 @@ def _run_pipeline() -> None:
         )
         print(f"STEP_OK: {prettier_label}", flush=True)
 
-        pytest_label = "uv run pytest --quiet"
+        pytest_label = "uv run pytest"
         print(f"STEP_START: {pytest_label}", flush=True)
-        subprocess.run(["uv", "run", "pytest", "--quiet"], check=True, cwd=repo_root)
+        subprocess.run(["uv", "run", "pytest"], check=True, cwd=repo_root)
         print(f"STEP_OK: {pytest_label}", flush=True)
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
@@ -264,9 +291,11 @@ def _run_pipeline() -> None:
             cmd_val = getattr(e, "filename", "Unknown command")
             print(f"VALIDATION_ERROR: {cmd_val!r} not found.", flush=True)
 
+        print(flush=True)
         print("VALIDATION_FAILED", flush=True)
         sys.exit(ret_code)
 
+    print(flush=True)
     print("VALIDATION_SUCCESS", flush=True)
 
 
