@@ -11,7 +11,6 @@ false positives related to command injection.
 
 import argparse
 import contextlib
-import json
 import os
 import re
 import shutil
@@ -21,6 +20,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from string import ascii_letters, digits
+
+import orjson
 
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 
@@ -46,7 +47,7 @@ _PYPI_HA_JSON_URL = "https://pypi.org/pypi/homeassistant/json"
 def _load_matrix_data() -> list[dict[str, str]]:
     """Load compatibility matrix from the repository tools directory."""
     with open(_MATRIX_FILE, encoding="utf-8") as f:
-        return json.load(f)
+        return orjson.loads(f.read())
 
 
 _MATRIX_DATA = _load_matrix_data()
@@ -121,9 +122,9 @@ def _get_latest_ha_version() -> str:
     """
     try:
         with urllib.request.urlopen(_PYPI_HA_JSON_URL, timeout=20) as response:
-            data = json.loads(response.read().decode("utf-8"))
+            data = orjson.loads(response.read())
             version = data["info"]["version"]
-    except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError) as err:
+    except (urllib.error.URLError, OSError, orjson.JSONDecodeError, KeyError) as err:
         raise ValueError(f"Failed to fetch latest Home Assistant version from PyPI: {err}") from err
 
     return _validate_version_label("pypi_version", version)

@@ -1,8 +1,8 @@
 """Tests for translation consistency and key ordering."""
 
-import json
 from pathlib import Path
 
+import orjson
 import pytest
 
 BASE_DIR = Path(__file__).parent.parent
@@ -58,9 +58,9 @@ def test_translation_key_order(translation_file):
     and clean diffs.
     """
     with open(STRINGS_JSON, encoding="utf-8") as f:
-        reference = json.load(f)
+        reference = orjson.loads(f.read())
 
     with open(translation_file, encoding="utf-8") as f:
-        translation = json.load(f)
+        translation = orjson.loads(f.read())
 
     check_dict_order(translation, reference)
