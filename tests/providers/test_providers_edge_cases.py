@@ -1,6 +1,6 @@
 """Tests for specialized blueprint provider behaviors and edge case URL formats."""
 
-import json
+import orjson
 
 from custom_components.blueprints_updater.const import SourceProviderType
 from custom_components.blueprints_updater.providers import (
@@ -64,9 +64,9 @@ def test_ha_forum_metadata_parsing():
     provider = HAForumProvider()
     url = "https://community.home-assistant.io/t/topic/123"
 
-    content = json.dumps(
+    content = orjson.dumps(
         {"slug": "awesome-blueprint", "post_stream": {"posts": [{"username": "expert_user"}]}}
-    )
+    ).decode("utf-8")
     metadata = provider.get_metadata(url, content=content)
     assert metadata["author"] == "expert_user"
     assert metadata["name"] == "awesome-blueprint"
@@ -171,7 +171,7 @@ def test_ha_forum_metadata_prefers_post_containing_blueprint():
     """Verify forum metadata uses the post that actually contains blueprint YAML."""
     provider = HAForumProvider()
     url = "https://community.home-assistant.io/t/topic/123"
-    content = json.dumps(
+    content = orjson.dumps(
         {
             "slug": "target-blueprint",
             "post_stream": {
@@ -185,7 +185,7 @@ def test_ha_forum_metadata_prefers_post_containing_blueprint():
                 ]
             },
         }
-    )
+    ).decode("utf-8")
 
     metadata = provider.get_metadata(url, content=content)
 

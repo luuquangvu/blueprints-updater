@@ -5,11 +5,11 @@ Semantic Versioning is applied consistently across all project descriptors.
 It performs safety checks to prevent overwriting dynamic versions.
 """
 
-import json
 import os
 import sys
 from typing import Any
 
+import orjson
 import tomlkit
 from tomlkit.items import Table
 
@@ -26,12 +26,12 @@ def _update_manifest(version: str) -> None:
         sys.exit(1)
 
     with open(path, encoding="utf-8") as f:
-        manifest = json.load(f)
+        manifest = orjson.loads(f.read())
 
     manifest["version"] = version
 
     with open(path, "w", encoding="utf-8") as f:
-        f.write(json.dumps(manifest, indent=2) + "\n")
+        f.write(orjson.dumps(manifest, option=orjson.OPT_INDENT_2).decode("utf-8") + "\n")
 
 
 def _update_pyproject(version: str) -> None:

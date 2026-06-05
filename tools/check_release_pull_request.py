@@ -1,6 +1,5 @@
 """Validate whether a merged pull request should publish a release."""
 
-import json
 import os
 import re
 import sys
@@ -8,6 +7,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import orjson
 
 VERSION_PATTERN = r"(([0-9]+\.[0-9]+\.[0-9]+)(?:-rc\.[0-9]+)?)"
 
@@ -33,7 +34,7 @@ def _normalized_version(value: Any) -> str | None:
 
 def _read_manifest_version(manifest_path: Path) -> tuple[str, str | None]:
     """Read and validate the integration manifest version."""
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = orjson.loads(manifest_path.read_text(encoding="utf-8"))
     raw_version = manifest.get("version", "")
     return str(raw_version), _normalized_version(raw_version)
 
@@ -119,8 +120,8 @@ def _read_pull_request_inputs() -> tuple[str, set[str]]:
     branch = _read_required_env("RELEASE_PR_HEAD_REF")
     labels_json = _read_required_env("RELEASE_PR_LABELS_JSON")
     try:
-        raw_labels = json.loads(labels_json)
-    except json.JSONDecodeError as exc:
+        raw_labels = orjson.loads(labels_json)
+    except orjson.JSONDecodeError as exc:
         raise ValueError("RELEASE_PR_LABELS_JSON must contain a JSON array") from exc
 
     if not isinstance(raw_labels, list):

@@ -9,12 +9,13 @@ to satisfy static analysis security audits. This prevents false positives relate
 to command injection that occur when iterating over dynamic command sequences.
 """
 
-import json
 import os
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
+
+import orjson
 
 
 def _report_dependency_check_failure(
@@ -49,15 +50,15 @@ def _parse_dependency_json(command_label: str, stdout: str) -> dict | None:
     Returns None if parsing or validation fails.
     """
     try:
-        data = json.loads(stdout)
-    except (json.JSONDecodeError, TypeError):
+        data = orjson.loads(stdout)
+    except (orjson.JSONDecodeError, TypeError):
         idx = stdout.find("{")
         if idx == -1:
             idx = stdout.find("[")
         if idx != -1:
             try:
-                data = json.loads(stdout[idx:])
-            except (json.JSONDecodeError, TypeError):
+                data = orjson.loads(stdout[idx:])
+            except (orjson.JSONDecodeError, TypeError):
                 _report_invalid_json_failure(command_label)
                 return None
         else:
