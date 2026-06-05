@@ -10,6 +10,7 @@ dev = [
   "homeassistant>=2026.6.0",
   "httpx[http2]",
   "interrogate",
+  "orjson",
   "packaging",
   "prek",
   "pyright",
