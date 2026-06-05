@@ -7,7 +7,7 @@ dependencies = []
 
 [dependency-groups]
 dev = [
-  "homeassistant>=2026.5.0",
+  "homeassistant>=2026.6.0",
   "httpx[http2]",
   "interrogate",
   "packaging",
@@ -24,7 +24,7 @@ dev = [
 ]
 
 [tool.uv]
-override-dependencies = ["homeassistant>=2026.5.0"]
+override-dependencies = ["homeassistant>=2026.6.0"]
 
 [tool.ruff]
 line-length = 100
