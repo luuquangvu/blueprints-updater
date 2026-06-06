@@ -464,7 +464,7 @@ wheels = [
 
 [[package]]
 name = "blueprints-updater"
-version = "2.7.2"
+version = "2.7.3"
 source = { virtual = "." }
 
 [package.dev-dependencies]
