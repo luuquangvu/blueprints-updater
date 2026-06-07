@@ -89,6 +89,7 @@ async def test_update_entities_lifecycle(hass):
     tasks_created = []
 
     def _async_create_task(coro, name=None):
+        """Create async task helper."""
         task = asyncio.create_task(coro)
         tasks_created.append(task)
         return task

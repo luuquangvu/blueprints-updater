@@ -229,6 +229,7 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
     prov_path = "custom_components.blueprints_updater.providers"
 
     async def _async_get(*args, **kwargs):
+        """Mock HTTP get request handler."""
         return mock_resp
 
     with patch(f"{coord_path}.get_async_client") as mock_client:

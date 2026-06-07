@@ -155,6 +155,7 @@ async def test_prune_metadata_persistence(coordinator, mock_makedirs):
     tasks = []
 
     def create_background_task(coro, name=None):
+        """Create test background task."""
         task = asyncio.create_task(coro)
         tasks.append(task)
         return task

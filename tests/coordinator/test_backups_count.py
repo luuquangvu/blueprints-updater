@@ -51,6 +51,7 @@ async def _setup_restore_test_context(hass, entry, coordinator_mock):
     from custom_components.blueprints_updater.__init__ import async_setup, async_setup_entry
 
     def _setup_test_coordinator(h, entry_id, coord):
+        """Set up test coordinator in hass data."""
         h.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})[entry_id] = coord
 
     _setup_test_coordinator(hass, entry.entry_id, coordinator_mock)

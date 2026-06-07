@@ -41,22 +41,22 @@ jobs:
         run: uv sync --all-groups
 
       - name: Run Ruff
-        run: uv run ruff check
+        run: uv run --no-project ruff check
 
       - name: Run Ruff Format
-        run: uv run ruff format --check
+        run: uv run --no-project ruff format --check
 
       - name: Run Ty Check
-        run: uv run ty check
+        run: uv run --no-project ty check
 
       - name: Run Pyright
-        run: uv run pyright
+        run: uv run --no-project pyright
 
       - name: Run Interrogate
-        run: uv run interrogate
+        run: uv run --no-project interrogate
 
       - name: Run Tests
-        run: uv run pytest
+        run: uv run --no-project pytest
 
   setup-matrix:
     runs-on: ubuntu-latest

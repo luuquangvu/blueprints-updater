@@ -96,6 +96,7 @@ async def test_auto_update_proceeds_when_risks_and_no_consumers(
     _prepare_blueprint_entry(coordinator, blueprint_path)
 
     async def mock_install(path, *args, **kwargs):
+        """Mock installation helper."""
         if coordinator.data and path in coordinator.data:
             coordinator.data[path].update(
                 {
@@ -144,6 +145,7 @@ async def test_async_summarize_risks_formatting_and_translation_fallback(coordin
     translated_keys = []
 
     async def fake_async_translate(key, **kwargs):
+        """Fake async translation helper."""
         translated_keys.append(key)
         return f"translated:{key}"
 
