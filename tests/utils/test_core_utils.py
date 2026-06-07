@@ -276,6 +276,7 @@ async def test_utils_behavior():
     mock_calls = 0
 
     async def mock_func(*args, **kwargs):
+        """Mock failure function."""
         nonlocal mock_calls
         mock_calls += 1
         raise RuntimeError("Fail")

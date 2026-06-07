@@ -79,5 +79,5 @@ typeCheckingMode = "standard"
 
 [tool.interrogate]
 fail-under = 100
-ignore_nested_functions = true
-exclude = ["tests", "scratch"]
+ignore-nested-functions = true
+exclude = ["scratch"]

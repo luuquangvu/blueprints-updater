@@ -45,6 +45,7 @@ async def test_scan_blueprints(coordinator, mock_makedirs):
     invalid_path = os.path.join(base_path, "not_a_domain")
 
     def mock_open_side_effect(path, *args, **kwargs):
+        """Mock open side effect helper."""
         if "test.yaml" in path:
             return mock_open(
                 read_data="blueprint:\n  name: Auto YAML\n  domain: automation\n  source_url: https://example.com/a.yaml\n"
@@ -117,6 +118,7 @@ async def test_scan_blueprints_domain_extraction(coordinator, mock_makedirs):
     sub_auto_path = os.path.join(base_path, DOMAIN_AUTOMATION, "luuquangvu")
 
     def mock_open_side_effect_extraction(path, *args, **kwargs):
+        """Mock open side effect extraction helper."""
         if "a.yaml" in path:
             return mock_open(
                 read_data="blueprint:\n  name: Test\n  source_url: https://example.com/blueprint1.yaml\n"
@@ -224,6 +226,7 @@ async def test_async_update_data_partial_failure(coordinator, mock_makedirs):
     }
 
     def mock_fetch(session, path, url, cdn_url, *args, **kwargs):
+        """Mock fetch content helper."""
         if url == url1:
             return (
                 f"blueprint:\n  name: OK\n  domain: automation\n  source_url: {url1}\n",
@@ -359,6 +362,7 @@ async def test_async_update_data_auto_update_multiple_sorted(
     }
 
     def mock_fetch(session, path, url, cdn_url, *args, **kwargs):
+        """Mock fetch content helper for multiple files."""
         if url == u1:
             return (c1, "e1", None)
         return (c2, "e2", None) if url == u2 else (None, None, None)
@@ -425,6 +429,7 @@ async def test_async_background_refresh_concurrency_and_cancellation(
     workers_ready = asyncio.Condition()
 
     async def mock_update_in_place(*args, **kwargs):
+        """Mock update in place helper."""
         nonlocal active_workers, max_observed_concurrency, processed_count
         async with workers_ready:
             active_workers += 1
