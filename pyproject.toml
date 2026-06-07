@@ -63,7 +63,10 @@ indent-style = "space"
 asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
-filterwarnings = ["ignore::DeprecationWarning"]
+filterwarnings = [
+  "ignore::DeprecationWarning",
+  "ignore::pytest.PytestDeprecationWarning",
+]
 addopts = [
   "--quiet",
   "--cov=custom_components",
