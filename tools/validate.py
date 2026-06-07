@@ -178,6 +178,25 @@ def _print_npm_dependency_update_notice(
     return True
 
 
+def _print_process_output_summary(
+    label: str,
+    completed_process: subprocess.CompletedProcess[str],
+) -> None:
+    """Print shortened stdout and stderr of a completed process for synchronization checks."""
+    if completed_process.stdout:
+        print(f"{label} stdout:", flush=True)
+        print(
+            textwrap.shorten(completed_process.stdout, width=150, placeholder="..."),
+            flush=True,
+        )
+    if completed_process.stderr:
+        print(f"{label} stderr:", flush=True)
+        print(
+            textwrap.shorten(completed_process.stderr, width=150, placeholder="..."),
+            flush=True,
+        )
+
+
 def _run_pipeline() -> None:
     """Execute the full validation pipeline.
 
@@ -208,6 +227,7 @@ def _run_pipeline() -> None:
         )
         if sync_check.returncode != 0:
             print("Environment is out of sync. Running 'uv sync --all-groups'", flush=True)
+            _print_process_output_summary("uv sync --check", sync_check)
             subprocess.run(["uv", "sync", "--all-groups"], check=True, cwd=repo_root)
         else:
             print("Environment is already synchronized.", flush=True)
@@ -223,6 +243,7 @@ def _run_pipeline() -> None:
         )
         if npm_check.returncode != 0:
             print("NPM packages are out of sync. Running 'npm ci'", flush=True)
+            _print_process_output_summary("npm ls", npm_check)
             subprocess.run(["npm", "ci"], check=True, cwd=repo_root)
         else:
             print("NPM packages are already synchronized.", flush=True)
