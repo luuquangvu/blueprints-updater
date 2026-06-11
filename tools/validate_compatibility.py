@@ -95,20 +95,20 @@ def _validate_version_label(label_name: str, label_value: str) -> str:
 
 
 def _ensure_within_root(root_path: str, candidate_path: str) -> str:
-    """Return canonical candidate path only if it is contained in canonical root_path.
+    """Return safe absolute path only if candidate resides within root_path.
 
-    Uses os.path.abspath and startswith in a specific pattern recognized by
-    CodeQL as a robust path injection sanitizer.
+    SECURITY: Resolves the root via os.path.realpath (symlink-safe), joins
+       with the cleaned path, normalizes via os.path.normpath, and
+       verifies containment via startswith.
+
+    Returns the safe absolute path or raises ValueError.
     """
-    root = os.path.abspath(root_path)
-    candidate = os.path.abspath(candidate_path)
+    root = os.path.realpath(root_path)
+    fullpath = os.path.realpath(os.path.normpath(os.path.join(root, candidate_path)))
 
-    if candidate == root:
-        return candidate
-
-    if not candidate.startswith(root + os.sep):
-        raise ValueError(f"Resolved path {candidate!r} escapes allowed root {root!r}.")
-    return candidate
+    if fullpath != root and not fullpath.startswith(root + os.sep):
+        raise ValueError(f"Resolved path {fullpath!r} escapes allowed root {root!r}.")
+    return fullpath
 
 
 def _get_latest_ha_version() -> str:
