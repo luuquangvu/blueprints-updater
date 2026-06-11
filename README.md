@@ -182,7 +182,9 @@ The system automatically validates content, extracts metadata, and generates a s
 
 ## Requirements
 
-For a blueprint to be trackable, it **must** contain a valid `source_url` within its metadata:
+- **Home Assistant** `>= 2024.12.0`
+- The integration requires the `blueprint` domain and depends on `automation`, `script`, `template` being available.
+- For a blueprint to be trackable, it **must** contain a valid `source_url` within its metadata:
 
 ```yaml
 blueprint:
