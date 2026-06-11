@@ -464,7 +464,7 @@ wheels = [
 
 [[package]]
 name = "blueprints-updater"
-version = "2.7.3"
+version = "2.7.4"
 source = { virtual = "." }
 dependencies = [
     { name = "httpx", extra = ["http2"] },
