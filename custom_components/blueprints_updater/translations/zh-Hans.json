@@ -137,19 +137,19 @@
     "invalid_yaml": {
       "message": "导入的文件不是有效的 YAML 蓝图。"
     },
-    "empty_content": {
+    "empty_blueprint_content": {
       "message": "收到的内容为空"
     },
-    "fetch_error": {
+    "fetch_blueprint_error": {
       "message": "获取错误：{error}"
     },
-    "unsafe_url": {
+    "unsafe_blueprint_url": {
       "message": "不安全的 URL：{url}"
     },
-    "unsafe_path": {
+    "unsafe_blueprint_path": {
       "message": "目标路径不安全：{path}"
     },
-    "validation_error": {
+    "blueprint_validation_error": {
       "message": "验证错误：{error}"
     },
     "import_invalid_source_type": {

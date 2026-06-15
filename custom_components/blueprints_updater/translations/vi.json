@@ -137,19 +137,19 @@
     "invalid_yaml": {
       "message": "Tệp được nhập không phải là một blueprint YAML hợp lệ."
     },
-    "empty_content": {
+    "empty_blueprint_content": {
       "message": "Nội dung nhận được bị trống"
     },
-    "fetch_error": {
+    "fetch_blueprint_error": {
       "message": "Lỗi tải xuống: {error}"
     },
-    "unsafe_url": {
+    "unsafe_blueprint_url": {
       "message": "URL không an toàn: {url}"
     },
-    "unsafe_path": {
+    "unsafe_blueprint_path": {
       "message": "Đường dẫn mục tiêu không an toàn: {path}"
     },
-    "validation_error": {
+    "blueprint_validation_error": {
       "message": "Lỗi xác thực: {error}"
     },
     "import_invalid_source_type": {

@@ -375,7 +375,7 @@ def test_validate_blueprint_schema_error(coordinator):
         data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
     )
     assert result is not None
-    assert "validation_error" in result
+    assert "blueprint_validation_error" in result
 
 
 def test_validate_blueprint_missing_key(coordinator):

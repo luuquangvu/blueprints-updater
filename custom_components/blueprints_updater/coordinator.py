@@ -12,7 +12,6 @@ import random
 import shutil
 import socket
 import time
-from collections import OrderedDict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
@@ -171,9 +170,19 @@ class GitDiffResult:
     is_semantic_sync: bool
 
 
+MAX_HOSTNAME_CACHE_SIZE = 1024
+"""Maximum number of entries in the safe hostname cache per refresh cycle."""
+
+
 @lru_cache(maxsize=512)
 def _count_backups_sync_helper(file_path: str, max_bak: int) -> int:
-    """Count the number of existing backup files for a given blueprint path."""
+    """Count the number of existing backup files for a given blueprint path.
+
+    Note: This function uses ``@lru_cache`` keyed on ``(file_path, max_bak)``.
+    The cache is cleared at the start of ``scan_blueprints`` and after
+    ``_rotate_backups``, but other code paths (e.g. ``async_check_backup_exists``)
+    may see stale counts if backups are manually added or removed between clears.
+    """
     count = 0
     for i in range(1, max_bak + 1):
         bak_path = BlueprintUpdateCoordinator._get_backup_path(file_path, i)
@@ -233,6 +242,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
         self.data: dict[str, dict[str, Any]] = {}
         self._translations: dict[tuple[str, str], dict[str, str]] = {}
+        self._translation_index: dict[str, dict[str, str]] = {}
+        self._indexed_translation_keys: set[tuple[str, str]] = set()
         self.hass.data.setdefault(DOMAIN, {}).setdefault("translation_cache", {})
         self._translation_lock = asyncio.Lock()
         self._background_task: asyncio.Task | None = None
@@ -242,6 +253,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY_DATA)
         self._persisted_metadata: dict[str, dict[str, Any]] = {}
         self._safe_hostname_cache: dict[str, bool] = {}
+        self._max_hostname_cache_size = MAX_HOSTNAME_CACHE_SIZE
         self._safe_hostname_lock = asyncio.Lock()
         self._blueprint_validate_lock = asyncio.Lock()
         self._first_update_done = False
@@ -262,6 +274,58 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         _LOGGER.debug("Clearing translations for Blueprints Updater coordinator")
         self._translations = {}
+        self._translation_index = {}
+        self._indexed_translation_keys = set()
+
+    @staticmethod
+    def _build_translation_index(loaded: dict[str, str], language: str) -> dict[str, str]:
+        """Build a flat key→template index from loaded translations.
+
+        Extracts translation keys from all categories by stripping the
+        ``component.{DOMAIN}.{category}.`` prefix (and optional ``.message``
+        suffix), yielding a direct O(1) lookup dictionary.
+
+        Args:
+            loaded: Raw translation dict from async_get_translations.
+            language: Language code (for debug logging).
+
+        Returns:
+            A dict mapping translation keys to their template strings.
+
+        """
+        index: dict[str, str] = {}
+        prefix = f"component.{DOMAIN}."
+        for full_key, template in loaded.items():
+            if not isinstance(template, str) or not full_key.startswith(prefix):
+                continue
+            suffix = full_key[len(prefix) :]
+            parts = suffix.split(".", 1)
+            if len(parts) != 2:
+                continue
+            category = parts[0]
+            key = parts[1]
+            if key.endswith(".message"):
+                key = key[:-8]
+            if key not in index:
+                index[key] = template
+            else:
+                _LOGGER.warning(
+                    "Translation key collision for language=%s: key=%r "
+                    "already indexed (previous=%r, new=%r in category=%r). "
+                    "First-loaded value wins; rename one of the keys to "
+                    "avoid ambiguity.",
+                    language,
+                    key,
+                    index[key],
+                    template,
+                    category,
+                )
+        _LOGGER.debug(
+            "Built translation index for %s with %d keys",
+            language,
+            len(index),
+        )
+        return index
 
     async def async_setup(self) -> None:
         """Load persisted data from storage.
@@ -299,8 +363,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     async def async_translate(self, key: str, category: str = "common", **kwargs: Any) -> str:
         """Translate a key using the current language and category.
 
-        This method is a wrapper around async_get_translations that provides
-        a more convenient API and better error handling for startup race conditions.
+        This method builds a unified translation index across all loaded
+        categories so every lookup is a single O(1) dict access.  The index
+        is built and read inside the translation lock to prevent races
+        between concurrent loaders for the same language.
+
+        A tracking set (``_indexed_translation_keys``) eliminates redundant
+        per-call index rebuilds: each ``(language, category)`` entry is
+        indexed exactly once, on first access.
 
         Args:
             key: Translation key.
@@ -325,12 +395,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                             self.hass, language, category, [DOMAIN]
                         )
                         self._translations[cache_key] = loaded or {}
-                        if loaded:
-                            _LOGGER.debug(
-                                "Successfully loaded translations for language: %s, category: %s",
-                                language,
-                                category,
-                            )
                     except (OSError, ValueError) as err:
                         _LOGGER.debug(
                             "Could not load translations for %s (%s) for language %s: %s",
@@ -341,45 +405,35 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         )
                         self._translations[cache_key] = {}
 
-        translations = self._translations.get(cache_key, {})
+                loaded = self._translations[cache_key]
+                if loaded and cache_key not in self._indexed_translation_keys:
+                    language_index = self._translation_index.setdefault(language, {})
+                    language_index.update(self._build_translation_index(loaded, language))
+                    self._indexed_translation_keys.add(cache_key)
+                    _LOGGER.debug(
+                        "Successfully loaded translations for language: %s, category: %s",
+                        language,
+                        category,
+                    )
 
-        search_categories = [category]
-        extra_cats = [
-            "common",
-            "exceptions",
-            "selector",
-            "title",
-            "config",
-            "options",
-            "services",
-            "entity",
-            "device",
-            "device_automation",
-            "entity_component",
-            "issues",
-        ]
-        for cat in extra_cats:
-            if cat not in search_categories:
-                search_categories.append(cat)
+        language_index = self._translation_index.setdefault(language, {})
+        for (lang, _cat), loaded in self._translations.items():
+            cache = (lang, _cat)
+            if lang == language and loaded and cache not in self._indexed_translation_keys:
+                language_index.update(self._build_translation_index(loaded, language))
+                self._indexed_translation_keys.add(cache)
 
-        template = None
-        for cat in search_categories:
-            full_key = f"component.{DOMAIN}.{cat}.{key}"
-            template = translations.get(f"{full_key}.message") or translations.get(full_key)
-            if template:
-                break
-
+        template = language_index.get(key)
         if not template:
             template = key
-            _LOGGER.debug("Translation key not found: %s in search path %s", key, search_categories)
+            _LOGGER.debug("Translation key not found: %s", key)
 
         try:
             return template.format(**kwargs) if kwargs else template
         except (KeyError, ValueError, IndexError) as err:
             _LOGGER.debug(
-                "Error formatting translation for key %s in categories %s: %s",
+                "Error formatting translation for key %s: %s",
                 key,
-                search_categories,
                 err,
             )
             return template
@@ -557,7 +611,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             results: The newly initialized results dictionary to update.
 
         """
-        if not self.data:
+        if self.data is None or not self.data:
             for info in results.values():
                 if remote_hash := info.get("remote_hash"):
                     prev_url = info.get("persisted_source_url")
@@ -924,19 +978,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         current_data_map = {
             i["relative_path"]: i for i in self.data.values() if i.get("relative_path")
         }
-        candidate_metadata = {
-            rel: self._persisted_metadata.get(rel, {}) for rel in all_relative_paths
-        }
-
+        candidate_metadata = {}
         for relative_path in all_relative_paths:
-            existing = dict(candidate_metadata.get(relative_path, {}))
+            existing = dict(self._persisted_metadata.get(relative_path, {}))
             if info := current_data_map.get(relative_path):
-                existing |= {
-                    "remote_hash": info.get("remote_hash"),
-                    "etag": info.get("etag"),
-                    "last_modified": info.get("last_modified"),
-                    "source_url": info.get("source_url"),
-                }
+                for field in ("remote_hash", "etag", "last_modified", "source_url"):
+                    existing[field] = info.get(field)
             candidate_metadata[relative_path] = existing
 
         if not skip_filter:
@@ -977,10 +1024,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     def _has_meaningful_metadata(entry: dict[str, Any]) -> bool:
         """Return True if this metadata entry has any meaningful value set.
 
-        We explicitly check known fields instead of relying on truthiness of all values,
-        so that future falsy-but-meaningful values (e.g. 0 or False) are not discarded.
+        Uses ``is not None`` checks rather than truthiness so that falsy-but-
+        meaningful values (empty strings, 0, False) are not discarded.
         """
-        return any(entry.get(field) for field in METADATA_STORAGE_FIELDS)
+        return any(entry.get(field) is not None for field in METADATA_STORAGE_FIELDS)
 
     @staticmethod
     def _get_client_kwargs() -> dict[str, Any]:
@@ -1082,7 +1129,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 redact_url(source_url),
                 err,
             )
-            return f"validation_error|{sanitize_error_detail(str(err))}"
+            return f"blueprint_validation_error|{sanitize_error_detail(str(err))}"
         return None
 
     def _get_functional_domain(
@@ -1169,7 +1216,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not await self._is_safe_url(url):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
-                translation_key="unsafe_url",
+                translation_key="unsafe_blueprint_url",
                 translation_placeholders={"url": redact_url(url)},
             )
 
@@ -1184,7 +1231,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not await self._is_safe_url(canonical_url):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
-                translation_key="unsafe_url",
+                translation_key="unsafe_blueprint_url",
                 translation_placeholders={"url": redact_url(canonical_url)},
             )
 
@@ -1208,14 +1255,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if not content:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
-                    translation_key="empty_content",
+                    translation_key="empty_blueprint_content",
                 )
         except (httpx.HTTPError, HomeAssistantError) as err:
             if isinstance(err, ServiceValidationError):
                 raise
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
-                translation_key="fetch_error",
+                translation_key="fetch_blueprint_error",
                 translation_placeholders={"error": str(err)},
             ) from err
 
@@ -1226,7 +1273,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         except (KeyError, TypeError, ValueError) as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
-                translation_key="fetch_error",
+                translation_key="fetch_blueprint_error",
                 translation_placeholders={"error": f"Malformed metadata: {err}"},
             ) from err
 
@@ -1255,7 +1302,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not self._is_safe_path(full_path):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
-                translation_key="unsafe_path",
+                translation_key="unsafe_blueprint_path",
                 translation_placeholders={"path": rel_path},
             )
 
@@ -1576,6 +1623,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "etag": final_etag,
                 "last_modified": final_last_modified,
                 "backups_count": new_backups_count,
+                "_cached_git_diff": None,
             }
 
             if self.data and path in self.data:
@@ -1699,9 +1747,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         hostname = hostname.rstrip(".").lower()
 
-        for tld in SPECIAL_USE_TLDS:
-            if hostname == tld or hostname.endswith("." + tld):
-                return False
+        if hostname in SPECIAL_USE_TLDS:
+            return False
+        if any(hostname.endswith("." + tld) for tld in SPECIAL_USE_TLDS):
+            return False
 
         if hostname in self._safe_hostname_cache:
             return self._safe_hostname_cache[hostname]
@@ -1711,7 +1760,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 return self._safe_hostname_cache[hostname]
 
             result = await self._perform_safe_hostname_check(hostname)
-            self._safe_hostname_cache[hostname] = result
+            if len(self._safe_hostname_cache) < self._max_hostname_cache_size:
+                self._safe_hostname_cache[hostname] = result
             return result
 
     async def _perform_safe_hostname_check(self, hostname: str) -> bool:
@@ -1895,7 +1945,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A dictionary mapping input names to their properties (mandatory, selector).
         """
         try:
-            data = yaml_util.parse_yaml(content)
+            content_to_parse = BlueprintUpdateCoordinator._extract_blueprint_text(content)
+            try:
+                data = yaml_util.parse_yaml(content_to_parse)
+            except HomeAssistantError:
+                data = yaml_util.parse_yaml(content)
             if (
                 not isinstance(data, dict)
                 or "blueprint" not in data
@@ -2115,7 +2169,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A list of unique structured risks.
 
         """
-        seen: set[tuple[BlueprintRiskType, str]] = set()
+        seen: set[tuple[BlueprintRiskType, bytes]] = set()
         unique_risks: list[StructuredRisk] = []
         for risk in risks:
             if not isinstance(risk, dict) or "type" not in risk or "args" not in risk:
@@ -2124,7 +2178,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             key = (
                 risk["type"],
-                orjson.dumps(risk["args"], option=orjson.OPT_SORT_KEYS).decode("utf-8"),
+                orjson.dumps(risk["args"], option=orjson.OPT_SORT_KEYS),
             )
             if key not in seen:
                 seen.add(key)
@@ -2356,8 +2410,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         Returns:
             A formatted string with bullet points for each risk.
         """
-        lines = []
-        for risk in risks:
+
+        async def _translate_risk(risk: StructuredRisk) -> str:
+            """Translate a single risk to a bullet-point string."""
             rtype = risk.get("type", BlueprintRiskType.SYSTEM_ERROR)
             rargs = dict(risk.get("args", {}))
 
@@ -2374,7 +2429,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     translation_key, type=str(rtype), **cast(Any, rargs)
                 )
 
-            lines.append(f"- {msg}")
+            return f"- {msg}"
+
+        lines = await asyncio.gather(*[_translate_risk(r) for r in risks])
         return "\n".join(lines)
 
     def _get_entities_using_blueprint(self, relative_path: str) -> list[str]:
@@ -3285,7 +3342,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         current_url = url
         current_headers = headers.copy()
 
-        for redirect_count in range(21):
+        max_redirects = 20
+        for _redirect_attempt in range(max_redirects):
             response = await session.get(
                 current_url,
                 headers=current_headers,
@@ -3300,10 +3358,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 verify_https_enforcement(response, url)
                 response.raise_for_status()
                 return response
-
-            if redirect_count >= 20:
-                _LOGGER.error("Too many redirects fetching %s", redact_url(url))
-                raise httpx.HTTPError("Too many redirects")
 
             next_url = response.headers.get("Location")
             if not next_url:
@@ -3324,7 +3378,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 if k.lower() in ("if-none-match", "if-modified-since")
             }
 
-        _LOGGER.error("Redirect loop exceeded range without raising")
+        _LOGGER.error("Too many redirects (%d) fetching %s", max_redirects, redact_url(url))
         raise httpx.HTTPError("Too many redirects")
 
     @staticmethod
@@ -3402,6 +3456,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         1. Strips UTF-8 Byte Order Mark (BOM).
         2. Normalizes all line endings to Unix style (\n).
 
+        A fast-path is used when the content is already normalized,
+        avoiding unnecessary string operations.
+
         Args:
             content: Raw YAML content string.
 
@@ -3409,6 +3466,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             Normalized YAML content.
 
         """
+        if "\r" not in content and not content.startswith("\ufeff"):
+            return content
+
         if content.startswith("\ufeff"):
             content = content[1:]
 
@@ -3466,6 +3526,48 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return BLUEPRINT_SCHEMA
 
     @staticmethod
+    @lru_cache(maxsize=4096)
+    def _ensure_source_url_cached(content: str, source_url: str) -> str:
+        """Cached implementation of _ensure_source_url.
+
+        Assumes content and source_url are both strings.
+        """
+        source_url = source_url.strip()
+
+        try:
+            parsed = yaml_util.parse_yaml(content)
+        except HomeAssistantError:
+            parsed = None
+
+        if not isinstance(parsed, dict) or "blueprint" not in parsed:
+            return BlueprintUpdateCoordinator._normalize_content(content)
+
+        blueprint_info = parsed["blueprint"]
+        if not isinstance(blueprint_info, dict):
+            return BlueprintUpdateCoordinator._normalize_content(content)
+
+        blueprint_info["source_url"] = source_url
+
+        target_data = parsed
+        try:
+            domain = blueprint_info.get("domain", DOMAIN_AUTOMATION)
+            schema = BlueprintUpdateCoordinator._get_blueprint_schema(domain)
+            normalized = schema(parsed)
+            target_data = BlueprintUpdateCoordinator._stabilize_yaml_structure(parsed, normalized)
+        except (vol.Invalid, KeyError, TypeError, ValueError) as err:
+            _LOGGER.debug(
+                "Semantic normalization skipped for %s (falling back to canonical YAML): %s",
+                redact_url(source_url),
+                err,
+            )
+
+        try:
+            return yaml_util.dump(target_data)
+        except (HomeAssistantError, yaml.YAMLError, TypeError, ValueError) as err:
+            _LOGGER.warning("YAML canonicalization failed for %s: %s", redact_url(source_url), err)
+            return BlueprintUpdateCoordinator._normalize_content(content)
+
+    @staticmethod
     def _ensure_source_url(content: str, source_url: str) -> str:
         """Ensure the target source_url is present in the blueprint metadata.
 
@@ -3500,50 +3602,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             return BlueprintUpdateCoordinator._normalize_content(content)
 
-        try:
-            parsed = yaml_util.parse_yaml(content)
-        except HomeAssistantError:
-            parsed = None
-
-        if not isinstance(parsed, dict) or "blueprint" not in parsed:
-            return BlueprintUpdateCoordinator._normalize_content(content)
-
-        blueprint_info = parsed["blueprint"]
-        if not isinstance(blueprint_info, dict):
-            return BlueprintUpdateCoordinator._normalize_content(content)
-
-        source_url = source_url.strip()
-        blueprint_info["source_url"] = source_url
-
-        target_data = parsed
-        try:
-            domain = blueprint_info.get("domain", DOMAIN_AUTOMATION)
-            schema = BlueprintUpdateCoordinator._get_blueprint_schema(domain)
-            normalized = schema(parsed)
-            target_data = BlueprintUpdateCoordinator._stabilize_yaml_structure(parsed, normalized)
-        except (vol.Invalid, KeyError, TypeError, ValueError) as err:
-            _LOGGER.debug(
-                "Semantic normalization skipped for %s (falling back to canonical YAML): %s",
-                redact_url(source_url),
-                err,
-            )
-
-        try:
-            return yaml_util.dump(target_data)
-        except (HomeAssistantError, yaml.YAMLError, TypeError, ValueError) as err:
-            _LOGGER.warning("YAML canonicalization failed for %s: %s", redact_url(source_url), err)
-            return BlueprintUpdateCoordinator._normalize_content(content)
+        return BlueprintUpdateCoordinator._ensure_source_url_cached(content, source_url)
 
     @staticmethod
     def _stabilize_yaml_structure(original: Any, normalized: Any) -> Any:
         """Stabilize YAML structure by merging normalized data into original order.
 
         Args:
-            original: The original OrderedDict from parsing.
+            original: The original dict from parsing.
             normalized: The dictionary returned by the schema.
 
         Returns:
-            A new OrderedDict with preserved order and deterministic new keys.
+            A dict with preserved order and deterministic new keys.
 
         """
         if original is not None and not (
@@ -3552,7 +3622,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return normalized
 
         if isinstance(normalized, dict):
-            res = OrderedDict()
+            res: dict[str, Any] = {}
             orig_dict = original if isinstance(original, dict) else {}
 
             for key in orig_dict:
@@ -3570,7 +3640,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return res
 
         if isinstance(normalized, list):
-            res_list = []
+            res_list: list[Any] = []
             orig_list = original if isinstance(original, list) else []
 
             for i, item in enumerate(normalized):
@@ -3613,6 +3683,22 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
 
     @staticmethod
+    def _extract_blueprint_text(content: str) -> str:
+        """Extract only the blueprint block text to avoid parsing huge YAMLs."""
+        lines = content.splitlines(keepends=True)
+        blueprint_lines: list[str] = []
+        in_blueprint = False
+        for line in lines:
+            if line.startswith("blueprint:"):
+                in_blueprint = True
+                blueprint_lines.append(line)
+            elif in_blueprint:
+                if line.strip() and line[0] not in (" ", "\t", "#"):
+                    break
+                blueprint_lines.append(line)
+        return "".join(blueprint_lines) if in_blueprint else content
+
+    @staticmethod
     def _get_blueprint_block(
         path: str,
         content: str | None = None,
@@ -3621,12 +3707,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """Extract the blueprint block from YAML content or pre-parsed data."""
         parsed = parsed_data
         if not parsed and content:
+            content_to_parse = BlueprintUpdateCoordinator._extract_blueprint_text(content)
             try:
-                parsed = yaml_util.parse_yaml(content)
-            except HomeAssistantError as err:
-                _LOGGER.warning("Failed to parse blueprint at %s", path)
-                _LOGGER.debug("Blueprint parse error at %s: %s", path, err)
-                return None
+                parsed = yaml_util.parse_yaml(content_to_parse)
+            except HomeAssistantError:
+                try:
+                    parsed = yaml_util.parse_yaml(content)
+                except HomeAssistantError as err:
+                    _LOGGER.warning("Failed to parse blueprint at %s", path)
+                    _LOGGER.debug("Blueprint parse error at %s: %s", path, err)
+                    return None
 
         if not isinstance(parsed, dict):
             _LOGGER.debug(

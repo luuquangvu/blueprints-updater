@@ -64,7 +64,7 @@ async def test_async_import_blueprint_rejects_unsafe_canonical_url(coordinator):
     ):
         await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
-    assert err.value.translation_key == "unsafe_url"
+    assert err.value.translation_key == "unsafe_blueprint_url"
 
 
 @pytest.mark.asyncio
@@ -82,7 +82,7 @@ async def test_async_import_blueprint_rejects_empty_provider_content(coordinator
     ):
         await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
-    assert err.value.translation_key == "empty_content"
+    assert err.value.translation_key == "empty_blueprint_content"
     provider.get_metadata.assert_not_called()
 
 
@@ -102,7 +102,7 @@ async def test_async_import_blueprint_wraps_fetch_errors(coordinator):
     ):
         await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
-    assert err.value.translation_key == "fetch_error"
+    assert err.value.translation_key == "fetch_blueprint_error"
     assert err.value.translation_placeholders == {"error": "network down"}
 
 
@@ -126,7 +126,7 @@ async def test_async_import_blueprint_rejects_malformed_provider_metadata(coordi
     ):
         await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
-    assert err.value.translation_key == "fetch_error"
+    assert err.value.translation_key == "fetch_blueprint_error"
     placeholders = err.value.translation_placeholders
     assert placeholders is not None
     assert "Malformed metadata" in placeholders["error"]
@@ -200,7 +200,7 @@ async def test_async_import_blueprint_rejects_unsafe_destination_path(coordinato
     ):
         await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
-    assert err.value.translation_key == "unsafe_path"
+    assert err.value.translation_key == "unsafe_blueprint_path"
 
 
 @pytest.mark.asyncio
@@ -279,11 +279,11 @@ async def test_async_import_blueprint_surfaces_blueprint_validation_error(coordi
             AsyncMock(return_value=IMPORTED_BLUEPRINT),
         ),
         patch.object(
-            coordinator, "_validate_blueprint", return_value="validation_error|bad schema"
+            coordinator, "_validate_blueprint", return_value="blueprint_validation_error|bad schema"
         ),
         pytest.raises(ServiceValidationError) as err,
     ):
         await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
-    assert err.value.translation_key == "validation_error"
+    assert err.value.translation_key == "blueprint_validation_error"
     assert err.value.translation_placeholders == {"error": "bad schema"}
