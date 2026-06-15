@@ -141,7 +141,7 @@ async def test_process_blueprint_content_error_handling(coordinator):
             [],
             set(),
         )
-        assert coordinator.data[path3]["last_error"].startswith("validation_error|")
+        assert coordinator.data[path3]["last_error"].startswith("blueprint_validation_error|")
         assert "Mock Schema Failure" in coordinator.data[path3]["last_error"]
 
 

@@ -137,19 +137,19 @@
     "invalid_yaml": {
       "message": "Den importerade filen är inte en giltig YAML-blueprint."
     },
-    "empty_content": {
+    "empty_blueprint_content": {
       "message": "Tomt innehåll mottogs"
     },
-    "fetch_error": {
+    "fetch_blueprint_error": {
       "message": "Hämtningsfel: {error}"
     },
-    "unsafe_url": {
+    "unsafe_blueprint_url": {
       "message": "Osäker URL: {url}"
     },
-    "unsafe_path": {
+    "unsafe_blueprint_path": {
       "message": "Målsökvägen är osäker: {path}"
     },
-    "validation_error": {
+    "blueprint_validation_error": {
       "message": "Valideringsfel: {error}"
     },
     "import_invalid_source_type": {

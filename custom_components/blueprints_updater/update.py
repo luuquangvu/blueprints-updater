@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import inspect
 import logging
 from functools import cached_property
 from typing import Any, ClassVar
@@ -383,19 +382,25 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 attrs["breaking_risks"] = risks
         return attrs
 
-    _cached_property_names_by_class: ClassVar[dict[type, list[str]]] = {}
+    _CACHED_PROPERTY_NAMES: ClassVar[tuple[str, ...]] = (
+        "auto_update",
+        "provider_type",
+        "domain",
+        "relative_path",
+        "blueprint_id",
+        "installed_version",
+        "latest_version",
+    )
 
     @callback
     def _clear_cached_properties(self) -> None:
-        """Invalidate cached properties after state changes."""
-        cls = self.__class__
-        if cls not in self._cached_property_names_by_class:
-            self._cached_property_names_by_class[cls] = [
-                name
-                for name, _ in inspect.getmembers(cls, lambda x: isinstance(x, cached_property))
-            ]
+        """Invalidate cached properties after state changes.
 
-        for name in self._cached_property_names_by_class[cls]:
+        Uses a hardcoded tuple of cached-property names instead of runtime
+        introspection via ``inspect.getmembers`` to avoid the import cost
+        of ``inspect`` in this module.
+        """
+        for name in self._CACHED_PROPERTY_NAMES:
             with contextlib.suppress(AttributeError):
                 delattr(self, name)
 

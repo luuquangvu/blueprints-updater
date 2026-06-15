@@ -51,15 +51,43 @@ def _replace_path_segment(url: str, raw_marker: str, from_seg: str, to_seg: str)
     if not path_parts or path_parts == [""]:
         return url
 
+    if len(path_parts) < 3:
+        return url
+
+    path_parts_lower = [p.lower() for p in path_parts]
+
     for i in range(2, len(path_parts)):
-        current_parts_lower = [p.lower() for p in path_parts[i:]]
-        if i + raw_len <= len(path_parts) and current_parts_lower[:raw_len] == raw_parts:
+        if i + raw_len <= len(path_parts) and path_parts_lower[i : i + raw_len] == raw_parts:
             return url
-        if i + from_len <= len(path_parts) and current_parts_lower[:from_len] == from_parts:
+        if i + from_len <= len(path_parts) and path_parts_lower[i : i + from_len] == from_parts:
             new_parts = path_parts[:i] + to_parts + path_parts[i + from_len :]
             return urlunparse(parsed._replace(path="/" + "/".join(new_parts)))
 
     return url
+
+
+def _strip_yaml_extension(filename: str) -> str:
+    """Strip .yaml or .yml extension from a filename, preserving original case."""
+    lower = filename.lower()
+    if lower.endswith(".yaml"):
+        return filename[:-5]
+    if lower.endswith(".yml"):
+        return filename[:-4]
+    return filename
+
+
+def _default_url_metadata(url: str) -> dict[str, str]:
+    """Extract default metadata (author, name) from a URL.
+
+    Shared by GitLab, Codeberg, Bitbucket, and GenericProvider for
+    consistent hostname-based author extraction and filename-based naming.
+    """
+    parsed = urlparse(url)
+    author = parsed.hostname.lower() if parsed.hostname else "imported"
+    path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+    filename = path_parts[-1] if path_parts else "blueprint.yaml"
+    name = _strip_yaml_extension(filename)
+    return {"author": author, "name": name}
 
 
 class SourceProvider(ABC):
@@ -141,11 +169,7 @@ class GitHubProvider(SourceProvider):
         path_parts = parsed.path.strip("/").split("/")
         author = path_parts[0] if len(path_parts) > 0 else "unknown"
         filename = path_parts[-1] if len(path_parts) > 0 else "blueprint.yaml"
-        name = (
-            filename[:-5]
-            if filename.lower().endswith(".yaml")
-            else (filename[:-4] if filename.lower().endswith(".yml") else filename)
-        )
+        name = _strip_yaml_extension(filename)
         return {"author": author, "name": name}
 
     def get_cdn_url(self, url: str) -> str | None:
@@ -239,11 +263,7 @@ class GistProvider(SourceProvider):
         filename = path_parts[-1] if len(path_parts) > 0 else "blueprint.yaml"
         if filename == "raw" and len(path_parts) > 1:
             filename = path_parts[-2]
-        name = (
-            filename[:-5]
-            if filename.lower().endswith(".yaml")
-            else (filename[:-4] if filename.lower().endswith(".yml") else filename)
-        )
+        name = _strip_yaml_extension(filename)
         return {"author": author, "name": name}
 
 
@@ -338,6 +358,8 @@ class HAForumProvider(SourceProvider):
 
             code_blocks: list[str] = RE_FORUM_CODE_BLOCK.findall(post_content)
             for block in code_blocks:
+                if "blueprint:" not in block:
+                    continue
                 unquoted_block = html.unescape(block).strip()
                 if "blueprint:" in unquoted_block:
                     return unquoted_block
@@ -364,16 +386,7 @@ class GitLabProvider(SourceProvider):
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from GitLab URL (Matching HA Generic Logic)."""
-        parsed = urlparse(url)
-        author = parsed.hostname.lower() if parsed.hostname else "imported"
-        path_parts = parsed.path.strip("/").split("/")
-        filename = path_parts[-1] if path_parts else "blueprint.yaml"
-        name = (
-            filename[:-5]
-            if filename.lower().endswith(".yaml")
-            else (filename[:-4] if filename.lower().endswith(".yml") else filename)
-        )
-        return {"author": author, "name": name}
+        return _default_url_metadata(url)
 
 
 class CodebergProvider(SourceProvider):
@@ -396,16 +409,7 @@ class CodebergProvider(SourceProvider):
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from Codeberg URL (Matching HA Generic Logic)."""
-        parsed = urlparse(url)
-        author = parsed.hostname.lower() if parsed.hostname else "imported"
-        path_parts = parsed.path.strip("/").split("/")
-        filename = path_parts[-1] if path_parts else "blueprint.yaml"
-        name = (
-            filename[:-5]
-            if filename.lower().endswith(".yaml")
-            else (filename[:-4] if filename.lower().endswith(".yml") else filename)
-        )
-        return {"author": author, "name": name}
+        return _default_url_metadata(url)
 
 
 class BitbucketProvider(SourceProvider):
@@ -428,16 +432,7 @@ class BitbucketProvider(SourceProvider):
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from Bitbucket URL (Matching HA Generic Logic)."""
-        parsed = urlparse(url)
-        author = parsed.hostname.lower() if parsed.hostname else "imported"
-        path_parts = parsed.path.strip("/").split("/")
-        filename = path_parts[-1] if path_parts else "blueprint.yaml"
-        name = (
-            filename[:-5]
-            if filename.lower().endswith(".yaml")
-            else (filename[:-4] if filename.lower().endswith(".yml") else filename)
-        )
-        return {"author": author, "name": name}
+        return _default_url_metadata(url)
 
 
 class GenericProvider(SourceProvider):
@@ -500,6 +495,29 @@ class ProviderRegistry:
             BitbucketProvider(),
             GenericProvider(),
         ]
+        self._host_to_provider: dict[str, SourceProvider] = {}
+        self._build_host_index()
+
+    def _build_host_index(self) -> None:
+        """Pre-compute hostname→provider O(1) index for known domains.
+
+        Uses a direct constant-time mapping from canonical hostnames to
+        provider types, including DOMAIN_GITHUB_RAW for raw.githubusercontent.com
+        URLs which are the most common URL type in practice.
+        """
+        host_to_provider_type: dict[str, type[SourceProvider]] = {
+            DOMAIN_GITHUB: GitHubProvider,
+            DOMAIN_GITHUB_RAW: GitHubProvider,
+            DOMAIN_GIST: GistProvider,
+            DOMAIN_HA_FORUM: HAForumProvider,
+            DOMAIN_GITLAB: GitLabProvider,
+            DOMAIN_CODEBERG: CodebergProvider,
+            DOMAIN_BITBUCKET: BitbucketProvider,
+        }
+        provider_by_type = {type(p): p for p in self._providers}
+        for host, ptype in host_to_provider_type.items():
+            if ptype in provider_by_type:
+                self._host_to_provider[host] = provider_by_type[ptype]
 
     def __iter__(self) -> Iterator[SourceProvider]:
         """Iterate over registered providers."""
@@ -507,6 +525,10 @@ class ProviderRegistry:
 
     def get_provider(self, url: str) -> SourceProvider | None:
         """Get the appropriate provider for the given URL."""
+        hostname = _normalize_hostname(urlparse(url).hostname)
+        if hostname and (provider := self._host_to_provider.get(hostname)):
+            return provider
+
         for provider in self._providers:
             if not isinstance(provider, GenericProvider) and provider.can_handle(url):
                 return provider

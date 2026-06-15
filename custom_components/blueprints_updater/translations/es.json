@@ -137,19 +137,19 @@
     "invalid_yaml": {
       "message": "El archivo importado no es un blueprint YAML válido."
     },
-    "empty_content": {
+    "empty_blueprint_content": {
       "message": "Se ha recibido contenido vacío"
     },
-    "fetch_error": {
+    "fetch_blueprint_error": {
       "message": "Error de obtención: {error}"
     },
-    "unsafe_url": {
+    "unsafe_blueprint_url": {
       "message": "URL no segura: {url}"
     },
-    "unsafe_path": {
+    "unsafe_blueprint_path": {
       "message": "La ruta de destino no es segura: {path}"
     },
-    "validation_error": {
+    "blueprint_validation_error": {
       "message": "Error de validación: {error}"
     },
     "import_invalid_source_type": {

@@ -137,19 +137,19 @@
     "invalid_yaml": {
       "message": "Het geïmporteerde bestand is geen geldige YAML-blueprint."
     },
-    "empty_content": {
+    "empty_blueprint_content": {
       "message": "Lege inhoud ontvangen"
     },
-    "fetch_error": {
+    "fetch_blueprint_error": {
       "message": "Ophaalfout: {error}"
     },
-    "unsafe_url": {
+    "unsafe_blueprint_url": {
       "message": "Onveilige URL: {url}"
     },
-    "unsafe_path": {
+    "unsafe_blueprint_path": {
       "message": "Doelpad is onveilig: {path}"
     },
-    "validation_error": {
+    "blueprint_validation_error": {
       "message": "Validatiefout: {error}"
     },
     "import_invalid_source_type": {
