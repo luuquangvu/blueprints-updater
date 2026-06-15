@@ -1,7 +1,9 @@
 """Tests for Blueprints Updater update entities."""
 
 import asyncio
+import inspect
 import logging
+from functools import cached_property
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 from urllib.parse import quote
 
@@ -18,7 +20,10 @@ from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
     GitDiffResult,
 )
-from custom_components.blueprints_updater.update import BlueprintUpdateEntity, async_setup_entry
+from custom_components.blueprints_updater.update import (
+    BlueprintUpdateEntity,
+    async_setup_entry,
+)
 from custom_components.blueprints_updater.utils import (
     get_cdn_url,
     normalize_domain,
@@ -961,3 +966,30 @@ async def test_entity_release_notes_semantic_sync_notice(coordinator):
     assert "```diff" not in notes
     assert "<details>" not in notes
     assert "<summary>git_diff_title</summary>" not in notes
+
+
+def test_cached_property_names_no_drift():
+    """Ensure _CACHED_PROPERTY_NAMES stays in sync with @cached_property methods.
+
+    When a new ``@cached_property`` is added to ``BlueprintUpdateEntity``,
+    its name must also be added to ``_CACHED_PROPERTY_NAMES`` so that
+    ``_clear_cached_properties`` invalidates it on state changes.
+    This test catches drift at development time; it does not run on
+    end-user systems because tests are not included in the installed
+    integration.
+    """
+    actual_cached = sorted(
+        name
+        for name, value in inspect.getmembers(BlueprintUpdateEntity)
+        if isinstance(value, cached_property)
+    )
+
+    declared = sorted(BlueprintUpdateEntity._CACHED_PROPERTY_NAMES)
+
+    assert actual_cached == declared, (
+        f"_CACHED_PROPERTY_NAMES is out of sync.\n"
+        f"  @cached_property methods: {actual_cached}\n"
+        f"  _CACHED_PROPERTY_NAMES:    {declared}\n"
+        f"  Missing from tuple: {set(actual_cached) - set(declared)}\n"
+        f"  Extraneous in tuple: {set(declared) - set(actual_cached)}"
+    )
