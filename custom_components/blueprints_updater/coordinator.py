@@ -257,6 +257,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._safe_hostname_lock = asyncio.Lock()
         self._blueprint_validate_lock = asyncio.Lock()
         self._first_update_done = False
+        self._expected_hash_len: int | None = None
         if self.config_entry:
             self.config_entry.async_on_unload(self._async_cancel_background_task)
 
@@ -2504,6 +2505,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             session,
             path,
             normalized_url,
+            source_url,
             cdn_url,
             stored_etag=None,
             stored_last_modified=None,
@@ -2655,6 +2657,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         session: httpx.AsyncClient,
         path: str,
         normalized_url: str,
+        source_url: str,
         cdn_url: str | None,
         stored_etag: str | None,
         stored_last_modified: str | None,
@@ -2667,6 +2670,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             session: Async HTTP client session.
             path: Local path of the blueprint.
             normalized_url: The normalized raw GitHub URL.
+            source_url: The original blueprint source URL identity.
             cdn_url: The jsDelivr CDN URL, if applicable.
             stored_etag: Previously stored ETag.
             stored_last_modified: Previously stored Last-Modified date.
@@ -2681,6 +2685,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         last_modified = stored_last_modified if (stored_remote_hash and not force) else None
 
         if cdn_url:
+            mismatch_fallback = False
             try:
                 _LOGGER.debug("Fetching blueprint via CDN: %s", redact_url(cdn_url))
                 remote_content, new_etag, new_last_modified = await self._async_fetch_content(
@@ -2690,7 +2695,29 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     remote_content is None
                     and (new_etag is not None or new_last_modified is not None)
                 ):
-                    return remote_content, new_etag, new_last_modified
+                    if self._expected_hash_len is None:
+                        self._expected_hash_len = len(
+                            self._hash_content("", already_normalized=True)
+                        )
+                    if (
+                        remote_content
+                        and stored_remote_hash
+                        and len(stored_remote_hash) == self._expected_hash_len
+                    ):
+                        ensured_content = self._ensure_source_url(remote_content, source_url)
+                        cdn_hash = self._hash_content(
+                            ensured_content, source_url, already_normalized=True
+                        )
+                        if cdn_hash != stored_remote_hash:
+                            _LOGGER.debug(
+                                "CDN content mismatch detected (CDN: %s, stored: %s); "
+                                "falling back to authoritative source URL for validation.",
+                                cdn_hash[:8],
+                                stored_remote_hash[:8],
+                            )
+                            mismatch_fallback = True
+                    if not mismatch_fallback:
+                        return remote_content, new_etag, new_last_modified
             except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
                 _LOGGER.warning(
                     "CDN fetch failed for %s; falling back to original source: %s",
@@ -2745,6 +2772,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 session,
                 path,
                 normalized_url,
+                source_url,
                 cdn_url,
                 stored_etag,
                 stored_last_modified,
@@ -2842,6 +2870,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 session,
                 path,
                 normalized_url,
+                info.get("source_url", ""),
                 cdn_url,
                 stored_etag=None,
                 stored_last_modified=None,

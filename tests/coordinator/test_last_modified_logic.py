@@ -66,7 +66,7 @@ async def test_async_fetch_with_cdn_fallback_last_modified_propagation(coordinat
     coordinator._async_fetch_content = AsyncMock(return_value=("content", "etag", None))
 
     content, etag, last_modified = await coordinator._async_fetch_with_cdn_fallback(
-        session, "path", normalized_url, cdn_url, None, None, None, False
+        session, "path", normalized_url, normalized_url, cdn_url, None, None, None, False
     )
 
     assert content == "content"
@@ -83,6 +83,7 @@ async def test_async_fetch_with_cdn_fallback_last_modified_propagation(coordinat
     content2, etag2, last_modified2 = await coordinator._async_fetch_with_cdn_fallback(
         session,
         "path",
+        normalized_url,
         normalized_url,
         cdn_url,
         None,

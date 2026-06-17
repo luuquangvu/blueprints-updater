@@ -93,7 +93,7 @@ async def test_async_fetch_with_cdn_fallback_success(coordinator):
     coordinator._async_fetch_content = AsyncMock(return_value=("content", "etag", None))
 
     content, etag, _last_modified = await coordinator._async_fetch_with_cdn_fallback(
-        session, "path", normalized_url, cdn_url, None, None, None, False
+        session, "path", normalized_url, normalized_url, cdn_url, None, None, None, False
     )
 
     assert content == "content"
@@ -113,7 +113,15 @@ async def test_async_fetch_with_cdn_fallback_304(coordinator):
     coordinator._async_fetch_content = AsyncMock(return_value=(None, "old_etag", None))
 
     content, etag, _last_modified = await coordinator._async_fetch_with_cdn_fallback(
-        session, "path", normalized_url, cdn_url, "old_etag", None, "old_hash", False
+        session,
+        "path",
+        normalized_url,
+        normalized_url,
+        cdn_url,
+        "old_etag",
+        None,
+        "old_hash",
+        False,
     )
 
     assert content is None
@@ -135,7 +143,7 @@ async def test_async_fetch_with_cdn_fallback_failure_fallback(coordinator):
     )
 
     content, etag, _last_modified = await coordinator._async_fetch_with_cdn_fallback(
-        session, "path", normalized_url, cdn_url, None, None, None, False
+        session, "path", normalized_url, normalized_url, cdn_url, None, None, None, False
     )
 
     assert content == "fallback_content"
@@ -161,7 +169,7 @@ async def test_async_fetch_with_cdn_enabled_but_no_cdn_url(coordinator):
     coordinator._async_fetch_content = AsyncMock(return_value=("orig", "orig_etag", None))
 
     content, _etag, _last_modified = await coordinator._async_fetch_with_cdn_fallback(
-        session, "path", normalized_url, cdn_url, None, None, None, False
+        session, "path", normalized_url, normalized_url, cdn_url, None, None, None, False
     )
 
     assert content == "orig"
@@ -185,6 +193,7 @@ async def test_async_fetch_with_cdn_fallback_etag_only(coordinator):
     content, etag, _last_modified = await coordinator._async_fetch_with_cdn_fallback(
         session,
         "path",
+        normalized_url,
         normalized_url,
         cdn_url,
         stored_etag,
@@ -220,6 +229,7 @@ async def test_async_fetch_with_cdn_fallback_force_ignores_etag_and_hash(coordin
         session,
         "path",
         normalized_url,
+        normalized_url,
         cdn_url,
         stored_etag,
         None,
@@ -246,7 +256,7 @@ async def test_async_fetch_with_cdn_fallback_silent_failure(coordinator):
     )
 
     content, etag, _last_modified = await coordinator._async_fetch_with_cdn_fallback(
-        session, "path", normalized_url, cdn_url, None, None, None, False
+        session, "path", normalized_url, normalized_url, cdn_url, None, None, None, False
     )
 
     assert content == "orig_content"
@@ -268,7 +278,7 @@ async def test_async_fetch_with_cdn_fallback_empty_content(coordinator):
     )
 
     content, etag, _last_modified = await coordinator._async_fetch_with_cdn_fallback(
-        session, "path", normalized_url, cdn_url, None, None, None, False
+        session, "path", normalized_url, normalized_url, cdn_url, None, None, None, False
     )
 
     assert content == "orig_content"
@@ -295,6 +305,7 @@ async def test_async_fetch_with_cdn_failure_preserves_conditional_etag(coordinat
         session,
         "path",
         normalized_url,
+        normalized_url,
         cdn_url,
         stored_etag,
         stored_last_modified,
@@ -314,3 +325,49 @@ async def test_async_fetch_with_cdn_failure_preserves_conditional_etag(coordinat
     assert args1[1] == normalized_url
     assert kwargs1.get("etag") == stored_etag
     assert kwargs1.get("last_modified") == stored_last_modified
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_with_cdn_fallback_lag_detection(coordinator, monkeypatch):
+    """Test that if CDN returns lagged content, it falls back to the original source."""
+    session = MagicMock(spec=httpx.AsyncClient)
+    source_url = "https://github.com/u/r/blob/b/p.yaml"
+    normalized_url = "https://raw.githubusercontent.com/u/r/b/p.yaml"
+    cdn_url = "https://cdn.jsdelivr.net/gh/u/r@b/p.yaml"
+
+    new_content_raw = "blueprint:\n  name: Test\n"
+    lagged_content_raw = "blueprint:\n  name: Stale\n"
+
+    # Compute stored remote hash using the real methods with source_url
+    stored_remote_content = coordinator._ensure_source_url(new_content_raw, source_url)
+    stored_remote_hash = coordinator._hash_content(
+        stored_remote_content, source_url, already_normalized=True
+    )
+
+    mock_fetch_content = AsyncMock(
+        side_effect=[
+            (lagged_content_raw, "cdn_etag", None),
+            (new_content_raw, "origin_etag", None),
+        ]
+    )
+    monkeypatch.setattr(coordinator, "_async_fetch_content", mock_fetch_content)
+
+    content, etag, _last_modified = await coordinator._async_fetch_with_cdn_fallback(
+        session,
+        "path",
+        normalized_url,
+        source_url,
+        cdn_url,
+        None,
+        None,
+        stored_remote_hash,
+        False,
+    )
+
+    assert content == new_content_raw
+    assert etag == "origin_etag"
+    assert mock_fetch_content.call_count == 2
+
+    calls = mock_fetch_content.call_args_list
+    assert calls[0][0][1] == cdn_url
+    assert calls[1][0][1] == normalized_url
