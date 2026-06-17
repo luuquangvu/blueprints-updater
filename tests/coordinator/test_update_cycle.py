@@ -1278,7 +1278,7 @@ async def test_async_update_blueprint_cdn_gating(coordinator, cdn_config, expect
             mock_session, path, info, results_to_notify, updated_domains
         )
         _args, _kwargs = mock_fetch.call_args
-        cdn_url_arg = _args[3]
+        cdn_url_arg = _args[4]
 
         if expect_cdn:
             assert cdn_url_arg is not None
