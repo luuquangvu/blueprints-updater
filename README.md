@@ -118,7 +118,10 @@ Blueprints Updater provides a built-in safety net by allowing you to back up blu
 
 When installing an update from the Home Assistant dashboard, you will have the option to check the **Backup** toggle. If enabled, the integration will automatically save your current blueprint to a numbered backup file (`.bak.1`, `.bak.2`, etc.) before replacing it with the new version.
 
-> **Note:** If you have **Auto-Update** enabled in the integration settings, it will **always** create a backup automatically before applying an update, providing a guaranteed safety net with zero effort required.
+> [!NOTE]
+> Backup files are saved in the **same folder as the blueprint itself** (e.g., `/config/blueprints/automation/author/name.yaml.bak.1`). Since they are stored alongside the blueprints in your Home Assistant configuration directory, they will be safely included in your standard Home Assistant daily backups.
+>
+> If you have **Auto-Update** enabled in the integration settings, it will **always** create a backup automatically before applying an update, providing a guaranteed safety net with zero effort required.
 
 ### Restoring a Backup
 
