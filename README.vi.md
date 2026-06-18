@@ -118,7 +118,10 @@ Blueprints Updater cung cấp một mạng lưới an toàn tích hợp sẵn, c
 
 Khi cài đặt bản cập nhật từ bảng điều khiển Home Assistant, bạn sẽ có tùy chọn tích chọn **Backup (Sao lưu)**. Nếu được bật, tiện ích sẽ tự động lưu blueprint hiện tại của bạn thành một tệp sao lưu có đánh số (`.bak.1`, `.bak.2`, v.v.) trước khi ghi đè bằng phiên bản mới.
 
-> **Lưu ý:** Nếu bạn đang bật tùy chọn **Tự động Cập nhật (Auto-Update)**, tiện ích sẽ **luôn luôn** tự động sao lưu cấu hình trước khi ghi đè bản mới nhất, tạo ra một mạng lưới an toàn 100% giúp bạn hoàn toàn yên tâm.
+> [!NOTE]
+> Các tệp sao lưu được lưu trữ ở **cùng thư mục với chính blueprint đó** (ví dụ: `/config/blueprints/automation/author/name.yaml.bak.1`). Vì chúng được lưu cùng với các blueprint trong thư mục cấu hình của Home Assistant, chúng sẽ tự động được bao gồm trong các bản sao lưu hàng ngày của Home Assistant.
+>
+> Nếu bạn đang bật tùy chọn **Tự động Cập nhật (Auto-Update)**, tiện ích sẽ **luôn luôn** tự động sao lưu cấu hình trước khi ghi đè bản mới nhất, tạo ra một mạng lưới an toàn 100% giúp bạn hoàn toàn yên tâm.
 
 ### Khôi phục bản Sao lưu
 
