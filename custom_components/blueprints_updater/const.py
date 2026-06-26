@@ -10,11 +10,9 @@ CONF_FILTER_MODE = "filter_mode"
 CONF_SELECTED_BLUEPRINTS = "selected_blueprints"
 CONF_AUTO_UPDATE = "auto_update"
 CONF_MAX_BACKUPS = "max_backups"
-CONF_USE_CDN = "use_cdn"
 EVENT_BLUEPRINTS_UPDATER_UPDATED = f"{DOMAIN}_updated"
 
 DEFAULT_AUTO_UPDATE = False
-DEFAULT_USE_CDN = True
 DEFAULT_MAX_BACKUPS = 3
 MIN_BACKUPS = 1
 MAX_BACKUPS = 10
@@ -49,7 +47,6 @@ DOMAIN_HA_FORUM = "community.home-assistant.io"
 DOMAIN_GITLAB = "gitlab.com"
 DOMAIN_CODEBERG = "codeberg.org"
 DOMAIN_BITBUCKET = "bitbucket.org"
-DOMAIN_JSDELIVR = "cdn.jsdelivr.net"
 
 RE_FORUM_TOPIC_ID = re.compile(r"/t/(?:[^/]+/)?(\d+)")
 RE_FORUM_CODE_BLOCK = re.compile(r"<code[^>]*>(.*?)</code>", re.DOTALL)

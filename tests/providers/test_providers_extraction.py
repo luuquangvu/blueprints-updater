@@ -118,14 +118,6 @@ def test_github_provider_unsupported_urls():
     assert provider.normalize_url(url) == url
 
 
-def test_github_provider_cdn_url():
-    """Test GitHub provider CDN URL generation."""
-    provider = GitHubProvider()
-    url = "https://github.com/user/repo/blob/main/bp.yaml"
-    cdn_url = provider.get_cdn_url(url)
-    assert cdn_url == "https://cdn.jsdelivr.net/gh/user/repo@main/bp.yaml"
-
-
 def test_provider_registry_iter():
     """Test ProviderRegistry iteration."""
     registry = ProviderRegistry()

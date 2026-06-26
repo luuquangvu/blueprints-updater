@@ -25,7 +25,6 @@ from custom_components.blueprints_updater.update import (
     async_setup_entry,
 )
 from custom_components.blueprints_updater.utils import (
-    get_cdn_url,
     normalize_domain,
     normalize_url,
 )
@@ -39,8 +38,8 @@ async def await_scheduled_update(entity, coordinator):
         await coro
 
 
-def bind_coordinator_cdn_methods(coordinator: MagicMock) -> None:
-    """Bind real coordinator CDN/fetch methods to a MagicMock instance.
+def bind_coordinator_fetch_methods(coordinator: MagicMock) -> None:
+    """Bind real coordinator fetch methods to a MagicMock instance.
 
     This allows testing the internal interaction logic while still using
     mocks for network calls and validation.
@@ -53,17 +52,8 @@ def bind_coordinator_cdn_methods(coordinator: MagicMock) -> None:
             coordinator, BlueprintUpdateCoordinator
         )
     )
-    coordinator._async_fetch_with_cdn_fallback = (
-        BlueprintUpdateCoordinator._async_fetch_with_cdn_fallback.__get__(
-            coordinator, BlueprintUpdateCoordinator
-        )
-    )
-    coordinator._get_cdn_url = get_cdn_url
     coordinator._ensure_source_url = BlueprintUpdateCoordinator._ensure_source_url
     coordinator._normalize_url = normalize_url
-    coordinator.is_cdn_enabled = BlueprintUpdateCoordinator.is_cdn_enabled.__get__(
-        coordinator, BlueprintUpdateCoordinator
-    )
     coordinator._update_error_state = BlueprintUpdateCoordinator._update_error_state.__get__(
         coordinator, BlueprintUpdateCoordinator
     )
@@ -853,7 +843,7 @@ async def test_async_install_bypass_protection(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    bind_coordinator_cdn_methods(coordinator)
+    bind_coordinator_fetch_methods(coordinator)
 
     with (
         patch.object(coordinator, "_is_safe_url", AsyncMock(return_value=True)),
@@ -892,7 +882,7 @@ async def test_async_install_unsafe_url_protection(coordinator):
     entity = BlueprintUpdateEntity(coordinator, path, info)
     entity.hass = coordinator.hass
 
-    bind_coordinator_cdn_methods(coordinator)
+    bind_coordinator_fetch_methods(coordinator)
 
     with (
         patch.object(coordinator, "_is_safe_url", AsyncMock(return_value=False)),

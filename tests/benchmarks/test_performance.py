@@ -153,15 +153,11 @@ def sample_blueprint_content_nested() -> str:
 @pytest.fixture
 def sample_blueprint_content_large() -> str:
     """Return a large blueprint with many inputs for stress testing."""
-    inputs_block = []
-    for i in range(50):
-        inputs_block.append(
-            f"    input_{i}:\n"
-            f"      name: Input {i}\n"
-            f"      selector:\n"
-            f"        entity:\n"
-            f"          domain: binary_sensor"
-        )
+    inputs_block = [
+        f"    input_{i}:\n      name: Input {i}\n"
+        f"      selector:\n        entity:\n          domain: binary_sensor"
+        for i in range(50)
+    ]
     return (
         "blueprint:\n"
         "  name: Large Blueprint\n"
@@ -280,21 +276,24 @@ class TestYamlProcessing:
 
     def test_ensure_source_url_normal(self, benchmark, sample_blueprint_content):
         """Benchmark _ensure_source_url with standard blueprint."""
-        source_url = "https://github.com/home-assistant/core/blob/dev/blueprint.yaml"
-        result = benchmark(
-            BlueprintUpdateCoordinator._ensure_source_url,
+        self._run_url_benchmark(
+            "https://github.com/home-assistant/core/blob/dev/blueprint.yaml",
+            benchmark,
             sample_blueprint_content,
-            source_url,
         )
-        assert source_url in result
 
     def test_ensure_source_url_large(self, benchmark, sample_blueprint_content_large):
         """Benchmark _ensure_source_url with large blueprint (50 inputs)."""
-        source_url = "https://github.com/example/large.yaml"
-        result = benchmark(
-            BlueprintUpdateCoordinator._ensure_source_url,
+        self._run_url_benchmark(
+            "https://github.com/example/large.yaml",
+            benchmark,
             sample_blueprint_content_large,
-            source_url,
+        )
+
+    def _run_url_benchmark(self, source_url: str, benchmark, blueprint_content: str) -> None:
+        """Helper to run the URL benchmark with validation assertions."""
+        result = benchmark(
+            BlueprintUpdateCoordinator._ensure_source_url, blueprint_content, source_url
         )
         assert source_url in result
 
@@ -354,25 +353,27 @@ class TestSchemaExtraction:
 
     def test_extract_inputs_schema_standard(self, benchmark, sample_blueprint_content):
         """Benchmark _extract_inputs_schema with standard blueprint."""
-        schema, error = benchmark(
-            BlueprintUpdateCoordinator._extract_inputs_schema,
-            sample_blueprint_content,
+        schema = self._run_schema_benchmark(
+            benchmark, sample_blueprint_content, "motion_entity", "light_target"
         )
-        assert error is None
-        assert "motion_entity" in schema
-        assert "light_target" in schema
         assert "no_motion_wait" in schema
 
     def test_extract_inputs_schema_nested(self, benchmark, sample_blueprint_content_nested):
         """Benchmark _extract_inputs_schema with nested sections (HA 2024.6+)."""
-        schema, error = benchmark(
-            BlueprintUpdateCoordinator._extract_inputs_schema,
-            sample_blueprint_content_nested,
+        schema = self._run_schema_benchmark(
+            benchmark, sample_blueprint_content_nested, "sensor_a", "sensor_b"
+        )
+        assert schema["sensor_b"]["mandatory"] is False
+
+    def _run_schema_benchmark(self, benchmark, blueprint_content, input_key_a, input_key_b):
+        """Helper to run the schema extraction benchmark with validation assertions."""
+        result, error = benchmark(
+            BlueprintUpdateCoordinator._extract_inputs_schema, blueprint_content
         )
         assert error is None
-        assert "sensor_a" in schema
-        assert "sensor_b" in schema
-        assert schema["sensor_b"]["mandatory"] is False
+        assert input_key_a in result
+        assert input_key_b in result
+        return result
 
     def test_extract_inputs_schema_large(self, benchmark, sample_blueprint_content_large):
         """Benchmark _extract_inputs_schema with 50 inputs."""
@@ -554,14 +555,6 @@ class TestProviderPerformance:
         result = benchmark(provider.normalize_url, url)
         assert result is not None
         assert urlparse(result).hostname == "raw.githubusercontent.com"
-
-    def test_github_get_cdn_url(self, benchmark):
-        """Benchmark GitHubProvider.get_cdn_url."""
-        provider = GitHubProvider()
-        url = "https://raw.githubusercontent.com/home-assistant/core/dev/blueprint.yaml"
-        result = benchmark(provider.get_cdn_url, url)
-        assert result is not None
-        assert urlparse(result).hostname == "cdn.jsdelivr.net"
 
     def test_haforum_parse_content(self, benchmark):
         """Benchmark HAForumProvider.parse_content with JSON data."""

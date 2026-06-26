@@ -98,7 +98,7 @@ def mock_getaddrinfo(request, monkeypatch):
             is_local = not is_ip_safe(ip)
         except ValueError:
             for tld in SPECIAL_USE_TLDS:
-                if hostname == tld or hostname.endswith("." + tld):
+                if hostname == tld or hostname.endswith(f".{tld}"):
                     is_local = True
                     break
 

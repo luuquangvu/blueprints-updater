@@ -26,9 +26,7 @@ from .const import (
     CONF_MAX_BACKUPS,
     CONF_SELECTED_BLUEPRINTS,
     CONF_UPDATE_INTERVAL,
-    CONF_USE_CDN,
     DEFAULT_AUTO_UPDATE,
-    DEFAULT_USE_CDN,
     DOMAIN,
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
@@ -92,7 +90,6 @@ def _get_config_schema(
 
     """
     auto_update = get_config_bool(config, CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
-    use_cdn = get_config_bool(config, CONF_USE_CDN, DEFAULT_USE_CDN)
     filter_mode = get_config_str(config, CONF_FILTER_MODE, FILTER_MODE_ALL)
     selected_blueprints = get_config_value(config, CONF_SELECTED_BLUEPRINTS, [])
 
@@ -101,10 +98,6 @@ def _get_config_schema(
             vol.Required(
                 CONF_AUTO_UPDATE,
                 default=auto_update,
-            ): cv.boolean,
-            vol.Required(
-                CONF_USE_CDN,
-                default=use_cdn,
             ): cv.boolean,
             vol.Required(
                 CONF_UPDATE_INTERVAL,

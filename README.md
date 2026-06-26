@@ -47,7 +47,6 @@
 - **Smart Change Detection**: Minimizes system overhead by using SHA256 hashing and ETag headers to pull data only when a genuine change is detected.
 - **Wide-Ranging Source Support**: Robustly tracks and updates blueprints from major platforms (**GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, and Bitbucket**) and **any direct YAML URL** (e.g., Pastebin, Private Gists, or custom web servers).
 - **Versatile Blueprint Importer**: A dedicated tool to instantly download and install blueprints from **any of the supported sources** with automatic metadata extraction, stable path generation, and strict security validation.
-- **High-Performance CDN Support**: Leverages the [jsDelivr](https://www.jsdelivr.com/) CDN for GitHub-hosted blueprints to maximize download speeds and reduce the impact of rate limiting. Features an intelligent fallback mechanism that automatically reverts to the original source in case of CDN unavailability.
 - **Pre-Update Impact Visibility**: See exactly how many Automations, Scripts, or Templates use the blueprint before you update, ensuring full control over your smart home logic.
 - **Granular Tracking Control**: Fine-tune your experience by tracking all blueprints or targeting specific ones using flexible Whitelists and Blacklists.
 - **Instant, Restart-Free Reloads**: Automatically reloads relevant automation, script, or template domains after an update for immediate results without rebooting.
@@ -88,8 +87,7 @@
    - **Update All**: Tracks all blueprints found in your directory.
    - **Whitelist**: Only tracks blueprints you explicitly select from the list.
    - **Blacklist**: Tracks all blueprints _except_ the ones you select.
-6. **Use jsDelivr CDN**: (Optional, default: Enabled) Optimizes your updates by fetching GitHub-hosted blueprints via the jsDelivr CDN. If the CDN is unreachable or encounters an error, the integration will seamlessly fall back to the original GitHub URL to ensure uninterrupted service.
-7. Once added, the integration will scan your blueprints. If updates are found, they will appear as `update` entities in your dashboard.
+6. Once added, the integration will scan your blueprints. If updates are found, they will appear as `update` entities in your dashboard.
 
 ---
 
@@ -165,7 +163,7 @@ Blueprints Updater provides a dedicated service to import blueprints from extern
 
 ### Supported Platforms
 
-- **Specialized**: GitHub (with CDN support), GitHub Gist, Home Assistant Community, GitLab, Codeberg, and Bitbucket.
+- **Specialized**: GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, and Bitbucket.
 - **Generic**: Any direct YAML link (Pastebin, private servers, etc.).
 
 ### How to Import

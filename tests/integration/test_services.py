@@ -78,7 +78,7 @@ async def test_update_all_service(hass: HomeAssistant, respx_mock) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={},
-        options={"update_interval": 24, "filter_mode": "all", "use_cdn": False},
+        options={"update_interval": 24, "filter_mode": "all"},
         entry_id="test_update_all",
     )
     entry.add_to_hass(hass)
@@ -121,7 +121,7 @@ async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> Non
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={},
-        options={"update_interval": 24, "max_backups": 5, "use_cdn": False},
+        options={"update_interval": 24, "max_backups": 5},
         entry_id="test_restore",
     )
     entry.add_to_hass(hass)

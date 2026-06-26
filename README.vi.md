@@ -47,7 +47,6 @@
 - **Tối ưu hiệu suất và băng thông**: Sử dụng mã băm SHA256 và ETag để chỉ tải về khi thực sự có thay đổi từ nguồn, giảm thiểu tải cho hệ thống.
 - **Hỗ trợ nguồn đa dạng và linh hoạt**: Tự động theo dõi và cập nhật các bản thiết kế từ những nền tảng phổ biến (**GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg và Bitbucket**) cũng như **mọi liên kết YAML trực tiếp** (như Pastebin, Gist riêng tư, hoặc máy chủ riêng).
 - **Nhập Blueprint từ mọi nguồn**: Công cụ chuyên dụng giúp tải về và cài đặt nhanh chóng các bản thiết kế từ **bất kỳ nguồn nào được hỗ trợ** vào hệ thống của bạn với cơ chế tự động trích xuất metadata, tạo đường dẫn tệp tin ổn định và xác thực bảo mật nghiêm ngặt.
-- **Tối ưu hóa với jsDelivr CDN**: Tận dụng mạng lưới [jsDelivr](https://www.jsdelivr.com/) CDN để tăng tốc độ tải và giảm ảnh hưởng từ giới hạn truy cập (rate limit). Cơ chế dự phòng đi kèm sẽ tự động lấy dữ liệu trực tiếp từ GitHub nếu CDN gặp sự cố, đảm bảo quá trình cập nhật luôn diễn ra thông suốt.
 - **Nắm rõ tác động trước khi cập nhật**: Hiển thị chính xác số lượng Automation, Script hoặc Template đang sử dụng blueprint đó, giúp bạn chủ động kiểm soát mọi thay đổi.
 - **Kiểm soát linh hoạt theo nhu cầu**: Cho phép theo dõi toàn bộ hoặc lọc danh sách blueprint theo Whitelist/Blacklist một cách chi tiết.
 - **Cập nhật tức thì, không cần khởi động lại**: Thao tác cập nhật tự động làm mới các automation, script hoặc template liên quan, giúp thay đổi có hiệu lực ngay lập tức.
@@ -88,8 +87,7 @@
    - **Cập nhật tất cả (Update All)**: Theo dõi tất cả blueprint tìm thấy trong thư mục của bạn.
    - **Danh sách trắng (Whitelist)**: Chỉ theo dõi các blueprint bạn chọn cụ thể từ danh sách.
    - **Danh sách đen (Blacklist)**: Theo dõi tất cả các blueprint _ngoại trừ_ những cái bạn chọn.
-6. **Sử dụng jsDelivr CDN**: (Tùy chọn, mặc định là bật) Bật tính năng này để sử dụng CDN jsDelivr khi tải các blueprint từ GitHub, giúp tăng hiệu suất. Nếu CDN không thể truy cập hoặc trả về lỗi, hệ thống sẽ tự động sử dụng link GitHub gốc để đảm bảo việc cập nhật thành công.
-7. Sau khi thêm, tích hợp sẽ quét các blueprint của bạn. Nếu tìm thấy bản cập nhật, chúng sẽ xuất hiện dưới dạng thực thể `update` trong bảng điều khiển của bạn.
+6. Sau khi thêm, tích hợp sẽ quét các blueprint của bạn. Nếu tìm thấy bản cập nhật, chúng sẽ xuất hiện dưới dạng thực thể `update` trong bảng điều khiển của bạn.
 
 ---
 
@@ -165,7 +163,7 @@ Blueprints Updater cung cấp một dịch vụ chuyên dụng để nhập blue
 
 ### Các nền tảng hỗ trợ
 
-- **Chuyên dụng**: GitHub (hỗ trợ CDN), GitHub Gist, Home Assistant Community, GitLab, Codeberg và Bitbucket.
+- **Chuyên dụng**: GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg và Bitbucket.
 - **Tùy chỉnh (Generic)**: Bất kỳ liên kết YAML trực tiếp nào (Pastebin, máy chủ riêng, v.v.).
 
 ### Cách nhập

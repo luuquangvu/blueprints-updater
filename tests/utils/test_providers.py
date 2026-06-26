@@ -18,19 +18,6 @@ def test_normalize_hostname_edge_cases():
     assert _normalize_hostname("github.com") == "github.com"
 
 
-def test_github_provider_cdn_url_edge_cases():
-    """Test GitHubProvider.get_cdn_url with malformed or unsupported URLs."""
-    provider = GitHubProvider()
-
-    assert provider.get_cdn_url("https://github.com/user/repo/not-blob/branch/file.yaml") is None
-
-    assert provider.get_cdn_url("https://raw.githubusercontent.com/user/repo/branch") is None
-
-    assert provider.get_cdn_url("https://github.com/user/repo/blob") is None
-
-    assert provider.get_cdn_url("https://example.com/user/repo/blob/branch/file.yaml") is None
-
-
 def test_ha_forum_provider_normalize_url_edge_cases():
     """Test HAForumProvider.normalize_url with non-topic URLs."""
     provider = HAForumProvider()

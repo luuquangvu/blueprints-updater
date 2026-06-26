@@ -216,114 +216,7 @@ def _run_pipeline() -> None:
         sys.exit(1)
 
     try:
-        repo_root = str(Path(__file__).resolve().parent.parent)
-        uv_sync_label = "uv sync --check --all-groups"
-        print(f"STEP_START: {uv_sync_label}", flush=True)
-        sync_check = subprocess.run(
-            ["uv", "sync", "--check", "--all-groups"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-        )
-        if sync_check.returncode != 0:
-            print("Environment is out of sync. Running 'uv sync --all-groups'", flush=True)
-            _print_process_output_summary("uv sync --check", sync_check)
-            subprocess.run(["uv", "sync", "--all-groups"], check=True, cwd=repo_root)
-        else:
-            print("Environment is already synchronized.", flush=True)
-        print(f"STEP_OK: {uv_sync_label}", flush=True)
-
-        npm_sync_label = "npm ls"
-        print(f"STEP_START: {npm_sync_label}", flush=True)
-        npm_check = subprocess.run(
-            ["npm", "ls"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-        )
-        if npm_check.returncode != 0:
-            print("NPM packages are out of sync. Running 'npm ci'", flush=True)
-            _print_process_output_summary("npm ls", npm_check)
-            subprocess.run(["npm", "ci"], check=True, cwd=repo_root)
-        else:
-            print("NPM packages are already synchronized.", flush=True)
-        print(f"STEP_OK: {npm_sync_label}", flush=True)
-
-        uv_upgrade_label = "uv sync --all-groups --upgrade --dry-run --output-format json"
-        print(f"STEP_START: {uv_upgrade_label}", flush=True)
-        uv_upgrade_check = subprocess.run(
-            ["uv", "sync", "--all-groups", "--upgrade", "--dry-run", "--output-format", "json"],
-            check=False,
-            capture_output=True,
-            text=True,
-            cwd=repo_root,
-        )
-        uv_ok = _print_uv_dependency_update_notice(uv_upgrade_label, uv_upgrade_check)
-        if uv_ok:
-            print(f"STEP_OK: {uv_upgrade_label}", flush=True)
-        else:
-            print(
-                f"STEP_WARNING: {uv_upgrade_label} exited with code {uv_upgrade_check.returncode}",
-                flush=True,
-            )
-
-        npm_update_label = "npm update --dry-run --no-audit --no-fund --json"
-        print(f"STEP_START: {npm_update_label}", flush=True)
-        npm_update_check = subprocess.run(
-            ["npm", "update", "--dry-run", "--no-audit", "--no-fund", "--json"],
-            check=False,
-            capture_output=True,
-            text=True,
-            cwd=repo_root,
-        )
-        npm_ok = _print_npm_dependency_update_notice(npm_update_label, npm_update_check)
-        if npm_ok:
-            print(f"STEP_OK: {npm_update_label}", flush=True)
-        else:
-            print(
-                f"STEP_WARNING: {npm_update_label} exited with code {npm_update_check.returncode}",
-                flush=True,
-            )
-
-        ruff_format_label = "uv run --no-project ruff format"
-        print(f"STEP_START: {ruff_format_label}", flush=True)
-        subprocess.run(["uv", "run", "--no-project", "ruff", "format"], check=True, cwd=repo_root)
-        print(f"STEP_OK: {ruff_format_label}", flush=True)
-
-        ruff_check_label = "uv run --no-project ruff check --fix"
-        print(f"STEP_START: {ruff_check_label}", flush=True)
-        subprocess.run(
-            ["uv", "run", "--no-project", "ruff", "check", "--fix"], check=True, cwd=repo_root
-        )
-        print(f"STEP_OK: {ruff_check_label}", flush=True)
-
-        ty_check_label = "uv run --no-project ty check"
-        print(f"STEP_START: {ty_check_label}", flush=True)
-        subprocess.run(["uv", "run", "--no-project", "ty", "check"], check=True, cwd=repo_root)
-        print(f"STEP_OK: {ty_check_label}", flush=True)
-
-        pyright_label = "uv run --no-project pyright"
-        print(f"STEP_START: {pyright_label}", flush=True)
-        subprocess.run(["uv", "run", "--no-project", "pyright"], check=True, cwd=repo_root)
-        print(f"STEP_OK: {pyright_label}", flush=True)
-
-        interrogate_label = "uv run --no-project interrogate"
-        print(f"STEP_START: {interrogate_label}", flush=True)
-        subprocess.run(["uv", "run", "--no-project", "interrogate"], check=True, cwd=repo_root)
-        print(f"STEP_OK: {interrogate_label}", flush=True)
-
-        prettier_label = "npx prettier --log-level warn --write ."
-        print(f"STEP_START: {prettier_label}", flush=True)
-        subprocess.run(
-            ["npx", "prettier", "--log-level", "warn", "--write", "."], check=True, cwd=repo_root
-        )
-        print(f"STEP_OK: {prettier_label}", flush=True)
-
-        pytest_label = "uv run --no-project pytest"
-        print(f"STEP_START: {pytest_label}", flush=True)
-        subprocess.run(["uv", "run", "--no-project", "pytest"], check=True, cwd=repo_root)
-        print(f"STEP_OK: {pytest_label}", flush=True)
-
+        _validate_pipeline()
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         ret_code = getattr(e, "returncode", 1)
         if isinstance(e, subprocess.CalledProcessError):
@@ -344,6 +237,115 @@ def _run_pipeline() -> None:
 
     print(flush=True)
     print("VALIDATION_SUCCESS", flush=True)
+
+
+def _validate_pipeline():
+    """Run the validation pipeline steps in order."""
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    uv_sync_label = "uv sync --check --all-groups"
+    print(f"STEP_START: {uv_sync_label}", flush=True)
+    sync_check = subprocess.run(
+        ["uv", "sync", "--check", "--all-groups"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if sync_check.returncode != 0:
+        print("Environment is out of sync. Running 'uv sync --all-groups'", flush=True)
+        _print_process_output_summary("uv sync --check", sync_check)
+        subprocess.run(["uv", "sync", "--all-groups"], check=True, cwd=repo_root)
+    else:
+        print("Environment is already synchronized.", flush=True)
+    print(f"STEP_OK: {uv_sync_label}", flush=True)
+
+    npm_sync_label = "npm ls"
+    print(f"STEP_START: {npm_sync_label}", flush=True)
+    npm_check = subprocess.run(
+        ["npm", "ls"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if npm_check.returncode != 0:
+        print("NPM packages are out of sync. Running 'npm ci'", flush=True)
+        _print_process_output_summary("npm ls", npm_check)
+        subprocess.run(["npm", "ci"], check=True, cwd=repo_root)
+    else:
+        print("NPM packages are already synchronized.", flush=True)
+    print(f"STEP_OK: {npm_sync_label}", flush=True)
+
+    uv_upgrade_label = "uv sync --all-groups --upgrade --dry-run --output-format json"
+    print(f"STEP_START: {uv_upgrade_label}", flush=True)
+    uv_upgrade_check = subprocess.run(
+        ["uv", "sync", "--all-groups", "--upgrade", "--dry-run", "--output-format", "json"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+    )
+    if _uv_ok := _print_uv_dependency_update_notice(uv_upgrade_label, uv_upgrade_check):
+        print(f"STEP_OK: {uv_upgrade_label}", flush=True)
+    else:
+        print(
+            f"STEP_WARNING: {uv_upgrade_label} exited with code {uv_upgrade_check.returncode}",
+            flush=True,
+        )
+
+    npm_update_label = "npm update --dry-run --no-audit --no-fund --json"
+    print(f"STEP_START: {npm_update_label}", flush=True)
+    npm_update_check = subprocess.run(
+        ["npm", "update", "--dry-run", "--no-audit", "--no-fund", "--json"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+    )
+    if _npm_ok := _print_npm_dependency_update_notice(npm_update_label, npm_update_check):
+        print(f"STEP_OK: {npm_update_label}", flush=True)
+    else:
+        print(
+            f"STEP_WARNING: {npm_update_label} exited with code {npm_update_check.returncode}",
+            flush=True,
+        )
+
+    ruff_format_label = "uv run --no-project ruff format"
+    print(f"STEP_START: {ruff_format_label}", flush=True)
+    subprocess.run(["uv", "run", "--no-project", "ruff", "format"], check=True, cwd=repo_root)
+    print(f"STEP_OK: {ruff_format_label}", flush=True)
+
+    ruff_check_label = "uv run --no-project ruff check --fix"
+    print(f"STEP_START: {ruff_check_label}", flush=True)
+    subprocess.run(
+        ["uv", "run", "--no-project", "ruff", "check", "--fix"], check=True, cwd=repo_root
+    )
+    print(f"STEP_OK: {ruff_check_label}", flush=True)
+
+    ty_check_label = "uv run --no-project ty check"
+    print(f"STEP_START: {ty_check_label}", flush=True)
+    subprocess.run(["uv", "run", "--no-project", "ty", "check"], check=True, cwd=repo_root)
+    print(f"STEP_OK: {ty_check_label}", flush=True)
+
+    pyright_label = "uv run --no-project pyright"
+    print(f"STEP_START: {pyright_label}", flush=True)
+    subprocess.run(["uv", "run", "--no-project", "pyright"], check=True, cwd=repo_root)
+    print(f"STEP_OK: {pyright_label}", flush=True)
+
+    interrogate_label = "uv run --no-project interrogate"
+    print(f"STEP_START: {interrogate_label}", flush=True)
+    subprocess.run(["uv", "run", "--no-project", "interrogate"], check=True, cwd=repo_root)
+    print(f"STEP_OK: {interrogate_label}", flush=True)
+
+    prettier_label = "npx prettier --log-level warn --write ."
+    print(f"STEP_START: {prettier_label}", flush=True)
+    subprocess.run(
+        ["npx", "prettier", "--log-level", "warn", "--write", "."], check=True, cwd=repo_root
+    )
+    print(f"STEP_OK: {prettier_label}", flush=True)
+
+    pytest_label = "uv run --no-project pytest"
+    print(f"STEP_START: {pytest_label}", flush=True)
+    subprocess.run(["uv", "run", "--no-project", "pytest"], check=True, cwd=repo_root)
+    print(f"STEP_OK: {pytest_label}", flush=True)
 
 
 def main() -> None:
