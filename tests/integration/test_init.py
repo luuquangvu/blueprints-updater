@@ -68,7 +68,7 @@ async def test_full_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={},
-        options={"update_interval": 24, "use_cdn": False},
+        options={"update_interval": 24},
         entry_id="lifecycle_entry",
     )
     entry.add_to_hass(hass)

@@ -18,6 +18,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Generator
 from pathlib import Path
 from string import ascii_letters, digits
 
@@ -144,10 +145,159 @@ def _get_venv_path(ha_ver: str, py_ver: str) -> str:
     return _ensure_within_root(_VENVS_ROOT, candidate)
 
 
+@contextlib.contextmanager
+def _overrides_file(ha_ver: str) -> Generator[str]:
+    """Write a HA version-pin overrides file and remove it on exit.
+
+    Yields the absolute path to the overrides file.
+    """
+    overrides_dir = os.path.join(_REPO_ROOT, "scratch")
+    os.makedirs(overrides_dir, exist_ok=True)
+    overrides_path = os.path.join(overrides_dir, "overrides.txt")
+    with open(overrides_path, "w", encoding="utf-8") as f:
+        f.write(f"homeassistant == {ha_ver}\n")
+    try:
+        yield overrides_path
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(overrides_path)
+
+
+def _ensure_venv(venv_path: Path, py_ver: str) -> bool:
+    """Ensure virtual environment exists, creating it if necessary.
+
+    Returns:
+        True if a new virtual environment was created, False otherwise.
+    """
+    python_bin = venv_path / "bin" / "python"
+    pytest_bin = venv_path / "bin" / "pytest"
+    if venv_path.exists() and python_bin.exists() and pytest_bin.exists():
+        return False
+    if venv_path.exists():
+        print(f"STEP_INFO: Re-creating incomplete virtual environment at {venv_path}", flush=True)
+        shutil.rmtree(venv_path, ignore_errors=True)
+    print(f"STEP_START: uv venv {venv_path} (Python {py_ver})", flush=True)
+    subprocess.run(
+        [
+            "uv",
+            "--no-config",
+            "venv",
+            "--no-project",
+            "--python",
+            py_ver,
+            venv_path,
+            "--quiet",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=_REPO_ROOT,
+    )
+    print(f"STEP_OK: uv venv {venv_path} (Python {py_ver})", flush=True)
+    return True
+
+
+def _install_dependencies(
+    python_bin: Path,
+    ha_ver_to_install: str,
+) -> None:
+    """Install or upgrade required test dependencies in the compatibility venv."""
+    ha_spec = f"homeassistant=={ha_ver_to_install}"
+    print(f"STEP_START: uv pip install {ha_spec}", flush=True)
+    with _overrides_file(ha_ver_to_install) as overrides_path:
+        subprocess.run(
+            [
+                "uv",
+                "--no-config",
+                "pip",
+                "install",
+                "--upgrade",
+                "--overrides",
+                overrides_path,
+                "--python",
+                python_bin,
+                ha_spec,
+                *_REQUIRED_TEST_DEPS,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=_REPO_ROOT,
+        )
+    print(f"STEP_OK: uv pip install {ha_spec}", flush=True)
+
+    print("STEP_START: cleanup __pycache__", flush=True)
+    subprocess.run(
+        [
+            "find",
+            ".",
+            "-name",
+            "__pycache__",
+            "-type",
+            "d",
+            "-exec",
+            "rm",
+            "-rf",
+            "{}",
+            "+",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=_REPO_ROOT,
+    )
+    print("STEP_OK: cleanup __pycache__", flush=True)
+
+
+def _get_installed_ha_version(python_bin: Path) -> str:
+    """Get the actually installed Home Assistant version inside the venv."""
+    actual_ver = "unknown"
+    with contextlib.suppress(subprocess.CalledProcessError):
+        result = subprocess.run(
+            ["uv", "--no-config", "pip", "show", "--python", python_bin, "homeassistant"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=_REPO_ROOT,
+        )
+        for line in result.stdout.splitlines():
+            if line.startswith("Version:"):
+                actual_ver = line.split(":", 1)[1].strip()
+                break
+    return actual_ver
+
+
+def _run_pytest(python_bin: Path, ha_ver_display: str) -> None:
+    """Run pytest inside the virtual environment."""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = _REPO_ROOT
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    print(f"STEP_START: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
+    subprocess.run(
+        [
+            "uv",
+            "--no-config",
+            "run",
+            "--no-project",
+            "--python",
+            python_bin,
+            "pytest",
+            "--no-cov",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=_REPO_ROOT,
+    )
+    print(f"STEP_OK: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
+
+
 def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bool, str]:
     """Run the test suite for a specific Home Assistant version."""
     ha_ver_to_install = ha_ver
-    if ha_ver == "latest":
+    if ha_ver_to_install == "latest":
         latest_ver = _get_latest_ha_version()
         ha_ver_to_install = latest_ver
 
@@ -159,134 +309,30 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
     pytest_bin = venv_path / "bin" / "pytest"
 
     try:
-        if not venv_path.exists():
-            print(f"STEP_START: uv venv {venv_path} (Python {py_ver})", flush=True)
-            subprocess.run(
-                [
-                    "uv",
-                    "--no-config",
-                    "venv",
-                    "--no-project",
-                    "--python",
-                    py_ver,
-                    venv_path,
-                    "--quiet",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=_REPO_ROOT,
-            )
-            print(f"STEP_OK: uv venv {venv_path} (Python {py_ver})", flush=True)
-            needs_install = True
-        else:
-            needs_install = reinstall
+        created_venv = _ensure_venv(venv_path, py_ver)
 
         if not python_bin.exists():
             print(f"VALIDATION_ERROR: python not found at {python_bin}", flush=True)
             return False, ha_ver_display
 
-        if needs_install:
-            overrides_dir = os.path.join(_REPO_ROOT, "scratch")
-            os.makedirs(overrides_dir, exist_ok=True)
-            overrides_file = os.path.join(overrides_dir, "overrides.txt")
-            with open(overrides_file, "w", encoding="utf-8") as f:
-                f.write(f"homeassistant == {ha_ver_to_install}\n")
-
-            ha_spec = f"homeassistant=={ha_ver_to_install}"
-            print(f"STEP_START: uv pip install {ha_spec}", flush=True)
-            try:
-                subprocess.run(
-                    [
-                        "uv",
-                        "--no-config",
-                        "pip",
-                        "install",
-                        "--upgrade",
-                        "--overrides",
-                        overrides_file,
-                        "--python",
-                        python_bin,
-                        ha_spec,
-                        *_REQUIRED_TEST_DEPS,
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    cwd=_REPO_ROOT,
-                )
-            finally:
-                with contextlib.suppress(OSError):
-                    os.remove(overrides_file)
-            print(f"STEP_OK: uv pip install {ha_spec}", flush=True)
-
-            print("STEP_START: cleanup __pycache__", flush=True)
-            subprocess.run(
-                [
-                    "find",
-                    ".",
-                    "-name",
-                    "__pycache__",
-                    "-type",
-                    "d",
-                    "-exec",
-                    "rm",
-                    "-rf",
-                    "{}",
-                    "+",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=_REPO_ROOT,
-            )
-            print("STEP_OK: cleanup __pycache__", flush=True)
+        installed_ha_version = _get_installed_ha_version(python_bin)
+        if reinstall or created_venv or installed_ha_version != ha_ver_to_install:
+            _install_dependencies(python_bin, ha_ver_to_install)
+            installed_ha_version = _get_installed_ha_version(python_bin)
 
         if not pytest_bin.exists():
             print(f"VALIDATION_ERROR: pytest not found at {pytest_bin}", flush=True)
             return False, ha_ver_display
 
-        actual_ver = "unknown"
-        try:
-            result = subprocess.run(
-                ["uv", "--no-config", "pip", "show", "--python", python_bin, "homeassistant"],
-                capture_output=True,
-                text=True,
-                check=True,
-                cwd=_REPO_ROOT,
+        ha_ver_display = installed_ha_version
+        if ha_ver_display != ha_ver_to_install:
+            print(
+                f"VALIDATION_ERROR: expected Home Assistant {ha_ver_to_install}, "
+                f"found {ha_ver_display}",
+                flush=True,
             )
-            for line in result.stdout.splitlines():
-                if line.startswith("Version:"):
-                    actual_ver = line.split(":", 1)[1].strip()
-                    break
-        except subprocess.CalledProcessError:
-            pass
-
-        ha_ver_display = actual_ver
-
-        env = os.environ.copy()
-        env["PYTHONPATH"] = _REPO_ROOT
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-
-        print(f"STEP_START: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
-        subprocess.run(
-            [
-                "uv",
-                "--no-config",
-                "run",
-                "--no-project",
-                "--python",
-                python_bin,
-                "pytest",
-                "--no-cov",
-            ],
-            env=env,
-            check=True,
-            capture_output=True,
-            text=True,
-            cwd=_REPO_ROOT,
-        )
-        print(f"STEP_OK: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
+            return False, ha_ver_display
+        _run_pytest(python_bin, ha_ver_display)
         return True, ha_ver_display
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:

@@ -31,21 +31,12 @@ def test_github_provider_complex_urls():
 
     Includes verification of:
     - Non-file routes (tree views) returned without normalization.
-    - CDN conversion for raw URLs using 'refs/heads'.
-    - CDN conversion for UI URLs using 'refs/heads'.
+    - Standard blob URLs normalized to raw githubusercontent URLs.
     """
     provider = GitHubProvider()
 
     url = "https://github.com/user/repo/tree/main/blueprints"
     assert provider.normalize_url(url) == url
-
-    url = "https://raw.githubusercontent.com/user/repo/refs/heads/main/bp.yaml"
-    cdn_url = provider.get_cdn_url(url)
-    assert cdn_url == "https://cdn.jsdelivr.net/gh/user/repo@main/bp.yaml"
-
-    url = "https://github.com/user/repo/blob/refs/heads/main/bp.yaml"
-    cdn_url = provider.get_cdn_url(url)
-    assert cdn_url == "https://cdn.jsdelivr.net/gh/user/repo@main/bp.yaml"
 
     url = "https://github.com/user/repo/blob/main/raw/bp.yaml"
     assert (
@@ -109,52 +100,49 @@ def test_git_normalization_robustness():
     - Bitbucket: Raw links preservation and non-source paths handling.
     """
     gl = GitLabProvider()
-    assert (
-        gl.normalize_url("https://gitlab.com/user/repo/-/raw/main/bp.yaml")
-        == "https://gitlab.com/user/repo/-/raw/main/bp.yaml"
+    _test_git_normalization_robustness(
+        gl,
+        "https://gitlab.com/user/repo/-/raw/main/bp.yaml",
+        "https://gitlab.com/too/short",
+        "https://gitlab.com/user/repo/-/notblob/main/bp.yaml",
     )
-    assert gl.normalize_url("https://gitlab.com/too/short") == "https://gitlab.com/too/short"
-    assert (
-        gl.normalize_url("https://gitlab.com/user/repo/-/notblob/main/bp.yaml")
-        == "https://gitlab.com/user/repo/-/notblob/main/bp.yaml"
-    )
-
     cb = CodebergProvider()
-    assert (
-        cb.normalize_url("https://codeberg.org/user/repo/raw/branch/main/bp.yaml")
-        == "https://codeberg.org/user/repo/raw/branch/main/bp.yaml"
+    _test_git_normalization_robustness(
+        cb,
+        "https://codeberg.org/user/repo/raw/branch/main/bp.yaml",
+        "https://codeberg.org/too/short",
+        "https://codeberg.org/user/repo/notsrc/branch/main/bp.yaml",
     )
-    assert cb.normalize_url("https://codeberg.org/too/short") == "https://codeberg.org/too/short"
-    assert (
-        cb.normalize_url("https://codeberg.org/user/repo/notsrc/branch/main/bp.yaml")
-        == "https://codeberg.org/user/repo/notsrc/branch/main/bp.yaml"
+    bb = BitbucketProvider()
+    _test_git_normalization_robustness(
+        bb,
+        "https://bitbucket.org/user/repo/raw/master/bp.yaml",
+        "https://bitbucket.org/too/short",
+        "https://bitbucket.org/user/repo/notsrc/master/bp.yaml",
     )
 
-    bb = BitbucketProvider()
-    assert (
-        bb.normalize_url("https://bitbucket.org/user/repo/raw/master/bp.yaml")
-        == "https://bitbucket.org/user/repo/raw/master/bp.yaml"
-    )
-    assert bb.normalize_url("https://bitbucket.org/too/short") == "https://bitbucket.org/too/short"
-    assert (
-        bb.normalize_url("https://bitbucket.org/user/repo/notsrc/master/bp.yaml")
-        == "https://bitbucket.org/user/repo/notsrc/master/bp.yaml"
-    )
+
+def _test_git_normalization_robustness(provider, normalized_url, short_url, non_source_url):
+    """Verify providers preserve already normalized URLs and handle invalid paths gracefully."""
+    assert provider.normalize_url(normalized_url) == normalized_url
+    assert provider.normalize_url(short_url) == short_url
+    assert provider.normalize_url(non_source_url) == non_source_url
 
 
 def test_gist_metadata_normalization():
     """Verify that GistProvider handles /raw suffix when extracting metadata."""
     provider = GistProvider()
 
-    url = "https://gist.github.com/author/gist_id"
+    _test_gist_metadata_normalization(provider, "https://gist.github.com/author/gist_id")
+    normalized_url = "https://gist.github.com/author/gist_id/raw"
+    _test_gist_metadata_normalization(provider, normalized_url)
+
+
+def _test_gist_metadata_normalization(provider, url):
+    """Verify that GistProvider correctly extracts metadata from both standard and /raw URLs."""
     metadata = provider.get_metadata(url)
     assert metadata["author"] == "author"
     assert metadata["name"] == "gist_id"
-
-    normalized_url = "https://gist.github.com/author/gist_id/raw"
-    metadata_raw = provider.get_metadata(normalized_url)
-    assert metadata_raw["author"] == "author"
-    assert metadata_raw["name"] == "gist_id"
 
 
 def test_gitlab_normalization_keeps_empty_path_unchanged():

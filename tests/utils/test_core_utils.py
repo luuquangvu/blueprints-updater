@@ -8,7 +8,6 @@ import pytest
 
 from custom_components.blueprints_updater.const import CONF_MAX_BACKUPS, CONF_UPDATE_INTERVAL
 from custom_components.blueprints_updater.utils import (
-    get_cdn_url,
     get_config_bool,
     get_config_int,
     get_config_str,
@@ -320,7 +319,6 @@ def test_retry_async_rejects_bool_max_retries():
 def test_source_url_helpers_return_safe_defaults_for_unknown_sources():
     """Verify URL helpers keep unknown malformed sources inert."""
     assert normalize_url("not-a-url") == "not-a-url"
-    assert get_cdn_url("not-a-url") is None
 
 
 def test_should_include_blueprint_filter_modes():

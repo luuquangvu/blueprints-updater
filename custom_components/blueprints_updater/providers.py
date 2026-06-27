@@ -1,5 +1,6 @@
 """Source providers for Blueprints Updater."""
 
+import contextlib
 import hashlib
 import html
 from abc import ABC, abstractmethod
@@ -21,7 +22,6 @@ from .const import (
     DOMAIN_GITHUB_RAW,
     DOMAIN_GITLAB,
     DOMAIN_HA_FORUM,
-    DOMAIN_JSDELIVR,
     RE_FORUM_CODE_BLOCK,
     RE_FORUM_TOPIC_ID,
     RE_GIST_RAW,
@@ -71,9 +71,7 @@ def _strip_yaml_extension(filename: str) -> str:
     lower = filename.lower()
     if lower.endswith(".yaml"):
         return filename[:-5]
-    if lower.endswith(".yml"):
-        return filename[:-4]
-    return filename
+    return filename[:-4] if lower.endswith(".yml") else filename
 
 
 def _default_url_metadata(url: str) -> dict[str, str]:
@@ -109,10 +107,6 @@ class SourceProvider(ABC):
     @abstractmethod
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata (author, name) from URL or content."""
-
-    def get_cdn_url(self, url: str) -> str | None:
-        """Get CDN URL for the given source URL if supported."""
-        return None
 
     def parse_content(
         self, response_text: str, response_json: dict[str, Any] | None = None
@@ -171,57 +165,6 @@ class GitHubProvider(SourceProvider):
         filename = path_parts[-1] if len(path_parts) > 0 else "blueprint.yaml"
         name = _strip_yaml_extension(filename)
         return {"author": author, "name": name}
-
-    def get_cdn_url(self, url: str) -> str | None:
-        """Get jsDelivr CDN URL for GitHub source."""
-        parsed = urlparse(url)
-        hostname = _normalize_hostname(parsed.hostname)
-        path_parts = [p for p in parsed.path.split("/") if p]
-
-        if hostname == DOMAIN_GITHUB_RAW:
-            if len(path_parts) < 4:
-                return None
-            if (
-                len(path_parts) >= 6
-                and path_parts[2] == "refs"
-                and path_parts[3] in ("heads", "tags")
-            ):
-                user, repo = path_parts[:2]
-                branch = path_parts[4]
-                path = "/".join(path_parts[5:])
-            else:
-                user, repo, branch = path_parts[:3]
-                path = "/".join(path_parts[3:])
-        elif hostname == DOMAIN_GITHUB:
-            if len(path_parts) < 5:
-                return None
-
-            if path_parts[2].lower() not in ("blob", "raw"):
-                return None
-            user, repo = path_parts[:2]
-            if (
-                len(path_parts) >= 7
-                and path_parts[3] == "refs"
-                and path_parts[4] in ("heads", "tags")
-            ):
-                branch = path_parts[5]
-                path = "/".join(path_parts[6:])
-            else:
-                branch = path_parts[3]
-                path = "/".join(path_parts[4:])
-        else:
-            return None
-
-        return urlunparse(
-            (
-                "https",
-                DOMAIN_JSDELIVR,
-                f"/gh/{user}/{repo}@{branch}/{path}",
-                "",
-                "",
-                "",
-            )
-        )
 
 
 class GistProvider(SourceProvider):
@@ -304,7 +247,7 @@ class HAForumProvider(SourceProvider):
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from Forum URL, prioritizing username/slug from topic JSON."""
         if content:
-            try:
+            with contextlib.suppress(orjson.JSONDecodeError, KeyError, TypeError):
                 data = orjson.loads(content)
                 if isinstance(data, dict):
                     post_stream = data.get("post_stream")
@@ -324,9 +267,6 @@ class HAForumProvider(SourceProvider):
                         slug = data.get("slug")
                         if username and slug:
                             return {"author": username, "name": slug}
-            except (orjson.JSONDecodeError, KeyError, TypeError):
-                pass
-
         parsed = urlparse(url)
         hostname = parsed.hostname.lower() if parsed.hostname else DOMAIN_HA_FORUM
         match = RE_FORUM_TOPIC_ID.search(parsed.path)
@@ -534,10 +474,7 @@ class ProviderRegistry:
                 return provider
 
         generic = next((p for p in self._providers if isinstance(p, GenericProvider)), None)
-        if generic and generic.can_handle(url):
-            return generic
-
-        return None
+        return generic if generic and generic.can_handle(url) else None
 
     def normalize_url(self, url: str) -> str:
         """Find appropriate provider and normalize URL."""

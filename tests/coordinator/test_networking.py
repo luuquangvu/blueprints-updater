@@ -1,4 +1,4 @@
-"""Tests for coordinator networking, fetching, and CDN logic."""
+"""Tests for coordinator networking and fetching logic."""
 
 import asyncio
 from http import HTTPStatus

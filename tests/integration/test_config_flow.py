@@ -31,7 +31,6 @@ async def test_config_flow_user_step(hass: HomeAssistant) -> None:
             result["flow_id"],
             {
                 "auto_update": True,
-                "use_cdn": True,
                 "update_interval": 24,
                 "max_backups": 5,
                 "filter_mode": "all",

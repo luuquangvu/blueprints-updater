@@ -29,12 +29,12 @@ def _normalized_version(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     match = re.fullmatch(VERSION_PATTERN, value)
-    return match.group(1) if match else None
+    return match[1] if match else None
 
 
 def _read_manifest_version(manifest_path: Path) -> tuple[str, str | None]:
     """Read and validate the integration manifest version."""
-    manifest = orjson.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = orjson.loads(manifest_path.read_bytes())
     raw_version = manifest.get("version", "")
     return str(raw_version), _normalized_version(raw_version)
 
@@ -55,7 +55,7 @@ def _evaluate_release_gate(
 ) -> ReleaseGateResult:
     """Evaluate release PR labels, branch name, and metadata versions."""
     branch_match = re.fullmatch(rf"release/{VERSION_PATTERN}", branch)
-    branch_version = branch_match.group(1) if branch_match else None
+    branch_version = branch_match[1] if branch_match else None
 
     manifest_version, manifest_version_full = _read_manifest_version(manifest_path)
     pyproject_version, pyproject_version_full = _read_pyproject_version(pyproject_path)
@@ -109,10 +109,9 @@ def _read_required_env(name: str) -> str:
     if value is None:
         raise ValueError(f"Environment variable {name!r} is not set")
 
-    stripped = value.strip()
-    if not stripped:
-        raise ValueError(f"Environment variable {name!r} is empty")
-    return stripped
+    if stripped := value.strip():
+        return stripped
+    raise ValueError(f"Environment variable {name!r} is empty")
 
 
 def _read_pull_request_inputs() -> tuple[str, set[str]]:

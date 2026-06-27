@@ -8,7 +8,6 @@ from http import HTTPStatus
 from types import MappingProxyType
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
-from urllib.parse import urlparse
 
 import httpx
 import pytest
@@ -16,9 +15,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import (
     ALLOWED_RELOAD_DOMAINS,
-    CONF_USE_CDN,
     DOMAIN_AUTOMATION,
-    DOMAIN_JSDELIVR,
     DOMAIN_SCRIPT,
     DOMAIN_TEMPLATE,
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
@@ -225,7 +222,7 @@ async def test_async_update_data_partial_failure(coordinator, mock_makedirs):
         },
     }
 
-    def mock_fetch(session, path, url, cdn_url, *args, **kwargs):
+    def mock_fetch(session, url, etag=None, last_modified=None, force=False):
         """Mock fetch content helper."""
         if url == url1:
             return (
@@ -237,7 +234,7 @@ async def test_async_update_data_partial_failure(coordinator, mock_makedirs):
             raise httpx.RequestError("Failed")
         return None, None, None
 
-    coordinator._async_fetch_with_cdn_fallback = AsyncMock(side_effect=mock_fetch)
+    coordinator._async_fetch_content = AsyncMock(side_effect=mock_fetch)
 
     with (
         patch.object(BlueprintUpdateCoordinator, "scan_blueprints", return_value=blueprints),
@@ -259,7 +256,7 @@ async def test_async_background_refresh_503_resilience(coordinator, mock_makedir
         path: {"source_url": "https://example.com/blueprint.yaml", "local_hash": "h"}
     }
 
-    coordinator._async_fetch_with_cdn_fallback = AsyncMock(
+    coordinator._async_fetch_content = AsyncMock(
         side_effect=httpx.HTTPStatusError(
             "Service Unavailable",
             request=MagicMock(),
@@ -300,7 +297,7 @@ async def test_async_update_data_auto_update(mock_translate, coordinator, mock_m
     }
 
     coordinator.async_install_blueprint = AsyncMock()
-    coordinator._async_fetch_with_cdn_fallback = AsyncMock(return_value=(content, "new_etag", None))
+    coordinator._async_fetch_content = AsyncMock(return_value=(content, "new_etag", None))
 
     with (
         patch.object(
@@ -361,14 +358,14 @@ async def test_async_update_data_auto_update_multiple_sorted(
         },
     }
 
-    def mock_fetch(session, path, url, cdn_url, *args, **kwargs):
+    def mock_fetch(session, url, etag=None, last_modified=None, force=False):
         """Mock fetch content helper for multiple files."""
         if url == u1:
             return (c1, "e1", None)
         return (c2, "e2", None) if url == u2 else (None, None, None)
 
     coordinator.async_install_blueprint = AsyncMock()
-    coordinator._async_fetch_with_cdn_fallback = AsyncMock(side_effect=mock_fetch)
+    coordinator._async_fetch_content = AsyncMock(side_effect=mock_fetch)
 
     with (
         patch.object(
@@ -1241,56 +1238,6 @@ async def test_async_update_blueprint_304_last_modified(coordinator, mock_makedi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("cdn_config", "expect_cdn"),
-    [
-        (None, True),
-        (True, True),
-        (False, False),
-    ],
-)
-async def test_async_update_blueprint_cdn_gating(coordinator, cdn_config, expect_cdn):
-    """Test that cdn_url is only passed to fetcher based on config gating."""
-    path = "/config/blueprints/automation/test.yaml"
-    info = {
-        "name": "Test",
-        "relative_path": "automation/test.yaml",
-        "source_url": "https://github.com/user/repo/blob/main/test.yaml",
-        "domain": DOMAIN_AUTOMATION,
-        "local_hash": "old_hash",
-    }
-    coordinator.data = {path: info}
-
-    if cdn_config is None:
-        coordinator.config_entry.options = MappingProxyType({})
-    else:
-        coordinator.config_entry.options = MappingProxyType({CONF_USE_CDN: cdn_config})
-
-    mock_session = MagicMock(spec=httpx.AsyncClient)
-    results_to_notify = []
-    updated_domains = set()
-
-    with patch.object(
-        coordinator,
-        "_async_fetch_with_cdn_fallback",
-        AsyncMock(return_value=("cont", "etag", None)),
-    ) as mock_fetch:
-        await coordinator._async_update_blueprint_in_place(
-            mock_session, path, info, results_to_notify, updated_domains
-        )
-        _args, _kwargs = mock_fetch.call_args
-        cdn_url_arg = _args[4]
-
-        if expect_cdn:
-            assert cdn_url_arg is not None
-            parsed = urlparse(cdn_url_arg)
-            assert parsed.hostname == DOMAIN_JSDELIVR
-            assert parsed.scheme == "https"
-        else:
-            assert cdn_url_arg is None
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
     "error_case", ["unsafe_url", "fetch_error", "empty_content", "processing_error"]
 )
 async def test_async_update_blueprint_failure_paths(coordinator, error_case):
@@ -1310,13 +1257,11 @@ async def test_async_update_blueprint_failure_paths(coordinator, error_case):
         info["source_url"] = "https://malicious.com/exploit.yaml"
         coordinator._is_safe_url = AsyncMock(return_value=False)
     elif error_case == "fetch_error":
-        coordinator._async_fetch_with_cdn_fallback = AsyncMock(
-            side_effect=httpx.HTTPError("Network down")
-        )
+        coordinator._async_fetch_content = AsyncMock(side_effect=httpx.HTTPError("Network down"))
     elif error_case == "empty_content":
-        coordinator._async_fetch_with_cdn_fallback = AsyncMock(return_value=("", "new-etag", None))
+        coordinator._async_fetch_content = AsyncMock(return_value=("", "new-etag", None))
     elif error_case == "processing_error":
-        coordinator._async_fetch_with_cdn_fallback = AsyncMock(
+        coordinator._async_fetch_content = AsyncMock(
             return_value=("valid content", "new-etag", None)
         )
         coordinator._process_blueprint_content = AsyncMock(
@@ -1727,7 +1672,7 @@ async def test_async_fetch_diff_content_rejects_invalid_remote_yaml(coordinator)
             "updatable": True,
         }
     }
-    coord._async_fetch_with_cdn_fallback = AsyncMock(return_value=("invalid: yaml: [", None, None))
+    coord._async_fetch_content = AsyncMock(return_value=("invalid: yaml: [", None, None))
 
     with (
         patch(
@@ -1814,8 +1759,8 @@ async def test_handle_auto_update_step_preserves_failure_state(coordinator):
     )
 
     assert result is False
-    assert results_to_notify == []
-    assert updated_domains == set()
+    assert not results_to_notify
+    assert not updated_domains
     assert coord.data[path]["updatable"] is True
     assert coord.data[path]["remote_hash"] == "remote-hash"
     assert coord.data[path]["remote_content"] == "remote content"

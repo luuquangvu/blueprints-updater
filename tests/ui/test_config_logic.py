@@ -10,9 +10,7 @@ import voluptuous as vol
 from custom_components.blueprints_updater.config_flow import _get_config_schema
 from custom_components.blueprints_updater.const import (
     CONF_AUTO_UPDATE,
-    CONF_USE_CDN,
     DEFAULT_AUTO_UPDATE,
-    DEFAULT_USE_CDN,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
@@ -35,29 +33,10 @@ def test_is_auto_update_enabled_config_logic(hass, options, expected):
     assert coordinator.is_auto_update_enabled() is expected
 
 
-@pytest.mark.parametrize(
-    ("options", "expected"),
-    [
-        ({}, DEFAULT_USE_CDN),
-        ({CONF_USE_CDN: False}, False),
-        ({CONF_USE_CDN: True}, True),
-    ],
-)
-def test_is_cdn_enabled_config_logic(hass, options, expected):
-    """Test is_cdn_enabled respects default and options."""
-    entry = MagicMock()
-    entry.data = {}
-    entry.options = options
-
-    coordinator = create_mock_coordinator(hass, entry)
-    assert coordinator.is_cdn_enabled() is expected
-
-
 def test_config_helpers_no_entry(hass):
     """Test config helpers handle missing config_entry."""
     coordinator = create_mock_coordinator(hass, None)
     assert coordinator.is_auto_update_enabled() is DEFAULT_AUTO_UPDATE
-    assert coordinator.is_cdn_enabled() is DEFAULT_USE_CDN
 
 
 def test_is_auto_update_enabled_ignores_legacy_data(hass):
@@ -72,20 +51,6 @@ def test_is_auto_update_enabled_ignores_legacy_data(hass):
 
     coordinator = create_mock_coordinator(hass, entry)
     assert coordinator.is_auto_update_enabled() is DEFAULT_AUTO_UPDATE
-
-
-def test_is_cdn_enabled_ignores_legacy_data(hass):
-    """Test is_cdn_enabled ignores values in config_entry.data.
-
-    This verifies the breaking change in v2.0.0 where legacy data fallback
-    was removed.
-    """
-    entry = MagicMock()
-    entry.data = {CONF_USE_CDN: not DEFAULT_USE_CDN}
-    entry.options = {}
-
-    coordinator = create_mock_coordinator(hass, entry)
-    assert coordinator.is_cdn_enabled() is DEFAULT_USE_CDN
 
 
 def create_mock_coordinator(
@@ -118,17 +83,14 @@ def test_get_config_schema_entry_precedence(hass):
     entry = MagicMock()
     entry.data = {
         CONF_AUTO_UPDATE: False,
-        CONF_USE_CDN: False,
     }
     entry.options = {
         CONF_AUTO_UPDATE: True,
-        CONF_USE_CDN: True,
     }
 
     schema = _get_config_schema(entry, [])
 
     assert get_schema_default(schema, CONF_AUTO_UPDATE) is True
-    assert get_schema_default(schema, CONF_USE_CDN) is True
 
 
 def test_get_config_schema_ignores_legacy_data(hass):
@@ -136,14 +98,12 @@ def test_get_config_schema_ignores_legacy_data(hass):
     entry = MagicMock()
     entry.data = {
         CONF_AUTO_UPDATE: not DEFAULT_AUTO_UPDATE,
-        CONF_USE_CDN: not DEFAULT_USE_CDN,
     }
     entry.options = {}
 
     schema = _get_config_schema(entry, [])
 
     assert get_schema_default(schema, CONF_AUTO_UPDATE) is DEFAULT_AUTO_UPDATE
-    assert get_schema_default(schema, CONF_USE_CDN) is DEFAULT_USE_CDN
 
 
 def test_get_config_schema_initial_defaults(hass):
@@ -151,4 +111,3 @@ def test_get_config_schema_initial_defaults(hass):
     schema = _get_config_schema({}, [])
 
     assert get_schema_default(schema, CONF_AUTO_UPDATE) is DEFAULT_AUTO_UPDATE
-    assert get_schema_default(schema, CONF_USE_CDN) is DEFAULT_USE_CDN

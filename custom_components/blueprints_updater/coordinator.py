@@ -70,10 +70,8 @@ from .const import (
     CONF_AUTO_UPDATE,
     CONF_FILTER_MODE,
     CONF_SELECTED_BLUEPRINTS,
-    CONF_USE_CDN,
     DEFAULT_AUTO_UPDATE,
     DEFAULT_MAX_BACKUPS,
-    DEFAULT_USE_CDN,
     DOMAIN,
     DOMAIN_AUTOMATION,
     DOMAIN_SCRIPT,
@@ -98,7 +96,6 @@ from .const import (
 from .providers import registry
 from .utils import (
     get_blueprint_relative_path,
-    get_cdn_url,
     get_config_bool,
     get_max_backups,
     get_validated_filter_mode,
@@ -168,6 +165,17 @@ class GitDiffResult:
 
     diff_text: str
     is_semantic_sync: bool
+
+
+@dataclass(frozen=True)
+class BlueprintScanContext:
+    """Context and configuration for a blueprint scan operation."""
+
+    hass: HomeAssistant
+    real_blueprint_path: str
+    filter_mode: str
+    selected_set: set[str]
+    max_backups: int
 
 
 MAX_HOSTNAME_CACHE_SIZE = 1024
@@ -1193,27 +1201,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if self.hass.services.has_service(domain, "reload"):
                 await self.hass.services.async_call(domain, "reload")
 
-    async def async_import_blueprint(self, url: str, confirm: bool = False) -> None:
-        """Import a new blueprint from a URL.
-
-        This method fetches, validates, and installs a blueprint. It uses raw components
-        (author/name) for the destination path instead of slugifying them. This is a
-        deliberate design choice to maintain 100% parity with Home Assistant Core's
-        internal blueprint importer (see homeassistant/components/blueprint/importer.py).
-
-        By avoiding slugification, we ensure that:
-        1. Hostnames (e.g., 'pastebin.com') or platform usernames remain as-is in the
-           folder structure, matching exactly how HA Core stores them.
-        2. Blueprints imported via this service will resolve to the exact same file
-           system path as those imported via the Home Assistant UI, preventing
-           duplicate entries and ensuring seamless update management.
-        """
-        if not confirm:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="confirmation_required",
-            )
-
+    async def _async_fetch_import_data(self, url: str) -> tuple[str, str, str, str, httpx.Response]:
+        """Fetch blueprint content, canonical url, and validate basic metadata."""
         if not await self._is_safe_url(url):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -1278,28 +1267,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 translation_placeholders={"error": f"Malformed metadata: {err}"},
             ) from err
 
-        try:
-            parsed = yaml_util.parse_yaml(content)
-            if not isinstance(parsed, dict) or "blueprint" not in parsed:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="invalid_yaml",
-                )
-            functional_domain = self._get_functional_domain(
-                "imported.yaml", content=content, parsed_data=parsed
-            )
-            domain = functional_domain
-        except HomeAssistantError as err:
-            if isinstance(err, ServiceValidationError):
-                raise
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="invalid_yaml",
-            ) from err
+        return content, canonical_url, author, name, response
 
-        rel_path = f"{domain}/{author}/{name}.yaml"
-        full_path = self.hass.config.path(BLUEPRINTS_DATA_DIR, rel_path)
-
+    def _check_import_path_conflicts(
+        self, full_path: str, rel_path: str, canonical_url: str
+    ) -> None:
+        """Check for existing path conflicts and URL matches on import."""
         if not self._is_safe_path(full_path):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -1316,7 +1289,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     content_on_disk = f.read()
                 parsed_disk = yaml_util.parse_yaml(content_on_disk)
                 if isinstance(parsed_disk, dict):
-                    existing_url = parsed_disk.get("blueprint", {}).get("source_url")
+                    blueprint_section = parsed_disk.get("blueprint")
+                    if isinstance(blueprint_section, dict):
+                        existing_url = blueprint_section.get("source_url")
             except (OSError, UnicodeDecodeError, HomeAssistantError) as err:
                 _LOGGER.debug(
                     "Failed to read existing blueprint file %s to determine source_url: %s",
@@ -1344,6 +1319,53 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 translation_key="import_path_conflict",
                 translation_placeholders={"existing_url": redact_url(full_path)},
             )
+
+    async def async_import_blueprint(self, url: str, confirm: bool = False) -> None:
+        """Import a new blueprint from a URL.
+
+        This method fetches, validates, and installs a blueprint. It uses raw components
+        (author/name) for the destination path instead of slugifying them. This is a
+        deliberate design choice to maintain 100% parity with Home Assistant Core's
+        internal blueprint importer (see homeassistant/components/blueprint/importer.py).
+
+        By avoiding slugification, we ensure that:
+        1. Hostnames (e.g., 'pastebin.com') or platform usernames remain as-is in the
+           folder structure, matching exactly how HA Core stores them.
+        2. Blueprints imported via this service will resolve to the exact same file
+           system path as those imported via the Home Assistant UI, preventing
+           duplicate entries and ensuring seamless update management.
+        """
+        if not confirm:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="confirmation_required",
+            )
+
+        content, canonical_url, author, name, response = await self._async_fetch_import_data(url)
+
+        try:
+            parsed = yaml_util.parse_yaml(content)
+            if not isinstance(parsed, dict) or "blueprint" not in parsed:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="invalid_yaml",
+                )
+            functional_domain = self._get_functional_domain(
+                "imported.yaml", content=content, parsed_data=parsed
+            )
+            domain = functional_domain
+        except HomeAssistantError as err:
+            if isinstance(err, ServiceValidationError):
+                raise
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_yaml",
+            ) from err
+
+        rel_path = f"{domain}/{author}/{name}.yaml"
+        full_path = self.hass.config.path(BLUEPRINTS_DATA_DIR, rel_path)
+
+        self._check_import_path_conflicts(full_path, rel_path, canonical_url)
 
         if validation_error := self._validate_blueprint(parsed, canonical_url, domain):
             error_key = validation_error.split("|")[0]
@@ -1750,7 +1772,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if hostname in SPECIAL_USE_TLDS:
             return False
-        if any(hostname.endswith("." + tld) for tld in SPECIAL_USE_TLDS):
+        if any(hostname.endswith(f".{tld}") for tld in SPECIAL_USE_TLDS):
             return False
 
         if hostname in self._safe_hostname_cache:
@@ -1885,19 +1907,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     "blueprints_updater_save_after_restore",
                 )
                 await self.async_request_refresh()
+            elif message == "missing_backup":
+                _LOGGER.error(
+                    "Backup version %s requested for %s does not exist on disk",
+                    version,
+                    real_path,
+                )
             else:
-                if message == "missing_backup":
-                    _LOGGER.error(
-                        "Backup version %s requested for %s does not exist on disk",
-                        version,
-                        real_path,
-                    )
-                else:
-                    _LOGGER.error(
-                        "Failed to restore blueprint at %s: %s",
-                        real_path,
-                        message,
-                    )
+                _LOGGER.error(
+                    "Failed to restore blueprint at %s: %s",
+                    real_path,
+                    message,
+                )
 
             translation_kwargs = {}
             if not success and message == "system_error":
@@ -2499,17 +2520,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         client_kwargs = self._get_client_kwargs()
         session = get_async_client(self.hass, **client_kwargs)
-        cdn_url = get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
 
-        remote_content, _, _ = await self._async_fetch_with_cdn_fallback(
+        remote_content, _, _ = await self._async_fetch_content(
             session,
-            path,
             normalized_url,
-            source_url,
-            cdn_url,
-            stored_etag=None,
-            stored_last_modified=None,
-            stored_remote_hash=None,
+            etag=None,
+            last_modified=None,
             force=True,
         )
 
@@ -2614,15 +2630,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         """
         return get_config_bool(self.config_entry, CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
 
-    def is_cdn_enabled(self) -> bool:
-        """Return whether jsDelivr CDN usage is enabled.
-
-        Returns:
-            Boolean indicating CDN preference.
-
-        """
-        return get_config_bool(self.config_entry, CONF_USE_CDN, DEFAULT_USE_CDN)
-
     def _update_error_state(
         self, path: str, error_type: str, detail: Any, clear_etag: bool = False
     ) -> None:
@@ -2651,83 +2658,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             self.data[path].update(update_data)
         else:
             _LOGGER.warning("Attempted to update error state for missing blueprint path: %s", path)
-
-    async def _async_fetch_with_cdn_fallback(
-        self,
-        session: httpx.AsyncClient,
-        path: str,
-        normalized_url: str,
-        source_url: str,
-        cdn_url: str | None,
-        stored_etag: str | None,
-        stored_last_modified: str | None,
-        stored_remote_hash: str | None,
-        force: bool,
-    ) -> tuple[str | None, str | None, str | None]:
-        """Fetch remote content from CDN with fallback to original source.
-
-        Args:
-            session: Async HTTP client session.
-            path: Local path of the blueprint.
-            normalized_url: The normalized raw GitHub URL.
-            source_url: The original blueprint source URL identity.
-            cdn_url: The jsDelivr CDN URL, if applicable.
-            stored_etag: Previously stored ETag.
-            stored_last_modified: Previously stored Last-Modified date.
-            stored_remote_hash: Previously stored content hash.
-            force: If True, ignore ETag/Last-Modified and force a full download.
-
-        Returns:
-            A tuple of (remote_content, new_etag, new_last_modified).
-
-        """
-        etag = stored_etag if (stored_remote_hash and not force) else None
-        last_modified = stored_last_modified if (stored_remote_hash and not force) else None
-
-        if cdn_url:
-            mismatch_fallback = False
-            try:
-                _LOGGER.debug("Fetching blueprint via CDN: %s", redact_url(cdn_url))
-                remote_content, new_etag, new_last_modified = await self._async_fetch_content(
-                    session, cdn_url, etag=etag, last_modified=last_modified, force=force
-                )
-                if remote_content or (
-                    remote_content is None
-                    and (new_etag is not None or new_last_modified is not None)
-                ):
-                    if self._expected_hash_len is None:
-                        self._expected_hash_len = len(
-                            self._hash_content("", already_normalized=True)
-                        )
-                    if (
-                        remote_content
-                        and stored_remote_hash
-                        and len(stored_remote_hash) == self._expected_hash_len
-                    ):
-                        ensured_content = self._ensure_source_url(remote_content, source_url)
-                        cdn_hash = self._hash_content(
-                            ensured_content, source_url, already_normalized=True
-                        )
-                        if cdn_hash != stored_remote_hash:
-                            _LOGGER.debug(
-                                "CDN content mismatch detected (CDN: %s, stored: %s); "
-                                "falling back to authoritative source URL for validation.",
-                                cdn_hash[:8],
-                                stored_remote_hash[:8],
-                            )
-                            mismatch_fallback = True
-                    if not mismatch_fallback:
-                        return remote_content, new_etag, new_last_modified
-            except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
-                _LOGGER.warning(
-                    "CDN fetch failed for %s; falling back to original source: %s",
-                    path,
-                    sanitize_error_detail(str(err)),
-                )
-
-        return await self._async_fetch_content(
-            session, normalized_url, etag=etag, last_modified=last_modified, force=force
-        )
 
     async def _async_update_blueprint_in_place(
         self,
@@ -2761,23 +2691,25 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not normalized_url:
             return
 
-        cdn_url = get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
+        if not await self._is_safe_url(normalized_url):
+            _LOGGER.warning("Blocking update from untrusted URL: %s", redact_url(normalized_url))
+            self._update_error_state(path, "unsafe_url", source_url, clear_etag=True)
+            return
 
         stored_etag = self.data.get(path, {}).get("etag")
         stored_last_modified = self.data.get(path, {}).get("last_modified")
         stored_remote_hash = self.data.get(path, {}).get("remote_hash")
 
+        etag = stored_etag if (stored_remote_hash and not force) else None
+        last_modified = stored_last_modified if (stored_remote_hash and not force) else None
+
         try:
-            remote_content, new_etag, new_last_modified = await self._async_fetch_with_cdn_fallback(
+            remote_content, new_etag, new_last_modified = await self._async_fetch_content(
                 session,
-                path,
                 normalized_url,
-                source_url,
-                cdn_url,
-                stored_etag,
-                stored_last_modified,
-                stored_remote_hash,
-                force,
+                etag=etag,
+                last_modified=last_modified,
+                force=force,
             )
 
             if remote_content is None:
@@ -2865,16 +2797,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "Auto-update enabled for '%s', fetching on-demand",
                 info["name"],
             )
-            cdn_url = get_cdn_url(normalized_url) if self.is_cdn_enabled() else None
-            return await self._async_fetch_with_cdn_fallback(
+            return await self._async_fetch_content(
                 session,
-                path,
                 normalized_url,
-                info.get("source_url", ""),
-                cdn_url,
-                stored_etag=None,
-                stored_last_modified=None,
-                stored_remote_hash=None,
+                etag=None,
+                last_modified=None,
                 force=True,
             )
 
@@ -3651,15 +3578,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return normalized
 
         if isinstance(normalized, dict):
-            res: dict[str, Any] = {}
             orig_dict = original if isinstance(original, dict) else {}
 
-            for key in orig_dict:
-                if key in normalized:
-                    res[key] = BlueprintUpdateCoordinator._stabilize_yaml_structure(
-                        orig_dict[key], normalized[key]
-                    )
-
+            res: dict[str, Any] = {
+                key: BlueprintUpdateCoordinator._stabilize_yaml_structure(
+                    orig_dict[key], normalized[key]
+                )
+                for key in orig_dict
+                if key in normalized
+            }
             new_keys = sorted(k for k in normalized if k not in res)
             for key in new_keys:
                 res[key] = BlueprintUpdateCoordinator._stabilize_yaml_structure(
@@ -3819,6 +3746,58 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         }
 
     @staticmethod
+    def _scan_single_blueprint_file(
+        full_path: str,
+        context: BlueprintScanContext,
+    ) -> BlueprintMetadata | None:
+        """Scan and process a single blueprint file."""
+        real_full_path = os.path.realpath(full_path)
+        try:
+            if (
+                os.path.commonpath([real_full_path, context.real_blueprint_path])
+                != context.real_blueprint_path
+            ):
+                _LOGGER.warning(
+                    "Security alert: Ignoring blueprint symlink outside root: %s",
+                    full_path,
+                )
+                return None
+        except (ValueError, OSError):
+            _LOGGER.warning("Skipping blueprint with invalid path: %s", full_path)
+            return None
+
+        relative_path = get_blueprint_relative_path(context.hass, full_path)
+        if not relative_path:
+            return None
+
+        try:
+            with open(full_path, encoding="utf-8") as f:
+                content = f.read()
+
+            parsed_data = BlueprintUpdateCoordinator._parse_blueprint_data(
+                full_path, content, relative_path
+            )
+            if not parsed_data:
+                return None
+
+            if not should_include_blueprint(
+                relative_path, context.filter_mode, context.selected_set
+            ):
+                return None
+
+            backups_count = BlueprintUpdateCoordinator._count_backups_sync(
+                real_full_path, context.max_backups
+            )
+            return {
+                **parsed_data,
+                "relative_path": relative_path,
+                "backups_count": backups_count,
+            }
+        except OSError:
+            _LOGGER.exception("Error reading blueprint at %s", full_path)
+            return None
+
+    @staticmethod
     def scan_blueprints(
         hass: HomeAssistant,
         filter_mode: str,
@@ -3838,6 +3817,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         real_blueprint_path = os.path.realpath(blueprint_path)
         selected_set = set(selected_blueprints)
 
+        context = BlueprintScanContext(
+            hass=hass,
+            real_blueprint_path=real_blueprint_path,
+            filter_mode=filter_mode,
+            selected_set=selected_set,
+            max_backups=max_backups,
+        )
+
         for domain in ALLOWED_RELOAD_DOMAINS:
             domain_path = os.path.join(blueprint_path, domain)
             if not os.path.isdir(domain_path):
@@ -3845,48 +3832,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
             for root, _, files in os.walk(domain_path):
                 for file in files:
-                    if not (file.endswith((".yaml", ".yml"))):
+                    if not file.endswith((".yaml", ".yml")):
                         continue
 
                     full_path = os.path.join(root, file)
-                    real_full_path = os.path.realpath(full_path)
-                    try:
-                        if (
-                            os.path.commonpath([real_full_path, real_blueprint_path])
-                            != real_blueprint_path
-                        ):
-                            _LOGGER.warning(
-                                "Security alert: Ignoring blueprint symlink outside root: %s",
-                                full_path,
-                            )
-                            continue
-                    except (ValueError, OSError):
-                        _LOGGER.warning("Skipping blueprint with invalid path: %s", full_path)
-                        continue
-
-                    if relative_path := get_blueprint_relative_path(hass, full_path):
-                        try:
-                            with open(full_path, encoding="utf-8") as f:
-                                content = f.read()
-
-                            if parsed_data := BlueprintUpdateCoordinator._parse_blueprint_data(
-                                full_path, content, relative_path
-                            ):
-                                if not should_include_blueprint(
-                                    relative_path, filter_mode, selected_set
-                                ):
-                                    continue
-                                backups_count = BlueprintUpdateCoordinator._count_backups_sync(
-                                    real_full_path, max_backups
-                                )
-                                found_blueprints[full_path] = {
-                                    **parsed_data,
-                                    "relative_path": relative_path,
-                                    "backups_count": backups_count,
-                                }
-
-                        except OSError:
-                            _LOGGER.exception("Error reading blueprint at %s", full_path)
+                    if metadata := BlueprintUpdateCoordinator._scan_single_blueprint_file(
+                        full_path,
+                        context,
+                    ):
+                        found_blueprints[full_path] = metadata
 
         return found_blueprints
 

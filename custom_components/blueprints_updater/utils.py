@@ -277,21 +277,6 @@ def normalize_url(url: str) -> str:
     return url
 
 
-def get_cdn_url(url: str) -> str | None:
-    """Convert a source URL to a supported CDN URL.
-
-    Args:
-        url: The source URL, preferably already normalized.
-
-    Returns:
-        The CDN URL, or None if no provider can produce one.
-
-    """
-    if provider := registry.get_provider(url):
-        return provider.get_cdn_url(url)
-    return None
-
-
 def normalize_domain(domain: Any) -> str:
     """Normalize and validate the blueprint domain, defaulting to automation.
 
