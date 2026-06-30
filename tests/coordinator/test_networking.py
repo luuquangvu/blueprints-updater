@@ -60,13 +60,18 @@ async def test_async_fetch_content_pacing_logic(coordinator):
             new_callable=AsyncMock,
         ) as mock_sleep,
     ):
-        await coordinator._async_fetch_content(mock_session, "https://url1")
-        await coordinator._async_fetch_content(mock_session, "https://url2")
+        await coordinator._async_fetch_content(mock_session, "https://example.com/url1")
+        await coordinator._async_fetch_content(mock_session, "https://example.com/url2")
 
         mock_random.assert_called_with(MIN_SEND_INTERVAL, MAX_SEND_INTERVAL)
 
         expected_delay = (100.1 + MIN_SEND_INTERVAL) - 100.2
         mock_sleep.assert_called_with(pytest.approx(expected_delay))
+        assert mock_sleep.call_count == 1
+
+        # Query other host and verify it does not trigger pacing delay
+        await coordinator._async_fetch_content(mock_session, "https://otherdomain.com/url3")
+        assert mock_sleep.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -98,13 +103,18 @@ async def test_async_fetch_content_pacing_logic_max(coordinator):
             new_callable=AsyncMock,
         ) as mock_sleep,
     ):
-        await coordinator._async_fetch_content(mock_session, "https://url1")
-        await coordinator._async_fetch_content(mock_session, "https://url2")
+        await coordinator._async_fetch_content(mock_session, "https://example.com/url1")
+        await coordinator._async_fetch_content(mock_session, "https://example.com/url2")
 
         mock_random.assert_called_with(MIN_SEND_INTERVAL, MAX_SEND_INTERVAL)
 
         expected_delay = (200.1 + MAX_SEND_INTERVAL) - 200.2
         mock_sleep.assert_called_with(pytest.approx(expected_delay))
+        assert mock_sleep.call_count == 1
+
+        # Query other host and verify it does not trigger pacing delay
+        await coordinator._async_fetch_content(mock_session, "https://otherdomain.com/url3")
+        assert mock_sleep.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -138,9 +148,9 @@ async def test_async_fetch_content_pacing_synchronization(coordinator):
             mock_get.return_value.raise_for_status = MagicMock()
 
             tasks = [
-                coordinator._async_fetch_content(async_client, "https://url1/bp.yaml"),
-                coordinator._async_fetch_content(async_client, "https://url2/bp.yaml"),
-                coordinator._async_fetch_content(async_client, "https://url3/bp.yaml"),
+                coordinator._async_fetch_content(async_client, "https://example.com/url1/bp.yaml"),
+                coordinator._async_fetch_content(async_client, "https://example.com/url2/bp.yaml"),
+                coordinator._async_fetch_content(async_client, "https://example.com/url3/bp.yaml"),
             ]
 
             await asyncio.gather(*tasks)

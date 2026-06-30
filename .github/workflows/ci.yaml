@@ -109,12 +109,15 @@ jobs:
 
       - name: Install dependencies
         shell: bash
+        env:
+          MATRIX_HA_REAL_VERSION: ${{ matrix.ha_real_version }}
+          MATRIX_PYTHON_VERSION: ${{ matrix.python_version }}
         run: |
           set -euo pipefail
 
-          uv --no-config venv --no-project --python ${{ matrix.python_version }}
-          HA_SPEC="homeassistant==${{ matrix.ha_real_version }}"
-          echo "homeassistant == ${{ matrix.ha_real_version }}" > overrides.txt
+          uv --no-config venv --no-project --python "$MATRIX_PYTHON_VERSION"
+          HA_SPEC="homeassistant==$MATRIX_HA_REAL_VERSION"
+          echo "homeassistant == $MATRIX_HA_REAL_VERSION" > overrides.txt
           uv --no-config pip install --overrides overrides.txt --python .venv/bin/python "$HA_SPEC" 'httpx[http2]' pytest pytest-homeassistant-custom-component
 
       - name: Run Tests

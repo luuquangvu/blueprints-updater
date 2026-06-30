@@ -182,14 +182,11 @@ MAX_HOSTNAME_CACHE_SIZE = 1024
 """Maximum number of entries in the safe hostname cache per refresh cycle."""
 
 
-@lru_cache(maxsize=512)
 def _count_backups_sync_helper(file_path: str, max_bak: int) -> int:
     """Count the number of existing backup files for a given blueprint path.
 
-    Note: This function uses ``@lru_cache`` keyed on ``(file_path, max_bak)``.
-    The cache is cleared at the start of ``scan_blueprints`` and after
-    ``_rotate_backups``, but other code paths (e.g. ``async_check_backup_exists``)
-    may see stale counts if backups are manually added or removed between clears.
+    This is a synchronous helper that checks for the presence of backup
+    files sequentially up to the maximum backup limit.
     """
     count = 0
     for i in range(1, max_bak + 1):
@@ -256,7 +253,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._translation_lock = asyncio.Lock()
         self._background_task: asyncio.Task | None = None
         self._refresh_lock = asyncio.Lock()
-        self._last_request_time = 0.0
+        self._last_request_times: dict[str, float] = {}
         self._pacing_lock = asyncio.Lock()
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY_DATA)
         self._persisted_metadata: dict[str, dict[str, Any]] = {}
@@ -265,7 +262,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._safe_hostname_lock = asyncio.Lock()
         self._blueprint_validate_lock = asyncio.Lock()
         self._first_update_done = False
-        self._expected_hash_len: int | None = None
         if self.config_entry:
             self.config_entry.async_on_unload(self._async_cancel_background_task)
 
@@ -1451,7 +1447,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             max_bak: Maximum number of backups to keep.
 
         """
-        _count_backups_sync_helper.cache_clear()
         try:
             file_exists = os.path.isfile(file_path)
             if not file_exists:
@@ -3238,7 +3233,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if last_modified:
                 headers["If-Modified-Since"] = last_modified
 
-        await self._apply_request_pacing()
+        await self._apply_request_pacing(url)
 
         _LOGGER.debug("[Pacing] Dispatching request for %s", redact_url(url))
 
@@ -3248,20 +3243,43 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         content = await self._parse_provider_response(response, url)
         return content, new_etag, new_last_modified
 
-    async def _apply_request_pacing(self) -> None:
-        """Enforce a random pacing delay between outbound HTTP requests.
+    @property
+    def _last_request_time(self) -> float:
+        """Compatibility property for tests."""
+        return max(self._last_request_times.values(), default=0.0)
+
+    @_last_request_time.setter
+    def _last_request_time(self, val: float) -> None:
+        """Compatibility property setter for tests."""
+        self._last_request_times.clear()
+        self._last_request_times["_default_"] = val
+
+    async def _apply_request_pacing(self, url: str) -> None:
+        """Enforce a random pacing delay between outbound HTTP requests per domain.
 
         Acquires the pacing lock to calculate a safe send time based on the
-        last request timestamp, then releases the lock before sleeping. This
-        keeps concurrent coroutines from sleeping inside the lock.
+        last request timestamp for the target host, then releases the lock
+        before sleeping. This keeps concurrent coroutines from sleeping inside
+        the lock.
 
         """
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower() if parsed.netloc else "unknown"
         async with self._pacing_lock:
             now = time.monotonic()
+            if len(self._last_request_times) > 100:
+                self._last_request_times = {
+                    k: v
+                    for k, v in self._last_request_times.items()
+                    if k == "_default_" or now - v < 3600
+                }
             interval = random.uniform(MIN_SEND_INTERVAL, MAX_SEND_INTERVAL)
-            start_time = max(now, self._last_request_time + interval)
+            last_time = self._last_request_times.get(
+                domain, self._last_request_times.get("_default_", 0.0)
+            )
+            start_time = max(now, last_time + interval)
             delay = start_time - now
-            self._last_request_time = start_time
+            self._last_request_times[domain] = start_time
 
         if delay > 0:
             await asyncio.sleep(delay)
@@ -3805,7 +3823,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         max_backups: int = DEFAULT_MAX_BACKUPS,
     ) -> dict[str, BlueprintMetadata]:
         """Scan the blueprints directory for YAML files with source_url."""
-        _count_backups_sync_helper.cache_clear()
         blueprint_path: str = hass.config.path(BLUEPRINTS_DATA_DIR)
         found_blueprints: dict[str, BlueprintMetadata] = {}
 
