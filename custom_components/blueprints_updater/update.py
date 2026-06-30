@@ -410,15 +410,16 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         Triggered whenever the coordinator finishes a refresh.
         """
+        self._clear_cached_properties()
         if self.hass:
             self.hass.async_create_task(self._async_localize_strings())
-
-        self._clear_cached_properties()
-        super()._handle_coordinator_update()
+        else:
+            super()._handle_coordinator_update()
 
     async def _async_localize_strings(self) -> None:
         """Fetch translations and update localized strings."""
         if self._path not in self.coordinator.data:
+            super()._handle_coordinator_update()
             return
 
         info = self.coordinator.data[self._path]
@@ -446,8 +447,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 blocking, name=name
             )
 
-        if self.hass and self.entity_id:
-            self.async_write_ha_state()
+        if self.hass:
+            super()._handle_coordinator_update()
 
     async def _translate_and_raise_last_error(self, info: dict[str, Any]) -> None:
         """Translate the last error and raise HomeAssistantError."""

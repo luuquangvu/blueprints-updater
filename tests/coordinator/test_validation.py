@@ -13,6 +13,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.exceptions import HomeAssistantError
 
@@ -293,3 +294,31 @@ not_blueprint:
 """
     expected = coordinator._normalize_content(content)
     assert coordinator._ensure_source_url(content, source_url) == expected
+
+
+@pytest.mark.asyncio
+async def test_async_validate_blueprint_consumers_voluptuous_error(hass, coordinator):
+    """Verify that voluptuous validation failures are registered as COMPATIBILITY risks."""
+    relative_path = "automation/test.yaml"
+    content = "blueprint:\n  name: test\n  domain: automation\n"
+
+    mock_hub = MagicMock()
+    mock_hub._blueprints = {}
+    hass.data["blueprint"] = {DOMAIN_AUTOMATION: mock_hub}
+
+    configs = {
+        "automation.test": {
+            "use_blueprint": {"path": relative_path, "input": {}},
+        }
+    }
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_validate_automation_config",
+        AsyncMock(side_effect=vol.Invalid("Invalid selector parameter")),
+    ):
+        risks = await coordinator._async_validate_blueprint_consumers(
+            relative_path, content, configs
+        )
+        assert len(risks) == 1
+        assert risks[0]["type"] == BlueprintRiskType.COMPATIBILITY
+        assert "Invalid selector parameter" in risks[0]["args"]["error"]

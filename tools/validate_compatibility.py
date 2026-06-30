@@ -18,6 +18,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import uuid
 from collections.abc import Generator
 from pathlib import Path
 from string import ascii_letters, digits
@@ -51,11 +52,34 @@ def _load_matrix_data() -> list[dict[str, str]]:
         return orjson.loads(f.read())
 
 
-_MATRIX_DATA = _load_matrix_data()
+def _matrix_entry_text(entry: dict[str, str], key: str) -> str:
+    """Return a required text field from a matrix entry."""
+    value = entry.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"Compatibility matrix field {key!r} must be a string")
+    return value
 
-_TEST_MATRIX = [
-    {"ha_ver": entry["ha_version"], "python_ver": entry["python_version"]} for entry in _MATRIX_DATA
-]
+
+def _test_matrix() -> list[dict[str, str]]:
+    """Return validated compatibility matrix entries."""
+    data = _load_matrix_data()
+    if not isinstance(data, list):
+        raise ValueError("Compatibility matrix JSON root must be a list")
+
+    entries = []
+    for idx, entry in enumerate(data):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"Compatibility matrix entry at index {idx} must be a mapping/dictionary, "
+                f"got {type(entry).__name__}: {entry!r}"
+            )
+        entries.append(
+            {
+                "ha_ver": _matrix_entry_text(entry, "ha_version"),
+                "python_ver": _matrix_entry_text(entry, "python_version"),
+            }
+        )
+    return entries
 
 
 def _validate_version_label(label_name: str, label_value: str) -> str:
@@ -153,7 +177,7 @@ def _overrides_file(ha_ver: str) -> Generator[str]:
     """
     overrides_dir = os.path.join(_REPO_ROOT, "scratch")
     os.makedirs(overrides_dir, exist_ok=True)
-    overrides_path = os.path.join(overrides_dir, "overrides.txt")
+    overrides_path = os.path.join(overrides_dir, f"overrides_{uuid.uuid4().hex}.txt")
     with open(overrides_path, "w", encoding="utf-8") as f:
         f.write(f"homeassistant == {ha_ver}\n")
     try:
@@ -383,12 +407,12 @@ def main() -> None:
             if os.path.exists(_VENVS_ROOT):
                 shutil.rmtree(_VENVS_ROOT)
 
-        for config in _TEST_MATRIX:
+        for config in _test_matrix():
             ha_ver = config["ha_ver"]
             py_ver = config["python_ver"]
             success, ha_version = _run_tests_for_version(ha_ver, py_ver, args.reinstall)
             results[(ha_ver, py_ver)] = (ha_version, "PASSED" if success else "FAILED")
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         print(f"VALIDATION_ERROR: {exc}", flush=True)
         sys.exit(1)
 
