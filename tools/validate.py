@@ -239,7 +239,7 @@ def _run_pipeline() -> None:
     print("VALIDATION_SUCCESS", flush=True)
 
 
-def _validate_pipeline():
+def _validate_pipeline() -> None:
     """Run the validation pipeline steps in order."""
     repo_root = str(Path(__file__).resolve().parent.parent)
     uv_sync_label = "uv sync --check --all-groups"
@@ -283,7 +283,7 @@ def _validate_pipeline():
         text=True,
         cwd=repo_root,
     )
-    if _uv_ok := _print_uv_dependency_update_notice(uv_upgrade_label, uv_upgrade_check):
+    if _print_uv_dependency_update_notice(uv_upgrade_label, uv_upgrade_check):
         print(f"STEP_OK: {uv_upgrade_label}", flush=True)
     else:
         print(
@@ -300,7 +300,7 @@ def _validate_pipeline():
         text=True,
         cwd=repo_root,
     )
-    if _npm_ok := _print_npm_dependency_update_notice(npm_update_label, npm_update_check):
+    if _print_npm_dependency_update_notice(npm_update_label, npm_update_check):
         print(f"STEP_OK: {npm_update_label}", flush=True)
     else:
         print(

@@ -710,26 +710,24 @@ class TestDataStructureOperations:
 class TestBackupOperations:
     """Benchmark backup-related operations (EC-5)."""
 
-    def test_count_backups_lru_warm(self, benchmark, tmp_path):
-        """Benchmark _count_backups_sync_helper with warm LRU cache."""
+    def test_count_backups_repeated(self, benchmark, tmp_path):
+        """Benchmark _count_backups_sync_helper repeated calls."""
         file_path = str(tmp_path / "test.yaml")
         for i in range(1, 6):
             (tmp_path / f"test.yaml.bak.{i}").write_text(f"backup_{i}")
 
-        _count_backups_sync_helper.cache_clear()
         _count_backups_sync_helper(file_path, 10)
 
         result = benchmark(_count_backups_sync_helper, file_path, 10)
         assert result == 5
 
-    def test_count_backups_lru_cold(self, benchmark, tmp_path):
-        """Benchmark _count_backups_sync_helper with cold LRU cache."""
+    def test_count_backups_initial(self, benchmark, tmp_path):
+        """Benchmark _count_backups_sync_helper initial call."""
         file_path = str(tmp_path / "test.yaml")
         for i in range(1, 6):
             (tmp_path / f"test.yaml.bak.{i}").write_text(f"backup_{i}")
 
         def _cold():
-            _count_backups_sync_helper.cache_clear()
             return _count_backups_sync_helper(file_path, 10)
 
         result = benchmark(_cold)
