@@ -2406,7 +2406,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                         await async_validate_script_config(
                             self.hass, object_id=object_id, config=config
                         )
-                except HomeAssistantError as err:
+                except (HomeAssistantError, vol.Invalid) as err:
                     risks.append(
                         {
                             "type": BlueprintRiskType.COMPATIBILITY,

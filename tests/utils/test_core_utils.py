@@ -4,6 +4,7 @@ import asyncio
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 from custom_components.blueprints_updater.const import CONF_MAX_BACKUPS, CONF_UPDATE_INTERVAL
@@ -352,3 +353,48 @@ def test_get_relative_path_reports_commonpath_failures(hass, monkeypatch):
 
     with pytest.raises(ValueError, match="Invalid or unsafe path"):
         get_relative_path(hass, "/config/blueprints/test.yaml")
+
+
+@pytest.mark.asyncio
+async def test_retry_async_client_errors_fail_fast():
+    """Verify retry_async decorator does not retry on permanent HTTP 4xx errors except 429."""
+    call_count = 0
+
+    @retry_async(max_retries=3, exceptions=(httpx.HTTPError,), base_delay=0.001)
+    async def fetch_something(status_code: int):
+        """Fetch helper that raises HTTPStatusError with status_code."""
+        nonlocal call_count
+        call_count += 1
+        request = httpx.Request("GET", "https://example.com")
+        response = httpx.Response(status_code=status_code, request=request)
+        raise httpx.HTTPStatusError("HTTP Status Error", request=request, response=response)
+
+    # Test permanent 404 Client Error - should fail fast (1 attempt, 0 retries)
+    call_count = 0
+    with pytest.raises(httpx.HTTPStatusError):
+        await fetch_something(httpx.codes.NOT_FOUND)
+    assert call_count == 1
+
+    # Test transient 500 Server Error - should retry (1 attempt + 3 retries = 4 calls)
+    call_count = 0
+    with pytest.raises(httpx.HTTPStatusError):
+        await fetch_something(httpx.codes.INTERNAL_SERVER_ERROR)
+    assert call_count == 4
+
+    # Test 429 Rate Limit - should retry (1 attempt + 3 retries = 4 calls)
+    call_count = 0
+    with pytest.raises(httpx.HTTPStatusError):
+        await fetch_something(httpx.codes.TOO_MANY_REQUESTS)
+    assert call_count == 4
+
+    # Test 408 Request Timeout - should retry (1 attempt + 3 retries = 4 calls)
+    call_count = 0
+    with pytest.raises(httpx.HTTPStatusError):
+        await fetch_something(httpx.codes.REQUEST_TIMEOUT)
+    assert call_count == 4
+
+    # Test 425 Too Early - should retry (1 attempt + 3 retries = 4 calls)
+    call_count = 0
+    with pytest.raises(httpx.HTTPStatusError):
+        await fetch_something(httpx.codes.TOO_EARLY)
+    assert call_count == 4

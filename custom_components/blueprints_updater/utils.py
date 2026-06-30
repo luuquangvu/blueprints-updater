@@ -101,6 +101,23 @@ def retry_async(
                 except asyncio.CancelledError:
                     raise
                 except exceptions as err:
+                    if (
+                        isinstance(err, httpx.HTTPStatusError)
+                        and err.response.is_client_error
+                        and err.response.status_code
+                        not in (
+                            httpx.codes.TOO_MANY_REQUESTS,
+                            httpx.codes.REQUEST_TIMEOUT,
+                            httpx.codes.TOO_EARLY,
+                        )
+                    ):
+                        _LOGGER.debug(
+                            "Non-retryable HTTP status code %d for %s; failing fast",
+                            err.response.status_code,
+                            context,
+                        )
+                        raise
+
                     if attempt >= max_retries:
                         _LOGGER.error(
                             "Could not update from %s after %d attempts: %s",
