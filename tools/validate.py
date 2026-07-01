@@ -13,9 +13,35 @@ import os
 import subprocess
 import sys
 import textwrap
+from collections.abc import Callable
 from pathlib import Path
 
 import orjson
+
+_DEPENDENCY_SYNC_TIMEOUT_SECONDS = 300
+_DEPENDENCY_UPDATE_TIMEOUT_SECONDS = 120
+
+
+def _format_cmd(cmd_val: object) -> str:
+    """Format a subprocess command value into a space-separated string."""
+    return (
+        " ".join(str(arg) for arg in cmd_val)
+        if isinstance(cmd_val, (list, tuple))
+        else str(cmd_val)
+    )
+
+
+def _report_dependency_check_timeout(command_label: str, timeout_seconds: int) -> None:
+    """Report a non-fatal dependency update check timeout."""
+    print(
+        f"DEPENDENCY_UPDATE_NOTICE: {command_label!r} timed out after "
+        f"{timeout_seconds} seconds; informational only",
+        flush=True,
+    )
+    print(
+        f"STEP_WARNING: {command_label} timed out after {timeout_seconds} seconds",
+        flush=True,
+    )
 
 
 def _report_dependency_check_failure(
@@ -197,6 +223,117 @@ def _print_process_output_summary(
         )
 
 
+def _run_sync_repair_step(
+    repo_root: str,
+    *,
+    command_label: str,
+    check_output_label: str,
+    repair_message: str,
+    synchronized_message: str,
+    run_check: Callable[[str], subprocess.CompletedProcess[str]],
+    run_repair: Callable[[str], None],
+) -> None:
+    """Run a dependency sync check and repair the environment when needed."""
+    print(f"STEP_START: {command_label}", flush=True)
+    sync_check = run_check(repo_root)
+    if sync_check.returncode != 0:
+        print(repair_message, flush=True)
+        _print_process_output_summary(check_output_label, sync_check)
+        run_repair(repo_root)
+    else:
+        print(synchronized_message, flush=True)
+    print(f"STEP_OK: {command_label}", flush=True)
+
+
+def _run_dependency_update_notice_step(
+    repo_root: str,
+    *,
+    command_label: str,
+    run_check: Callable[[str], subprocess.CompletedProcess[str]],
+    print_notice: Callable[[str, subprocess.CompletedProcess[str]], bool],
+) -> None:
+    """Run an informational dependency-update dry run and emit validation markers."""
+    print(f"STEP_START: {command_label}", flush=True)
+    try:
+        update_check = run_check(repo_root)
+    except subprocess.TimeoutExpired:
+        _report_dependency_check_timeout(command_label, _DEPENDENCY_UPDATE_TIMEOUT_SECONDS)
+    else:
+        if print_notice(command_label, update_check):
+            print(f"STEP_OK: {command_label}", flush=True)
+        else:
+            print(
+                f"STEP_WARNING: {command_label} exited with code {update_check.returncode}",
+                flush=True,
+            )
+
+
+def _run_uv_sync_check(repo_root: str) -> subprocess.CompletedProcess[str]:
+    """Run uv dependency synchronization check."""
+    return subprocess.run(
+        ["uv", "sync", "--check", "--all-groups"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
+    )
+
+
+def _repair_uv_sync(repo_root: str) -> None:
+    """Synchronize uv dependencies."""
+    subprocess.run(
+        ["uv", "sync", "--all-groups"],
+        check=True,
+        cwd=repo_root,
+        timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
+    )
+
+
+def _run_npm_sync_check(repo_root: str) -> subprocess.CompletedProcess[str]:
+    """Run npm dependency synchronization check."""
+    return subprocess.run(
+        ["npm", "ls"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
+    )
+
+
+def _repair_npm_sync(repo_root: str) -> None:
+    """Synchronize npm dependencies."""
+    subprocess.run(
+        ["npm", "ci"],
+        check=True,
+        cwd=repo_root,
+        timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
+    )
+
+
+def _run_uv_dependency_update_check(repo_root: str) -> subprocess.CompletedProcess[str]:
+    """Run the uv dependency-update dry run."""
+    return subprocess.run(
+        ["uv", "sync", "--all-groups", "--upgrade", "--dry-run", "--output-format", "json"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+        timeout=_DEPENDENCY_UPDATE_TIMEOUT_SECONDS,
+    )
+
+
+def _run_npm_dependency_update_check(repo_root: str) -> subprocess.CompletedProcess[str]:
+    """Run the npm dependency-update dry run."""
+    return subprocess.run(
+        ["npm", "update", "--dry-run", "--no-audit", "--no-fund", "--json"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+        timeout=_DEPENDENCY_UPDATE_TIMEOUT_SECONDS,
+    )
+
+
 def _run_pipeline() -> None:
     """Execute the full validation pipeline.
 
@@ -217,15 +354,13 @@ def _run_pipeline() -> None:
 
     try:
         _validate_pipeline()
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
         ret_code = getattr(e, "returncode", 1)
-        if isinstance(e, subprocess.CalledProcessError):
-            cmd_val = e.cmd
-            cmd_str = (
-                " ".join(str(arg) for arg in cmd_val)
-                if isinstance(cmd_val, (list, tuple))
-                else str(cmd_val)
-            )
+        if isinstance(e, subprocess.TimeoutExpired):
+            cmd_str = _format_cmd(e.cmd)
+            print(f"STEP_FAILED: {cmd_str} TIMEOUT={e.timeout}", flush=True)
+        elif isinstance(e, subprocess.CalledProcessError):
+            cmd_str = _format_cmd(e.cmd)
             print(f"STEP_FAILED: {cmd_str} EXIT_CODE={ret_code}", flush=True)
         else:
             cmd_val = getattr(e, "filename", "Unknown command")
@@ -242,71 +377,36 @@ def _run_pipeline() -> None:
 def _validate_pipeline() -> None:
     """Run the validation pipeline steps in order."""
     repo_root = str(Path(__file__).resolve().parent.parent)
-    uv_sync_label = "uv sync --check --all-groups"
-    print(f"STEP_START: {uv_sync_label}", flush=True)
-    sync_check = subprocess.run(
-        ["uv", "sync", "--check", "--all-groups"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
+    _run_sync_repair_step(
+        repo_root,
+        command_label="uv sync --check --all-groups",
+        check_output_label="uv sync --check",
+        repair_message="Environment is out of sync. Running 'uv sync --all-groups'",
+        synchronized_message="Environment is already synchronized.",
+        run_check=_run_uv_sync_check,
+        run_repair=_repair_uv_sync,
     )
-    if sync_check.returncode != 0:
-        print("Environment is out of sync. Running 'uv sync --all-groups'", flush=True)
-        _print_process_output_summary("uv sync --check", sync_check)
-        subprocess.run(["uv", "sync", "--all-groups"], check=True, cwd=repo_root)
-    else:
-        print("Environment is already synchronized.", flush=True)
-    print(f"STEP_OK: {uv_sync_label}", flush=True)
-
-    npm_sync_label = "npm ls"
-    print(f"STEP_START: {npm_sync_label}", flush=True)
-    npm_check = subprocess.run(
-        ["npm", "ls"],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
+    _run_sync_repair_step(
+        repo_root,
+        command_label="npm ls",
+        check_output_label="npm ls",
+        repair_message="NPM packages are out of sync. Running 'npm ci'",
+        synchronized_message="NPM packages are already synchronized.",
+        run_check=_run_npm_sync_check,
+        run_repair=_repair_npm_sync,
     )
-    if npm_check.returncode != 0:
-        print("NPM packages are out of sync. Running 'npm ci'", flush=True)
-        _print_process_output_summary("npm ls", npm_check)
-        subprocess.run(["npm", "ci"], check=True, cwd=repo_root)
-    else:
-        print("NPM packages are already synchronized.", flush=True)
-    print(f"STEP_OK: {npm_sync_label}", flush=True)
-
-    uv_upgrade_label = "uv sync --all-groups --upgrade --dry-run --output-format json"
-    print(f"STEP_START: {uv_upgrade_label}", flush=True)
-    uv_upgrade_check = subprocess.run(
-        ["uv", "sync", "--all-groups", "--upgrade", "--dry-run", "--output-format", "json"],
-        check=False,
-        capture_output=True,
-        text=True,
-        cwd=repo_root,
+    _run_dependency_update_notice_step(
+        repo_root,
+        command_label="uv sync --all-groups --upgrade --dry-run --output-format json",
+        run_check=_run_uv_dependency_update_check,
+        print_notice=_print_uv_dependency_update_notice,
     )
-    if _print_uv_dependency_update_notice(uv_upgrade_label, uv_upgrade_check):
-        print(f"STEP_OK: {uv_upgrade_label}", flush=True)
-    else:
-        print(
-            f"STEP_WARNING: {uv_upgrade_label} exited with code {uv_upgrade_check.returncode}",
-            flush=True,
-        )
-
-    npm_update_label = "npm update --dry-run --no-audit --no-fund --json"
-    print(f"STEP_START: {npm_update_label}", flush=True)
-    npm_update_check = subprocess.run(
-        ["npm", "update", "--dry-run", "--no-audit", "--no-fund", "--json"],
-        check=False,
-        capture_output=True,
-        text=True,
-        cwd=repo_root,
+    _run_dependency_update_notice_step(
+        repo_root,
+        command_label="npm update --dry-run --no-audit --no-fund --json",
+        run_check=_run_npm_dependency_update_check,
+        print_notice=_print_npm_dependency_update_notice,
     )
-    if _print_npm_dependency_update_notice(npm_update_label, npm_update_check):
-        print(f"STEP_OK: {npm_update_label}", flush=True)
-    else:
-        print(
-            f"STEP_WARNING: {npm_update_label} exited with code {npm_update_check.returncode}",
-            flush=True,
-        )
 
     ruff_format_label = "uv run --no-project ruff format"
     print(f"STEP_START: {ruff_format_label}", flush=True)

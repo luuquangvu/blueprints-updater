@@ -63,7 +63,7 @@ async def test_scan_blueprints(coordinator, mock_makedirs):
 
     with (
         patch(
-            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._get_entities_using_blueprint_list",
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._get_entities_using_blueprint",
             return_value=[],
         ),
         patch(
