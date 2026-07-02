@@ -15,7 +15,6 @@ dev = [
   "pyright",
   "pytest",
   "pytest-asyncio",
-  "pytest-benchmark",
   "pytest-cov",
   "pytest-homeassistant-custom-component",
   "pytest-timeout",
@@ -75,12 +74,8 @@ addopts = [
   "--cov-branch",
   "--timeout=60",
   "--strict-markers",
-  "-m not benchmark",
 ]
-markers = [
-  "real_network: tests that require real network access",
-  "benchmark: performance benchmarks (run manually, excluded from default suite)",
-]
+markers = ["real_network: tests that require real network access"]
 
 [tool.pyright]
 typeCheckingMode = "standard"

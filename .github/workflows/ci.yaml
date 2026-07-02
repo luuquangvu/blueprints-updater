@@ -87,6 +87,16 @@ jobs:
             exit 1
           fi
 
+          jq -e '
+            (type == "array") and all(.[]; (
+              (type == "object") and
+              (.ha_version | type == "string") and
+              (.python_version | type == "string") and
+              (.ha_version == "latest" or (.ha_version | test("^[a-zA-Z0-9]+(\\.[a-zA-Z0-9]+)*$"))) and
+              (.python_version | test("^[a-zA-Z0-9]+(\\.[a-zA-Z0-9]+)*$"))
+            ))
+          ' tools/compatibility_matrix.json >/dev/null
+
           MATRIX_JSON=$(jq -c --arg latest "$LATEST_HA" 'map(if .ha_version == "latest" then . + {ha_version: ("latest (" + $latest + ")"), ha_real_version: $latest} else . + {ha_real_version: .ha_version} end) | {include: .}' tools/compatibility_matrix.json)
           echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
 

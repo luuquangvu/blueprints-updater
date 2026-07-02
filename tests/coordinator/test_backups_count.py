@@ -239,3 +239,125 @@ async def test_coordinator_check_backup_exists(coordinator, tmp_path):
     (tmp_path / "test_exists.yaml.bak.2").write_text("v2")
     assert coordinator._check_backup_exists_sync(str(bp_file), 2)
     assert await coordinator.async_check_backup_exists(str(bp_file), 2)
+
+
+@pytest.mark.asyncio
+async def test_rotate_backups_limit_reduction(tmp_path) -> None:
+    """Test that rotate_backups cleans up leftover backups when limits are reduced."""
+    file_path = tmp_path / "test_file.yaml"
+    file_path.write_text("current")
+    for i in range(1, 6):
+        (tmp_path / f"test_file.yaml.bak.{i}").write_text(f"bak{i}")
+
+    BlueprintUpdateCoordinator._rotate_backups(str(file_path), max_bak=2)
+
+    # Check bak.1 and bak.2 exist
+    assert (tmp_path / "test_file.yaml.bak.1").read_text() == "current"
+    assert (tmp_path / "test_file.yaml.bak.2").read_text() == "bak1"
+    # Leftover bak.3, bak.4, bak.5 should be cleaned up
+    assert not (tmp_path / "test_file.yaml.bak.3").exists()
+    assert not (tmp_path / "test_file.yaml.bak.4").exists()
+    assert not (tmp_path / "test_file.yaml.bak.5").exists()
+
+
+@pytest.mark.asyncio
+async def test_rotate_backups_malformed_suffixes(tmp_path) -> None:
+    """Test that rotate_backups ignores malformed backup suffixes."""
+    file_path = tmp_path / "test_file.yaml"
+    file_path.write_text("current")
+    (tmp_path / "test_file.yaml.bak.abc").write_text("malformed1")
+    (tmp_path / "test_file.yaml.bak.1.tmp").write_text("malformed2")
+    (tmp_path / "test_file.yaml.bak.1").write_text("valid1")
+
+    # Run backup rotation with limit reduction to 0
+    BlueprintUpdateCoordinator._rotate_backups(str(file_path), max_bak=0)
+
+    # Valid backup should be deleted
+    assert not (tmp_path / "test_file.yaml.bak.1").exists()
+    # Malformed ones should be ignored and still exist
+    assert (tmp_path / "test_file.yaml.bak.abc").exists()
+    assert (tmp_path / "test_file.yaml.bak.1.tmp").exists()
+
+
+@pytest.mark.asyncio
+async def test_rotate_backups_scandir_oserror(tmp_path) -> None:
+    """Test that rotate_backups handles OSError during directory scanning gracefully."""
+    file_path = tmp_path / "test_file.yaml"
+    file_path.write_text("current")
+
+    with (
+        patch("os.scandir", side_effect=OSError("Permission denied")),
+        patch("custom_components.blueprints_updater.coordinator._LOGGER.warning") as mock_warn,
+    ):
+        BlueprintUpdateCoordinator._rotate_backups(str(file_path), max_bak=2)
+        mock_warn.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_save_file_temp_cleanup_on_exception(
+    tmp_path, coordinator: BlueprintUpdateCoordinator
+) -> None:
+    """Test that temporary files are deleted if saving/rotation raises an exception."""
+    file_path = tmp_path / "test_file.yaml"
+
+    with (
+        patch.object(coordinator, "_rotate_backups", side_effect=ValueError("Rotation failed")),
+        pytest.raises(ValueError, match="Rotation failed"),
+    ):
+        await coordinator.async_install_blueprint(str(file_path), "content", backup=True)
+
+    # Verify the temporary file is removed
+    assert not (tmp_path / "test_file.yaml.tmp").exists()
+
+
+@pytest.mark.asyncio
+async def test_save_file_happy_path(tmp_path, coordinator: BlueprintUpdateCoordinator) -> None:
+    """Test the happy path of saving a file successfully with backup rotation."""
+    file_path = tmp_path / "test_file.yaml"
+    file_path.write_text("old_content")
+
+    # Perform successful blueprint install
+    await coordinator.async_install_blueprint(str(file_path), "new_content", backup=True)
+
+    assert file_path.read_text() == "new_content"
+    assert (tmp_path / "test_file.yaml.bak.1").read_text() == "old_content"
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_file_happy_path(tmp_path) -> None:
+    """Test the happy path of _execute_restore_file."""
+    real_path = tmp_path / "test_file.yaml"
+    real_path.write_text("current")
+    bak_path = tmp_path / "test_file.yaml.bak.1"
+    bak_path.write_text("backup_content")
+
+    success, msg, _count = BlueprintUpdateCoordinator._execute_restore_file(
+        str(real_path), version=1, max_backups=3
+    )
+
+    assert success
+    assert msg == "success"
+    assert real_path.read_text() == "backup_content"
+
+
+@pytest.mark.asyncio
+async def test_execute_restore_file_temp_cleanup_on_exception(tmp_path) -> None:
+    """Test that restore_file temporary files are cleaned up on exception."""
+    real_path = tmp_path / "test_file.yaml"
+    bak_path = tmp_path / "test_file.yaml.bak.1"
+    bak_path.write_text("backup_content")
+
+    # Patch _rotate_backups to fail during restoration
+    with patch(
+        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._rotate_backups",
+        side_effect=ValueError("Rotation failed during restore"),
+    ):
+        success, msg, count = BlueprintUpdateCoordinator._execute_restore_file(
+            str(real_path), version=1, max_backups=3
+        )
+
+    assert not success
+    assert msg == "system_error"
+    assert count == 0
+    # Verify the temporary file is removed
+    assert not (tmp_path / "test_file.yaml.tmp").exists()

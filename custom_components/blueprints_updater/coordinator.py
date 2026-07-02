@@ -881,6 +881,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             blueprints: Dictionary of blueprints to check for updates.
 
         """
+        session = None
         try:
             if self._refresh_lock.locked():
                 _LOGGER.debug("Background refresh already running, skipping")
@@ -895,8 +896,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 for path, info in blueprints.items():
                     queue.put_nowait((path, info))
 
-                client_kwargs = self._get_client_kwargs()
-                session = get_async_client(self.hass, **client_kwargs)
+                session = get_async_client(self.hass, **self._get_client_kwargs())
 
                 async def _worker() -> None:
                     """Process blueprints from the queue."""
@@ -1221,8 +1221,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 translation_placeholders={"url": redact_url(canonical_url)},
             )
 
-        client_kwargs = self._get_client_kwargs()
-        session = get_async_client(self.hass, **client_kwargs)
+        session = get_async_client(self.hass, **self._get_client_kwargs())
         try:
             response = await self._execute_with_redirect_guard(session, canonical_url, {})
 
@@ -1313,7 +1312,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="import_path_conflict",
-                translation_placeholders={"existing_url": redact_url(full_path)},
+                translation_placeholders={"existing_url": rel_path},
             )
 
     async def async_import_blueprint(self, url: str, confirm: bool = False) -> None:
@@ -1396,9 +1395,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not info.get("source_url"):
             return
 
-        client_kwargs = self._get_client_kwargs()
-        session = get_async_client(self.hass, **client_kwargs)
-
+        session = get_async_client(self.hass, **self._get_client_kwargs())
         results_to_notify: list[str] = []
         updated_domains: set[str] = set()
 
@@ -1470,12 +1467,35 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             except OSError as err:
                 _LOGGER.warning("Error creating new backup for %s: %s", file_path, err)
 
-            stale_bak = BlueprintUpdateCoordinator._get_backup_path(file_path, max_bak + 1)
+            dir_name = os.path.dirname(file_path)
+            base_name = os.path.basename(file_path)
+            prefix = f"{base_name}.bak."
+            prefix_len = len(prefix)
             try:
-                os.remove(stale_bak)
+                with os.scandir(dir_name) as entries:
+                    for entry in entries:
+                        try:
+                            is_file = entry.is_file()
+                        except OSError:
+                            continue
+                        if is_file and entry.name.startswith(prefix):
+                            suffix = entry.name[prefix_len:]
+                            if suffix.isdigit():
+                                with contextlib.suppress(ValueError):
+                                    ver = int(suffix)
+                                    if ver > max_bak:
+                                        try:
+                                            os.remove(entry.path)
+                                        except FileNotFoundError:
+                                            pass
+                                        except OSError as err:
+                                            _LOGGER.warning(
+                                                "Error removing stale backup %s: %s",
+                                                entry.path,
+                                                err,
+                                            )
             except OSError as err:
-                if not isinstance(err, FileNotFoundError):
-                    _LOGGER.warning("Error removing stale backup %s: %s", stale_bak, err)
+                _LOGGER.warning("Error scanning for stale backups for %s: %s", file_path, err)
 
         except OSError as err:
             _LOGGER.error("Filesystem error during backup rotation for %s: %s", file_path, err)
@@ -1538,14 +1558,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 """Local helper for _save_file."""
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 tmp_path = f"{file_path}.tmp"
+                try:
+                    with open(tmp_path, "w", encoding="utf-8") as f:
+                        f.write(content)
 
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    f.write(content)
+                    if backup:
+                        self._rotate_backups(file_path, max_bak)
 
-                if backup:
-                    self._rotate_backups(file_path, max_bak)
-
-                os.replace(tmp_path, file_path)
+                    os.replace(tmp_path, file_path)
+                finally:
+                    if os.path.exists(tmp_path):
+                        with contextlib.suppress(OSError):
+                            os.remove(tmp_path)
                 return BlueprintUpdateCoordinator._count_backups_sync(file_path, max_bak)
 
             parsed_raw = None
@@ -2244,8 +2268,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         return self._dedupe_risks(risks)
 
-    def _get_entities_using_blueprint_list(self, relative_path: str) -> list[str]:
-        """Internal helper to get entities using a specific blueprint.
+    def _get_entities_using_blueprint(self, relative_path: str) -> list[str]:
+        """Get entity IDs of automations and scripts using the given blueprint.
 
         Args:
             relative_path: Relative path of the blueprint.
@@ -2451,18 +2475,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         lines = await asyncio.gather(*[_translate_risk(r) for r in risks])
         return "\n".join(lines)
 
-    def _get_entities_using_blueprint(self, relative_path: str) -> list[str]:
-        """Get entity IDs of automations and scripts using the given blueprint.
-
-        Args:
-            relative_path: Relative path of the blueprint.
-
-        Returns:
-            A list of entity ID strings.
-
-        """
-        return self._get_entities_using_blueprint_list(relative_path)
-
     def set_cached_git_diff(
         self,
         path: str,
@@ -2513,9 +2525,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             self._update_error_state(path, "unsafe_url", source_url)
             return None
 
-        client_kwargs = self._get_client_kwargs()
-        session = get_async_client(self.hass, **client_kwargs)
-
+        session = get_async_client(self.hass, **self._get_client_kwargs())
         remote_content, _, _ = await self._async_fetch_content(
             session,
             normalized_url,
@@ -2920,7 +2930,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not last_error and self.data and path in self.data:
             local_file = self.hass.config.path(BLUEPRINTS_DATA_DIR, relative_path)
             try:
-                entity_ids = self._get_entities_using_blueprint_list(relative_path)
+                entity_ids = self._get_entities_using_blueprint(relative_path)
                 full_configs = self._get_entities_configs(entity_ids)
                 configs = {
                     eid: cfg.get("use_blueprint", {}).get("input", {})
@@ -3872,11 +3882,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             with open(bak_path, encoding="utf-8") as f:
                 content = f.read()
             tmp_path = f"{real_path}.tmp"
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                f.write(content)
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    f.write(content)
 
-            BlueprintUpdateCoordinator._rotate_backups(real_path, max_backups)
-            os.replace(tmp_path, real_path)
+                BlueprintUpdateCoordinator._rotate_backups(real_path, max_backups)
+                os.replace(tmp_path, real_path)
+            finally:
+                if os.path.exists(tmp_path):
+                    with contextlib.suppress(OSError):
+                        os.remove(tmp_path)
             new_cnt = BlueprintUpdateCoordinator._count_backups_sync(real_path, max_backups)
             return True, "success", new_cnt
         except FileNotFoundError:
