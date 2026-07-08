@@ -38,6 +38,10 @@ _REQUIRED_TEST_DEPS = [
 
 _COMPATIBILITY_PYTEST_ARGS = ["--no-cov"]
 _COMPATIBILITY_METADATA_PROBE_TIMEOUT_SECONDS = 60
+_VENV_CREATE_TIMEOUT_SECONDS = 120
+_INSTALL_TIMEOUT_SECONDS = 300
+_CLEANUP_TIMEOUT_SECONDS = 30
+_COMPATIBILITY_PYTEST_TIMEOUT_SECONDS = 300
 
 _ALNUM_CHARS = ascii_letters + digits
 _ALLOWED_VERSION_CHARS = f"{_ALNUM_CHARS}."
@@ -163,6 +167,13 @@ def _ensure_within_root(root_path: str, candidate_path: str) -> str:
     if fullpath != root and not fullpath.startswith(root + os.sep):
         raise ValueError(f"Resolved path {fullpath!r} escapes allowed root {root!r}.")
     return fullpath
+
+
+def _format_cmd_str(cmd: Any) -> str:
+    """Return a human-readable string for a subprocess command."""
+    if isinstance(cmd, (list, tuple)):
+        return " ".join(str(arg) for arg in cmd)
+    return str(cmd)
 
 
 def _get_latest_ha_version() -> str:
@@ -302,7 +313,8 @@ def _ensure_venv(venv_path: Path, py_ver: str) -> bool:
         True if a new virtual environment was created, False otherwise.
     """
     python_bin = venv_path / "bin" / "python"
-    if venv_path.exists() and python_bin.exists():
+    pytest_bin = venv_path / "bin" / "pytest"
+    if venv_path.exists() and python_bin.exists() and pytest_bin.exists():
         return False
     if venv_path.exists():
         print(f"STEP_INFO: Re-creating incomplete virtual environment at {venv_path}", flush=True)
@@ -323,6 +335,7 @@ def _ensure_venv(venv_path: Path, py_ver: str) -> bool:
         capture_output=True,
         text=True,
         cwd=_REPO_ROOT,
+        timeout=_VENV_CREATE_TIMEOUT_SECONDS,
     )
     print(f"STEP_OK: uv venv {venv_path} (Python {py_ver})", flush=True)
     return True
@@ -354,6 +367,7 @@ def _install_dependencies(
             capture_output=True,
             text=True,
             cwd=_REPO_ROOT,
+            timeout=_INSTALL_TIMEOUT_SECONDS,
         )
     print(f"STEP_OK: uv pip install {ha_spec}", flush=True)
 
@@ -376,6 +390,7 @@ def _install_dependencies(
         capture_output=True,
         text=True,
         cwd=_REPO_ROOT,
+        timeout=_CLEANUP_TIMEOUT_SECONDS,
     )
     print("STEP_OK: cleanup __pycache__", flush=True)
 
@@ -383,13 +398,14 @@ def _install_dependencies(
 def _get_installed_ha_version(python_bin: Path) -> str:
     """Get the actually installed Home Assistant version inside the venv."""
     actual_ver = "unknown"
-    with contextlib.suppress(subprocess.CalledProcessError):
+    with contextlib.suppress(subprocess.CalledProcessError, subprocess.TimeoutExpired):
         result = subprocess.run(
             ["uv", "--no-config", "pip", "show", "--python", python_bin, "homeassistant"],
             capture_output=True,
             text=True,
             check=True,
             cwd=_REPO_ROOT,
+            timeout=_COMPATIBILITY_METADATA_PROBE_TIMEOUT_SECONDS,
         )
         for line in result.stdout.splitlines():
             if line.startswith("Version:"):
@@ -418,9 +434,8 @@ def _run_pytest(python_bin: Path, ha_ver_display: str) -> None:
         ],
         env=env,
         check=True,
-        capture_output=True,
-        text=True,
         cwd=_REPO_ROOT,
+        timeout=_COMPATIBILITY_PYTEST_TIMEOUT_SECONDS,
     )
     print(f"STEP_OK: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
 
@@ -477,15 +492,13 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
     except ValueError as err:
         print(f"VALIDATION_ERROR: {err}", flush=True)
         return False, ha_ver_display
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
         ret_code = getattr(e, "returncode", 1)
-        if isinstance(e, subprocess.CalledProcessError):
-            cmd_val = e.cmd
-            cmd_str = (
-                " ".join(str(arg) for arg in cmd_val)
-                if isinstance(cmd_val, (list, tuple))
-                else str(cmd_val)
-            )
+        if isinstance(e, subprocess.TimeoutExpired):
+            cmd_str = _format_cmd_str(e.cmd)
+            print(f"STEP_FAILED: {cmd_str} TIMEOUT={e.timeout}", flush=True)
+        elif isinstance(e, subprocess.CalledProcessError):
+            cmd_str = _format_cmd_str(e.cmd)
             print(f"STEP_FAILED: {cmd_str} EXIT_CODE={ret_code}", flush=True)
             if e.stdout:
                 print("\nSTDOUT:", flush=True)

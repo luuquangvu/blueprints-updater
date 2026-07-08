@@ -39,10 +39,11 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
         )
         coord.hass = hass
         coord.data = {}
-        coord.async_set_updated_data = cast(Any, MagicMock(return_value=None))
-        coord.setup_complete = True
-        coord._is_safe_path = cast(Any, MagicMock(return_value=True))
-        coord._is_safe_url = cast(Any, AsyncMock(return_value=True))
+        coord_any = cast(Any, coord)
+        coord_any.async_set_updated_data = MagicMock(return_value=None)
+        coord_any.setup_complete = True
+        coord_any._is_safe_path = MagicMock(return_value=True)
+        coord_any._is_safe_url = AsyncMock(return_value=True)
         return coord
 
 

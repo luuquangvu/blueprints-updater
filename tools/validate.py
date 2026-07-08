@@ -20,6 +20,7 @@ import orjson
 
 _DEPENDENCY_SYNC_TIMEOUT_SECONDS = 300
 _DEPENDENCY_UPDATE_TIMEOUT_SECONDS = 120
+_VALIDATION_STEP_TIMEOUT_SECONDS = 300
 
 
 def _format_cmd(cmd_val: object) -> str:
@@ -272,6 +273,7 @@ def _run_uv_sync_check(repo_root: str) -> subprocess.CompletedProcess[str]:
     """Run uv dependency synchronization check."""
     return subprocess.run(
         ["uv", "sync", "--check", "--all-groups"],
+        check=False,
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -293,6 +295,7 @@ def _run_npm_sync_check(repo_root: str) -> subprocess.CompletedProcess[str]:
     """Run npm dependency synchronization check."""
     return subprocess.run(
         ["npm", "ls"],
+        check=False,
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -410,41 +413,72 @@ def _validate_pipeline() -> None:
 
     ruff_format_label = "uv run --no-project ruff format"
     print(f"STEP_START: {ruff_format_label}", flush=True)
-    subprocess.run(["uv", "run", "--no-project", "ruff", "format"], check=True, cwd=repo_root)
+    subprocess.run(
+        ["uv", "run", "--no-project", "ruff", "format"],
+        check=True,
+        cwd=repo_root,
+        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+    )
     print(f"STEP_OK: {ruff_format_label}", flush=True)
 
     ruff_check_label = "uv run --no-project ruff check --fix"
     print(f"STEP_START: {ruff_check_label}", flush=True)
     subprocess.run(
-        ["uv", "run", "--no-project", "ruff", "check", "--fix"], check=True, cwd=repo_root
+        ["uv", "run", "--no-project", "ruff", "check", "--fix"],
+        check=True,
+        cwd=repo_root,
+        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
     )
     print(f"STEP_OK: {ruff_check_label}", flush=True)
 
     ty_check_label = "uv run --no-project ty check"
     print(f"STEP_START: {ty_check_label}", flush=True)
-    subprocess.run(["uv", "run", "--no-project", "ty", "check"], check=True, cwd=repo_root)
+    subprocess.run(
+        ["uv", "run", "--no-project", "ty", "check"],
+        check=True,
+        cwd=repo_root,
+        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+    )
     print(f"STEP_OK: {ty_check_label}", flush=True)
 
     pyright_label = "uv run --no-project pyright"
     print(f"STEP_START: {pyright_label}", flush=True)
-    subprocess.run(["uv", "run", "--no-project", "pyright"], check=True, cwd=repo_root)
+    subprocess.run(
+        ["uv", "run", "--no-project", "pyright"],
+        check=True,
+        cwd=repo_root,
+        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+    )
     print(f"STEP_OK: {pyright_label}", flush=True)
 
     interrogate_label = "uv run --no-project interrogate"
     print(f"STEP_START: {interrogate_label}", flush=True)
-    subprocess.run(["uv", "run", "--no-project", "interrogate"], check=True, cwd=repo_root)
+    subprocess.run(
+        ["uv", "run", "--no-project", "interrogate"],
+        check=True,
+        cwd=repo_root,
+        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+    )
     print(f"STEP_OK: {interrogate_label}", flush=True)
 
     prettier_label = "npx prettier --log-level warn --write ."
     print(f"STEP_START: {prettier_label}", flush=True)
     subprocess.run(
-        ["npx", "prettier", "--log-level", "warn", "--write", "."], check=True, cwd=repo_root
+        ["npx", "prettier", "--log-level", "warn", "--write", "."],
+        check=True,
+        cwd=repo_root,
+        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
     )
     print(f"STEP_OK: {prettier_label}", flush=True)
 
     pytest_label = "uv run --no-project pytest"
     print(f"STEP_START: {pytest_label}", flush=True)
-    subprocess.run(["uv", "run", "--no-project", "pytest"], check=True, cwd=repo_root)
+    subprocess.run(
+        ["uv", "run", "--no-project", "pytest"],
+        check=True,
+        cwd=repo_root,
+        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+    )
     print(f"STEP_OK: {pytest_label}", flush=True)
 
 
