@@ -219,7 +219,7 @@ def _overrides_file(ha_ver: str) -> Generator[str]:
     os.makedirs(overrides_dir, exist_ok=True)
     overrides_path = os.path.join(overrides_dir, f"overrides_{uuid.uuid4().hex}.txt")
     with open(overrides_path, "w", encoding="utf-8") as f:
-        f.write(f"homeassistant == {ha_ver}\n")
+        f.write(f"homeassistant=={ha_ver}\n")
     try:
         yield overrides_path
     finally:

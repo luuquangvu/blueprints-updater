@@ -200,8 +200,8 @@ blueprint:
 
 To ensure long-term reliability and stability, this project utilizes a modern stack of automated development and security tools:
 
-- **Automated Code Review**: [CodeRabbit](https://coderabbit.ai) provides deep analysis of every Pull Request, identifying potential logic flaws and edge cases before they reach your system.
-- **Code Optimization**: [Sourcery](https://sourcery.ai) suggests cleaner, more idiomatic Python patterns to maintain a high-quality codebase.
+- **Automated Code Review**: [CodeRabbit AI](https://coderabbit.ai) provides deep analysis of every Pull Request, identifying potential logic flaws and edge cases before they reach your system.
+- **Code Optimization**: [Sourcery AI](https://sourcery.ai) suggests cleaner, more idiomatic Python patterns to maintain a high-quality codebase.
 - **Static Analysis & Security**: [CodeQL](https://codeql.github.com) performs industry-standard scans to detect security vulnerabilities and ensure compliance with best practices.
 - **Rigorous Development Workflow**:
   - **[Ruff](https://github.com/astral-sh/ruff)**: High-performance linting and formatting for consistent Python code.
@@ -211,7 +211,7 @@ To ensure long-term reliability and stability, this project utilizes a modern st
   - **[Prettier](https://github.com/prettier/prettier)**: Consistent formatting for documentation and configuration files.
 
 > [!NOTE]
-> All automated insights are manually reviewed and validated by the project maintainer to ensure every change aligns with the project's standards.
+> All AI automated insights are manually reviewed and validated by the project maintainer to ensure every change aligns with the project's standards.
 
 ## Contributing
 
