@@ -43,12 +43,8 @@ def coordinator(hass):
 
 
 @pytest.mark.asyncio
-async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinator):
-    """Verify that blueprint consumer validation correctly manages the hub's temporary state.
-
-    Ensures that the hub content is injected for validation and always restored to
-    its original content (or removed if new) regardless of validation outcome.
-    """
+async def test_async_validate_blueprint_consumers_isolated_from_hub(hass, coordinator):
+    """Candidate validation never publishes content to the shared blueprint hub."""
     relative_path = "automation/test.yaml"
     content = "blueprint:\n  name: test\n  domain: automation\n"
 
@@ -70,9 +66,9 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
     ) as mock_validate:
 
         async def check_during_validation(*args, **kwargs):
-            """Check hub state during validation."""
-            assert mock_hub._blueprints["test.yaml"] != original_bp
-            return
+            """Check shared hub state during validation."""
+            assert mock_hub._blueprints["test.yaml"] is original_bp
+            assert "use_blueprint" not in kwargs["config"]
 
         mock_validate.side_effect = check_during_validation
 
@@ -83,7 +79,7 @@ async def test_async_validate_blueprint_consumers_hub_lifecycle(hass, coordinato
         mock_validate.assert_awaited_once_with(
             hass,
             config_key="automation.test",
-            config=configs["automation.test"],
+            config={"alias": "Existing"},
         )
 
         assert mock_hub._blueprints["test.yaml"] == original_bp
@@ -226,7 +222,7 @@ async def test_is_safe_url(coordinator):
         assert await coord._is_safe_url("https://gitlab.com/user/repo/-/raw/main/bp.yaml")
         assert await coord._is_safe_url("https://bitbucket.org/user/repo/raw/main/bp.yaml")
 
-        assert await coord._is_safe_url("http://github.com/somepath")
+        assert not await coord._is_safe_url("http://github.com/somepath")
 
     with patch("socket.getaddrinfo", side_effect=socket.gaierror):
         assert not await coord._is_safe_url("http://localhost:8123")
@@ -251,6 +247,17 @@ async def test_is_safe_url_dns_resolution(coordinator):
         assert await coord._is_safe_url("https://google.com/bp.yaml")
     with patch("socket.getaddrinfo", side_effect=socket.gaierror):
         assert not await coord._is_safe_url("https://unresolvable.com/bp.yaml")
+
+
+@pytest.mark.asyncio
+async def test_is_safe_url_caches_canonical_idna_hostname(coordinator):
+    """Equivalent Unicode and punycode URLs share one canonical safety result."""
+    coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
+    coordinator._perform_safe_hostname_check = AsyncMock(return_value=True)
+
+    assert await coordinator._is_safe_url("https://BÜCHER.com./blueprint.yaml")
+    assert await coordinator._is_safe_url("https://xn--bcher-kva.com/blueprint.yaml")
+    coordinator._perform_safe_hostname_check.assert_awaited_once_with("xn--bcher-kva.com")
 
 
 def test_get_validated_filter_mode_normalization():

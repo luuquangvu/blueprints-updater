@@ -1,6 +1,10 @@
 """Tests for blueprints update backups count feature."""
 
+import asyncio
+import gc
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
+from weakref import ref
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -8,7 +12,212 @@ from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.blueprints_updater.const import DOMAIN, DOMAIN_AUTOMATION
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.file_store import BlueprintFileStore
 from custom_components.blueprints_updater.update import BlueprintUpdateEntity
+
+
+@pytest.mark.asyncio
+async def test_same_path_installs_are_serialized(coordinator):
+    """Two install entry points cannot mutate one canonical path concurrently."""
+    first_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    active = 0
+    maximum_active = 0
+    calls = 0
+
+    async def fake_locked_install(*_args, **_kwargs):
+        """Pause the first locked transaction while a second task starts."""
+        nonlocal active, calls, maximum_active
+        calls += 1
+        active += 1
+        maximum_active = max(maximum_active, active)
+        if calls == 1:
+            first_entered.set()
+            await release_first.wait()
+        active -= 1
+
+    coordinator._async_install_blueprint_locked = fake_locked_install
+    path = "/config/blueprints/automation/serialized.yaml"
+    first = asyncio.create_task(coordinator.async_install_blueprint(path, "first"))
+    await first_entered.wait()
+    second = asyncio.create_task(coordinator.async_install_blueprint(path, "second"))
+    yielded = asyncio.get_running_loop().create_future()
+    asyncio.get_running_loop().call_soon(yielded.set_result, None)
+    await yielded
+
+    assert calls == 1
+    release_first.set()
+    await asyncio.gather(first, second)
+    assert maximum_active == 1
+
+
+@pytest.mark.asyncio
+async def test_unused_path_lock_is_released(tmp_path) -> None:
+    """The path-lock registry does not retain an idle lock indefinitely."""
+    path = str(tmp_path / "transient.yaml")
+    canonical_path = os.path.realpath(path)
+
+    async with BlueprintFileStore.transaction(path):
+        lock_reference = ref(BlueprintFileStore._path_locks[canonical_path])
+        assert lock_reference() is not None
+
+    gc.collect()
+    assert lock_reference() is None
+    assert canonical_path not in BlueprintFileStore._path_locks
+
+
+def test_temp_write_failure_closes_stream_without_raw_descriptor_close(tmp_path) -> None:
+    """A stream-owned descriptor is not closed again through its raw integer."""
+    target = tmp_path / "test.yaml"
+    real_close = os.close
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.file_store.os.fsync",
+            side_effect=OSError("sync failed"),
+        ),
+        patch(
+            "custom_components.blueprints_updater.file_store.os.close",
+            wraps=real_close,
+        ) as close_descriptor,
+        pytest.raises(OSError, match="sync failed"),
+    ):
+        BlueprintFileStore._write_temp(str(target), "content")
+
+    close_descriptor.assert_not_called()
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_temp_write_fdopen_failure_closes_raw_descriptor(tmp_path) -> None:
+    """Failure to transfer descriptor ownership still closes the raw descriptor."""
+    target = tmp_path / "test.yaml"
+    temp_path = tmp_path / ".test.yaml.failed.tmp"
+    descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT)
+    real_close = os.close
+
+    with (
+        patch.object(
+            BlueprintFileStore,
+            "_new_temp_path",
+            return_value=(descriptor, str(temp_path)),
+        ),
+        patch(
+            "custom_components.blueprints_updater.file_store.os.fdopen",
+            side_effect=OSError("fdopen failed"),
+        ),
+        patch(
+            "custom_components.blueprints_updater.file_store.os.close",
+            wraps=real_close,
+        ) as close_descriptor,
+        pytest.raises(OSError, match="fdopen failed"),
+    ):
+        BlueprintFileStore._write_temp(str(target), "content")
+
+    close_descriptor.assert_called_once_with(descriptor)
+    assert not temp_path.exists()
+
+
+def test_install_rejects_corrupt_temp_before_replacing_target(tmp_path) -> None:
+    """A corrupted temporary write never replaces the active blueprint."""
+    target = tmp_path / "test.yaml"
+    temp_path = tmp_path / ".test.yaml.corrupt.tmp"
+    target.write_text("original", encoding="utf-8")
+    temp_path.write_text("corrupted", encoding="utf-8")
+    expected_hash = BlueprintFileStore._hash_file(str(target))
+
+    with (
+        patch.object(
+            BlueprintFileStore,
+            "_write_temp",
+            return_value=(str(temp_path), expected_hash),
+        ),
+        patch.object(BlueprintFileStore, "rotate_backups") as rotate_backups,
+        pytest.raises(OSError, match="Installed blueprint verification failed"),
+    ):
+        BlueprintFileStore.install(
+            str(target),
+            "replacement",
+            max_backups=3,
+            create_backup=True,
+        )
+
+    assert target.read_text(encoding="utf-8") == "original"
+    assert not temp_path.exists()
+    rotate_backups.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_requested_backup_failure_aborts_install(coordinator, tmp_path):
+    """A requested backup failure leaves the active blueprint unchanged."""
+    blueprint_path = tmp_path / "test.yaml"
+    original = "blueprint:\n  name: Original\n  domain: automation\n"
+    replacement = "blueprint:\n  name: Replacement\n  domain: automation\n"
+    blueprint_path.write_text(original, encoding="utf-8")
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.file_store.shutil.copy2",
+            side_effect=OSError("disk full"),
+        ),
+        pytest.raises(OSError, match="disk full"),
+    ):
+        await coordinator.async_install_blueprint(
+            str(blueprint_path),
+            replacement,
+            reload_services=False,
+            backup=True,
+        )
+
+    assert blueprint_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.asyncio
+async def test_invalid_backup_is_rejected_before_restore(coordinator, tmp_path):
+    """Invalid backup YAML never replaces a valid active blueprint."""
+    blueprint_path = tmp_path / "test.yaml"
+    source_url = "https://example.com/test.yaml"
+    original = f"blueprint:\n  name: Original\n  domain: automation\n  source_url: {source_url}\n"
+    blueprint_path.write_text(original, encoding="utf-8")
+    (tmp_path / "test.yaml.bak.1").write_text("invalid: yaml: [", encoding="utf-8")
+    coordinator.data[str(blueprint_path)] = {
+        "name": "Original",
+        "domain": DOMAIN_AUTOMATION,
+        "relative_path": "automation/test.yaml",
+        "source_url": source_url,
+    }
+
+    result = await coordinator.async_restore_blueprint(str(blueprint_path))
+
+    assert result["success"] is False
+    assert result["translation_key"] == "invalid_yaml"
+    assert blueprint_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.asyncio
+async def test_restore_source_mismatch_returns_validation_error(coordinator, tmp_path):
+    """A backup from another source is reported as validation, not system failure."""
+    blueprint_path = tmp_path / "test.yaml"
+    tracked_url = "https://example.com/tracked.yaml"
+    backup_url = "https://example.com/different.yaml"
+    original = f"blueprint:\n  name: Original\n  domain: automation\n  source_url: {tracked_url}\n"
+    backup = f"blueprint:\n  name: Backup\n  domain: automation\n  source_url: {backup_url}\n"
+    blueprint_path.write_text(original, encoding="utf-8")
+    (tmp_path / "test.yaml.bak.1").write_text(backup, encoding="utf-8")
+    coordinator.data[str(blueprint_path)] = {
+        "name": "Original",
+        "domain": DOMAIN_AUTOMATION,
+        "relative_path": "automation/test.yaml",
+        "source_url": tracked_url,
+    }
+
+    result = await coordinator.async_restore_blueprint(str(blueprint_path))
+
+    assert result["success"] is False
+    assert result["translation_key"] == "blueprint_validation_error"
+    assert result["translation_kwargs"] == {
+        "error": "Backup source URL does not match the tracked blueprint"
+    }
+    assert blueprint_path.read_text(encoding="utf-8") == original
 
 
 @pytest.mark.asyncio
@@ -281,16 +490,82 @@ async def test_rotate_backups_malformed_suffixes(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_rotate_backups_scandir_oserror(tmp_path) -> None:
-    """Test that rotate_backups handles OSError during directory scanning gracefully."""
+    """Test that backup scanning errors fail closed."""
     file_path = tmp_path / "test_file.yaml"
     file_path.write_text("current")
 
     with (
         patch("os.scandir", side_effect=OSError("Permission denied")),
-        patch("custom_components.blueprints_updater.coordinator._LOGGER.warning") as mock_warn,
+        pytest.raises(OSError, match="Permission denied"),
     ):
         BlueprintUpdateCoordinator._rotate_backups(str(file_path), max_bak=2)
-        mock_warn.assert_called_once()
+
+
+def test_stale_backup_entry_error_does_not_abort_discovery(tmp_path, caplog) -> None:
+    """One unreadable directory entry does not hide other stale backups."""
+    file_path = tmp_path / "test_file.yaml"
+    newest_backup = tmp_path / "test_file.yaml.bak.1"
+    unreadable_backup = tmp_path / "test_file.yaml.bak.3"
+    removable_backup = tmp_path / "test_file.yaml.bak.4"
+    file_path.write_text("current")
+    newest_backup.write_text("previous")
+    unreadable_backup.write_text("unreadable")
+    removable_backup.write_text("stale")
+
+    unreadable_entry = MagicMock(
+        name="unreadable_entry",
+        path=str(unreadable_backup),
+    )
+    unreadable_entry.name = unreadable_backup.name
+    unreadable_entry.is_file.side_effect = PermissionError("entry metadata unavailable")
+    removable_entry = MagicMock(
+        name="removable_entry",
+        path=str(removable_backup),
+    )
+    removable_entry.name = removable_backup.name
+    removable_entry.is_file.return_value = True
+    entries = MagicMock()
+    entries.__enter__.return_value = iter((unreadable_entry, removable_entry))
+
+    with patch(
+        "custom_components.blueprints_updater.file_store.os.scandir",
+        return_value=entries,
+    ):
+        BlueprintFileStore.rotate_backups(str(file_path), max_backups=2)
+
+    assert newest_backup.read_text() == "current"
+    assert (tmp_path / "test_file.yaml.bak.2").read_text() == "previous"
+    assert unreadable_backup.read_text() == "unreadable"
+    assert not removable_backup.exists()
+    assert "Failed to inspect stale backup" in caplog.text
+
+
+def test_stale_backup_removal_error_does_not_block_verified_backup(tmp_path, caplog) -> None:
+    """Stale retention cleanup is best effort and does not block a new backup."""
+    file_path = tmp_path / "test_file.yaml"
+    newest_backup = tmp_path / "test_file.yaml.bak.1"
+    stale_backup = tmp_path / "test_file.yaml.bak.3"
+    file_path.write_text("current")
+    newest_backup.write_text("previous")
+    stale_backup.write_text("stale")
+    real_remove = os.remove
+
+    def remove_unless_stale(path: str) -> None:
+        """Simulate one undeletable out-of-range backup."""
+        if os.fspath(path) == str(stale_backup):
+            raise PermissionError("read-only stale backup")
+        real_remove(path)
+
+    with patch(
+        "custom_components.blueprints_updater.file_store.os.remove",
+        side_effect=remove_unless_stale,
+    ):
+        BlueprintFileStore.rotate_backups(str(file_path), max_backups=2)
+
+    assert newest_backup.read_text() == "current"
+    assert (tmp_path / "test_file.yaml.bak.2").read_text() == "previous"
+    assert stale_backup.read_text() == "stale"
+    assert "Failed to remove stale backup" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -301,13 +576,16 @@ async def test_save_file_temp_cleanup_on_exception(
     file_path = tmp_path / "test_file.yaml"
 
     with (
-        patch.object(coordinator, "_rotate_backups", side_effect=ValueError("Rotation failed")),
+        patch(
+            "custom_components.blueprints_updater.file_store.BlueprintFileStore.rotate_backups",
+            side_effect=ValueError("Rotation failed"),
+        ),
         pytest.raises(ValueError, match="Rotation failed"),
     ):
         await coordinator.async_install_blueprint(str(file_path), "content", backup=True)
 
     # Verify the temporary file is removed
-    assert not (tmp_path / "test_file.yaml.tmp").exists()
+    assert not list(tmp_path.glob(".*.tmp"))
 
 
 @pytest.mark.asyncio
@@ -349,7 +627,7 @@ async def test_execute_restore_file_temp_cleanup_on_exception(tmp_path) -> None:
 
     # Patch _rotate_backups to fail during restoration
     with patch(
-        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._rotate_backups",
+        "custom_components.blueprints_updater.file_store.BlueprintFileStore.rotate_backups",
         side_effect=ValueError("Rotation failed during restore"),
     ):
         success, msg, count = BlueprintUpdateCoordinator._execute_restore_file(
@@ -360,4 +638,4 @@ async def test_execute_restore_file_temp_cleanup_on_exception(tmp_path) -> None:
     assert msg == "system_error"
     assert count == 0
     # Verify the temporary file is removed
-    assert not (tmp_path / "test_file.yaml.tmp").exists()
+    assert not list(tmp_path.glob(".*.tmp"))

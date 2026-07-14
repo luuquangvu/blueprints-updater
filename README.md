@@ -120,6 +120,8 @@ When installing an update from the Home Assistant dashboard, you will have the o
 > Backup files are saved in the **same folder as the blueprint itself** (e.g., `/config/blueprints/automation/author/name.yaml.bak.1`). Since they are stored alongside the blueprints in your Home Assistant configuration directory, they will be safely included in your standard Home Assistant daily backups.
 >
 > If you have **Auto-Update** enabled in the integration settings, it will **always** create a backup automatically before applying an update, providing a guaranteed safety net with zero effort required.
+>
+> A requested backup is verified before the active blueprint is replaced. If backup creation fails, the update is stopped. Restores are also validated as UTF-8 YAML, checked against the expected blueprint domain and source, and serialized with updates to the same file.
 
 ### Restoring a Backup
 
@@ -132,6 +134,8 @@ If you find that a newly updated blueprint breaks your automations, scripts, or 
 5. Click **Perform Action**.
 
 The integration will look for the specified numbered backup file, restore the original YAML content, and automatically reload your automations, scripts, and templates to apply the change immediately.
+
+For network safety, blueprint sources and redirects must use HTTPS. Responses are streamed with a 2 MiB decoded-content limit, and each connection is pinned to an address that was validated as publicly routable.
 
 ## Advanced Compatibility Guard
 
@@ -211,7 +215,7 @@ To ensure long-term reliability and stability, this project utilizes a modern st
   - **[Prettier](https://github.com/prettier/prettier)**: Consistent formatting for documentation and configuration files.
 
 > [!NOTE]
-> All AI automated insights are manually reviewed and validated by the project maintainer to ensure every change aligns with the project's standards.
+> All automated insights are manually reviewed and validated by the project maintainer to ensure every change aligns with the project's standards.
 
 ## Contributing
 

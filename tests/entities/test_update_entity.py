@@ -682,6 +682,23 @@ async def test_entity_auto_update_cache_invalidation(coordinator):
 
 
 @pytest.mark.asyncio
+async def test_entity_refreshes_name_title_and_release_url(coordinator):
+    """Coordinator metadata changes update retained entity display attributes."""
+    path = "/config/blueprints/test.yaml"
+    entity = BlueprintUpdateEntity(coordinator, path, coordinator.data[path])
+    entity.hass = coordinator.hass
+    entity.entity_id = "update.test"
+    coordinator.data[path]["name"] = "Renamed Blueprint"
+    coordinator.data[path]["source_url"] = "https://example.com/new-source.yaml"
+
+    await await_scheduled_update(entity, coordinator)
+
+    assert entity.name == "Renamed Blueprint"
+    assert entity.title == "Renamed Blueprint"
+    assert entity.release_url == "https://example.com/new-source.yaml"
+
+
+@pytest.mark.asyncio
 async def test_entity_availability_behavior(coordinator):
     """Test that entity availability correctly follows coordinator state."""
     entity = BlueprintUpdateEntity(

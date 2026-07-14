@@ -106,6 +106,25 @@ async def test_scan_blueprints(coordinator, mock_makedirs):
     assert blueprints[path_temp]["name"] == "Temp"
 
 
+def test_scan_blueprints_skips_non_utf8_file(hass, tmp_path):
+    """One invalidly encoded YAML file does not hide valid blueprints."""
+    blueprint_root = tmp_path / "blueprints"
+    automation_root = blueprint_root / "automation"
+    automation_root.mkdir(parents=True)
+    valid_path = automation_root / "valid.yaml"
+    valid_path.write_text(
+        "blueprint:\n  name: Valid\n  domain: automation\n"
+        "  source_url: https://example.com/valid.yaml\n",
+        encoding="utf-8",
+    )
+    (automation_root / "invalid.yaml").write_bytes(b"blueprint:\n  name: \xff\n")
+    hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+
+    blueprints = BlueprintUpdateCoordinator.scan_blueprints(hass, FILTER_MODE_ALL, [])
+
+    assert list(blueprints) == [str(valid_path)]
+
+
 @pytest.mark.asyncio
 async def test_scan_blueprints_domain_extraction(coordinator, mock_makedirs):
     """Test that domain is extracted correctly from folder structure during scan."""
@@ -709,31 +728,21 @@ async def test_async_install_blueprint(hass, coordinator, mock_makedirs):
 
 
 @pytest.mark.asyncio
-async def test_async_install_blueprint_backup(hass, coordinator, mock_makedirs):
+async def test_async_install_blueprint_backup(hass, coordinator, tmp_path):
     """Test installing a blueprint with backup enabled."""
-    path = "/config/blueprints/automation/test.yaml"
+    path = str(tmp_path / "test.yaml")
     remote_content = "blueprint:\n  name: Test"
+    (tmp_path / "test.yaml").write_text("original", encoding="utf-8")
 
     coordinator.config_entry = MagicMock()
     coordinator.config_entry.options = MappingProxyType({"max_backups": 3})
     hass.services.has_service = MagicMock(return_value=True)
     hass.services.async_call = AsyncMock()
 
-    with (
-        patch("builtins.open", MagicMock()),
-        patch(
-            "custom_components.blueprints_updater.coordinator.os.path.realpath",
-            side_effect=os.path.normpath,
-        ),
-        patch("custom_components.blueprints_updater.coordinator.os.replace") as mock_replace,
-        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
-        patch("custom_components.blueprints_updater.coordinator.shutil.copy2") as mock_copy,
-        patch("custom_components.blueprints_updater.coordinator.os.remove"),
-    ):
-        await coordinator.async_install_blueprint(path, remote_content, backup=True)
+    await coordinator.async_install_blueprint(path, remote_content, backup=True)
 
-    mock_copy.assert_called_once_with(os.path.normpath(path), os.path.normpath(f"{path}.bak.1"))
-    mock_replace.assert_any_call(os.path.normpath(f"{path}.tmp"), os.path.normpath(path))
+    assert (tmp_path / "test.yaml.bak.1").read_text(encoding="utf-8") == "original"
+    assert "name: Test" in (tmp_path / "test.yaml").read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio

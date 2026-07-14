@@ -120,6 +120,8 @@ Khi cài đặt bản cập nhật từ bảng điều khiển Home Assistant, b
 > Các tệp sao lưu được lưu trữ ở **cùng thư mục với chính blueprint đó** (ví dụ: `/config/blueprints/automation/author/name.yaml.bak.1`). Vì chúng được lưu cùng với các blueprint trong thư mục cấu hình của Home Assistant, chúng sẽ tự động được bao gồm trong các bản sao lưu hàng ngày của Home Assistant.
 >
 > Nếu bạn đang bật tùy chọn **Tự động Cập nhật (Auto-Update)**, tiện ích sẽ **luôn luôn** tự động sao lưu cấu hình trước khi ghi đè bản mới nhất, tạo ra một mạng lưới an toàn 100% giúp bạn hoàn toàn yên tâm.
+>
+> Trước khi thay thế blueprint hiện tại, tích hợp sẽ xác minh bản sao lưu vừa tạo. Nếu không thể tạo hoặc xác minh bản sao lưu, quá trình cập nhật sẽ dừng lại. Khi khôi phục, tích hợp cũng kiểm tra nội dung YAML có hợp lệ và được mã hóa bằng UTF-8 hay không, đồng thời đối chiếu miền và nguồn của blueprint. Các thao tác khôi phục và cập nhật trên cùng một tệp được thực hiện tuần tự để tránh xung đột.
 
 ### Khôi phục bản Sao lưu
 
@@ -132,6 +134,8 @@ Nếu bạn phát hiện ra rằng bản blueprint mới cập nhật làm hỏn
 5. Nhấn **Thực hiện hành động (Perform Action)**.
 
 Tiện ích sẽ tự động tìm tệp sao lưu tương ứng, khôi phục lại nội dung YAML gốc, và tự động tải lại (reload) các automation, script và template để áp dụng các thay đổi ngay lập tức.
+
+Để bảo đảm an toàn khi kết nối mạng, URL nguồn của blueprint và mọi URL chuyển hướng đều phải sử dụng HTTPS. Nội dung phản hồi được tải theo luồng và giới hạn ở 2 MiB sau khi giải mã. Mỗi kết nối chỉ được thiết lập tới địa chỉ đã được xác minh là công khai và có thể định tuyến trên Internet.
 
 ## Lớp bảo vệ Nâng cao (Advanced Compatibility Guard)
 
@@ -211,7 +215,7 @@ blueprint:
   - **[Prettier](https://github.com/prettier/prettier)**: Duy trì định dạng nhất quán cho các tệp tài liệu và cấu hình.
 
 > [!NOTE]
-> Mọi kết quả từ các công cụ AI tự động đều được quản trị viên dự án trực tiếp rà soát và xác nhận kỹ lưỡng, đảm bảo sự ổn định cao nhất cho người dùng.
+> Mọi kết quả từ các công cụ tự động đều được quản trị viên dự án trực tiếp rà soát và xác nhận kỹ lưỡng, đảm bảo sự ổn định cao nhất cho người dùng.
 
 ## Đóng góp
 

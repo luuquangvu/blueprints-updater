@@ -12,6 +12,7 @@ from custom_components.blueprints_updater.coordinator import (
 )
 
 from .protocols import BlueprintCoordinatorProtocol
+from .utils import mock_bounded_response
 
 
 @pytest.fixture
@@ -49,4 +50,6 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
     coord_any.last_update_success = True
     coord_any._is_safe_path = MagicMock(return_value=True)
     coord_any._is_safe_url = AsyncMock(return_value=True)
+
+    coord_any._async_get_bounded_response = AsyncMock(side_effect=mock_bounded_response)
     return coord

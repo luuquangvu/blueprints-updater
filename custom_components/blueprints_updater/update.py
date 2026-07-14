@@ -410,6 +410,11 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         Triggered whenever the coordinator finishes a refresh.
         """
+        if info := self.coordinator.data.get(self._path):
+            if name := info.get("name"):
+                self._attr_name = name
+                self._attr_title = name
+            self._attr_release_url = info.get("source_url")
         self._clear_cached_properties()
         if self.hass:
             self.hass.async_create_task(self._async_localize_strings())

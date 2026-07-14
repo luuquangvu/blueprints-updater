@@ -1,7 +1,10 @@
 """Fixtures for Blueprints Updater tests."""
 
 import asyncio
+import contextlib
+import hashlib
 import ipaddress
+import os
 import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,6 +12,10 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.blueprints_updater.const import SPECIAL_USE_TLDS
+from custom_components.blueprints_updater.file_store import (
+    BlueprintFileStore,
+    FileTransactionResult,
+)
 from custom_components.blueprints_updater.utils import is_ip_safe
 
 from .compat import patch_service_call_compat
@@ -35,8 +42,28 @@ def mock_storage():
 
 @pytest.fixture
 def mock_makedirs():
-    """Mock coordinator.os.makedirs for opt-in tests."""
-    with patch("custom_components.blueprints_updater.coordinator.os.makedirs") as mock:
+    """Mock legacy file writes for tests that use synthetic /config paths."""
+
+    def _mock_install(file_path, content, max_backups, create_backup):
+        """Simulate a completed file-store install through existing patched I/O."""
+        del create_backup
+        temp_path = f"{file_path}.tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as file:
+                file.write(content)
+            os.replace(temp_path, file_path)
+        finally:
+            with contextlib.suppress(OSError):
+                os.remove(temp_path)
+        return FileTransactionResult(
+            content_hash=hashlib.sha256(content.encode()).hexdigest(),
+            backups_count=BlueprintFileStore.count_backups(file_path, max_backups),
+        )
+
+    with (
+        patch("custom_components.blueprints_updater.coordinator.os.makedirs") as mock,
+        patch.object(BlueprintFileStore, "install", side_effect=_mock_install),
+    ):
         yield mock
 
 

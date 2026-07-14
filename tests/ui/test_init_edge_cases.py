@@ -221,23 +221,28 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
     mock_resp = MagicMock()
     mock_resp.is_redirect = False
     mock_resp.status_code = HTTPStatus.OK
-    mock_resp.url = httpx.URL("https://mock_url")
+    mock_resp.url = httpx.URL("https://mock-url.example.com")
     mock_resp.headers = {"Content-Type": "application/json"}
     mock_resp.json = MagicMock(side_effect=ValueError("JSON fail"))
 
     coord_path = "custom_components.blueprints_updater.coordinator"
     prov_path = "custom_components.blueprints_updater.providers"
 
-    async def _async_get(*args, **kwargs):
-        """Mock HTTP get request handler."""
-        return mock_resp
-
-    with patch(f"{coord_path}.get_async_client") as mock_client:
-        mock_client.return_value.get = AsyncMock(side_effect=_async_get)
-        with patch(f"{prov_path}.ProviderRegistry.get_provider") as mock_get:
-            mock_get.return_value = MagicMock()
-            with pytest.raises(HomeAssistantError, match="Invalid JSON response"):
-                await coordinator._async_fetch_content(mock_client.return_value, "mock_url")
+    with (
+        patch(f"{coord_path}.get_async_client") as mock_client,
+        patch.object(
+            coordinator,
+            "_async_get_bounded_response",
+            new=AsyncMock(return_value=mock_resp),
+        ),
+        patch(f"{prov_path}.ProviderRegistry.get_provider") as mock_get,
+    ):
+        mock_get.return_value = MagicMock()
+        with pytest.raises(HomeAssistantError, match="Invalid JSON response"):
+            await coordinator._async_fetch_content(
+                mock_client.return_value,
+                "https://mock-url.example.com",
+            )
 
     with patch(
         "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator.async_config_entry_first_refresh",

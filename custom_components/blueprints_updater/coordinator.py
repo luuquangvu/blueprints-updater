@@ -5,11 +5,9 @@ import contextlib
 import difflib
 import hashlib
 import inspect
-import ipaddress
 import logging
 import os
 import random
-import shutil
 import socket
 import time
 from collections.abc import Iterable, Mapping, Sequence
@@ -30,7 +28,7 @@ from homeassistant.components.automation.config import (
     async_validate_config_item as async_validate_automation_config,
 )
 from homeassistant.components.blueprint.errors import InvalidBlueprint
-from homeassistant.components.blueprint.models import Blueprint
+from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.components.script import scripts_with_blueprint
 from homeassistant.components.script.config import (
@@ -44,7 +42,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import async_get_platforms
-from homeassistant.helpers.httpx_client import get_async_client
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -79,6 +76,7 @@ from .const import (
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
     FILTER_MODE_ALL,
     MAX_CONCURRENT_REQUESTS,
+    MAX_RESPONSE_BYTES,
     MAX_RETRIES,
     MAX_SEND_INTERVAL,
     METADATA_STORAGE_FIELDS,
@@ -86,12 +84,18 @@ from .const import (
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
     RISK_TYPE_TRANSLATIONS,
-    SPECIAL_USE_TLDS,
     STORAGE_KEY_DATA,
     STORAGE_VERSION,
     BlueprintBlockingReason,
     BlueprintRiskType,
     SourceProviderType,
+)
+from .file_store import BlueprintFileStore, FileTransactionResult
+from .network import (
+    async_resolve_public_addresses,
+    get_guarded_async_client,
+    is_special_use_hostname,
+    normalize_hostname,
 )
 from .providers import registry
 from .utils import (
@@ -100,7 +104,6 @@ from .utils import (
     get_max_backups,
     get_validated_filter_mode,
     get_validated_selected_blueprints,
-    is_ip_safe,
     normalize_domain,
     normalize_url,
     read_local_file,
@@ -178,22 +181,48 @@ class BlueprintScanContext:
     max_backups: int
 
 
+@dataclass(frozen=True)
+class PreparedBlueprintInstall:
+    """Validated inputs and resolved metadata for one file installation."""
+
+    real_path: str
+    parsed: dict[str, Any] | None
+    blueprint_block: dict[str, Any] | None
+    functional_domain: str
+    current: dict[str, Any] | None
+    name: str
+    source_url: str | None
+    relative_path: str
+    content: str
+
+
+@dataclass(frozen=True)
+class PreparedBlueprintRestore:
+    """Validated backup content and identity for one restoration."""
+
+    real_path: str
+    content: str
+    domain: str
+    tracked_source_url: Any
+
+
+class BlueprintRestoreValidationError(HomeAssistantError):
+    """Expected restore validation failure with a localized result contract."""
+
+    def __init__(self, translation_key: str, **translation_kwargs: str) -> None:
+        """Initialize a restore validation failure."""
+        super().__init__(translation_key)
+        self.result_translation_key = translation_key
+        self.translation_kwargs = translation_kwargs
+
+
 MAX_HOSTNAME_CACHE_SIZE = 1024
 """Maximum number of entries in the safe hostname cache per refresh cycle."""
 
 
-def _count_backups_sync_helper(file_path: str, max_bak: int) -> int:
-    """Count the number of existing backup files for a given blueprint path.
-
-    This is a synchronous helper that checks for the presence of backup
-    files sequentially up to the maximum backup limit.
-    """
-    count = 0
-    for i in range(1, max_bak + 1):
-        bak_path = BlueprintUpdateCoordinator._get_backup_path(file_path, i)
-        if os.path.isfile(bak_path):
-            count += 1
-    return count
+def get_async_client(hass: HomeAssistant, alpn_protocols: Any = None) -> httpx.AsyncClient:
+    """Return the integration-owned connection-guarded HTTP client."""
+    return get_guarded_async_client(hass, alpn_protocols=alpn_protocols)
 
 
 class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
@@ -261,6 +290,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._max_hostname_cache_size = MAX_HOSTNAME_CACHE_SIZE
         self._safe_hostname_lock = asyncio.Lock()
         self._blueprint_validate_lock = asyncio.Lock()
+        self._file_store = BlueprintFileStore()
         self._first_update_done = False
         if self.config_entry:
             self.config_entry.async_on_unload(self._async_cancel_background_task)
@@ -1407,12 +1437,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     @staticmethod
     def _get_backup_path(file_path: str, version: int | str) -> str:
         """Construct the path to a specific backup file version."""
-        return f"{file_path}.bak.{version}"
+        return BlueprintFileStore.backup_path(file_path, version)
 
     @staticmethod
     def _count_backups_sync(file_path: str, max_bak: int) -> int:
         """Count the number of existing backup files for a given blueprint path."""
-        return _count_backups_sync_helper(file_path, max_bak)
+        return BlueprintFileStore.count_backups(file_path, max_bak)
 
     @staticmethod
     def _check_backup_exists_sync(file_path: str, version: int) -> bool:
@@ -1437,68 +1467,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _rotate_backups(file_path: str, max_bak: int) -> None:
-        """Rotate backup files for a given file path with robust error handling.
+        """Create a verified backup and rotate numbered backup files.
 
         Args:
             file_path: Path to the active file to rotate.
             max_bak: Maximum number of backups to keep.
 
         """
-        try:
-            file_exists = os.path.isfile(file_path)
-            if not file_exists:
-                return
-
-            for i in range(max_bak, 0, -1):
-                src = BlueprintUpdateCoordinator._get_backup_path(file_path, i)
-                dst = BlueprintUpdateCoordinator._get_backup_path(file_path, i + 1)
-                try:
-                    os.replace(src, dst)
-                except FileNotFoundError:
-                    pass
-                except OSError as err:
-                    _LOGGER.warning("Error rotating backup %s to %s: %s", src, dst, err)
-
-            try:
-                shutil.copy2(
-                    file_path,
-                    BlueprintUpdateCoordinator._get_backup_path(file_path, 1),
-                )
-            except OSError as err:
-                _LOGGER.warning("Error creating new backup for %s: %s", file_path, err)
-
-            dir_name = os.path.dirname(file_path)
-            base_name = os.path.basename(file_path)
-            prefix = f"{base_name}.bak."
-            prefix_len = len(prefix)
-            try:
-                with os.scandir(dir_name) as entries:
-                    for entry in entries:
-                        try:
-                            is_file = entry.is_file()
-                        except OSError:
-                            continue
-                        if is_file and entry.name.startswith(prefix):
-                            suffix = entry.name[prefix_len:]
-                            if suffix.isdigit():
-                                with contextlib.suppress(ValueError):
-                                    ver = int(suffix)
-                                    if ver > max_bak:
-                                        try:
-                                            os.remove(entry.path)
-                                        except FileNotFoundError:
-                                            pass
-                                        except OSError as err:
-                                            _LOGGER.warning(
-                                                "Error removing stale backup %s: %s",
-                                                entry.path,
-                                                err,
-                                            )
-            except OSError as err:
-                _LOGGER.warning("Error scanning for stale backups for %s: %s", file_path, err)
-
-        except OSError as err:
-            _LOGGER.error("Filesystem error during backup rotation for %s: %s", file_path, err)
+        BlueprintFileStore.rotate_backups(file_path, max_bak)
 
     async def async_install_blueprint(
         self,
@@ -1512,7 +1488,34 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         is_auto_update: bool = False,
         source_url: str | None = None,
     ) -> None:
-        """Install a blueprint to the local filesystem.
+        """Serialize and install a blueprint as one per-path transaction."""
+        real_path = os.path.realpath(path)
+        async with self._file_store.transaction(real_path):
+            await self._async_install_blueprint_locked(
+                path,
+                remote_content,
+                reload_services=reload_services,
+                backup=backup,
+                remote_hash=remote_hash,
+                etag=etag,
+                last_modified=last_modified,
+                is_auto_update=is_auto_update,
+                source_url=source_url,
+            )
+
+    async def _async_install_blueprint_locked(
+        self,
+        path: str,
+        remote_content: str,
+        reload_services: bool = True,
+        backup: bool = True,
+        remote_hash: str | None = None,
+        etag: str | None = None,
+        last_modified: str | None = None,
+        is_auto_update: bool = False,
+        source_url: str | None = None,
+    ) -> None:
+        """Install a blueprint while its canonical path lock is held.
 
         This method validates the blueprint path, creates a backup if requested,
         writes the new content, and optionally reloads the associated services.
@@ -1539,161 +1542,227 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             HomeAssistantError: If the path is unsafe or content is empty.
 
         """
+        try:
+            prepared = self._prepare_blueprint_install(
+                path,
+                remote_content,
+                remote_hash=remote_hash,
+                source_url=source_url,
+            )
+            file_result = await self.hass.async_add_executor_job(
+                self._file_store.install,
+                prepared.real_path,
+                prepared.content,
+                get_max_backups(self.config_entry),
+                backup,
+            )
+            await self._async_finalize_blueprint_install(
+                path,
+                prepared,
+                file_result,
+                reload_services=reload_services,
+                etag=etag,
+                last_modified=last_modified,
+                is_auto_update=is_auto_update,
+            )
+        except Exception:
+            _LOGGER.exception("Failed to update blueprint at %s", path)
+            raise
+
+    def _prepare_blueprint_install(
+        self,
+        path: str,
+        remote_content: str,
+        remote_hash: str | None,
+        source_url: str | None,
+    ) -> PreparedBlueprintInstall:
+        """Validate and normalize one blueprint installation."""
         real_path = os.path.realpath(path)
+        self._validate_blueprint_install_request(path, real_path, remote_content)
+        parsed = self._parse_blueprint_install_content(path, remote_content)
+        functional_domain = self._get_functional_domain(
+            path,
+            content=remote_content if parsed else None,
+            parsed_data=parsed,
+        )
+        blueprint_block = self._get_blueprint_block(path, parsed_data=parsed) if parsed else None
+        metadata = self._resolve_blueprint_metadata(
+            path,
+            blueprint_block,
+            real_path,
+            source_url=source_url,
+        )
+        final_source_url = cast(str | None, metadata["source_url"])
+        content = (
+            self._ensure_source_url(remote_content, final_source_url)
+            if final_source_url
+            else self._normalize_content(remote_content)
+        )
+        expected_hash = self._hash_content(content, already_normalized=True)
+        if remote_hash is not None and remote_hash != expected_hash:
+            raise HomeAssistantError("Remote hash does not match validated install content")
+
+        return PreparedBlueprintInstall(
+            real_path=real_path,
+            parsed=parsed,
+            blueprint_block=blueprint_block,
+            functional_domain=functional_domain,
+            current=cast(dict[str, Any] | None, metadata["current"]),
+            name=cast(str, metadata["name"]),
+            source_url=final_source_url,
+            relative_path=cast(str, metadata["relative_path"]),
+            content=content,
+        )
+
+    def _validate_blueprint_install_request(
+        self,
+        path: str,
+        real_path: str,
+        remote_content: str,
+    ) -> None:
+        """Reject unsafe paths and empty blueprint content."""
         if not self._is_safe_path(real_path):
             _LOGGER.error("Security violation: Attempted to install to unsafe path: %s", real_path)
             raise HomeAssistantError(
                 "Security violation: Attempted to install to an unsafe location"
             )
-
         if not remote_content:
             _LOGGER.error("Cannot install blueprint at %s: content is empty or None", path)
             raise HomeAssistantError("Blueprint content is missing or empty")
 
-        max_backups = get_max_backups(self.config_entry)
-
+    @staticmethod
+    def _parse_blueprint_install_content(
+        path: str,
+        remote_content: str,
+    ) -> dict[str, Any] | None:
+        """Parse install content, retaining the existing permissive fallback."""
         try:
+            parsed = yaml_util.parse_yaml(remote_content)
+        except HomeAssistantError as err:
+            _LOGGER.warning("Failed to parse blueprint at %s", path)
+            _LOGGER.debug("Blueprint YAML parse error at %s: %s", path, err, exc_info=err)
+            return None
+        return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else None
 
-            def _save_file(file_path: str, content: str, max_bak: int) -> int:
-                """Local helper for _save_file."""
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                tmp_path = f"{file_path}.tmp"
-                try:
-                    with open(tmp_path, "w", encoding="utf-8") as f:
-                        f.write(content)
-
-                    if backup:
-                        self._rotate_backups(file_path, max_bak)
-
-                    os.replace(tmp_path, file_path)
-                finally:
-                    if os.path.exists(tmp_path):
-                        with contextlib.suppress(OSError):
-                            os.remove(tmp_path)
-                return BlueprintUpdateCoordinator._count_backups_sync(file_path, max_bak)
-
-            parsed_raw = None
-            try:
-                parsed_raw = yaml_util.parse_yaml(remote_content)
-            except HomeAssistantError as err:
-                _LOGGER.warning("Failed to parse blueprint at %s", path)
-                _LOGGER.debug("Blueprint YAML parse error at %s: %s", path, err, exc_info=err)
-
-            parsed = cast(dict[str, Any], parsed_raw) if isinstance(parsed_raw, dict) else None
-
-            functional_domain = self._get_functional_domain(
-                path, content=remote_content if parsed else None, parsed_data=parsed
-            )
-            bp_block = self._get_blueprint_block(path, parsed_data=parsed) if parsed else None
-
-            metadata = self._resolve_blueprint_metadata(
-                path, bp_block, real_path, source_url=source_url
-            )
-            current = metadata["current"]
-            blueprint_name = metadata["name"]
-            final_source_url = metadata["source_url"]
-            relative_path = metadata["relative_path"]
-
-            if final_source_url:
-                final_content = self._ensure_source_url(remote_content, final_source_url)
-            else:
-                final_content = self._normalize_content(remote_content)
-
-            new_backups_count = await self.hass.async_add_executor_job(
-                _save_file, real_path, final_content, max_backups
+    @staticmethod
+    def _warn_if_blueprint_domain_mismatches(
+        path: str,
+        parsed: dict[str, Any] | None,
+        functional_domain: str,
+    ) -> None:
+        """Warn when YAML metadata conflicts with the path-derived domain."""
+        blueprint_meta = parsed.get("blueprint") if parsed else None
+        declared_domain_raw = (
+            blueprint_meta.get("domain") if isinstance(blueprint_meta, dict) else None
+        )
+        declared_domain = (
+            declared_domain_raw.strip().lower() if isinstance(declared_domain_raw, str) else None
+        )
+        if declared_domain and declared_domain != functional_domain:
+            _LOGGER.warning(
+                "Blueprint at %s has declared domain '%s' that does "
+                "not match functional domain '%s'; falling back to "
+                "functional domain",
+                path,
+                declared_domain,
+                functional_domain,
             )
 
-            if parsed:
-                blueprint_meta = parsed.get("blueprint")
-                declared_domain_raw = (
-                    blueprint_meta.get("domain") if isinstance(blueprint_meta, dict) else None
-                )
-                declared_domain = (
-                    declared_domain_raw.strip().lower()
-                    if isinstance(declared_domain_raw, str)
-                    else None
-                )
+    @staticmethod
+    def _build_installed_blueprint_metadata(
+        prepared: PreparedBlueprintInstall,
+        file_result: FileTransactionResult,
+        etag: str | None,
+        last_modified: str | None,
+    ) -> dict[str, Any]:
+        """Build the synchronized coordinator state for an installation."""
+        current = prepared.current
+        final_etag = etag if etag is not None else (current.get("etag") if current else None)
+        final_last_modified = (
+            last_modified
+            if last_modified is not None
+            else (current.get("last_modified") if current else None)
+        )
+        return {
+            "name": prepared.name,
+            "domain": prepared.functional_domain,
+            "source_url": prepared.source_url,
+            "relative_path": prepared.relative_path,
+            "updatable": False,
+            "local_hash": file_result.content_hash,
+            "remote_hash": file_result.content_hash,
+            "last_error": None,
+            "auto_update_last_error": None,
+            "remote_content": None,
+            "invalid_remote_hash": None,
+            "breaking_risks": [],
+            "update_blocking_reason": None,
+            "etag": final_etag,
+            "last_modified": final_last_modified,
+            "backups_count": file_result.backups_count,
+            "_cached_git_diff": None,
+        }
 
-                if declared_domain and declared_domain != functional_domain:
-                    _LOGGER.warning(
-                        "Blueprint at %s has declared domain '%s' that does "
-                        "not match functional domain '%s'; falling back to "
-                        "functional domain",
-                        path,
-                        declared_domain,
-                        functional_domain,
-                    )
+    async def _async_store_installed_blueprint_metadata(
+        self,
+        path: str,
+        blueprint_block: dict[str, Any] | None,
+        metadata: dict[str, Any],
+    ) -> None:
+        """Persist install metadata when the blueprint is tracked or parseable."""
+        if path in self.data:
+            self.data[path].update(metadata)
+        elif blueprint_block:
+            self.data[path] = metadata
+        else:
+            return
+        await self._async_save_metadata(force=True)
+        self.async_set_updated_data(self.data)
 
-            domain = functional_domain
-            if reload_services:
-                await self.async_reload_services([domain])
+    async def _async_finalize_blueprint_install(
+        self,
+        path: str,
+        prepared: PreparedBlueprintInstall,
+        file_result: FileTransactionResult,
+        reload_services: bool,
+        etag: str | None,
+        last_modified: str | None,
+        is_auto_update: bool,
+    ) -> None:
+        """Reload services, synchronize metadata, and announce an installation."""
+        self._warn_if_blueprint_domain_mismatches(
+            path,
+            prepared.parsed,
+            prepared.functional_domain,
+        )
+        if reload_services:
+            await self.async_reload_services([prepared.functional_domain])
 
-            previous_hash = current.get("local_hash") if current else None
-            had_breaking_risks = bool(current.get("breaking_risks")) if current else False
-
-            cached_remote_hash = (
-                current.get("remote_hash")
-                if current and current.get("remote_content") == final_content
-                else None
-            )
-            final_hash = (
-                remote_hash
-                or cached_remote_hash
-                or self._hash_content(final_content, already_normalized=True)
-            )
-            final_etag = etag if etag is not None else (current.get("etag") if current else None)
-            final_last_modified = (
-                last_modified
-                if last_modified is not None
-                else (current.get("last_modified") if current else None)
-            )
-
-            metadata_update = {
-                "name": blueprint_name,
-                "domain": domain,
-                "source_url": final_source_url,
-                "relative_path": relative_path,
-                "updatable": False,
-                "local_hash": final_hash,
-                "remote_hash": final_hash,
-                "last_error": None,
-                "auto_update_last_error": None,
-                "remote_content": None,
-                "invalid_remote_hash": None,
-                "breaking_risks": [],
-                "update_blocking_reason": None,
-                "etag": final_etag,
-                "last_modified": final_last_modified,
-                "backups_count": new_backups_count,
-                "_cached_git_diff": None,
-            }
-
-            if self.data and path in self.data:
-                self.data[path].update(metadata_update)
-                await self._async_save_metadata(force=True)
-                self.async_set_updated_data(self.data)
-            elif bp_block:
-                if self.data is None:
-                    self.data = {}
-                self.data[path] = cast(dict[str, Any], metadata_update)
-                await self._async_save_metadata(force=True)
-                self.async_set_updated_data(self.data)
-
-            self._fire_update_event(
-                blueprint_name=blueprint_name,
-                domain=domain,
-                relative_path=relative_path,
-                source_url=final_source_url,
-                previous_hash=previous_hash,
-                new_hash=final_hash,
-                is_auto_update=is_auto_update,
-                had_breaking_risks=had_breaking_risks,
-            )
-
-            _LOGGER.info("Blueprint at %s updated successfully", real_path)
-        except Exception:
-            _LOGGER.exception("Failed to update blueprint at %s", path)
-            raise
+        current = prepared.current
+        previous_hash = current.get("local_hash") if current else None
+        had_breaking_risks = bool(current.get("breaking_risks")) if current else False
+        metadata = self._build_installed_blueprint_metadata(
+            prepared,
+            file_result,
+            etag,
+            last_modified,
+        )
+        await self._async_store_installed_blueprint_metadata(
+            path,
+            prepared.blueprint_block,
+            metadata,
+        )
+        self._fire_update_event(
+            blueprint_name=prepared.name,
+            domain=prepared.functional_domain,
+            relative_path=prepared.relative_path,
+            source_url=prepared.source_url,
+            previous_hash=previous_hash,
+            new_hash=file_result.content_hash,
+            is_auto_update=is_auto_update,
+            had_breaking_risks=had_breaking_risks,
+        )
+        _LOGGER.info("Blueprint at %s updated successfully", prepared.real_path)
 
     def _resolve_blueprint_metadata(
         self,
@@ -1782,16 +1851,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             True if the URL points to a safe public hostname.
 
         """
-        parsed = urlparse(url)
-        hostname = parsed.hostname
-        if not hostname:
+        try:
+            parsed = urlparse(url)
+            raw_hostname = parsed.hostname
+        except ValueError:
+            return False
+        if parsed.scheme.lower() != "https":
+            return False
+        if not raw_hostname:
             return False
 
-        hostname = hostname.rstrip(".").lower()
-
-        if hostname in SPECIAL_USE_TLDS:
-            return False
-        if any(hostname.endswith(f".{tld}") for tld in SPECIAL_USE_TLDS):
+        hostname = normalize_hostname(raw_hostname)
+        if hostname is None or is_special_use_hostname(hostname):
             return False
 
         if hostname in self._safe_hostname_cache:
@@ -1816,29 +1887,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             True if the destination is a safe public IP.
 
         """
-        with contextlib.suppress(ValueError):
-            ip = ipaddress.ip_address(hostname)
-            return is_ip_safe(ip)
-
-        try:
-            async with asyncio.timeout(REQUEST_TIMEOUT):
-                addr_infos = await self.hass.async_add_executor_job(
-                    socket.getaddrinfo, hostname, 0, 0, 0, 0, 0
-                )
-            found_safe_ip = False
-            for _, _, _, _, sockaddr in addr_infos:
-                ip_str = sockaddr[0]
-                try:
-                    ip = ipaddress.ip_address(ip_str)
-                except ValueError:
-                    continue
-                if not is_ip_safe(ip):
-                    return False
-                found_safe_ip = True
-        except (TimeoutError, socket.gaierror):
-            return False
-
-        return found_safe_ip
+        return bool(await async_resolve_public_addresses(self.hass, hostname, 443))
 
     def _is_safe_path(self, path: str) -> bool:
         """Check if the path is within the blueprints' directory.
@@ -1859,6 +1908,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return False
 
     async def async_restore_blueprint(self, path: str, version: int = 1) -> dict[str, Any]:
+        """Serialize and restore a validated backup as one per-path transaction."""
+        real_path = os.path.realpath(path)
+        async with self._file_store.transaction(real_path):
+            return await self._async_restore_blueprint_locked(path, version)
+
+    async def _async_restore_blueprint_locked(self, path: str, version: int = 1) -> dict[str, Any]:
         """Restore a blueprint from a numbered backup file.
 
         The current blueprint is preserved as a new backup before the
@@ -1873,17 +1928,86 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         """
         real_path = os.path.realpath(path)
+        max_backups = get_max_backups(self.config_entry)
+        if validation_result := self._validate_blueprint_restore_request(
+            real_path,
+            version,
+            max_backups,
+        ):
+            return validation_result
+
+        try:
+            prepared = await self._async_prepare_blueprint_restore(
+                path,
+                real_path,
+                version,
+            )
+            if prepared is None:
+                return self._blueprint_restore_result(False, "missing_backup")
+
+            success, message, new_backups_count = await self.hass.async_add_executor_job(
+                BlueprintUpdateCoordinator._execute_restore_file,
+                real_path,
+                version,
+                max_backups,
+                prepared.content,
+            )
+            if not success:
+                _LOGGER.error(
+                    "Failed to restore blueprint at %s: %s",
+                    real_path,
+                    message,
+                )
+                error = "Filesystem error during restoration" if message == "system_error" else None
+                return self._blueprint_restore_result(False, message, error=error)
+
+            await self._async_finalize_blueprint_restore(path, prepared, new_backups_count)
+            return self._blueprint_restore_result(True, message)
+        except BlueprintRestoreValidationError as err:
+            _LOGGER.warning(
+                "Rejected invalid backup for %s: %s",
+                real_path,
+                err.result_translation_key,
+            )
+            return self._blueprint_restore_result(
+                False,
+                err.result_translation_key,
+                **err.translation_kwargs,
+            )
+        except Exception as err:
+            _LOGGER.exception("Failed to restore blueprint at %s", real_path)
+            return self._blueprint_restore_result(False, "system_error", error=str(err))
+
+    @staticmethod
+    def _blueprint_restore_result(
+        success: bool,
+        translation_key: str,
+        error: str | None = None,
+        **translation_kwargs: str,
+    ) -> dict[str, Any]:
+        """Build the translated service result for a restore attempt."""
+        if error is not None:
+            translation_kwargs["error"] = error
+        return {
+            "success": success,
+            "translation_key": translation_key,
+            "translation_kwargs": translation_kwargs,
+        }
+
+    def _validate_blueprint_restore_request(
+        self,
+        real_path: str,
+        version: int,
+        max_backups: int,
+    ) -> dict[str, Any] | None:
+        """Return an error result for an unsafe or invalid restore request."""
         if not self._is_safe_path(real_path):
             _LOGGER.error("Security violation: Attempted to restore unsafe path: %s", real_path)
-            return {
-                "success": False,
-                "translation_key": "system_error",
-                "translation_kwargs": {
-                    "error": "Security violation: Attempted to restore unsafe path"
-                },
-            }
-
-        max_backups = get_max_backups(self.config_entry)
+            return self._blueprint_restore_result(
+                False,
+                "system_error",
+                error="Security violation: Attempted to restore unsafe path",
+            )
         if version < 1 or version > max_backups:
             _LOGGER.error(
                 "Invalid backup version %s requested for %s (current limit: %s)",
@@ -1891,70 +2015,119 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 real_path,
                 max_backups,
             )
-            return {
-                "success": False,
-                "translation_key": "invalid_version",
-                "translation_kwargs": {
-                    "version": str(version),
-                    "max_backups": str(max_backups),
-                },
-            }
+            return self._blueprint_restore_result(
+                False,
+                "invalid_version",
+                version=str(version),
+                max_backups=str(max_backups),
+            )
+        return None
 
+    async def _async_prepare_blueprint_restore(
+        self,
+        path: str,
+        real_path: str,
+        version: int,
+    ) -> PreparedBlueprintRestore | None:
+        """Read and validate a backup before allowing filesystem mutation."""
         try:
-            success, message, new_backups_count = await self.hass.async_add_executor_job(
-                BlueprintUpdateCoordinator._execute_restore_file,
+            backup_content = await self.hass.async_add_executor_job(
+                self._file_store.read_backup,
                 real_path,
                 version,
-                max_backups,
+            )
+        except FileNotFoundError:
+            _LOGGER.error(
+                "Backup version %s requested for %s does not exist on disk",
+                version,
+                real_path,
+            )
+            return None
+
+        parsed_backup = self._parse_blueprint_backup(backup_content)
+        domain = self._get_functional_domain(real_path)
+        source_info = self.data.get(path) or self.data.get(real_path) or {}
+        tracked_source_url = source_info.get("source_url")
+        backup_block = self._get_blueprint_block(
+            real_path,
+            parsed_data=parsed_backup if isinstance(parsed_backup, dict) else None,
+        )
+        backup_source_url = backup_block.get("source_url") if backup_block else None
+        if tracked_source_url and backup_source_url != tracked_source_url:
+            raise BlueprintRestoreValidationError(
+                "blueprint_validation_error",
+                error="Backup source URL does not match the tracked blueprint",
             )
 
-            if success:
-                relative_path = get_blueprint_relative_path(self.hass, real_path)
-                if relative_path and relative_path in self._persisted_metadata:
-                    entry = self._persisted_metadata[relative_path]
-                    entry["etag"] = None
-                    entry["remote_hash"] = None
+        if validation_error := self._validate_blueprint(
+            parsed_backup,
+            tracked_source_url or backup_source_url or real_path,
+            domain,
+        ):
+            _, separator, detail = validation_error.partition("|")
+            raise BlueprintRestoreValidationError(
+                "blueprint_validation_error",
+                error=detail if separator else validation_error.replace("_", " "),
+            )
+        return PreparedBlueprintRestore(
+            real_path=real_path,
+            content=backup_content,
+            domain=domain,
+            tracked_source_url=tracked_source_url,
+        )
 
-                domain = self._get_functional_domain(real_path)
-                if self.data and real_path in self.data:
-                    self.data[real_path]["etag"] = None
-                    self.data[real_path]["remote_hash"] = None
-                    self.data[real_path]["backups_count"] = new_backups_count
-                await self.async_reload_services([domain])
-                self.hass.async_create_background_task(
-                    self._async_save_metadata(force=True),
-                    "blueprints_updater_save_after_restore",
-                )
-                await self.async_request_refresh()
-            elif message == "missing_backup":
-                _LOGGER.error(
-                    "Backup version %s requested for %s does not exist on disk",
-                    version,
-                    real_path,
-                )
-            else:
-                _LOGGER.error(
-                    "Failed to restore blueprint at %s: %s",
-                    real_path,
-                    message,
-                )
+    @staticmethod
+    def _parse_blueprint_backup(backup_content: str) -> Any:
+        """Parse backup YAML and present a sanitized validation error."""
+        try:
+            return yaml_util.parse_yaml(backup_content)
+        except HomeAssistantError as err:
+            _LOGGER.warning(
+                "Backup content is not valid YAML: %s",
+                sanitize_error_detail(str(err)),
+            )
+            raise BlueprintRestoreValidationError("invalid_yaml") from err
 
-            translation_kwargs = {}
-            if not success and message == "system_error":
-                translation_kwargs = {"error": "Filesystem error during restoration"}
+    async def _async_finalize_blueprint_restore(
+        self,
+        path: str,
+        prepared: PreparedBlueprintRestore,
+        new_backups_count: int,
+    ) -> None:
+        """Synchronize restored state, reload its domain, and refresh data."""
+        relative_path = get_blueprint_relative_path(self.hass, prepared.real_path)
+        if relative_path and relative_path in self._persisted_metadata:
+            entry = self._persisted_metadata[relative_path]
+            entry["etag"] = None
+            entry["remote_hash"] = None
+            entry["last_modified"] = None
 
-            return {
-                "success": success,
-                "translation_key": message,
-                "translation_kwargs": translation_kwargs,
-            }
-        except Exception as err:
-            _LOGGER.exception("Failed to restore blueprint at %s", real_path)
-            return {
-                "success": False,
-                "translation_key": "system_error",
-                "translation_kwargs": {"error": str(err)},
-            }
+        data_path = path if path in self.data else prepared.real_path
+        if data_path in self.data:
+            restored_hash = self._hash_content(
+                prepared.content,
+                (
+                    prepared.tracked_source_url
+                    if isinstance(prepared.tracked_source_url, str)
+                    else None
+                ),
+            )
+            self.data[data_path].update(
+                {
+                    "etag": None,
+                    "last_modified": None,
+                    "local_hash": restored_hash,
+                    "remote_hash": None,
+                    "remote_content": None,
+                    "updatable": False,
+                    "backups_count": new_backups_count,
+                    "_cached_git_diff": None,
+                }
+            )
+            self.async_set_updated_data(self.data)
+        await self._async_save_metadata(force=True)
+        await self.async_reload_services([prepared.domain])
+        await self.async_request_refresh()
 
     def get_cached_git_diff(
         self, path: str, local_hash: str | None, remote_hash: str | None
@@ -2291,36 +2464,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             result.extend(templates_with_blueprint(self.hass, bp_id))
         return list(dict.fromkeys(result))
 
-    @contextlib.asynccontextmanager
-    async def _temporary_hub_blueprint(self, blueprints_hub: Any, bp_id: str, blueprint: Blueprint):
-        """Temporarily override a blueprint in the hub's in-memory cache.
-
-        This allows validation against new content without writing to disk
-        or affecting the permanent blueprint index.
-
-        Note: This method accesses the private `_blueprints` attribute because
-        Home Assistant's `DomainBlueprints` does not provide a public API for
-        direct cache injection, which is necessary for this validation logic.
-
-        Args:
-            blueprints_hub: The HA BlueprintHub instance.
-            bp_id: The blueprint identifier (path).
-            blueprint: The new Blueprint object to inject.
-
-        """
-        blueprints = blueprints_hub._blueprints
-        original_exists = bp_id in blueprints
-        original_bp = blueprints.get(bp_id)
-
-        blueprints[bp_id] = blueprint
-        try:
-            yield
-        finally:
-            if original_exists:
-                blueprints[bp_id] = original_bp
-            else:
-                blueprints.pop(bp_id, None)
-
     async def _async_validate_blueprint_consumers(
         self,
         relative_path: str,
@@ -2329,8 +2472,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     ) -> list[StructuredRisk]:
         """Validate all consumers of a blueprint against specific content.
 
-        This uses Home Assistant's native validation engine by temporarily
-        injecting the content into the blueprint cache.
+        This uses Home Assistant's native input substitution and domain
+        validators without publishing candidate content to the shared hub.
 
         Args:
             relative_path: Relative path of the blueprint.
@@ -2367,7 +2510,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     }
                 ]
             domain = parts[0]
-            bp_id = parts[1]
             schema = BlueprintUpdateCoordinator._get_blueprint_schema(domain)
 
             blueprint_obj = Blueprint(
@@ -2390,32 +2532,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 }
             ]
 
-        blueprints_hub = self.hass.data.get("blueprint", {}).get(domain)
-        if not blueprints_hub:
-            if not configs:
-                return []
-            return [
-                {
-                    "type": BlueprintRiskType.SYSTEM_ERROR,
-                    "args": {
-                        "error": f"Blueprint hub for domain '{domain}' is not available",
-                        "path": relative_path,
-                    },
-                }
-            ]
-
-        async with (
-            self._blueprint_validate_lock,
-            self._temporary_hub_blueprint(blueprints_hub, bp_id, blueprint_obj),
-        ):
+        async with self._blueprint_validate_lock:
             for entity_id, config in configs.items():
                 try:
+                    blueprint_inputs = BlueprintInputs(blueprint_obj, config)
+                    blueprint_inputs.validate()
+                    substituted_config = blueprint_inputs.async_substitute()
                     if domain == DOMAIN_AUTOMATION:
                         await async_validate_automation_config(
-                            self.hass, config_key=entity_id, config=config
+                            self.hass,
+                            config_key=entity_id,
+                            config=substituted_config,
                         )
                     elif domain == DOMAIN_TEMPLATE:
-                        await async_validate_template_config(self.hass, config=config)
+                        await async_validate_template_config(
+                            self.hass,
+                            config=substituted_config,
+                        )
                     else:
                         object_id = (
                             entity_id.split(".", 1)[1]
@@ -2423,7 +2556,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                             else entity_id
                         )
                         await async_validate_script_config(
-                            self.hass, object_id=object_id, config=config
+                            self.hass,
+                            object_id=object_id,
+                            config=substituted_config,
                         )
                 except (HomeAssistantError, vol.Invalid) as err:
                     risks.append(
@@ -3328,11 +3463,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         max_redirects = 20
         for _redirect_attempt in range(max_redirects):
-            response = await session.get(
+            if urlparse(current_url).scheme.lower() != "https" or not await self._is_safe_url(
+                current_url
+            ):
+                _LOGGER.warning("Blocking unsafe URL before request: %s", redact_url(current_url))
+                raise httpx.HTTPError(f"Security violation: Unsafe URL {redact_url(current_url)}")
+
+            response = await self._async_get_bounded_response(
+                session,
                 current_url,
-                headers=current_headers,
-                timeout=REQUEST_TIMEOUT,
-                follow_redirects=False,
+                current_headers,
             )
             if response.status_code == HTTPStatus.NOT_MODIFIED:
                 verify_https_enforcement(response, url)
@@ -3364,6 +3504,55 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         _LOGGER.error("Too many redirects (%d) fetching %s", max_redirects, redact_url(url))
         raise httpx.HTTPError("Too many redirects")
+
+    @staticmethod
+    async def _async_get_bounded_response(
+        session: httpx.AsyncClient,
+        url: str,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        """Stream one response and reject bodies above the configured byte ceiling."""
+        request = session.build_request(
+            "GET",
+            url,
+            headers=headers,
+            timeout=REQUEST_TIMEOUT,
+        )
+        response = await session.send(request, stream=True, follow_redirects=False)
+        try:
+            declared_length = response.headers.get("Content-Length")
+            if declared_length is not None:
+                try:
+                    parsed_length = int(declared_length)
+                except ValueError:
+                    parsed_length = -1
+                if parsed_length > MAX_RESPONSE_BYTES:
+                    raise httpx.HTTPError(
+                        f"Blueprint response exceeds {MAX_RESPONSE_BYTES} byte limit"
+                    )
+
+            body = bytearray()
+            body_iterator = response.aiter_bytes()
+            try:
+                async for chunk in body_iterator:
+                    body.extend(chunk)
+                    if len(body) > MAX_RESPONSE_BYTES:
+                        raise httpx.HTTPError(
+                            f"Blueprint response exceeds {MAX_RESPONSE_BYTES} byte limit"
+                        )
+            finally:
+                if close_iterator := getattr(body_iterator, "aclose", None):
+                    await close_iterator()
+
+            return httpx.Response(
+                status_code=response.status_code,
+                headers=response.headers,
+                content=bytes(body),
+                request=response.request,
+                extensions=response.extensions,
+            )
+        finally:
+            await response.aclose()
 
     @staticmethod
     async def _parse_provider_response(
@@ -3821,6 +4010,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "relative_path": relative_path,
                 "backups_count": backups_count,
             }
+        except UnicodeDecodeError as err:
+            _LOGGER.warning("Skipping non-UTF-8 blueprint at %s: %s", full_path, err)
+            return None
         except OSError:
             _LOGGER.exception("Error reading blueprint at %s", full_path)
             return None
@@ -3873,27 +4065,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _execute_restore_file(
-        real_path: str, version: int, max_backups: int
+        real_path: str,
+        version: int,
+        max_backups: int,
+        validated_content: str | None = None,
     ) -> tuple[bool, str, int]:
         """Atomic filesystem operation for restoration (runs in executor)."""
-        bak_path = BlueprintUpdateCoordinator._get_backup_path(real_path, version)
-
         try:
-            with open(bak_path, encoding="utf-8") as f:
-                content = f.read()
-            tmp_path = f"{real_path}.tmp"
-            try:
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-
-                BlueprintUpdateCoordinator._rotate_backups(real_path, max_backups)
-                os.replace(tmp_path, real_path)
-            finally:
-                if os.path.exists(tmp_path):
-                    with contextlib.suppress(OSError):
-                        os.remove(tmp_path)
-            new_cnt = BlueprintUpdateCoordinator._count_backups_sync(real_path, max_backups)
-            return True, "success", new_cnt
+            content = validated_content
+            if content is None:
+                content = BlueprintFileStore.read_backup(real_path, version)
+            result = BlueprintFileStore.restore(real_path, content, max_backups)
+            return True, "success", result.backups_count
         except FileNotFoundError:
             return False, "missing_backup", 0
         except (OSError, ValueError) as err:

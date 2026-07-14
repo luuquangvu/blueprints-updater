@@ -65,7 +65,7 @@ async def test_background_refresh_error_scenarios(coordinator, mock_makedirs):
 
 
 @pytest.mark.asyncio
-async def test_blueprint_installation_security_and_errors(coordinator, mock_makedirs):
+async def test_blueprint_installation_security_and_errors(coordinator, tmp_path):
     """Test security checks and error handling during installation."""
     path = "/config/blueprints/automation/test.yaml"
 
@@ -76,23 +76,19 @@ async def test_blueprint_installation_security_and_errors(coordinator, mock_make
         await coordinator.async_install_blueprint(path, "content")
 
     coordinator.config_entry.options = {"max_backups": 1}
+    safe_path = tmp_path / "test.yaml"
+    safe_path.write_text("original", encoding="utf-8")
     with (
         patch.object(coordinator, "_is_safe_path", return_value=True),
-        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
         patch(
-            "custom_components.blueprints_updater.coordinator.shutil.copy2",
+            "custom_components.blueprints_updater.file_store.shutil.copy2",
             side_effect=OSError("Permission denied"),
         ),
-        patch("custom_components.blueprints_updater.coordinator._LOGGER.warning") as mock_warn,
-        patch("builtins.open", MagicMock()),
-        patch("custom_components.blueprints_updater.coordinator.os.replace"),
+        pytest.raises(OSError, match="Permission denied"),
     ):
-        await coordinator.async_install_blueprint(path, "content", backup=True)
-        assert any(
-            "Permission denied" in str(arg)
-            for call in mock_warn.call_args_list
-            for arg in call.args
-        )
+        await coordinator.async_install_blueprint(str(safe_path), "content", backup=True)
+
+    assert safe_path.read_text(encoding="utf-8") == "original"
 
 
 @pytest.mark.asyncio
@@ -108,7 +104,7 @@ async def test_async_fetch_content_failures(coordinator, mock_makedirs):
         patch("custom_components.blueprints_updater.coordinator._LOGGER.debug"),
         pytest.raises(httpx.RequestError),
     ):
-        await coordinator._async_fetch_content(mock_session, "url", "etag")
+        await coordinator._async_fetch_content(mock_session, "https://url", "etag")
 
 
 @pytest.mark.asyncio

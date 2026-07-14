@@ -383,19 +383,24 @@ async def test_backup_rotation(coordinator, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_async_restore_blueprint_error(hass, coordinator, mock_makedirs):
+async def test_async_restore_blueprint_error(hass, coordinator, tmp_path):
     """Test error handling during blueprint restoration."""
-    path = "/config/blueprints/automation/test.yaml"
-    coordinator.data = {path: {"updatable": False}}
+    path = str(tmp_path / "test.yaml")
+    source_url = "https://example.com/test.yaml"
+    valid_content = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {source_url}\n"
+    (tmp_path / "test.yaml").write_text(valid_content, encoding="utf-8")
+    (tmp_path / "test.yaml.bak.1").write_text(valid_content, encoding="utf-8")
+    coordinator.data = {
+        path: {
+            "updatable": False,
+            "domain": DOMAIN_AUTOMATION,
+            "source_url": source_url,
+        }
+    }
 
     with (
-        patch("builtins.open", MagicMock()),
-        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
-        patch("custom_components.blueprints_updater.coordinator.os.remove"),
-        patch("custom_components.blueprints_updater.coordinator.os.rename"),
-        patch("custom_components.blueprints_updater.coordinator.shutil.copy2"),
         patch(
-            "custom_components.blueprints_updater.coordinator.os.replace",
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._execute_restore_file",
             side_effect=Exception("Disk error"),
         ),
     ):
@@ -424,34 +429,33 @@ async def test_async_restore_blueprint_missing(hass, coordinator, mock_makedirs)
 
 
 @pytest.mark.asyncio
-async def test_async_restore_blueprint_success(hass, coordinator, mock_makedirs):
+async def test_async_restore_blueprint_success(hass, coordinator, tmp_path):
     """Test successful restoration of a blueprint backup."""
-    path = "/config/blueprints/automation/test.yaml"
-    coordinator.data = {path: {"updatable": False}}
+    path = str(tmp_path / "test.yaml")
+    source_url = "https://example.com/test.yaml"
+    current_content = (
+        f"blueprint:\n  name: Current\n  domain: automation\n  source_url: {source_url}\n"
+    )
+    backup_content = current_content.replace("Current", "Backup")
+    (tmp_path / "test.yaml").write_text(current_content, encoding="utf-8")
+    (tmp_path / "test.yaml.bak.1").write_text(backup_content, encoding="utf-8")
+    coordinator.data = {
+        path: {
+            "updatable": False,
+            "domain": DOMAIN_AUTOMATION,
+            "source_url": source_url,
+        }
+    }
 
     hass.services.has_service = MagicMock(return_value=True)
     hass.services.async_call = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
 
-    with (
-        patch("builtins.open", MagicMock()),
-        patch(
-            "custom_components.blueprints_updater.coordinator.os.path.realpath",
-            side_effect=os.path.normpath,
-        ),
-        patch("custom_components.blueprints_updater.coordinator.os.path.isfile", return_value=True),
-        patch("custom_components.blueprints_updater.coordinator.os.replace") as mock_replace,
-        patch("custom_components.blueprints_updater.coordinator.os.remove"),
-        patch("custom_components.blueprints_updater.coordinator.os.rename"),
-        patch("custom_components.blueprints_updater.coordinator.shutil.copy2"),
-    ):
-        result = await coordinator.async_restore_blueprint(path)
+    result = await coordinator.async_restore_blueprint(path)
 
-    mock_replace.assert_any_call(
-        os.path.normpath(f"{path}.bak.1"), os.path.normpath(f"{path}.bak.2")
-    )
     assert result["success"] is True
     assert result["translation_key"] == "success"
+    assert "name: Backup" in (tmp_path / "test.yaml").read_text(encoding="utf-8")
     hass.services.async_call.assert_any_call(DOMAIN_AUTOMATION, "reload")
 
 
@@ -468,9 +472,19 @@ async def test_async_restore_blueprint_unsafe_path(coordinator, mock_makedirs):
 async def test_restore_versioned(coordinator, tmp_path):
     """Test restoring from a specific backup version."""
     bp_file = tmp_path / "test.yaml"
-    bp_file.write_text("current")
-    (tmp_path / "test.yaml.bak.1").write_text("backup_v1")
-    (tmp_path / "test.yaml.bak.2").write_text("backup_v2")
+    source_url = "https://example.com/test.yaml"
+
+    def content(name: str) -> str:
+        """Build valid automation blueprint content."""
+        return f"blueprint:\n  name: {name}\n  domain: automation\n  source_url: {source_url}\n"
+
+    bp_file.write_text(content("current"), encoding="utf-8")
+    (tmp_path / "test.yaml.bak.1").write_text(content("backup_v1"), encoding="utf-8")
+    (tmp_path / "test.yaml.bak.2").write_text(content("backup_v2"), encoding="utf-8")
+    coordinator.data[str(bp_file)] = {
+        "domain": DOMAIN_AUTOMATION,
+        "source_url": source_url,
+    }
 
     coordinator.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
     coordinator.async_reload_services = AsyncMock()
@@ -478,8 +492,8 @@ async def test_restore_versioned(coordinator, tmp_path):
 
     result = await coordinator.async_restore_blueprint(str(bp_file), version=2)
     assert result["success"] is True
-    assert bp_file.read_text() == "backup_v2"
-    assert (tmp_path / "test.yaml.bak.2").read_text() == "backup_v1"
+    assert "name: backup_v2" in bp_file.read_text(encoding="utf-8")
+    assert "name: backup_v1" in (tmp_path / "test.yaml.bak.2").read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio

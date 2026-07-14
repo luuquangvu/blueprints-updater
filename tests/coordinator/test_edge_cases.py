@@ -20,6 +20,8 @@ from custom_components.blueprints_updater.const import (
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
+from .utils import mock_bounded_response
+
 
 @pytest.fixture
 def coordinator(hass):
@@ -31,6 +33,8 @@ def coordinator(hass):
     coord.hass = hass
     coord.config_entry = entry
     coord.setup_complete = True
+
+    coord._async_get_bounded_response = AsyncMock(side_effect=mock_bounded_response)
     return coord
 
 
