@@ -30,11 +30,11 @@ _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 
 _VENVS_ROOT = os.path.join(_REPO_ROOT, ".venvs")
 
-_REQUIRED_TEST_DEPS = [
+_REQUIRED_TEST_DEPS = (
     "httpx[http2]",
     "pytest",
     "pytest-homeassistant-custom-component",
-]
+)
 
 _COMPATIBILITY_PYTEST_ARGS = ["--no-cov"]
 _COMPATIBILITY_METADATA_PROBE_TIMEOUT_SECONDS = 60

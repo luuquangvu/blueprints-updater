@@ -415,6 +415,47 @@ async def test_bounded_response_accepts_exact_limit(coordinator):
 
 
 @pytest.mark.asyncio
+async def test_bounded_response_requests_identity_encoding():
+    """Blueprint requests avoid compressed transfer encodings."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        """Return plain YAML after verifying the explicit encoding preference."""
+        assert request.headers["Accept-Encoding"] == "identity"
+        assert request.headers["If-None-Match"] == '"test-etag"'
+        return httpx.Response(200, content=b"blueprint: plain text", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        response = await BlueprintUpdateCoordinator._async_get_bounded_response(
+            client,
+            "https://example.com/blueprint.yaml",
+            {"If-None-Match": '"test-etag"', "Accept-Encoding": "gzip"},
+        )
+
+    assert response.content == b"blueprint: plain text"
+
+
+@pytest.mark.asyncio
+async def test_bounded_response_rejects_malformed_compression():
+    """Malformed compression remains an error when a server ignores identity encoding."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        """Return plain bytes incorrectly advertised as gzip encoded."""
+        assert request.headers["Accept-Encoding"] == "identity"
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "gzip"},
+            content=b"blueprint: plain text",
+            request=request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.DecodingError):
+            await BlueprintUpdateCoordinator._async_get_bounded_response(
+                client, "https://example.com/blueprint.yaml", {}
+            )
+
+
+@pytest.mark.asyncio
 async def test_async_fetch_content_retry_limit(coordinator):
     """Test that _async_fetch_content retries exactly MAX_RETRIES times."""
     mock_session = MagicMock(spec=httpx.AsyncClient)

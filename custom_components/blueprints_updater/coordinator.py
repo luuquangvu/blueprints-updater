@@ -3511,11 +3511,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         url: str,
         headers: dict[str, str],
     ) -> httpx.Response:
-        """Stream one response and reject bodies above the configured byte ceiling."""
+        """Stream one identity-encoded response and enforce the decoded byte ceiling.
+
+        Blueprint downloads intentionally disable content coding. Caller headers are copied,
+        but any ``Accept-Encoding`` value is overridden to keep that policy centralized.
+        """
+        request_headers = httpx.Headers(headers)
+        request_headers["Accept-Encoding"] = "identity"
         request = session.build_request(
             "GET",
             url,
-            headers=headers,
+            headers=request_headers,
             timeout=REQUEST_TIMEOUT,
         )
         response = await session.send(request, stream=True, follow_redirects=False)
