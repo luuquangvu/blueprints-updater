@@ -9,10 +9,15 @@ to satisfy static analysis security audits. This prevents false positives relate
 to command injection that occur when iterating over dynamic command sequences.
 """
 
+import contextlib
+import importlib.metadata as md
+import importlib.util
 import os
+import re
 import subprocess
 import sys
 import textwrap
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,6 +26,14 @@ import orjson
 _DEPENDENCY_SYNC_TIMEOUT_SECONDS = 300
 _DEPENDENCY_UPDATE_TIMEOUT_SECONDS = 120
 _VALIDATION_STEP_TIMEOUT_SECONDS = 300
+
+_PACKAGE_NORM_PATTERN = re.compile(r"[._-]+")
+
+
+def normalize_package_name(package_name: str) -> str:
+    """Normalize a package name to its canonical base form."""
+    base_name = package_name.split("[", 1)[0].split(";", 1)[0].split("=", 1)[0].strip()
+    return _PACKAGE_NORM_PATTERN.sub("-", base_name).lower()
 
 
 def _format_cmd(cmd_val: object) -> str:
@@ -377,6 +390,286 @@ def _run_pipeline() -> None:
     print("VALIDATION_SUCCESS", flush=True)
 
 
+def _parse_package_name_from_req(raw_req: str) -> str:
+    """Extract canonicalized package name from a requirement specifier string."""
+    req_clean_initial = raw_req.split("#", 1)[0].strip()
+    if not req_clean_initial:
+        return ""
+    try:
+        from packaging.requirements import Requirement
+
+        req_obj = Requirement(req_clean_initial)
+    except Exception:
+        req_obj = None
+
+    if req_obj is not None:
+        return normalize_package_name(req_obj.name)
+    if "#egg=" in raw_req:
+        egg_name = raw_req.split("#egg=", 1)[1].split("&", 1)[0].split(";", 1)[0].strip()
+        if egg_name and (norm_egg := normalize_package_name(egg_name)) and norm_egg[0].isalnum():
+            return norm_egg
+
+    req_clean = raw_req.split("#", 1)[0].split(";", 1)[0].strip()
+    if not req_clean or req_clean.startswith("-"):
+        return ""
+    if (
+        "@" in req_clean
+        and not req_clean.startswith(("git+", "http://", "https://", "svn+", "hg+", "bzr+"))
+        and "://" not in req_clean.split("@", 1)[0]
+    ):
+        prefix = req_clean.split("@", 1)[0].strip()
+        for sep in ("[", "==", "!=", "~=", ">=", "<=", ">", "<"):
+            prefix = prefix.split(sep, 1)[0].strip()
+        norm_prefix = normalize_package_name(prefix)
+        if norm_prefix and norm_prefix[0].isalnum():
+            return norm_prefix
+
+    if "://" in req_clean or req_clean.startswith(("git+", "hg+", "svn+", "bzr+")):
+        url_path = req_clean.split("@", 1)[0].split("?", 1)[0].rstrip("/")
+        stem = url_path.rsplit("/", 1)[-1]
+        for ext in (".git", ".whl", ".tar.gz", ".zip"):
+            if stem.endswith(ext):
+                stem = stem[: -len(ext)]
+                break
+        norm_stem = normalize_package_name(stem)
+        if norm_stem and norm_stem[0].isalnum():
+            return norm_stem
+
+    for sep in ("[", "==", "!=", "~=", ">=", "<=", ">", "<", "@", "~", "!"):
+        req_clean = req_clean.split(sep, 1)[0].strip()
+    norm_name = normalize_package_name(req_clean)
+    return "" if not norm_name or not norm_name[0].isalnum() else norm_name
+
+
+def _load_ha_package_constraints(constraints_path: Path) -> dict[str, str]:
+    """Parse package versions from Home Assistant's package_constraints.txt."""
+    constraints: dict[str, str] = {}
+    for raw_line in constraints_path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        package_name, separator, version = line.partition("==")
+        if separator == "==":
+            norm_name = normalize_package_name(package_name)
+            constraints[norm_name] = version.strip()
+    return constraints
+
+
+def _load_ha_manifest_constraints() -> dict[str, str]:
+    """Parse package versions from Home Assistant component manifests."""
+    constraints: dict[str, str] = {}
+    with contextlib.suppress(Exception):
+        spec = importlib.util.find_spec("homeassistant.components")
+        if not spec or not spec.submodule_search_locations:
+            return constraints
+
+        for location in spec.submodule_search_locations:
+            component_root = Path(location)
+            if not component_root.is_dir():
+                continue
+            for manifest_path in sorted(component_root.glob("*/manifest.json")):
+                try:
+                    manifest = orjson.loads(manifest_path.read_bytes())
+                except (OSError, orjson.JSONDecodeError) as err:
+                    print(
+                        f"STEP_INFO: Warning: skipped manifest {manifest_path}: {err!r}",
+                        flush=True,
+                    )
+                    continue
+
+                raw_requirements = manifest.get("requirements")
+                if isinstance(raw_requirements, list):
+                    for raw_spec in raw_requirements:
+                        if isinstance(raw_spec, str) and "==" in raw_spec:
+                            spec_name, _, spec_ver = raw_spec.partition("==")
+                            norm_name = normalize_package_name(spec_name)
+                            spec_ver_clean = spec_ver.strip()
+                            if (
+                                norm_name in constraints
+                                and constraints[norm_name] != spec_ver_clean
+                            ):
+                                print(
+                                    f"STEP_INFO: Conflicting constraint for {norm_name}: "
+                                    f"{constraints[norm_name]} vs {spec_ver_clean} "
+                                    f"in {manifest_path}",
+                                    flush=True,
+                                )
+                            else:
+                                constraints[norm_name] = spec_ver_clean
+    return constraints
+
+
+def _load_project_dependency_packages(repo_root: str) -> set[str]:
+    """Parse project dependency package names dynamically from pyproject.toml."""
+    packages: set[str] = set()
+    pyproject_path = Path(repo_root) / "pyproject.toml"
+    if not pyproject_path.is_file():
+        return packages
+
+    try:
+        pyproject_data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as err:
+        print(f"STEP_INFO: Warning: could not parse {pyproject_path}: {err!r}", flush=True)
+        return packages
+
+    # 1. Parse PEP 621 project.dependencies
+    project_table = pyproject_data.get("project")
+    if isinstance(project_table, dict):
+        proj_deps = project_table.get("dependencies")
+        if isinstance(proj_deps, list):
+            for raw_req in proj_deps:
+                if isinstance(raw_req, str) and (
+                    norm_name := _parse_package_name_from_req(raw_req)
+                ):
+                    packages.add(norm_name)
+
+        opt_deps = project_table.get("optional-dependencies")
+        if isinstance(opt_deps, dict):
+            for group_items in opt_deps.values():
+                if isinstance(group_items, list):
+                    for raw_req in group_items:
+                        if isinstance(raw_req, str) and (
+                            norm_name := _parse_package_name_from_req(raw_req)
+                        ):
+                            packages.add(norm_name)
+
+    # 2. Parse PEP 735 dependency-groups
+    dep_groups = pyproject_data.get("dependency-groups")
+    if isinstance(dep_groups, dict):
+
+        def _resolve_group(group_name: str, active_path: set[str] | None = None) -> None:
+            if active_path is None:
+                active_path = set()
+            if not isinstance(group_name, str) or group_name in active_path:
+                return
+            active_path.add(group_name)
+            group_items = dep_groups.get(group_name)
+            if not isinstance(group_items, list):
+                return
+            for raw_req in group_items:
+                if isinstance(raw_req, str):
+                    if norm_name := _parse_package_name_from_req(raw_req):
+                        packages.add(norm_name)
+                elif isinstance(raw_req, dict):
+                    inc_group = raw_req.get("include") or raw_req.get("include-group")
+                    if isinstance(inc_group, str):
+                        _resolve_group(inc_group, set(active_path))
+
+        for group_name in dep_groups:
+            if isinstance(group_name, str):
+                _resolve_group(group_name)
+
+    return packages
+
+
+def _find_ha_constraints_path() -> Path | None:
+    """Return path to installed Home Assistant package_constraints.txt if present."""
+    ha_spec = importlib.util.find_spec("homeassistant")
+    if not ha_spec or not ha_spec.origin:
+        return None
+    constraints_path = Path(ha_spec.origin).parent / "package_constraints.txt"
+    return constraints_path if constraints_path.is_file() else None
+
+
+def _resolve_target_ha_constraints(constraints_path: Path) -> dict[str, str]:
+    """Combine package_constraints.txt and component manifest constraints.
+
+    Reads component manifest constraints first and updates them with package_constraints.txt
+    so that package_constraints.txt takes precedence as the authoritative constraints source.
+    """
+    required_constraints = _load_ha_manifest_constraints()
+    required_constraints.update(_load_ha_package_constraints(constraints_path))
+    return required_constraints
+
+
+def _check_and_sync_ha_constraints(repo_root: str) -> None:
+    """Verify dependencies match Home Assistant package constraints and component manifests."""
+    command_label = "check homeassistant constraints alignment"
+    print(f"STEP_START: {command_label}", flush=True)
+
+    constraints_path = _find_ha_constraints_path()
+    if not constraints_path:
+        print(
+            "STEP_INFO: homeassistant package_constraints.txt not found; "
+            "skipping constraints check",
+            flush=True,
+        )
+        print(f"STEP_OK: {command_label}", flush=True)
+        return
+
+    try:
+        required_constraints = _resolve_target_ha_constraints(constraints_path)
+
+        check_packages = _load_project_dependency_packages(repo_root)
+
+        drifted: list[tuple[str, str, str]] = []
+        for norm_pkg in sorted(check_packages):
+            req_ver = required_constraints.get(norm_pkg)
+            if not req_ver:
+                continue
+            try:
+                installed_ver = md.version(norm_pkg)
+            except md.PackageNotFoundError:
+                drifted.append((norm_pkg, "not installed", req_ver))
+            else:
+                if installed_ver != req_ver:
+                    drifted.append((norm_pkg, installed_ver, req_ver))
+
+        if drifted:
+            drift_details = ", ".join(
+                f"{pkg} ({inst} -> {req})" for pkg, inst, req in sorted(drifted)
+            )
+            print(
+                "STEP_INFO: Home Assistant constraints drift detected: "
+                f"{drift_details}; locking and syncing",
+                flush=True,
+            )
+            subprocess.run(
+                [
+                    "uv",
+                    "lock",
+                    *[f"--upgrade-package={pkg}=={req}" for pkg, _, req in sorted(drifted)],
+                ],
+                check=True,
+                cwd=repo_root,
+                timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
+            )
+            subprocess.run(
+                ["uv", "sync", "--all-groups"],
+                check=True,
+                cwd=repo_root,
+                timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
+            )
+            print(
+                "STEP_INFO: Home Assistant constraints locked and environment synchronized "
+                "successfully",
+                flush=True,
+            )
+        else:
+            print("STEP_INFO: Home Assistant constraints are fully synchronized", flush=True)
+
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        raise
+    except (
+        OSError,
+        orjson.JSONDecodeError,
+        md.PackageNotFoundError,
+        KeyError,
+        ValueError,
+    ) as err:
+        kind = (
+            "structural configuration error"
+            if isinstance(err, (orjson.JSONDecodeError, KeyError, ValueError))
+            else "transient environment or file I/O issue"
+        )
+        print(
+            f"STEP_WARNING: Home Assistant constraints check encountered {kind}: {err}",
+            flush=True,
+        )
+
+    print(f"STEP_OK: {command_label}", flush=True)
+
+
 def _validate_pipeline() -> None:
     """Run the validation pipeline steps in order."""
     repo_root = str(Path(__file__).resolve().parent.parent)
@@ -389,6 +682,7 @@ def _validate_pipeline() -> None:
         run_check=_run_uv_sync_check,
         run_repair=_repair_uv_sync,
     )
+    _check_and_sync_ha_constraints(repo_root)
     _run_sync_repair_step(
         repo_root,
         command_label="npm ls",

@@ -19,7 +19,7 @@ import sys
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from pathlib import Path
 from string import ascii_letters, digits
 from typing import Any, TypedDict
@@ -29,6 +29,8 @@ import orjson
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 
 _VENVS_ROOT = os.path.join(_REPO_ROOT, ".venvs")
+
+_VENV_DEPENDENCY_MARKER = ".blueprints_updater_test_dependencies.json"
 
 _REQUIRED_TEST_DEPS = (
     "httpx[http2]",
@@ -45,12 +47,20 @@ _COMPATIBILITY_PYTEST_TIMEOUT_SECONDS = 300
 
 _ALNUM_CHARS = ascii_letters + digits
 _ALLOWED_VERSION_CHARS = f"{_ALNUM_CHARS}."
+_ALLOWED_PACKAGE_CHARS = f"{_ALNUM_CHARS}._-"
 
 _VERSION_PATTERN = re.compile(rf"^[{_ALNUM_CHARS}]+(?:\.[{_ALNUM_CHARS}]+)*$")
+_PACKAGE_NAME_PATTERN = re.compile(
+    rf"^(?:[{_ALNUM_CHARS}]|[{_ALNUM_CHARS}][{_ALNUM_CHARS}._-]*[{_ALNUM_CHARS}])$"
+)
 
 _MATRIX_FILE = os.path.join(_REPO_ROOT, "tools", "compatibility_matrix.json")
 
 _PYPI_HA_JSON_URL = "https://pypi.org/pypi/homeassistant/json"
+
+_HA_CONSTRAINTS_GITHUB_URL_TEMPLATE = "https://raw.githubusercontent.com/home-assistant/core/{ha_version}/homeassistant/package_constraints.txt"
+
+_HA_CONSTRAINTS_CDN_URL_TEMPLATE = "https://cdn.jsdelivr.net/gh/home-assistant/core@{ha_version}/homeassistant/package_constraints.txt"
 
 
 class CompatibilityConfig(TypedDict):
@@ -58,6 +68,310 @@ class CompatibilityConfig(TypedDict):
 
     ha_ver: str
     python_ver: str
+
+
+def normalize_package_name(package_name: str) -> str:
+    """Normalize a package name to its canonical base form."""
+    try:
+        import validate
+    except ImportError:
+        from tools import validate
+
+    return validate.normalize_package_name(package_name)
+
+
+def _expected_required_test_dep_versions(
+    test_dependency_versions: dict[str, str],
+) -> dict[str, str]:
+    """Return expected required test dependency versions.
+
+    Keys are canonical normalized package names.
+    """
+    return {normalize_package_name(pkg): ver for pkg, ver in test_dependency_versions.items()}
+
+
+def _required_test_deps(test_dependency_versions: dict[str, str]) -> list[str]:
+    """Return install specs for required test dependencies."""
+    deps: list[str] = []
+    norm_test_deps = {
+        normalize_package_name(pkg): ver for pkg, ver in test_dependency_versions.items()
+    }
+    seen: set[str] = set()
+    for package in _REQUIRED_TEST_DEPS:
+        base_name = normalize_package_name(package)
+        seen.add(base_name)
+        if base_name in norm_test_deps:
+            deps.append(f"{package}=={norm_test_deps[base_name]}")
+        else:
+            deps.append(package)
+    deps.extend(
+        f"{package}=={version}"
+        for package, version in sorted(test_dependency_versions.items())
+        if normalize_package_name(package) not in seen
+    )
+    return deps
+
+
+def _dependency_pin_marker_payload(
+    test_dependency_versions: dict[str, str],
+) -> dict[str, dict[str, str]]:
+    """Return the canonical venv marker payload for resolved test dependency versions."""
+    return {"test_dependency_versions": dict(sorted(test_dependency_versions.items()))}
+
+
+def _venv_dependency_marker_matches(
+    venv_path: Path,
+    test_dependency_versions: dict[str, str],
+) -> bool:
+    """Return whether a compatibility venv was installed with the same resolved versions."""
+    marker_path = venv_path / _VENV_DEPENDENCY_MARKER
+    try:
+        parsed = orjson.loads(marker_path.read_bytes())
+    except (OSError, orjson.JSONDecodeError):
+        return False
+    return parsed == _dependency_pin_marker_payload(test_dependency_versions)
+
+
+def _dependency_marker_requires_reinstall(
+    created_venv: bool,
+    venv_path: Path,
+    test_dependency_versions: dict[str, str],
+) -> bool:
+    """Return whether the resolved version marker requires a full dependency install."""
+    if created_venv or _venv_dependency_marker_matches(
+        venv_path,
+        test_dependency_versions,
+    ):
+        return False
+    print(
+        "STEP_INFO: dependency marker changed; reinstalling test dependencies",
+        flush=True,
+    )
+    return True
+
+
+def _write_venv_dependency_marker(
+    venv_path: Path,
+    test_dependency_versions: dict[str, str],
+) -> None:
+    """Persist the resolved dependency version marker for future venv reuse checks."""
+    marker_path = venv_path / _VENV_DEPENDENCY_MARKER
+    marker_path.write_bytes(
+        orjson.dumps(
+            _dependency_pin_marker_payload(test_dependency_versions),
+            option=orjson.OPT_SORT_KEYS,
+        )
+    )
+
+
+def _parse_requirements_dependency_version(
+    requirements_text: str,
+    package_name: str,
+    source_name: str = "package_constraints.txt",
+) -> str:
+    """Return the exact package version from a requirements file."""
+    package = _validate_package_name("package_name", package_name)
+    for raw_line in requirements_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        requirement_name, separator, version_text = line.partition("==")
+        if separator != "==":
+            continue
+        try:
+            requirement_package = _validate_package_name(
+                "requirements_package_name",
+                requirement_name.strip(),
+            )
+        except ValueError:
+            continue
+        if requirement_package != package:
+            continue
+        version_tokens = version_text.split(";", 1)[0].strip().split()
+        if not version_tokens:
+            raise ValueError(
+                f"Invalid {package!r} requirement in Home Assistant {source_name}; "
+                "expected a version after '=='."
+            )
+        version = version_tokens[0]
+        return _validate_version_label(f"{package}_version", version)
+    raise ValueError(f"Could not find {package!r} in Home Assistant {source_name}")
+
+
+def _fetch_remote_text(url: str) -> str:
+    """Fetch and decode remote text from a URL.
+
+    Raises urllib.error.URLError, OSError, or UnicodeDecodeError on failure.
+    """
+    with urllib.request.urlopen(url, timeout=20) as response:
+        return response.read().decode("utf-8")
+
+
+def _get_required_package_version(ha_ver: str, package_name: str) -> str:
+    """Fetch the version for a package required by a Home Assistant tag constraints.
+
+    Reads exclusively from Home Assistant package_constraints.txt.
+    """
+    version = _validate_version_label("ha_ver", ha_ver)
+    package = _validate_package_name("package_name", package_name)
+
+    cdn_url = _HA_CONSTRAINTS_CDN_URL_TEMPLATE.format(ha_version=version)
+    github_url = _HA_CONSTRAINTS_GITHUB_URL_TEMPLATE.format(ha_version=version)
+    last_err: Exception | None = None
+
+    for url in (cdn_url, github_url):
+        try:
+            requirements_text = _fetch_remote_text(url)
+            return _parse_requirements_dependency_version(requirements_text, package)
+        except (urllib.error.URLError, OSError, ValueError) as err:
+            last_err = err
+
+    raise ValueError(
+        f"Failed to fetch Home Assistant package constraints for {version} "
+        f"and package {package}: {last_err}"
+    ) from last_err
+
+
+def _resolve_test_dependency_versions(
+    ha_ver: str,
+) -> dict[str, str]:
+    """Return Home Assistant test dependency versions.
+
+    Intentionally returns an empty dictionary because integration test
+    dependencies are static across all Home Assistant core versions.
+    """
+    return {}
+
+
+def _test_dep_packages(test_dependency_versions: dict[str, str]) -> tuple[str, ...]:
+    """Return base and resolved test dependency package names."""
+    return tuple(dict.fromkeys((*_REQUIRED_TEST_DEPS, *test_dependency_versions)))
+
+
+def _venv_required_test_dep_versions(
+    python_bin: Path,
+    test_dependency_versions: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Return required test dependency versions installed in a compatibility venv."""
+    packages = _test_dep_packages(test_dependency_versions or {})
+    code = (
+        "import contextlib, importlib.metadata as md, json\n"
+        f"packages = {packages!r}\n"
+        "versions = {}\n"
+        "for package in packages:\n"
+        "    with contextlib.suppress(md.PackageNotFoundError):\n"
+        "        if '[' in package and package.endswith(']'):\n"
+        "            base_name, extras_str = package[:-1].split('[', 1)\n"
+        "            extras = [e.strip() for e in extras_str.split(',')]\n"
+        "            base_ver = md.version(base_name)\n"
+        "            satisfied = True\n"
+        "            reqs = md.requires(base_name) or []\n"
+        "            for extra in extras:\n"
+        "                for req in reqs:\n"
+        "                    if ';' in req:\n"
+        "                        dep, marker = req.split(';', 1)\n"
+        "                        marker_norm = marker.replace(' ', '').replace('\"', \"'\")\n"
+        "                        if f\"extra=='{extra}'\" in marker_norm:\n"
+        "                            dep_name = ''\n"
+        "                            for c in dep.strip():\n"
+        "                                if not (c.isalnum() or c in '.-_'):\n"
+        "                                    break\n"
+        "                                dep_name += c\n"
+        "                            try:\n"
+        "                                md.version(dep_name)\n"
+        "                            except md.PackageNotFoundError:\n"
+        "                                satisfied = False\n"
+        "                                break\n"
+        "                if not satisfied:\n"
+        "                    break\n"
+        "            if satisfied:\n"
+        "                versions[package] = base_ver\n"
+        "        else:\n"
+        "            versions[package] = md.version(package)\n"
+        "print(json.dumps(versions, sort_keys=True))\n"
+    )
+    try:
+        result = subprocess.run(
+            [
+                "uv",
+                "--no-config",
+                "run",
+                "--no-project",
+                "--python",
+                str(python_bin),
+                "python",
+                "-c",
+                code,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=_REPO_ROOT,
+            timeout=_COMPATIBILITY_METADATA_PROBE_TIMEOUT_SECONDS,
+        )
+        parsed = orjson.loads(result.stdout)
+        if not isinstance(parsed, dict):
+            return {}
+        return {
+            normalize_package_name(str(package)): str(version)
+            for package, version in parsed.items()
+        }
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        orjson.JSONDecodeError,
+        OSError,
+    ) as err:
+        print(f"STEP_INFO: Failed to probe venv metadata for {python_bin}: {err!r}", flush=True)
+        if isinstance(err, subprocess.CalledProcessError):
+            if err.stdout:
+                print(f"STEP_INFO: probe stdout: {err.stdout.strip()}", flush=True)
+            if err.stderr:
+                print(f"STEP_INFO: probe stderr: {err.stderr.strip()}", flush=True)
+        return {}
+
+
+def _missing_required_test_deps(
+    python_bin: Path,
+    test_dependency_versions: dict[str, str],
+) -> tuple[str, ...]:
+    """Return required test dependency names that are absent from a compatibility venv.
+
+    Note: Checks unpinned required test dependencies. Required dependencies that are
+    pinned in test_dependency_versions are validated for version drift by _stale_test_deps.
+    """
+    installed = _venv_required_test_dep_versions(python_bin, test_dependency_versions)
+    norm_test_deps = {normalize_package_name(p): v for p, v in test_dependency_versions.items()}
+    return tuple(
+        package
+        for package in _REQUIRED_TEST_DEPS
+        if normalize_package_name(package) not in norm_test_deps
+        and normalize_package_name(package) not in installed
+    )
+
+
+def _stale_test_deps(
+    python_bin: Path,
+    test_dependency_versions: dict[str, str],
+) -> tuple[str, ...]:
+    """Return test dependency install specs that drifted from required versions."""
+    expected = _expected_required_test_dep_versions(test_dependency_versions)
+    if not expected:
+        return ()
+    installed = _venv_required_test_dep_versions(python_bin, test_dependency_versions)
+
+    stale = {
+        package: (installed.get(package), expected_version)
+        for package, expected_version in expected.items()
+        if installed.get(package) != expected_version
+    }
+    if stale:
+        details = ", ".join(
+            f"{package} {old or 'missing'} -> {new}"
+            for package, (old, new) in sorted(stale.items())
+        )
+        print(f"STEP_INFO: refreshing test dependencies: {details}", flush=True)
+    return tuple(f"{package}=={version}" for package, (_old, version) in sorted(stale.items()))
 
 
 def _load_matrix_data() -> list[dict[str, Any]]:
@@ -152,6 +466,36 @@ def _validate_version_label(label_name: str, label_value: str) -> str:
     return os.path.basename(safe_val)
 
 
+def _validate_package_name(label_name: str, package_name: object) -> str:
+    """Validate and sanitize a matrix package name to prevent command injection.
+
+    SECURITY NOTE:
+    - DO NOT simplify the character reconstruction loop (e.g., via comprehension).
+      Mapping via integer index to the static `_ALLOWED_PACKAGE_CHARS` is required
+      to completely sever the CodeQL data-flow taint chain.
+    - `os.path.basename` is retained to satisfy CodeQL's hardcoded AST sanitizer rules.
+    - The loop fails fast on unknown characters, acting as an extra safety net.
+    """
+    package_name = _require_str_field(label_name, package_name)
+
+    if not _PACKAGE_NAME_PATTERN.fullmatch(package_name):
+        raise ValueError(
+            f"Invalid {label_name} value {package_name!r}; must be a Python package name."
+        )
+
+    safe_chars: list[str] = []
+    for char in package_name:
+        idx = _ALLOWED_PACKAGE_CHARS.find(char)
+        if idx == -1:
+            raise ValueError(
+                f"Invalid {label_name} value {package_name!r}; character {char!r} is not allowed."
+            )
+        safe_chars.append(_ALLOWED_PACKAGE_CHARS[idx])
+
+    safe_val = "".join(safe_chars)
+    return normalize_package_name(os.path.basename(safe_val))
+
+
 def _ensure_within_root(root_path: str, candidate_path: str) -> str:
     """Return safe absolute path only if candidate resides within root_path.
 
@@ -227,83 +571,46 @@ def _overrides_file(ha_ver: str) -> Generator[str]:
             os.remove(overrides_path)
 
 
-def _missing_required_test_deps(python_bin: Path) -> tuple[str, ...]:
-    """Return required test dependency names that are absent from a compatibility venv."""
-    code = (
-        "import contextlib, importlib.metadata as md, json\n"
-        f"packages = {_REQUIRED_TEST_DEPS!r}\n"
-        "versions = {}\n"
-        "for package in packages:\n"
-        "    with contextlib.suppress(md.PackageNotFoundError):\n"
-        "        if '[' in package and package.endswith(']'):\n"
-        "            base_name, extras_str = package[:-1].split('[', 1)\n"
-        "            extras = [e.strip() for e in extras_str.split(',')]\n"
-        "            base_ver = md.version(base_name)\n"
-        "            satisfied = True\n"
-        "            reqs = md.requires(base_name) or []\n"
-        "            for extra in extras:\n"
-        "                for req in reqs:\n"
-        "                    if ';' in req:\n"
-        "                        dep, marker = req.split(';', 1)\n"
-        "                        marker_norm = marker.replace(' ', '').replace('\"', \"'\")\n"
-        "                        if f\"extra=='{extra}'\" in marker_norm:\n"
-        "                            dep_name = ''\n"
-        "                            for c in dep.strip():\n"
-        "                                if not (c.isalnum() or c in '.-_'):\n"
-        "                                    break\n"
-        "                                dep_name += c\n"
-        "                            try:\n"
-        "                                md.version(dep_name)\n"
-        "                            except md.PackageNotFoundError:\n"
-        "                                satisfied = False\n"
-        "                                break\n"
-        "                if not satisfied:\n"
-        "                    break\n"
-        "            if satisfied:\n"
-        "                versions[package] = base_ver\n"
-        "        else:\n"
-        "            versions[package] = md.version(package)\n"
-        "print(json.dumps(versions, sort_keys=True))\n"
-    )
-    try:
-        result = subprocess.run(
-            [
-                "uv",
-                "--no-config",
-                "run",
-                "--no-project",
-                "--python",
-                str(python_bin),
-                "python",
-                "-c",
-                code,
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            cwd=_REPO_ROOT,
-            timeout=_COMPATIBILITY_METADATA_PROBE_TIMEOUT_SECONDS,
-        )
-        installed = orjson.loads(result.stdout)
-        if not isinstance(installed, dict):
-            installed = {}
-    except (
-        subprocess.CalledProcessError,
-        subprocess.TimeoutExpired,
-        orjson.JSONDecodeError,
-        OSError,
-    ) as err:
-        print(f"STEP_INFO: Failed to probe venv metadata for {python_bin}: {err!r}", flush=True)
-        if isinstance(err, subprocess.CalledProcessError):
-            if err.stdout:
-                print(f"STEP_INFO: probe stdout: {err.stdout.strip()}", flush=True)
-            if err.stderr:
-                print(f"STEP_INFO: probe stderr: {err.stderr.strip()}", flush=True)
-        installed = {}
+def _determine_dependency_actions(
+    reinstall: bool,
+    created_venv: bool,
+    python_bin: Path,
+    test_dependency_versions: dict[str, str],
+) -> tuple[bool, tuple[str, ...]]:
+    """Determine whether dependencies need a full install or just refreshes."""
+    needs_install = reinstall or created_venv
+    refresh_deps: tuple[str, ...] = ()
+    if not needs_install:
+        if missing_deps := _missing_required_test_deps(
+            python_bin,
+            test_dependency_versions,
+        ):
+            details = ", ".join(sorted(missing_deps))
+            print(f"STEP_INFO: installing missing test dependencies: {details}", flush=True)
+            needs_install = True
+        else:
+            refresh_deps = _stale_test_deps(
+                python_bin,
+                test_dependency_versions,
+            )
+    return needs_install, refresh_deps
 
-    missing = []
-    missing.extend(pkg for pkg in _REQUIRED_TEST_DEPS if pkg not in installed)
-    return tuple(missing)
+
+def _remove_venv_dir(venv_path: Path) -> None:
+    """Safely remove a virtual environment directory."""
+    if not venv_path.exists():
+        return
+    try:
+        shutil.rmtree(venv_path)
+    except OSError as err:
+        raise RuntimeError(
+            f"Failed to remove virtual environment directory at {venv_path}: {err!r}"
+        ) from err
+
+    if venv_path.exists():
+        raise RuntimeError(
+            f"Virtual environment directory at {venv_path} still exists after removal."
+        )
 
 
 def _ensure_venv(venv_path: Path, py_ver: str) -> bool:
@@ -311,6 +618,9 @@ def _ensure_venv(venv_path: Path, py_ver: str) -> bool:
 
     Returns:
         True if a new virtual environment was created, False otherwise.
+
+    Raises:
+        RuntimeError: If virtual environment creation succeeded but python binary is missing.
     """
     python_bin = venv_path / "bin" / "python"
     pytest_bin = venv_path / "bin" / "pytest"
@@ -318,7 +628,7 @@ def _ensure_venv(venv_path: Path, py_ver: str) -> bool:
         return False
     if venv_path.exists():
         print(f"STEP_INFO: Re-creating incomplete virtual environment at {venv_path}", flush=True)
-        shutil.rmtree(venv_path, ignore_errors=True)
+        _remove_venv_dir(venv_path)
     print(f"STEP_START: uv venv {venv_path} (Python {py_ver})", flush=True)
     subprocess.run(
         [
@@ -337,62 +647,112 @@ def _ensure_venv(venv_path: Path, py_ver: str) -> bool:
         cwd=_REPO_ROOT,
         timeout=_VENV_CREATE_TIMEOUT_SECONDS,
     )
+    if not python_bin.exists():
+        raise RuntimeError(
+            f"Failed to create virtual environment: python binary missing at {python_bin}"
+        )
     print(f"STEP_OK: uv venv {venv_path} (Python {py_ver})", flush=True)
     return True
 
 
+def _reset_venv(venv_path: Path, py_ver: str) -> bool:
+    """Remove and recreate a compatibility virtual environment."""
+    if venv_path.exists():
+        print(f"STEP_INFO: Resetting virtual environment at {venv_path}", flush=True)
+        _remove_venv_dir(venv_path)
+    return _ensure_venv(venv_path, py_ver)
+
+
 def _install_dependencies(
+    venv_path: Path,
     python_bin: Path,
     ha_ver_to_install: str,
+    needs_install: bool,
+    refresh_deps: tuple[str, ...],
+    test_dependency_versions: dict[str, str],
+    *,
+    py_ver: str,
+    reset_before_install: bool = False,
 ) -> None:
     """Install or upgrade required test dependencies in the compatibility venv."""
-    ha_spec = f"homeassistant=={ha_ver_to_install}"
-    print(f"STEP_START: uv pip install {ha_spec}", flush=True)
-    with _overrides_file(ha_ver_to_install) as overrides_path:
+    if needs_install:
+        if reset_before_install:
+            _reset_venv(venv_path, py_ver)
+        required_test_deps = _required_test_deps(test_dependency_versions)
+        ha_spec = f"homeassistant=={ha_ver_to_install}"
+        print(f"STEP_START: uv pip install {ha_spec}", flush=True)
+        with _overrides_file(ha_ver_to_install) as overrides_path:
+            subprocess.run(
+                [
+                    "uv",
+                    "--no-config",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    "--overrides",
+                    overrides_path,
+                    "--python",
+                    python_bin,
+                    ha_spec,
+                    *required_test_deps,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=_REPO_ROOT,
+                timeout=_INSTALL_TIMEOUT_SECONDS,
+            )
+        print(f"STEP_OK: uv pip install {ha_spec}", flush=True)
+
+    elif refresh_deps:
+        refresh_label = " ".join(refresh_deps)
+        print(f"STEP_START: uv pip install {refresh_label}", flush=True)
+        with _overrides_file(ha_ver_to_install) as overrides_path:
+            subprocess.run(
+                [
+                    "uv",
+                    "--no-config",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    "--overrides",
+                    overrides_path,
+                    "--python",
+                    python_bin,
+                    *refresh_deps,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=_REPO_ROOT,
+                timeout=_INSTALL_TIMEOUT_SECONDS,
+            )
+        print(f"STEP_OK: uv pip install {refresh_label}", flush=True)
+
+    if needs_install or refresh_deps:
+        _write_venv_dependency_marker(venv_path, test_dependency_versions)
+        print("STEP_START: cleanup __pycache__", flush=True)
         subprocess.run(
             [
-                "uv",
-                "--no-config",
-                "pip",
-                "install",
-                "--upgrade",
-                "--overrides",
-                overrides_path,
-                "--python",
-                python_bin,
-                ha_spec,
-                *_REQUIRED_TEST_DEPS,
+                "find",
+                ".",
+                "-name",
+                "__pycache__",
+                "-type",
+                "d",
+                "-exec",
+                "rm",
+                "-rf",
+                "{}",
+                "+",
             ],
             check=True,
             capture_output=True,
             text=True,
             cwd=_REPO_ROOT,
-            timeout=_INSTALL_TIMEOUT_SECONDS,
+            timeout=_CLEANUP_TIMEOUT_SECONDS,
         )
-    print(f"STEP_OK: uv pip install {ha_spec}", flush=True)
-
-    print("STEP_START: cleanup __pycache__", flush=True)
-    subprocess.run(
-        [
-            "find",
-            ".",
-            "-name",
-            "__pycache__",
-            "-type",
-            "d",
-            "-exec",
-            "rm",
-            "-rf",
-            "{}",
-            "+",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        cwd=_REPO_ROOT,
-        timeout=_CLEANUP_TIMEOUT_SECONDS,
-    )
-    print("STEP_OK: cleanup __pycache__", flush=True)
+        print("STEP_OK: cleanup __pycache__", flush=True)
 
 
 def _get_installed_ha_version(python_bin: Path) -> str:
@@ -414,7 +774,7 @@ def _get_installed_ha_version(python_bin: Path) -> str:
     return actual_ver
 
 
-def _run_pytest(python_bin: Path, ha_ver_display: str) -> None:
+def _run_pytest(python_bin: Path, ha_ver_display: str, pytest_args: Sequence[str]) -> None:
     """Run pytest inside the virtual environment."""
     env = os.environ.copy()
     env["PYTHONPATH"] = _REPO_ROOT
@@ -430,7 +790,7 @@ def _run_pytest(python_bin: Path, ha_ver_display: str) -> None:
             "--python",
             python_bin,
             "pytest",
-            *_COMPATIBILITY_PYTEST_ARGS,
+            *pytest_args,
         ],
         env=env,
         check=True,
@@ -440,14 +800,111 @@ def _run_pytest(python_bin: Path, ha_ver_display: str) -> None:
     print(f"STEP_OK: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
 
 
-def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[bool, str]:
-    """Run the test suite for a specific Home Assistant version."""
+def _prepare_version_and_deps(
+    ha_ver: str,
+) -> tuple[str, dict[str, str]]:
+    """Resolve target HA version and retrieve test dependencies."""
     ha_ver_to_install = ha_ver
+    if ha_ver_to_install == "latest":
+        ha_ver_to_install = _get_latest_ha_version()
+    test_dependency_versions = _resolve_test_dependency_versions(
+        ha_ver_to_install,
+    )
+    return ha_ver_to_install, test_dependency_versions
+
+
+def _prepare_venv_and_install(
+    venv_path: Path,
+    python_bin: Path,
+    ha_ver: str,
+    ha_ver_to_install: str,
+    py_ver: str,
+    reinstall: bool,
+    test_dependency_versions: dict[str, str],
+) -> bool:
+    """Ensure the virtual environment is prepared and dependencies are installed.
+
+    Returns:
+        bool: True if setup succeeded, False if python binary is missing.
+    """
+    created_venv = _ensure_venv(venv_path, py_ver)
+
+    if not python_bin.exists():
+        print(f"VALIDATION_ERROR: python not found at {python_bin}", flush=True)
+        return False
+
+    installed_ha = _get_installed_ha_version(python_bin)
+    marker_requires_reinstall = _dependency_marker_requires_reinstall(
+        created_venv,
+        venv_path,
+        test_dependency_versions,
+    )
+    needs_reinstall = (
+        reinstall
+        or (installed_ha != ha_ver_to_install)
+        or ha_ver == "latest"
+        or marker_requires_reinstall
+    )
+
+    needs_install, refresh_deps = _determine_dependency_actions(
+        needs_reinstall,
+        created_venv,
+        python_bin,
+        test_dependency_versions,
+    )
+
+    _install_dependencies(
+        venv_path,
+        python_bin,
+        ha_ver_to_install,
+        needs_install,
+        refresh_deps,
+        test_dependency_versions,
+        py_ver=py_ver,
+        reset_before_install=needs_reinstall and not created_venv,
+    )
+    return True
+
+
+def _verify_and_run_tests(
+    python_bin: Path,
+    pytest_bin: Path,
+    ha_ver_to_install: str,
+) -> tuple[bool, str]:
+    """Verify virtual environment completeness and run the test suite.
+
+    Returns:
+        tuple[bool, str]: (Success status, Installed HA version)
+    """
+    ha_ver_display = _get_installed_ha_version(python_bin)
+    if not pytest_bin.exists():
+        print(f"VALIDATION_ERROR: pytest not found at {pytest_bin}", flush=True)
+        return False, ha_ver_display
+
+    if ha_ver_display != ha_ver_to_install:
+        print(
+            f"VALIDATION_ERROR: expected Home Assistant {ha_ver_to_install}, "
+            f"found {ha_ver_display}",
+            flush=True,
+        )
+        return False, ha_ver_display
+
+    _run_pytest(python_bin, ha_ver_display, _COMPATIBILITY_PYTEST_ARGS)
+    return True, ha_ver_display
+
+
+def _run_tests_for_version(
+    ha_ver: str,
+    py_ver: str,
+    reinstall: bool,
+) -> tuple[bool, str]:
+    """Run the test suite for a specific Home Assistant version."""
     ha_ver_display = ha_ver
+
     try:
-        if ha_ver_to_install == "latest":
-            latest_ver = _get_latest_ha_version()
-            ha_ver_to_install = latest_ver
+        ha_ver_to_install, test_dependency_versions = _prepare_version_and_deps(
+            ha_ver,
+        )
 
         ha_ver_display = ha_ver_to_install
         print(f"TESTING Home Assistant {ha_ver_to_install} (Python {py_ver})", flush=True)
@@ -456,40 +913,24 @@ def _run_tests_for_version(ha_ver: str, py_ver: str, reinstall: bool) -> tuple[b
         python_bin = venv_path / "bin" / "python"
         pytest_bin = venv_path / "bin" / "pytest"
 
-        created_venv = _ensure_venv(venv_path, py_ver)
-
-        if not python_bin.exists():
-            print(f"VALIDATION_ERROR: python not found at {python_bin}", flush=True)
+        if not _prepare_venv_and_install(
+            venv_path=venv_path,
+            python_bin=python_bin,
+            ha_ver=ha_ver,
+            ha_ver_to_install=ha_ver_to_install,
+            py_ver=py_ver,
+            reinstall=reinstall,
+            test_dependency_versions=test_dependency_versions,
+        ):
             return False, ha_ver_display
 
-        installed_ha_version = _get_installed_ha_version(python_bin)
-        missing_deps = _missing_required_test_deps(python_bin)
+        return _verify_and_run_tests(
+            python_bin=python_bin,
+            pytest_bin=pytest_bin,
+            ha_ver_to_install=ha_ver_to_install,
+        )
 
-        if reinstall or created_venv or installed_ha_version != ha_ver_to_install or missing_deps:
-            if missing_deps:
-                print(
-                    f"STEP_INFO: installing missing test dependencies: {', '.join(missing_deps)}",
-                    flush=True,
-                )
-            _install_dependencies(python_bin, ha_ver_to_install)
-            installed_ha_version = _get_installed_ha_version(python_bin)
-
-        if not pytest_bin.exists():
-            print(f"VALIDATION_ERROR: pytest not found at {pytest_bin}", flush=True)
-            return False, ha_ver_display
-
-        ha_ver_display = installed_ha_version
-        if ha_ver_display != ha_ver_to_install:
-            print(
-                f"VALIDATION_ERROR: expected Home Assistant {ha_ver_to_install}, "
-                f"found {ha_ver_display}",
-                flush=True,
-            )
-            return False, ha_ver_display
-        _run_pytest(python_bin, ha_ver_display)
-        return True, ha_ver_display
-
-    except ValueError as err:
+    except (ValueError, RuntimeError) as err:
         print(f"VALIDATION_ERROR: {err}", flush=True)
         return False, ha_ver_display
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
@@ -541,7 +982,11 @@ def main() -> None:
         for row_index, config in enumerate(_test_matrix(), start=1):
             ha_ver = config["ha_ver"]
             py_ver = config["python_ver"]
-            success, ha_version = _run_tests_for_version(ha_ver, py_ver, args.reinstall)
+            success, ha_version = _run_tests_for_version(
+                ha_ver,
+                py_ver,
+                args.reinstall,
+            )
             results.append(
                 (row_index, ha_ver, py_ver, ha_version, "PASSED" if success else "FAILED")
             )
