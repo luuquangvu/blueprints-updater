@@ -22,6 +22,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import orjson
+from packaging.version import InvalidVersion, Version
 
 _DEPENDENCY_SYNC_TIMEOUT_SECONDS = 300
 _DEPENDENCY_UPDATE_TIMEOUT_SECONDS = 120
@@ -612,7 +613,12 @@ def _check_and_sync_ha_constraints(repo_root: str) -> None:
             except md.PackageNotFoundError:
                 drifted.append((norm_pkg, "not installed", req_ver))
             else:
-                if installed_ver != req_ver:
+                is_drifted = False
+                try:
+                    is_drifted = Version(installed_ver) != Version(req_ver)
+                except InvalidVersion:
+                    is_drifted = installed_ver != req_ver
+                if is_drifted:
                     drifted.append((norm_pkg, installed_ver, req_ver))
 
         if drifted:
@@ -705,50 +711,50 @@ def _validate_pipeline() -> None:
         print_notice=_print_npm_dependency_update_notice,
     )
 
-    ruff_format_label = "uv run --no-project ruff format"
+    ruff_format_label = "uv run ruff format"
     print(f"STEP_START: {ruff_format_label}", flush=True)
     subprocess.run(
-        ["uv", "run", "--no-project", "ruff", "format"],
+        ["uv", "run", "ruff", "format"],
         check=True,
         cwd=repo_root,
         timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
     )
     print(f"STEP_OK: {ruff_format_label}", flush=True)
 
-    ruff_check_label = "uv run --no-project ruff check --fix"
+    ruff_check_label = "uv run ruff check --fix"
     print(f"STEP_START: {ruff_check_label}", flush=True)
     subprocess.run(
-        ["uv", "run", "--no-project", "ruff", "check", "--fix"],
+        ["uv", "run", "ruff", "check", "--fix"],
         check=True,
         cwd=repo_root,
         timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
     )
     print(f"STEP_OK: {ruff_check_label}", flush=True)
 
-    ty_check_label = "uv run --no-project ty check"
+    ty_check_label = "uv run ty check"
     print(f"STEP_START: {ty_check_label}", flush=True)
     subprocess.run(
-        ["uv", "run", "--no-project", "ty", "check"],
+        ["uv", "run", "ty", "check"],
         check=True,
         cwd=repo_root,
         timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
     )
     print(f"STEP_OK: {ty_check_label}", flush=True)
 
-    pyright_label = "uv run --no-project pyright"
+    pyright_label = "uv run pyright"
     print(f"STEP_START: {pyright_label}", flush=True)
     subprocess.run(
-        ["uv", "run", "--no-project", "pyright"],
+        ["uv", "run", "pyright"],
         check=True,
         cwd=repo_root,
         timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
     )
     print(f"STEP_OK: {pyright_label}", flush=True)
 
-    interrogate_label = "uv run --no-project interrogate"
+    interrogate_label = "uv run interrogate"
     print(f"STEP_START: {interrogate_label}", flush=True)
     subprocess.run(
-        ["uv", "run", "--no-project", "interrogate"],
+        ["uv", "run", "interrogate"],
         check=True,
         cwd=repo_root,
         timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
@@ -765,10 +771,10 @@ def _validate_pipeline() -> None:
     )
     print(f"STEP_OK: {prettier_label}", flush=True)
 
-    pytest_label = "uv run --no-project pytest"
+    pytest_label = "uv run pytest"
     print(f"STEP_START: {pytest_label}", flush=True)
     subprocess.run(
-        ["uv", "run", "--no-project", "pytest"],
+        ["uv", "run", "pytest"],
         check=True,
         cwd=repo_root,
         timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,

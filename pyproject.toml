@@ -7,7 +7,7 @@ dependencies = ["httpx[http2]"]
 
 [dependency-groups]
 dev = [
-  "homeassistant>=2026.6.0",
+  "homeassistant",
   "interrogate",
   "orjson",
   "packaging",
@@ -18,13 +18,14 @@ dev = [
   "pytest-cov",
   "pytest-homeassistant-custom-component",
   "pytest-timeout",
+  "pytest-xdist",
   "ruff",
   "tomlkit",
   "ty",
 ]
 
 [tool.uv]
-override-dependencies = ["homeassistant>=2026.6.0"]
+override-dependencies = ["homeassistant>=2026.7.0"]
 
 [tool.ruff]
 line-length = 100
@@ -68,6 +69,8 @@ filterwarnings = [
   "ignore::pytest.PytestDeprecationWarning",
 ]
 addopts = [
+  "-n",
+  "auto",
   "--quiet",
   "--cov=custom_components",
   "--cov-fail-under=90",

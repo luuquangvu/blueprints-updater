@@ -25,6 +25,14 @@ from string import ascii_letters, digits
 from typing import Any, TypedDict
 
 import orjson
+from packaging.specifiers import SpecifierSet
+from packaging.version import Version
+
+try:
+    from .validate import normalize_package_name
+except ImportError:
+    from validate import normalize_package_name
+
 
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 
@@ -35,7 +43,11 @@ _VENV_DEPENDENCY_MARKER = ".blueprints_updater_test_dependencies.json"
 _REQUIRED_TEST_DEPS = (
     "httpx[http2]",
     "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
     "pytest-homeassistant-custom-component",
+    "pytest-timeout",
+    "pytest-xdist",
 )
 
 _COMPATIBILITY_PYTEST_ARGS = ["--no-cov"]
@@ -68,16 +80,6 @@ class CompatibilityConfig(TypedDict):
 
     ha_ver: str
     python_ver: str
-
-
-def normalize_package_name(package_name: str) -> str:
-    """Normalize a package name to its canonical base form."""
-    try:
-        import validate
-    except ImportError:
-        from tools import validate
-
-    return validate.normalize_package_name(package_name)
 
 
 def _expected_required_test_dep_versions(
@@ -813,6 +815,58 @@ def _prepare_version_and_deps(
     return ha_ver_to_install, test_dependency_versions
 
 
+def _get_python_interpreter_version(python_bin: Path) -> str:
+    """Get the Python interpreter version inside the venv."""
+    result = subprocess.run(
+        [
+            "uv",
+            "--no-config",
+            "run",
+            "--no-project",
+            "--python",
+            str(python_bin),
+            "python",
+            "-c",
+            "import sys; print(sys.version.split()[0])",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=_REPO_ROOT,
+        timeout=_COMPATIBILITY_METADATA_PROBE_TIMEOUT_SECONDS,
+    )
+    return result.stdout.strip()
+
+
+def _verify_python_version_compatibility(python_bin: Path, ha_ver_to_install: str) -> None:
+    """Verify that Python interpreter satisfies Home Assistant's requires-python."""
+    try:
+        url = f"https://pypi.org/pypi/homeassistant/{ha_ver_to_install}/json"
+        requirements_text = _fetch_remote_text(url)
+        payload = orjson.loads(requirements_text)
+        requires_python = payload.get("info", {}).get("requires_python")
+        if not requires_python:
+            print(
+                f"STEP_INFO: PyPI metadata for HA {ha_ver_to_install} does not specify "
+                "requires-python; skipping compatibility verification",
+                flush=True,
+            )
+            return
+        actual_py_ver = _get_python_interpreter_version(python_bin)
+        spec = SpecifierSet(requires_python)
+        if Version(actual_py_ver) not in spec:
+            raise ValueError(
+                f"Python interpreter {actual_py_ver} at {python_bin} does not satisfy "
+                f"Home Assistant {ha_ver_to_install} constraint '{requires_python}'"
+            )
+    except ValueError:
+        raise
+    except Exception as err:
+        raise ValueError(
+            f"Failed to fetch or verify PyPI requires-python for HA {ha_ver_to_install}: {err}"
+        ) from err
+
+
 def _prepare_venv_and_install(
     venv_path: Path,
     python_bin: Path,
@@ -825,12 +879,18 @@ def _prepare_venv_and_install(
     """Ensure the virtual environment is prepared and dependencies are installed.
 
     Returns:
-        bool: True if setup succeeded, False if python binary is missing.
+        bool: True if setup succeeded, False if python binary is missing or incompatible.
     """
     created_venv = _ensure_venv(venv_path, py_ver)
 
     if not python_bin.exists():
         print(f"VALIDATION_ERROR: python not found at {python_bin}", flush=True)
+        return False
+
+    try:
+        _verify_python_version_compatibility(python_bin, ha_ver_to_install)
+    except ValueError as err:
+        print(f"VALIDATION_ERROR: {err}", flush=True)
         return False
 
     installed_ha = _get_installed_ha_version(python_bin)

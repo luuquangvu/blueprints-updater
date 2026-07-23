@@ -2,58 +2,58 @@ repos:
   - repo: local
     hooks:
       - id: ruff-format
-        name: ruff-format
-        entry: uv run --no-project ruff format
+        name: Run Ruff Format
+        entry: uv run ruff format
         language: system
         pass_filenames: false
         always_run: true
 
       - id: ruff-check
-        name: ruff-check
-        entry: uv run --no-project ruff check --fix
+        name: Run Ruff Check
+        entry: uv run ruff check --fix
         language: system
         pass_filenames: false
         always_run: true
 
       - id: ty-check
-        name: ty-check
-        entry: uv run --no-project ty check
+        name: Run Ty Check
+        entry: uv run ty check
         language: system
         pass_filenames: false
         always_run: true
 
       - id: pyright
-        name: pyright
-        entry: uv run --no-project pyright
+        name: Run Pyright
+        entry: uv run pyright
         language: system
         pass_filenames: false
         always_run: true
 
       - id: interrogate
-        name: interrogate
-        entry: uv run --no-project interrogate
+        name: Run Interrogate
+        entry: uv run interrogate
         language: system
         pass_filenames: false
         always_run: true
 
       - id: prettier
-        name: prettier
+        name: Run Prettier
         entry: npx prettier --log-level warn --write .
         language: system
         pass_filenames: false
         always_run: true
 
       - id: pytest
-        name: pytest
-        entry: uv run --no-project pytest
+        name: Run Pytest
+        entry: uv run pytest
         language: system
         pass_filenames: false
         always_run: true
         stages: [pre-push]
 
       - id: compatibility
-        name: compatibility
-        entry: uv run --no-project tools/validate_compatibility.py
+        name: Run Compatibility Check
+        entry: uv run tools/validate_compatibility.py
         language: system
         pass_filenames: false
         always_run: true
