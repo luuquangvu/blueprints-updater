@@ -665,6 +665,93 @@ def _reset_venv(venv_path: Path, py_ver: str) -> bool:
     return _ensure_venv(venv_path, py_ver)
 
 
+def _run_uv_pip_install(
+    python_bin: Path,
+    ha_version: str,
+    package_args: Sequence[str],
+    step_label: str,
+) -> None:
+    """Run uv pip install with constraints overrides and step logging."""
+    print(f"STEP_START: uv pip install {step_label}", flush=True)
+    with _overrides_file(ha_version) as overrides_path:
+        subprocess.run(
+            [
+                "uv",
+                "--no-config",
+                "pip",
+                "install",
+                "--upgrade",
+                "--overrides",
+                overrides_path,
+                "--python",
+                python_bin,
+                *package_args,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=_REPO_ROOT,
+            timeout=_INSTALL_TIMEOUT_SECONDS,
+        )
+    print(f"STEP_OK: uv pip install {step_label}", flush=True)
+
+
+def _install_compatibility_dependencies(
+    python_bin: Path,
+    ha_version: str,
+    test_dependency_versions: dict[str, str],
+) -> None:
+    """Install Home Assistant and required test dependencies."""
+    required_test_deps = _required_test_deps(test_dependency_versions)
+    ha_spec = f"homeassistant=={ha_version}"
+    _run_uv_pip_install(
+        python_bin,
+        ha_version,
+        [ha_spec, *required_test_deps],
+        ha_spec,
+    )
+
+
+def _refresh_compatibility_dependencies(
+    python_bin: Path,
+    ha_version: str,
+    refresh_dependencies: tuple[str, ...],
+) -> None:
+    """Upgrade selected compatibility dependencies."""
+    _run_uv_pip_install(
+        python_bin,
+        ha_version,
+        refresh_dependencies,
+        " ".join(refresh_dependencies),
+    )
+
+
+def _cleanup_compatibility_bytecode(target_dir: Path) -> None:
+    """Remove stale bytecode caches from the specified compatibility target directory."""
+    print("STEP_START: cleanup __pycache__", flush=True)
+    subprocess.run(
+        [
+            "find",
+            str(target_dir),
+            "-name",
+            "__pycache__",
+            "-type",
+            "d",
+            "-exec",
+            "rm",
+            "-rf",
+            "{}",
+            "+",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=_REPO_ROOT,
+        timeout=_CLEANUP_TIMEOUT_SECONDS,
+    )
+    print("STEP_OK: cleanup __pycache__", flush=True)
+
+
 def _install_dependencies(
     venv_path: Path,
     python_bin: Path,
@@ -680,81 +767,20 @@ def _install_dependencies(
     if needs_install:
         if reset_before_install:
             _reset_venv(venv_path, py_ver)
-        required_test_deps = _required_test_deps(test_dependency_versions)
-        ha_spec = f"homeassistant=={ha_ver_to_install}"
-        print(f"STEP_START: uv pip install {ha_spec}", flush=True)
-        with _overrides_file(ha_ver_to_install) as overrides_path:
-            subprocess.run(
-                [
-                    "uv",
-                    "--no-config",
-                    "pip",
-                    "install",
-                    "--upgrade",
-                    "--overrides",
-                    overrides_path,
-                    "--python",
-                    python_bin,
-                    ha_spec,
-                    *required_test_deps,
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=_REPO_ROOT,
-                timeout=_INSTALL_TIMEOUT_SECONDS,
-            )
-        print(f"STEP_OK: uv pip install {ha_spec}", flush=True)
-
+        _install_compatibility_dependencies(
+            python_bin,
+            ha_ver_to_install,
+            test_dependency_versions,
+        )
     elif refresh_deps:
-        refresh_label = " ".join(refresh_deps)
-        print(f"STEP_START: uv pip install {refresh_label}", flush=True)
-        with _overrides_file(ha_ver_to_install) as overrides_path:
-            subprocess.run(
-                [
-                    "uv",
-                    "--no-config",
-                    "pip",
-                    "install",
-                    "--upgrade",
-                    "--overrides",
-                    overrides_path,
-                    "--python",
-                    python_bin,
-                    *refresh_deps,
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=_REPO_ROOT,
-                timeout=_INSTALL_TIMEOUT_SECONDS,
-            )
-        print(f"STEP_OK: uv pip install {refresh_label}", flush=True)
-
+        _refresh_compatibility_dependencies(
+            python_bin,
+            ha_ver_to_install,
+            refresh_deps,
+        )
     if needs_install or refresh_deps:
         _write_venv_dependency_marker(venv_path, test_dependency_versions)
-        print("STEP_START: cleanup __pycache__", flush=True)
-        subprocess.run(
-            [
-                "find",
-                ".",
-                "-name",
-                "__pycache__",
-                "-type",
-                "d",
-                "-exec",
-                "rm",
-                "-rf",
-                "{}",
-                "+",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            cwd=_REPO_ROOT,
-            timeout=_CLEANUP_TIMEOUT_SECONDS,
-        )
-        print("STEP_OK: cleanup __pycache__", flush=True)
+        _cleanup_compatibility_bytecode(venv_path)
 
 
 def _get_installed_ha_version(python_bin: Path) -> str:

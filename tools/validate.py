@@ -4,9 +4,9 @@ This script manages the validation pipeline (Ruff, Ty, Pyright, Interrogate, Pre
 It is optimized for Linux, WSL, and macOS environments.
 
 SECURITY NOTE:
-Commands are intentionally hardcoded as explicit list literals in each subprocess.run call
-to satisfy static analysis security audits. This prevents false positives related
-to command injection that occur when iterating over dynamic command sequences.
+Commands are intentionally hardcoded as explicit list literals in subprocess.run
+calls where possible to satisfy static analysis security audits. This prevents
+false positives related to command injection.
 """
 
 import contextlib
@@ -18,14 +18,20 @@ import subprocess
 import sys
 import textwrap
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 import orjson
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import InvalidVersion, Version
 
 _DEPENDENCY_SYNC_TIMEOUT_SECONDS = 300
 _DEPENDENCY_UPDATE_TIMEOUT_SECONDS = 120
+_FORMAT_STEP_TIMEOUT_SECONDS = 120
+_STATIC_ANALYSIS_STEP_TIMEOUT_SECONDS = 180
+_PRETTIER_STEP_TIMEOUT_SECONDS = 120
+_PYTEST_STEP_TIMEOUT_SECONDS = 600
 _VALIDATION_STEP_TIMEOUT_SECONDS = 300
 
 _PACKAGE_NORM_PATTERN = re.compile(r"[._-]+")
@@ -354,9 +360,9 @@ def _run_npm_dependency_update_check(repo_root: str) -> subprocess.CompletedProc
 def _run_pipeline() -> None:
     """Execute the full validation pipeline.
 
-    Each step is explicitly defined to ensure security scanners can verify
-    the static nature of the commands being executed, avoiding dynamic
-    variable execution in subprocess calls.
+    Each pipeline step is implemented as an explicit step function with hardcoded
+    command list literals in subprocess.run calls to satisfy static security audits,
+    prevent command injection false positives, and ensure deterministic step markers.
 
     Dependency update checks use dry-run commands and are informational only;
     available updates are reported without failing validation.
@@ -391,55 +397,100 @@ def _run_pipeline() -> None:
     print("VALIDATION_SUCCESS", flush=True)
 
 
+def _valid_package_name(raw_name: str) -> str:
+    """Return a canonical package name when it starts alphanumerically."""
+    normalized = normalize_package_name(raw_name)
+    return normalized if normalized and normalized[0].isalnum() else ""
+
+
+def _egg_requirement_name(raw_req: str) -> str:
+    """Return a package name from a legacy egg URL fragment."""
+    if "#egg=" not in raw_req:
+        return ""
+    egg_name = raw_req.split("#egg=", 1)[1].split("&", 1)[0].split(";", 1)[0].strip()
+    return _valid_package_name(egg_name) if egg_name else ""
+
+
+def _direct_reference_name(requirement: str) -> str:
+    """Return a package name from a PEP 508 direct reference."""
+    if (
+        "@" not in requirement
+        or requirement.startswith(("git+", "http://", "https://", "svn+", "hg+", "bzr+"))
+        or "://" in requirement.split("@", 1)[0]
+    ):
+        return ""
+    prefix = requirement.split("@", 1)[0].strip()
+    for separator in ("[", "==", "!=", "~=", ">=", "<=", ">", "<"):
+        prefix = prefix.split(separator, 1)[0].strip()
+    return _valid_package_name(prefix)
+
+
+def _url_requirement_name(requirement: str) -> str:
+    """Return a package name inferred from a requirement URL."""
+    if "://" not in requirement and not requirement.startswith(("git+", "hg+", "svn+", "bzr+")):
+        return ""
+    url_clean = requirement.split("#", 1)[0].split("?", 1)[0].strip()
+    if "://" in url_clean:
+        rest = url_clean.split("://", 1)[1]
+        path_part = rest.split("/", 1)[1] if "/" in rest else ""
+    elif ":" in url_clean:
+        path_part = url_clean.split(":", 1)[-1]
+    else:
+        path_part = url_clean
+
+    repo_path = path_part.split("@", 1)[0].rstrip("/")
+    stem = repo_path.rsplit("/", 1)[-1]
+    for extension in (".git", ".whl", ".tar.gz", ".zip"):
+        if stem.endswith(extension):
+            stem = stem[: -len(extension)]
+            break
+    return _valid_package_name(stem)
+
+
+def _plain_requirement_name(requirement: str) -> str:
+    """Return a package name from a non-URL requirement."""
+    for separator in (
+        "[",
+        "==",
+        "!=",
+        "~=",
+        ">=",
+        "<=",
+        ">",
+        "<",
+        "@",
+        "~",
+        "!",
+    ):
+        requirement = requirement.split(separator, 1)[0].strip()
+    return _valid_package_name(requirement)
+
+
+def _packaging_requirement_name(requirement: str) -> str | None:
+    """Return the package name parsed by Packaging when valid."""
+    try:
+        return normalize_package_name(Requirement(requirement).name)
+    except InvalidRequirement:
+        return None
+
+
 def _parse_package_name_from_req(raw_req: str) -> str:
     """Extract canonicalized package name from a requirement specifier string."""
-    req_clean_initial = raw_req.split("#", 1)[0].strip()
-    if not req_clean_initial:
+    initial_requirement = raw_req.split("#", 1)[0].strip()
+    if not initial_requirement:
         return ""
-    try:
-        from packaging.requirements import Requirement
-
-        req_obj = Requirement(req_clean_initial)
-    except Exception:
-        req_obj = None
-
-    if req_obj is not None:
-        return normalize_package_name(req_obj.name)
-    if "#egg=" in raw_req:
-        egg_name = raw_req.split("#egg=", 1)[1].split("&", 1)[0].split(";", 1)[0].strip()
-        if egg_name and (norm_egg := normalize_package_name(egg_name)) and norm_egg[0].isalnum():
-            return norm_egg
-
-    req_clean = raw_req.split("#", 1)[0].split(";", 1)[0].strip()
-    if not req_clean or req_clean.startswith("-"):
+    if package_name := _packaging_requirement_name(initial_requirement):
+        return package_name
+    if egg_name := _egg_requirement_name(raw_req):
+        return egg_name
+    requirement = raw_req.split("#", 1)[0].split(";", 1)[0].strip()
+    if not requirement or requirement.startswith("-"):
         return ""
-    if (
-        "@" in req_clean
-        and not req_clean.startswith(("git+", "http://", "https://", "svn+", "hg+", "bzr+"))
-        and "://" not in req_clean.split("@", 1)[0]
-    ):
-        prefix = req_clean.split("@", 1)[0].strip()
-        for sep in ("[", "==", "!=", "~=", ">=", "<=", ">", "<"):
-            prefix = prefix.split(sep, 1)[0].strip()
-        norm_prefix = normalize_package_name(prefix)
-        if norm_prefix and norm_prefix[0].isalnum():
-            return norm_prefix
-
-    if "://" in req_clean or req_clean.startswith(("git+", "hg+", "svn+", "bzr+")):
-        url_path = req_clean.split("@", 1)[0].split("?", 1)[0].rstrip("/")
-        stem = url_path.rsplit("/", 1)[-1]
-        for ext in (".git", ".whl", ".tar.gz", ".zip"):
-            if stem.endswith(ext):
-                stem = stem[: -len(ext)]
-                break
-        norm_stem = normalize_package_name(stem)
-        if norm_stem and norm_stem[0].isalnum():
-            return norm_stem
-
-    for sep in ("[", "==", "!=", "~=", ">=", "<=", ">", "<", "@", "~", "!"):
-        req_clean = req_clean.split(sep, 1)[0].strip()
-    norm_name = normalize_package_name(req_clean)
-    return "" if not norm_name or not norm_name[0].isalnum() else norm_name
+    return (
+        _direct_reference_name(requirement)
+        or _url_requirement_name(requirement)
+        or _plain_requirement_name(requirement)
+    )
 
 
 def _load_ha_package_constraints(constraints_path: Path) -> dict[str, str]:
@@ -500,67 +551,86 @@ def _load_ha_manifest_constraints() -> dict[str, str]:
     return constraints
 
 
+def _add_requirement_list(packages: set[str], requirements: Any) -> None:
+    """Add package names from a TOML requirement list."""
+    if not isinstance(requirements, list):
+        return
+    for raw_requirement in requirements:
+        if isinstance(raw_requirement, str) and (
+            package_name := _parse_package_name_from_req(raw_requirement)
+        ):
+            packages.add(package_name)
+
+
+def _project_table_packages(project_table: Any) -> set[str]:
+    """Return packages declared by the PEP 621 project table."""
+    packages: set[str] = set()
+    if not isinstance(project_table, dict):
+        return packages
+    _add_requirement_list(packages, project_table.get("dependencies"))
+    optional_dependencies = project_table.get("optional-dependencies")
+    if isinstance(optional_dependencies, dict):
+        for requirements in optional_dependencies.values():
+            _add_requirement_list(packages, requirements)
+    return packages
+
+
+def _add_dependency_group(
+    packages: set[str],
+    dependency_groups: Mapping[str, Any],
+    group_name: str,
+    active_path: frozenset[str] = frozenset(),
+) -> None:
+    """Resolve one PEP 735 dependency group and its includes."""
+    if group_name in active_path:
+        return
+    group_items = dependency_groups.get(group_name)
+    if not isinstance(group_items, list):
+        return
+    next_path = active_path | {group_name}
+    for raw_requirement in group_items:
+        if isinstance(raw_requirement, str):
+            if package_name := _parse_package_name_from_req(raw_requirement):
+                packages.add(package_name)
+            continue
+        if isinstance(raw_requirement, dict):
+            included_group = raw_requirement.get("include-group")
+            if isinstance(included_group, str):
+                _add_dependency_group(
+                    packages,
+                    dependency_groups,
+                    included_group,
+                    next_path,
+                )
+
+
+def _dependency_group_packages(dependency_groups: Any) -> set[str]:
+    """Return packages declared by PEP 735 dependency groups."""
+    packages: set[str] = set()
+    if not isinstance(dependency_groups, dict):
+        return packages
+    for group_name in dependency_groups:
+        if isinstance(group_name, str):
+            _add_dependency_group(packages, dependency_groups, group_name)
+    return packages
+
+
 def _load_project_dependency_packages(repo_root: str) -> set[str]:
     """Parse project dependency package names dynamically from pyproject.toml."""
-    packages: set[str] = set()
     pyproject_path = Path(repo_root) / "pyproject.toml"
     if not pyproject_path.is_file():
-        return packages
-
+        return set()
     try:
         pyproject_data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as err:
-        print(f"STEP_INFO: Warning: could not parse {pyproject_path}: {err!r}", flush=True)
-        return packages
-
-    # 1. Parse PEP 621 project.dependencies
-    project_table = pyproject_data.get("project")
-    if isinstance(project_table, dict):
-        proj_deps = project_table.get("dependencies")
-        if isinstance(proj_deps, list):
-            for raw_req in proj_deps:
-                if isinstance(raw_req, str) and (
-                    norm_name := _parse_package_name_from_req(raw_req)
-                ):
-                    packages.add(norm_name)
-
-        opt_deps = project_table.get("optional-dependencies")
-        if isinstance(opt_deps, dict):
-            for group_items in opt_deps.values():
-                if isinstance(group_items, list):
-                    for raw_req in group_items:
-                        if isinstance(raw_req, str) and (
-                            norm_name := _parse_package_name_from_req(raw_req)
-                        ):
-                            packages.add(norm_name)
-
-    # 2. Parse PEP 735 dependency-groups
-    dep_groups = pyproject_data.get("dependency-groups")
-    if isinstance(dep_groups, dict):
-
-        def _resolve_group(group_name: str, active_path: set[str] | None = None) -> None:
-            if active_path is None:
-                active_path = set()
-            if not isinstance(group_name, str) or group_name in active_path:
-                return
-            active_path.add(group_name)
-            group_items = dep_groups.get(group_name)
-            if not isinstance(group_items, list):
-                return
-            for raw_req in group_items:
-                if isinstance(raw_req, str):
-                    if norm_name := _parse_package_name_from_req(raw_req):
-                        packages.add(norm_name)
-                elif isinstance(raw_req, dict):
-                    inc_group = raw_req.get("include") or raw_req.get("include-group")
-                    if isinstance(inc_group, str):
-                        _resolve_group(inc_group, set(active_path))
-
-        for group_name in dep_groups:
-            if isinstance(group_name, str):
-                _resolve_group(group_name)
-
-    return packages
+        print(
+            f"STEP_INFO: Warning: could not parse {pyproject_path}: {err!r}",
+            flush=True,
+        )
+        return set()
+    return _project_table_packages(pyproject_data.get("project")) | _dependency_group_packages(
+        pyproject_data.get("dependency-groups")
+    )
 
 
 def _find_ha_constraints_path() -> Path | None:
@@ -583,6 +653,79 @@ def _resolve_target_ha_constraints(constraints_path: Path) -> dict[str, str]:
     return required_constraints
 
 
+def _versions_differ(installed: str, required: str) -> bool:
+    """Return whether two dependency versions differ."""
+    try:
+        return Version(installed) != Version(required)
+    except InvalidVersion:
+        return installed != required
+
+
+def _constraint_drift(
+    project_packages: set[str],
+    required_constraints: Mapping[str, str],
+) -> list[tuple[str, str, str]]:
+    """Return installed project packages that differ from HA constraints."""
+    drifted: list[tuple[str, str, str]] = []
+    for package_name in sorted(project_packages):
+        required_version = required_constraints.get(package_name)
+        if not required_version:
+            continue
+        try:
+            installed_version = md.version(package_name)
+        except md.PackageNotFoundError:
+            drifted.append((package_name, "not installed", required_version))
+        else:
+            if _versions_differ(installed_version, required_version):
+                drifted.append((package_name, installed_version, required_version))
+    return drifted
+
+
+def _sync_constraint_drift(
+    repo_root: str,
+    drifted: list[tuple[str, str, str]],
+) -> None:
+    """Lock and synchronize dependencies that differ from HA constraints."""
+    drift_details = ", ".join(
+        f"{package} ({installed} -> {required})" for package, installed, required in sorted(drifted)
+    )
+    print(
+        "STEP_INFO: Home Assistant constraints drift detected: "
+        f"{drift_details}; locking and syncing",
+        flush=True,
+    )
+    subprocess.run(
+        [
+            "uv",
+            "lock",
+            *[
+                f"--upgrade-package={package}=={required}"
+                for package, _, required in sorted(drifted)
+            ],
+        ],
+        check=True,
+        cwd=repo_root,
+        timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
+    )
+    subprocess.run(
+        ["uv", "sync", "--all-groups"],
+        check=True,
+        cwd=repo_root,
+        timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
+    )
+    print(
+        "STEP_INFO: Home Assistant constraints locked and environment synchronized successfully",
+        flush=True,
+    )
+
+
+def _constraint_error_kind(error: Exception) -> str:
+    """Classify a non-fatal constraint check error."""
+    if isinstance(error, (orjson.JSONDecodeError, KeyError, ValueError)):
+        return "structural configuration error"
+    return "transient environment or file I/O issue"
+
+
 def _check_and_sync_ha_constraints(repo_root: str) -> None:
     """Verify dependencies match Home Assistant package constraints and component manifests."""
     command_label = "check homeassistant constraints alignment"
@@ -600,57 +743,9 @@ def _check_and_sync_ha_constraints(repo_root: str) -> None:
 
     try:
         required_constraints = _resolve_target_ha_constraints(constraints_path)
-
         check_packages = _load_project_dependency_packages(repo_root)
-
-        drifted: list[tuple[str, str, str]] = []
-        for norm_pkg in sorted(check_packages):
-            req_ver = required_constraints.get(norm_pkg)
-            if not req_ver:
-                continue
-            try:
-                installed_ver = md.version(norm_pkg)
-            except md.PackageNotFoundError:
-                drifted.append((norm_pkg, "not installed", req_ver))
-            else:
-                is_drifted = False
-                try:
-                    is_drifted = Version(installed_ver) != Version(req_ver)
-                except InvalidVersion:
-                    is_drifted = installed_ver != req_ver
-                if is_drifted:
-                    drifted.append((norm_pkg, installed_ver, req_ver))
-
-        if drifted:
-            drift_details = ", ".join(
-                f"{pkg} ({inst} -> {req})" for pkg, inst, req in sorted(drifted)
-            )
-            print(
-                "STEP_INFO: Home Assistant constraints drift detected: "
-                f"{drift_details}; locking and syncing",
-                flush=True,
-            )
-            subprocess.run(
-                [
-                    "uv",
-                    "lock",
-                    *[f"--upgrade-package={pkg}=={req}" for pkg, _, req in sorted(drifted)],
-                ],
-                check=True,
-                cwd=repo_root,
-                timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
-            )
-            subprocess.run(
-                ["uv", "sync", "--all-groups"],
-                check=True,
-                cwd=repo_root,
-                timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
-            )
-            print(
-                "STEP_INFO: Home Assistant constraints locked and environment synchronized "
-                "successfully",
-                flush=True,
-            )
+        if drifted := _constraint_drift(check_packages, required_constraints):
+            _sync_constraint_drift(repo_root, drifted)
         else:
             print("STEP_INFO: Home Assistant constraints are fully synchronized", flush=True)
 
@@ -663,22 +758,17 @@ def _check_and_sync_ha_constraints(repo_root: str) -> None:
         KeyError,
         ValueError,
     ) as err:
-        kind = (
-            "structural configuration error"
-            if isinstance(err, (orjson.JSONDecodeError, KeyError, ValueError))
-            else "transient environment or file I/O issue"
-        )
         print(
-            f"STEP_WARNING: Home Assistant constraints check encountered {kind}: {err}",
+            "STEP_WARNING: Home Assistant constraints check encountered "
+            f"{_constraint_error_kind(err)}: {err}",
             flush=True,
         )
 
     print(f"STEP_OK: {command_label}", flush=True)
 
 
-def _validate_pipeline() -> None:
-    """Run the validation pipeline steps in order."""
-    repo_root = str(Path(__file__).resolve().parent.parent)
+def _run_dependency_steps(repo_root: str) -> None:
+    """Synchronize dependencies and report available updates."""
     _run_sync_repair_step(
         repo_root,
         command_label="uv sync --check --all-groups",
@@ -711,75 +801,119 @@ def _validate_pipeline() -> None:
         print_notice=_print_npm_dependency_update_notice,
     )
 
-    ruff_format_label = "uv run ruff format"
-    print(f"STEP_START: {ruff_format_label}", flush=True)
+
+def _run_ruff_format_step(repo_root: str) -> None:
+    """Format Python code with explicit list literal for security audits."""
+    format_cmd = "uv run ruff format"
+    print(f"STEP_START: {format_cmd}", flush=True)
     subprocess.run(
         ["uv", "run", "ruff", "format"],
         check=True,
         cwd=repo_root,
-        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+        timeout=_FORMAT_STEP_TIMEOUT_SECONDS,
     )
-    print(f"STEP_OK: {ruff_format_label}", flush=True)
+    print(f"STEP_OK: {format_cmd}", flush=True)
 
-    ruff_check_label = "uv run ruff check --fix"
-    print(f"STEP_START: {ruff_check_label}", flush=True)
+
+def _run_ruff_check_step(repo_root: str) -> None:
+    """Lint Python code with explicit list literal for security audits."""
+    check_cmd = "uv run ruff check --fix"
+    print(f"STEP_START: {check_cmd}", flush=True)
     subprocess.run(
         ["uv", "run", "ruff", "check", "--fix"],
         check=True,
         cwd=repo_root,
-        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+        timeout=_FORMAT_STEP_TIMEOUT_SECONDS,
     )
-    print(f"STEP_OK: {ruff_check_label}", flush=True)
+    print(f"STEP_OK: {check_cmd}", flush=True)
 
-    ty_check_label = "uv run ty check"
-    print(f"STEP_START: {ty_check_label}", flush=True)
+
+def _run_ruff_steps(repo_root: str) -> None:
+    """Format and lint Python with explicit Ruff commands."""
+    _run_ruff_format_step(repo_root)
+    _run_ruff_check_step(repo_root)
+
+
+def _run_ty_step(repo_root: str) -> None:
+    """Run Ty type check with explicit list literal for security audits."""
+    ty_cmd = "uv run ty check"
+    print(f"STEP_START: {ty_cmd}", flush=True)
     subprocess.run(
         ["uv", "run", "ty", "check"],
         check=True,
         cwd=repo_root,
-        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+        timeout=_STATIC_ANALYSIS_STEP_TIMEOUT_SECONDS,
     )
-    print(f"STEP_OK: {ty_check_label}", flush=True)
+    print(f"STEP_OK: {ty_cmd}", flush=True)
 
-    pyright_label = "uv run pyright"
-    print(f"STEP_START: {pyright_label}", flush=True)
+
+def _run_pyright_step(repo_root: str) -> None:
+    """Run Pyright type check with explicit list literal for security audits."""
+    pyright_cmd = "uv run pyright"
+    print(f"STEP_START: {pyright_cmd}", flush=True)
     subprocess.run(
         ["uv", "run", "pyright"],
         check=True,
         cwd=repo_root,
-        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+        timeout=_STATIC_ANALYSIS_STEP_TIMEOUT_SECONDS,
     )
-    print(f"STEP_OK: {pyright_label}", flush=True)
+    print(f"STEP_OK: {pyright_cmd}", flush=True)
 
-    interrogate_label = "uv run interrogate"
-    print(f"STEP_START: {interrogate_label}", flush=True)
+
+def _run_interrogate_step(repo_root: str) -> None:
+    """Run Interrogate docstring audit with explicit list literal for security audits."""
+    interrogate_cmd = "uv run interrogate"
+    print(f"STEP_START: {interrogate_cmd}", flush=True)
     subprocess.run(
         ["uv", "run", "interrogate"],
         check=True,
         cwd=repo_root,
-        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+        timeout=_STATIC_ANALYSIS_STEP_TIMEOUT_SECONDS,
     )
-    print(f"STEP_OK: {interrogate_label}", flush=True)
+    print(f"STEP_OK: {interrogate_cmd}", flush=True)
 
-    prettier_label = "npx prettier --log-level warn --write ."
-    print(f"STEP_START: {prettier_label}", flush=True)
+
+def _run_static_analysis_steps(repo_root: str) -> None:
+    """Run explicit type and docstring analysis commands."""
+    _run_ty_step(repo_root)
+    _run_pyright_step(repo_root)
+    _run_interrogate_step(repo_root)
+
+
+def _run_prettier_step(repo_root: str) -> None:
+    """Format text files using explicit Prettier list literal for security audits."""
+    prettier_cmd = "npx prettier --log-level warn --write ."
+    print(f"STEP_START: {prettier_cmd}", flush=True)
     subprocess.run(
         ["npx", "prettier", "--log-level", "warn", "--write", "."],
         check=True,
         cwd=repo_root,
-        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+        timeout=_PRETTIER_STEP_TIMEOUT_SECONDS,
     )
-    print(f"STEP_OK: {prettier_label}", flush=True)
+    print(f"STEP_OK: {prettier_cmd}", flush=True)
 
-    pytest_label = "uv run pytest"
-    print(f"STEP_START: {pytest_label}", flush=True)
+
+def _run_pytest_step(repo_root: str) -> None:
+    """Run test suite using explicit Pytest list literal for security audits."""
+    pytest_cmd = "uv run pytest"
+    print(f"STEP_START: {pytest_cmd}", flush=True)
     subprocess.run(
         ["uv", "run", "pytest"],
         check=True,
         cwd=repo_root,
-        timeout=_VALIDATION_STEP_TIMEOUT_SECONDS,
+        timeout=_PYTEST_STEP_TIMEOUT_SECONDS,
     )
-    print(f"STEP_OK: {pytest_label}", flush=True)
+    print(f"STEP_OK: {pytest_cmd}", flush=True)
+
+
+def _validate_pipeline() -> None:
+    """Run the validation pipeline steps in order."""
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    _run_dependency_steps(repo_root)
+    _run_ruff_steps(repo_root)
+    _run_static_analysis_steps(repo_root)
+    _run_prettier_step(repo_root)
+    _run_pytest_step(repo_root)
 
 
 def main() -> None:

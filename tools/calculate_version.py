@@ -12,6 +12,8 @@ workflows to ensure consistent versioning across project branches.
 import os
 import re
 import sys
+from dataclasses import dataclass
+from typing import NoReturn
 
 from packaging.version import parse
 
@@ -117,114 +119,128 @@ def _calculate_next_rc(
     return f"{effective_prefix}{target_stable}-rc.{next_rc}"
 
 
-def main() -> None:
-    """Compute and print the next version using environment configuration.
+def _exit_with_error(message: str) -> NoReturn:
+    """Print a version calculation error and exit."""
+    print(f"Error: {message}", file=sys.stderr)
+    raise SystemExit(1)
 
-    The function orchestrates the full calculation pipeline:
-    1. Parses environment variables for bump strategies and base versions.
-    2. Validates input formats and detects active version lines.
-    3. Increments specific version segments or RC counters.
-    4. Performs regression checks against stable and latest reachable tags.
 
-    Environment Inputs:
-        BUMP_TYPE: Version segment to increment ('major', 'minor', 'patch').
-        IS_PRERELEASE: Boolean string ('true' or 'false') for RC suffixes.
-        LATEST_STABLE: Baseline stable version string.
-        CURRENT_ANY: Latest reachable tag for regression checks.
-        ALL_TAGS: Newline-separated tags for exhaustive prerelease scanning.
-        TAG_PREFIX: Optional override for the version prefix (e.g., 'v').
+@dataclass(frozen=True, slots=True)
+class _VersionInputs:
+    """Environment inputs used to calculate a version."""
 
-    Output:
-        Prints the calculated version string to standard output.
-        Exits with status 1 on validation failure or malformed input.
-    """
-    bump_type = os.environ["BUMP_TYPE"]
+    bump_type: str
+    is_prerelease: bool
+    latest_stable: str
+    current_any: str
+    all_tags: list[str]
+    prefix: str
+    prefix_is_auto_detected: bool
 
-    is_prerelease_raw = os.environ["IS_PRERELEASE"].strip().lower()
+
+def _version_inputs() -> _VersionInputs:
+    """Parse version calculation inputs from the environment."""
+    is_prerelease_env = os.environ.get("IS_PRERELEASE")
+    if is_prerelease_env is None:
+        _exit_with_error("Missing required environment variable IS_PRERELEASE")
+    is_prerelease_raw = is_prerelease_env.strip().lower()
     if is_prerelease_raw not in ("true", "false"):
-        print(
-            f"Error: Invalid IS_PRERELEASE value '{os.environ['IS_PRERELEASE']}', "
-            "expected 'true' or 'false'",
-            file=sys.stderr,
+        _exit_with_error(
+            f"Invalid IS_PRERELEASE value '{is_prerelease_env}', expected 'true' or 'false'"
         )
-        sys.exit(1)
-    is_prerelease = is_prerelease_raw == "true"
-
-    latest_stable_str = os.environ.get("LATEST_STABLE", DEFAULT_VERSION)
-    current_any_str = os.environ.get("CURRENT_ANY", DEFAULT_VERSION)
-    all_tags_raw = os.environ.get("ALL_TAGS", "")
-    all_tags = [t.strip() for t in all_tags_raw.split("\n") if t.strip()]
-
+    bump_type_env = os.environ.get("BUMP_TYPE")
+    if bump_type_env is None:
+        _exit_with_error("Missing required environment variable BUMP_TYPE")
+    latest_stable = os.environ.get("LATEST_STABLE", DEFAULT_VERSION)
     configured_prefix = os.environ.get("TAG_PREFIX")
-    if configured_prefix is not None:
-        prefix = configured_prefix
-    else:
-        prefix = "v" if latest_stable_str.startswith("v") else ""
+    prefix = (
+        configured_prefix
+        if configured_prefix is not None
+        else ("v" if latest_stable.startswith("v") else "")
+    )
+    return _VersionInputs(
+        bump_type=bump_type_env,
+        is_prerelease=is_prerelease_raw == "true",
+        latest_stable=latest_stable,
+        current_any=os.environ.get("CURRENT_ANY", DEFAULT_VERSION),
+        all_tags=[tag.strip() for tag in os.environ.get("ALL_TAGS", "").split("\n") if tag.strip()],
+        prefix=prefix,
+        prefix_is_auto_detected=configured_prefix is None,
+    )
 
+
+def _target_stable_version(inputs: _VersionInputs) -> str:
+    """Return the bumped stable version without a tag prefix."""
     try:
-        stable_baseline_str = _normalize_version(latest_stable_str, prefix)
-        parsed_stable = parse(stable_baseline_str)
-        v = [parsed_stable.major, parsed_stable.minor, parsed_stable.micro]
-    except Exception as e:
-        print(
-            f"Error: Could not parse baseline stable version '{latest_stable_str}': {e}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    if bump_type not in ("major", "minor", "patch"):
-        print(
-            f"Error: Invalid bump_type '{bump_type}', expected major, minor, or patch",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    if bump_type == "major":
-        v[0] += 1
-        v[1] = 0
-        v[2] = 0
-    elif bump_type == "minor":
-        v[1] += 1
-        v[2] = 0
+        stable_baseline = _normalize_version(inputs.latest_stable, inputs.prefix)
+        parsed_stable = parse(stable_baseline)
+        segments = [
+            parsed_stable.major,
+            parsed_stable.minor,
+            parsed_stable.micro,
+        ]
+    except Exception as err:
+        _exit_with_error(f"Could not parse baseline stable version '{inputs.latest_stable}': {err}")
+    if inputs.bump_type not in ("major", "minor", "patch"):
+        _exit_with_error(f"Invalid bump_type '{inputs.bump_type}', expected major, minor, or patch")
+    if inputs.bump_type == "major":
+        segments[0] += 1
+        segments[1] = 0
+        segments[2] = 0
+    elif inputs.bump_type == "minor":
+        segments[1] += 1
+        segments[2] = 0
     else:
-        v[2] += 1
+        segments[2] += 1
+    return ".".join(str(segment) for segment in segments)
 
-    target_stable = f"{v[0]}.{v[1]}.{v[2]}"
 
-    if not is_prerelease:
-        result_str = f"{prefix}{target_stable}"
-    else:
-        result_str = _calculate_next_rc(prefix, target_stable, all_tags, configured_prefix is None)
+def _calculated_version(inputs: _VersionInputs, target_stable: str) -> str:
+    """Return the stable or release-candidate version."""
+    if not inputs.is_prerelease:
+        return f"{inputs.prefix}{target_stable}"
+    return _calculate_next_rc(
+        inputs.prefix,
+        target_stable,
+        inputs.all_tags,
+        inputs.prefix_is_auto_detected,
+    )
 
+
+def _verify_calculated_version(
+    inputs: _VersionInputs,
+    target_stable: str,
+    result: str,
+) -> None:
+    """Verify that the calculated version advances repository history."""
     try:
-        norm_result = parse(_normalize_version(result_str, prefix))
-        norm_latest = parse(_normalize_version(latest_stable_str, prefix))
-        norm_current = parse(_normalize_version(current_any_str, prefix))
-    except Exception as e:
-        print(f"Error: Verification parsing failed: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    if norm_result <= norm_latest:
-        print(
-            f"Error: Calculated version {result_str} is not greater than "
-            f"latest stable {latest_stable_str}",
-            file=sys.stderr,
+        normalized_result = parse(_normalize_version(result, inputs.prefix))
+        normalized_latest = parse(_normalize_version(inputs.latest_stable, inputs.prefix))
+        normalized_current = parse(_normalize_version(inputs.current_any, inputs.prefix))
+    except Exception as err:
+        _exit_with_error(f"Verification parsing failed: {err}")
+    if normalized_result <= normalized_latest:
+        _exit_with_error(
+            f"Calculated version {result} is not greater than latest stable {inputs.latest_stable}"
         )
-        sys.exit(1)
-
     if (
-        is_prerelease
-        and _normalize_version(current_any_str, prefix).startswith(target_stable)
-        and norm_result <= norm_current
+        inputs.is_prerelease
+        and normalized_current.base_version == target_stable
+        and normalized_result <= normalized_current
     ):
-        print(
-            f"Error: Calculated pre-release {result_str} is not greater than "
-            f"latest version {current_any_str}",
-            file=sys.stderr,
+        _exit_with_error(
+            f"Calculated pre-release {result} is not greater than "
+            f"latest version {inputs.current_any}"
         )
-        sys.exit(1)
 
-    print(result_str)
+
+def main() -> None:
+    """Compute, verify, and print the next configured version."""
+    inputs = _version_inputs()
+    target_stable = _target_stable_version(inputs)
+    result = _calculated_version(inputs, target_stable)
+    _verify_calculated_version(inputs, target_stable, result)
+    print(result)
 
 
 if __name__ == "__main__":
