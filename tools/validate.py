@@ -6,7 +6,10 @@ It is optimized for Linux, WSL, and macOS environments.
 SECURITY NOTE:
 Commands are intentionally hardcoded as explicit list literals in subprocess.run
 calls where possible to satisfy static analysis security audits. This prevents
-false positives related to command injection.
+false positives related to command injection. The repeated step implementations
+are deliberately not consolidated into a DRY shared command runner: security
+scanners must be able to verify each literal argument list at its subprocess
+call site instead of tracing a command value through another function.
 """
 
 import contextlib
@@ -363,6 +366,9 @@ def _run_pipeline() -> None:
     Each pipeline step is implemented as an explicit step function with hardcoded
     command list literals in subprocess.run calls to satisfy static security audits,
     prevent command injection false positives, and ensure deterministic step markers.
+    Keep this intentionally non-DRY structure: moving command execution into a shared
+    runner would hide the literal argument lists from scanners that only inspect the
+    immediate subprocess call site and could reintroduce security false positives.
 
     Dependency update checks use dry-run commands and are informational only;
     available updates are reported without failing validation.

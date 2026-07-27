@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Generator, Sequence
 from pathlib import Path
 from string import ascii_letters, digits
+from time import monotonic
 from typing import Any, TypedDict
 
 import orjson
@@ -55,6 +56,7 @@ _COMPATIBILITY_METADATA_PROBE_TIMEOUT_SECONDS = 60
 _VENV_CREATE_TIMEOUT_SECONDS = 120
 _INSTALL_TIMEOUT_SECONDS = 300
 _CLEANUP_TIMEOUT_SECONDS = 30
+_CLEANUP_ISSUE_LIMIT = 10
 _COMPATIBILITY_PYTEST_TIMEOUT_SECONDS = 300
 
 _ALNUM_CHARS = ascii_letters + digits
@@ -727,28 +729,78 @@ def _refresh_compatibility_dependencies(
 
 
 def _cleanup_compatibility_bytecode(target_dir: Path) -> None:
-    """Remove stale bytecode caches from the specified compatibility target directory."""
+    """Remove stale bytecode caches, reporting missing targets as nonfatal no-ops."""
     print("STEP_START: cleanup __pycache__", flush=True)
-    subprocess.run(
-        [
-            "find",
-            str(target_dir),
-            "-name",
-            "__pycache__",
-            "-type",
-            "d",
-            "-exec",
-            "rm",
-            "-rf",
-            "{}",
-            "+",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        cwd=_REPO_ROOT,
-        timeout=_CLEANUP_TIMEOUT_SECONDS,
-    )
+    if target_dir.is_symlink():
+        message = f"refusing to clean symlinked target directory {target_dir}"
+        print(f"STEP_FAILED: cleanup __pycache__: {message}", file=sys.stderr, flush=True)
+        raise RuntimeError(message)
+    if not target_dir.exists():
+        print(
+            f"STEP_WARNING: cleanup __pycache__: target directory does not exist: {target_dir}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    if not target_dir.is_dir():
+        message = f"cleanup target path is not a directory: {target_dir}"
+        print(f"STEP_FAILED: cleanup __pycache__: {message}", file=sys.stderr, flush=True)
+        raise RuntimeError(message)
+
+    deadline = monotonic() + _CLEANUP_TIMEOUT_SECONDS
+    issues: list[str] = []
+    issue_count = 0
+
+    def report_issue(message: str) -> None:
+        nonlocal issue_count
+        issue_count += 1
+        if len(issues) < _CLEANUP_ISSUE_LIMIT:
+            issues.append(message)
+            print(
+                f"STEP_WARNING: cleanup __pycache__: {message}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    def report_walk_error(err: OSError) -> None:
+        report_issue(f"unable to scan {err.filename or target_dir}: {err}")
+
+    try:
+        for root, dirnames, _filenames in os.walk(
+            target_dir,
+            topdown=True,
+            onerror=report_walk_error,
+            followlinks=False,
+        ):
+            if monotonic() > deadline:
+                report_issue(f"timed out after {_CLEANUP_TIMEOUT_SECONDS} seconds")
+                break
+            bytecode_names = [name for name in dirnames if name == "__pycache__"]
+            dirnames[:] = [name for name in dirnames if name != "__pycache__"]
+            timed_out = False
+            for name in bytecode_names:
+                if monotonic() > deadline:
+                    timed_out = True
+                    break
+                bytecode_dir = Path(root, name)
+                try:
+                    shutil.rmtree(bytecode_dir)
+                except OSError as err:
+                    report_issue(f"unable to remove {bytecode_dir}: {err}")
+                if monotonic() > deadline:
+                    timed_out = True
+                    break
+            if timed_out:
+                report_issue(f"timed out after {_CLEANUP_TIMEOUT_SECONDS} seconds")
+                break
+    except OSError as err:
+        report_issue(f"unable to traverse {target_dir}: {err}")
+    if issue_count:
+        omitted_count = issue_count - len(issues)
+        if omitted_count:
+            issues.append(f"{omitted_count} additional issue(s) omitted")
+        print("STEP_FAILED: cleanup __pycache__", file=sys.stderr, flush=True)
+        raise RuntimeError("Compatibility bytecode cleanup failed: " + "; ".join(issues))
     print("STEP_OK: cleanup __pycache__", flush=True)
 
 
@@ -779,8 +831,8 @@ def _install_dependencies(
             refresh_deps,
         )
     if needs_install or refresh_deps:
-        _write_venv_dependency_marker(venv_path, test_dependency_versions)
         _cleanup_compatibility_bytecode(venv_path)
+        _write_venv_dependency_marker(venv_path, test_dependency_versions)
 
 
 def _get_installed_ha_version(python_bin: Path) -> str:

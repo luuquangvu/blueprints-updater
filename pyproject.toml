@@ -86,4 +86,5 @@ typeCheckingMode = "standard"
 [tool.interrogate]
 fail-under = 100
 ignore-nested-functions = true
+ignore-overloaded-functions = true
 exclude = ["scratch"]
