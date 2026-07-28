@@ -835,9 +835,9 @@ def _run_ruff_check_step(repo_root: str) -> None:
 
 
 def _run_ruff_steps(repo_root: str) -> None:
-    """Format and lint Python with explicit Ruff commands."""
-    _run_ruff_format_step(repo_root)
+    """Lint and format Python with explicit Ruff commands."""
     _run_ruff_check_step(repo_root)
+    _run_ruff_format_step(repo_root)
 
 
 def _run_ty_step(repo_root: str) -> None:

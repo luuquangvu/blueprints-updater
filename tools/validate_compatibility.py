@@ -787,9 +787,6 @@ def _cleanup_compatibility_bytecode(target_dir: Path) -> None:
                     shutil.rmtree(bytecode_dir)
                 except OSError as err:
                     report_issue(f"unable to remove {bytecode_dir}: {err}")
-                if monotonic() > deadline:
-                    timed_out = True
-                    break
             if timed_out:
                 report_issue(f"timed out after {_CLEANUP_TIMEOUT_SECONDS} seconds")
                 break
