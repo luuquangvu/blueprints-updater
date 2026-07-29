@@ -35,6 +35,7 @@ from .const import (
     MIN_UPDATE_INTERVAL,
     RE_URL_REDACTION,
 )
+from .exceptions import BlueprintFetchPolicyError
 from .providers import registry
 
 _LOGGER = logging.getLogger(__name__)
@@ -94,6 +95,7 @@ def retry_async(
                     context = getattr(func, "__name__", "unknown")
             else:
                 context = getattr(func, "__name__", "unknown")
+            safe_context = redact_url(str(context))
 
             for attempt in range(max_retries + 1):
                 try:
@@ -114,16 +116,17 @@ def retry_async(
                         _LOGGER.debug(
                             "Non-retryable HTTP status code %d for %s; failing fast",
                             err.response.status_code,
-                            context,
+                            safe_context,
                         )
                         raise
 
+                    safe_error = sanitize_error_detail(str(err))
                     if attempt >= max_retries:
                         _LOGGER.error(
                             "Could not update from %s after %d attempts: %s",
-                            context,
+                            safe_context,
                             attempt + 1,
-                            err,
+                            safe_error,
                         )
                         raise
 
@@ -132,8 +135,8 @@ def retry_async(
                     )
                     _LOGGER.debug(
                         "Retrying lookup for %s due to %s (Retry %d/%d, wait %.2fs)",
-                        context,
-                        err,
+                        safe_context,
+                        safe_error,
                         attempt + 1,
                         max_retries,
                         wait,
@@ -438,7 +441,7 @@ def sanitize_error_detail(detail: str, max_length: int = 120) -> str:
 def verify_https_enforcement(response: httpx.Response, original_url: str) -> None:
     """Verify that the response URL uses HTTPS scheme.
 
-    Raises httpx.HTTPError if the scheme is not https.
+    Raises BlueprintFetchPolicyError if the scheme is not https.
     """
     if response.url.scheme != "https":
         _LOGGER.error(
@@ -446,7 +449,7 @@ def verify_https_enforcement(response: httpx.Response, original_url: str) -> Non
             redact_url(original_url),
             response.url.scheme,
         )
-        raise httpx.HTTPError(
+        raise BlueprintFetchPolicyError(
             f"Security violation: Final destination for {redact_url(original_url)} "
             f"must be HTTPS (got {response.url.scheme})"
         )

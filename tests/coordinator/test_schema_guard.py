@@ -60,6 +60,94 @@ blueprint:
     )
 
 
+def test_detect_breaking_changes_same_selector_constraint(coordinator):
+    """A same-type selector domain change is retained as a compatibility risk."""
+    old_content = """
+blueprint:
+  name: Old
+  input:
+    controlled_entity:
+      selector:
+        entity:
+          domain: light
+"""
+    new_content = """
+blueprint:
+  name: New
+  input:
+    controlled_entity:
+      selector:
+        entity:
+          domain: switch
+"""
+
+    risks = coordinator._detect_breaking_changes(
+        old_content,
+        new_content,
+        {"automation.consumer": {"controlled_entity": "light.kitchen"}},
+    )
+
+    assert any(
+        risk["type"] == BlueprintRiskType.SELECTOR_MISMATCH
+        and risk["args"]["old_type"] == "entity"
+        and risk["args"]["new_type"] == "entity"
+        for risk in risks
+    )
+
+
+def test_normalize_selector_config_preserves_nested_presentation_keys():
+    """Only presentation keys on the selector config itself are ignored."""
+    normalized = BlueprintUpdateCoordinator._normalize_selector_config(
+        {
+            "name": "Top-level name",
+            "description": "Top-level description",
+            "options": [
+                {
+                    "value": "one",
+                    "label": "Nested label",
+                    "description": "Nested description",
+                    "metadata": {"help": "Nested help"},
+                }
+            ],
+        }
+    )
+
+    assert normalized == {
+        "options": [
+            {
+                "description": "Nested description",
+                "label": "Nested label",
+                "metadata": {"help": "Nested help"},
+                "value": "one",
+            }
+        ]
+    }
+
+
+def test_detect_breaking_changes_nested_select_label(coordinator):
+    """A changed select-option label remains part of the selector contract."""
+    old_content = """
+blueprint:
+  name: Old
+  input:
+    mode:
+      selector:
+        select:
+          options:
+            - value: one
+              label: Original
+"""
+    new_content = old_content.replace("label: Original", "label: Replacement")
+
+    risks = coordinator._detect_breaking_changes(
+        old_content,
+        new_content,
+        {"automation.consumer": {"mode": "one"}},
+    )
+
+    assert any(risk["type"] == BlueprintRiskType.SELECTOR_MISMATCH for risk in risks)
+
+
 def test_detect_breaking_changes_new_mandatory(coordinator):
     """Test detecting new mandatory input."""
     old_content = "blueprint:\n  name: Old\n  input: {}"

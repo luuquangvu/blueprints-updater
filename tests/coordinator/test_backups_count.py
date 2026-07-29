@@ -12,7 +12,11 @@ from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.blueprints_updater.const import DOMAIN, DOMAIN_AUTOMATION
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
-from custom_components.blueprints_updater.file_store import BlueprintFileStore
+from custom_components.blueprints_updater.exceptions import FileRevisionMismatchError
+from custom_components.blueprints_updater.file_store import (
+    BlueprintFileStore,
+    FileRevisionPrecondition,
+)
 from custom_components.blueprints_updater.update import BlueprintUpdateEntity
 
 
@@ -144,6 +148,211 @@ def test_install_rejects_corrupt_temp_before_replacing_target(tmp_path) -> None:
     assert target.read_text(encoding="utf-8") == "original"
     assert not temp_path.exists()
     rotate_backups.assert_not_called()
+
+
+def test_install_rejects_external_edit_after_scan(tmp_path) -> None:
+    """A target differing from the scanned raw hash is never replaced or backed up."""
+    target = tmp_path / "test.yaml"
+    target.write_text("scanned", encoding="utf-8")
+    expected_hash = BlueprintFileStore._hash_file(str(target))
+    target.write_text("user edit", encoding="utf-8")
+
+    with pytest.raises(FileRevisionMismatchError, match="content changed"):
+        BlueprintFileStore.install(
+            str(target),
+            "remote",
+            max_backups=3,
+            create_backup=True,
+            precondition=FileRevisionPrecondition.existing(expected_hash),
+        )
+
+    assert target.read_text(encoding="utf-8") == "user edit"
+    assert not (tmp_path / "test.yaml.bak.1").exists()
+
+
+def test_install_hashes_existing_target_only_during_initial_revision_check(tmp_path) -> None:
+    """The identity recheck does not repeat initial content validation."""
+    target = tmp_path / "test.yaml"
+    target.write_text("scanned", encoding="utf-8")
+    precondition = BlueprintFileStore.capture_precondition(str(target))
+
+    with patch.object(
+        BlueprintFileStore,
+        "_hash_file",
+        wraps=BlueprintFileStore._hash_file,
+    ) as hash_file:
+        BlueprintFileStore.install(
+            str(target),
+            "remote",
+            max_backups=3,
+            create_backup=False,
+            precondition=precondition,
+        )
+
+    target_hash_calls = [call for call in hash_file.call_args_list if call.args == (str(target),)]
+    assert len(target_hash_calls) == 1
+
+
+def test_install_rejects_import_target_created_after_prepare(tmp_path) -> None:
+    """A new import cannot overwrite a file created after conflict checking."""
+    target = tmp_path / "test.yaml"
+    target.write_text("created concurrently", encoding="utf-8")
+
+    with pytest.raises(FileRevisionMismatchError, match="was created"):
+        BlueprintFileStore.install(
+            str(target),
+            "remote",
+            max_backups=3,
+            create_backup=False,
+            precondition=FileRevisionPrecondition.missing(),
+        )
+
+    assert target.read_text(encoding="utf-8") == "created concurrently"
+
+
+def test_install_rejects_target_deleted_after_scan(tmp_path) -> None:
+    """A deleted scanned target is not recreated and produces no backup."""
+    target = tmp_path / "test.yaml"
+    target.write_text("scanned", encoding="utf-8")
+    precondition = FileRevisionPrecondition.existing(BlueprintFileStore._hash_file(str(target)))
+    target.unlink()
+
+    with pytest.raises(FileRevisionMismatchError, match="was deleted"):
+        BlueprintFileStore.install(
+            str(target),
+            "remote",
+            max_backups=3,
+            create_backup=True,
+            precondition=precondition,
+        )
+
+    assert not target.exists()
+    assert not (tmp_path / "test.yaml.bak.1").exists()
+
+
+def test_install_rejects_target_created_between_revision_checks(tmp_path, monkeypatch) -> None:
+    """A target appearing between checks is preserved without a backup."""
+    target = tmp_path / "test.yaml"
+    original_verify = BlueprintFileStore._verify_current_revision
+    verification_count = 0
+
+    def verify_with_concurrent_create(
+        file_path: str,
+        precondition: FileRevisionPrecondition | None,
+        expected_identity: tuple[int, int, int, int] | None = None,
+    ) -> tuple[int, int, int, int] | None:
+        """Create the target immediately before the second revision check."""
+        nonlocal verification_count
+        verification_count += 1
+        if verification_count == 2:
+            target.write_text("created between checks", encoding="utf-8")
+        return original_verify(file_path, precondition, expected_identity)
+
+    monkeypatch.setattr(
+        BlueprintFileStore,
+        "_verify_current_revision",
+        staticmethod(verify_with_concurrent_create),
+    )
+
+    with pytest.raises(FileRevisionMismatchError, match="was created"):
+        BlueprintFileStore.install(
+            str(target),
+            "remote",
+            max_backups=3,
+            create_backup=True,
+            precondition=FileRevisionPrecondition.missing(),
+        )
+
+    assert target.read_text(encoding="utf-8") == "created between checks"
+    assert not (tmp_path / "test.yaml.bak.1").exists()
+
+
+def test_install_atomically_rejects_target_created_at_commit(tmp_path) -> None:
+    """The absent-target commit cannot overwrite a last-moment creation."""
+    target = tmp_path / "test.yaml"
+    real_link = os.link
+
+    def link_after_concurrent_create(source: str, destination: str) -> None:
+        """Create the destination immediately before the no-clobber link."""
+        target.write_text("created at commit", encoding="utf-8")
+        real_link(source, destination)
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.file_store.os.link",
+            side_effect=link_after_concurrent_create,
+        ),
+        pytest.raises(FileRevisionMismatchError, match="was created"),
+    ):
+        BlueprintFileStore.install(
+            str(target),
+            "remote",
+            max_backups=3,
+            create_backup=False,
+            precondition=FileRevisionPrecondition.missing(),
+        )
+
+    assert target.read_text(encoding="utf-8") == "created at commit"
+
+
+def test_install_rejects_symlink_target(tmp_path) -> None:
+    """The file store never mutates a target through a symlink alias."""
+    target = tmp_path / "target.yaml"
+    alias = tmp_path / "alias.yaml"
+    target.write_text("original", encoding="utf-8")
+    alias.symlink_to(target)
+
+    with pytest.raises(FileRevisionMismatchError, match="symlink"):
+        BlueprintFileStore.install(
+            str(alias),
+            "remote",
+            max_backups=3,
+            create_backup=True,
+        )
+
+    assert target.read_text(encoding="utf-8") == "original"
+    assert alias.is_symlink()
+
+
+def test_install_allows_symlinked_ancestor_directory(tmp_path) -> None:
+    """Only a symlink at the final path component is rejected."""
+    real_directory = tmp_path / "real"
+    linked_directory = tmp_path / "linked"
+    real_directory.mkdir()
+    linked_directory.symlink_to(real_directory, target_is_directory=True)
+    target = real_directory / "target.yaml"
+    alias_path = linked_directory / "target.yaml"
+    target.write_text("original", encoding="utf-8")
+    precondition = BlueprintFileStore.capture_precondition(str(alias_path))
+
+    BlueprintFileStore.install(
+        str(alias_path),
+        "replacement",
+        max_backups=3,
+        create_backup=False,
+        precondition=precondition,
+    )
+
+    assert target.read_text(encoding="utf-8") == "replacement"
+
+
+def test_restore_rejects_edit_after_prepare(tmp_path) -> None:
+    """Restore uses the same revision precondition as every other mutation."""
+    target = tmp_path / "test.yaml"
+    target.write_text("prepared", encoding="utf-8")
+    precondition = BlueprintFileStore.capture_precondition(str(target))
+    target.write_text("user edit", encoding="utf-8")
+
+    with pytest.raises(FileRevisionMismatchError, match="content changed"):
+        BlueprintFileStore.restore(
+            str(target),
+            "backup",
+            max_backups=3,
+            precondition=precondition,
+        )
+
+    assert target.read_text(encoding="utf-8") == "user edit"
+    assert not (tmp_path / "test.yaml.bak.1").exists()
 
 
 @pytest.mark.asyncio

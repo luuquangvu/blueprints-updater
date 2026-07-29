@@ -11,6 +11,7 @@ from custom_components.blueprints_updater.const import (
     DOMAIN_AUTOMATION,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.exceptions import FileRevisionMismatchError
 
 
 @pytest.mark.asyncio
@@ -50,6 +51,20 @@ async def test_async_prune_stale_metadata_triggers_save(coordinator, mock_makedi
 
     assert "automation/stale.yaml" not in coordinator._persisted_metadata
     mock_save.assert_called_once_with(force=True)
+
+
+def test_filter_existing_metadata_requires_real_file(coordinator, tmp_path):
+    """A safe in-root lexical path is not enough to retain deleted metadata."""
+    blueprint_root = tmp_path / "blueprints"
+    target = blueprint_root / "automation" / "deleted.yaml"
+    target.parent.mkdir(parents=True)
+    target.write_text("content", encoding="utf-8")
+    coordinator.hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+    metadata = {"automation/deleted.yaml": {"remote_hash": "hash"}}
+
+    assert coordinator._filter_existing_metadata(str(blueprint_root), metadata) == metadata
+    target.unlink()
+    assert coordinator._filter_existing_metadata(str(blueprint_root), metadata) == {}
 
 
 @pytest.mark.asyncio
@@ -133,7 +148,7 @@ async def test_async_save_metadata_empty_data(coordinator, mock_makedirs):
     ):
         await coordinator._async_save_metadata()
 
-    mock_save.assert_called_once_with({"metadata": {}})
+    mock_save.assert_called_once_with({"metadata": {}, "pending_reload_domains": []})
     assert not coordinator._persisted_metadata
 
 
@@ -412,6 +427,64 @@ async def test_async_restore_blueprint_error(hass, coordinator, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_async_restore_blueprint_translates_revision_mismatch(coordinator, tmp_path):
+    """A concurrent local edit produces the same actionable response as install."""
+    path = tmp_path / "test.yaml"
+    source_url = "https://example.com/test.yaml"
+    current_content = (
+        f"blueprint:\n  name: Current\n  domain: automation\n  source_url: {source_url}\n"
+    )
+    backup_content = current_content.replace("Current", "Backup")
+    path.write_text(current_content, encoding="utf-8")
+    (tmp_path / "test.yaml.bak.1").write_text(backup_content, encoding="utf-8")
+    coordinator.data = {
+        str(path): {
+            "domain": DOMAIN_AUTOMATION,
+            "source_url": source_url,
+        }
+    }
+
+    async def _executor_job(target, *args):
+        """Edit the target after restore preparation but before commit."""
+        if target is BlueprintUpdateCoordinator._execute_restore_file:
+            path.write_text("concurrent local edit", encoding="utf-8")
+        return target(*args)
+
+    coordinator.hass.async_add_executor_job = AsyncMock(side_effect=_executor_job)
+
+    result = await coordinator.async_restore_blueprint(str(path))
+
+    assert result == {
+        "success": False,
+        "translation_key": "system_error",
+        "translation_kwargs": {"error": "Local blueprint changed; refresh and retry the update"},
+    }
+    assert path.read_text(encoding="utf-8") == "concurrent local edit"
+
+
+@pytest.mark.asyncio
+async def test_async_restore_blueprint_translates_preparation_revision_mismatch(
+    coordinator, tmp_path
+):
+    """A revision mismatch during preparation has the actionable restore response."""
+    path = tmp_path / "test.yaml"
+    path.write_text("current content", encoding="utf-8")
+
+    with patch.object(
+        coordinator._file_store,
+        "capture_precondition",
+        side_effect=FileRevisionMismatchError("Blueprint path became a symlink"),
+    ):
+        result = await coordinator.async_restore_blueprint(str(path))
+
+    assert result == {
+        "success": False,
+        "translation_key": "system_error",
+        "translation_kwargs": {"error": "Local blueprint changed; refresh and retry the update"},
+    }
+
+
+@pytest.mark.asyncio
 async def test_async_restore_blueprint_missing(hass, coordinator, mock_makedirs):
     """Test restoration when backup is missing."""
     path = "/config/blueprints/automation/test.yaml"
@@ -450,6 +523,7 @@ async def test_async_restore_blueprint_success(hass, coordinator, tmp_path):
     hass.services.has_service = MagicMock(return_value=True)
     hass.services.async_call = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
+    coordinator._async_save_metadata = AsyncMock()
 
     result = await coordinator.async_restore_blueprint(path)
 
@@ -457,6 +531,7 @@ async def test_async_restore_blueprint_success(hass, coordinator, tmp_path):
     assert result["translation_key"] == "success"
     assert "name: Backup" in (tmp_path / "test.yaml").read_text(encoding="utf-8")
     hass.services.async_call.assert_any_call(DOMAIN_AUTOMATION, "reload")
+    assert coordinator._async_save_metadata.await_count == 2
 
 
 @pytest.mark.asyncio

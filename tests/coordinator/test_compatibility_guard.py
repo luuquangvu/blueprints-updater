@@ -47,6 +47,7 @@ def _prepare_blueprint_entry(coordinator: BlueprintUpdateCoordinator, blueprint_
         "update_blocking_reason": None,
         "name": "Test Blueprint",
         "relative_path": blueprint_path,
+        "local_file_hash": "local-file-hash",
     }
 
 

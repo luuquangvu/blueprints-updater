@@ -21,20 +21,20 @@
   - [Mục lục](#mục-lục)
   - [Tính năng chính](#tính-năng-chính)
   - [Cài đặt](#cài-đặt)
-    - [Cách 1: Sử dụng HACS (Khuyên dùng)](#cách-1-sử-dụng-hacs-khuyên-dùng)
+    - [Cách 1: Sử dụng HACS (Khuyến nghị)](#cách-1-sử-dụng-hacs-khuyến-nghị)
     - [Cách 2: Cài đặt thủ công](#cách-2-cài-đặt-thủ-công)
-  - [Hướng dẫn thiết lập & Cấu hình](#hướng-dẫn-thiết-lập--cấu-hình)
+  - [Thiết lập và cấu hình](#thiết-lập-và-cấu-hình)
   - [Xem thử ngay](#xem-thử-ngay)
-  - [Sao lưu & Phục hồi (Backup & Restore)](#sao-lưu--phục-hồi-backup--restore)
-    - [Kích hoạt Sao lưu](#kích-hoạt-sao-lưu)
-    - [Khôi phục bản Sao lưu](#khôi-phục-bản-sao-lưu)
+  - [Sao lưu và phục hồi](#sao-lưu-và-phục-hồi)
+    - [Kích hoạt sao lưu](#kích-hoạt-sao-lưu)
+    - [Phục hồi bản Sao lưu](#phục-hồi-bản-sao-lưu)
   - [Lớp bảo vệ Nâng cao (Advanced Compatibility Guard)](#lớp-bảo-vệ-nâng-cao-advanced-compatibility-guard)
   - [Làm mới danh sách Blueprint](#làm-mới-danh-sách-blueprint)
-  - [Nhập (Import) Blueprint](#nhập-import-blueprint)
-  - [Yêu cầu](#yêu-cầu)
-  - [Chất lượng Mã nguồn & Bảo mật](#chất-lượng-mã-nguồn--bảo-mật)
+  - [Thêm mới Blueprint](#thêm-mới-blueprint)
+  - [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
+  - [Chất lượng mã nguồn và bảo mật](#chất-lượng-mã-nguồn-và-bảo-mật)
   - [Đóng góp](#đóng-góp)
-  - [Bản quyền](#bản-quyền)
+  - [Giấy phép](#giấy-phép)
   - [Hỗ trợ dự án](#hỗ-trợ-dự-án)
 
 ---
@@ -58,7 +58,7 @@
 
 ## Cài đặt
 
-### Cách 1: Sử dụng HACS (Khuyên dùng)
+### Cách 1: Sử dụng HACS (Khuyến nghị)
 
 [![Add Blueprints Updater to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=luuquangvu&repository=blueprints-updater&category=integration)
 
@@ -77,7 +77,7 @@
 
 ---
 
-## Hướng dẫn thiết lập & Cấu hình
+## Thiết lập và cấu hình
 
 1. Đi tới **Cài đặt (Settings)** > **Thiết bị & Dịch vụ (Devices & Services)**.
 2. Nhấp vào **Thêm bộ tích hợp (Add Integration)** và tìm kiếm **Blueprints Updater**.
@@ -108,11 +108,11 @@ Sau khi nhập xong, **Blueprints Updater** sẽ tự động phát hiện nó t
 
 ---
 
-## Sao lưu & Phục hồi (Backup & Restore)
+## Sao lưu và phục hồi
 
 Blueprints Updater cung cấp một mạng lưới an toàn tích hợp sẵn, cho phép bạn sao lưu các blueprint trước khi chúng được cập nhật và khôi phục chúng nếu cần thiết.
 
-### Kích hoạt Sao lưu
+### Kích hoạt sao lưu
 
 Khi cài đặt bản cập nhật từ bảng điều khiển Home Assistant, bạn sẽ có tùy chọn tích chọn **Backup (Sao lưu)**. Nếu được bật, tiện ích sẽ tự động lưu blueprint hiện tại của bạn thành một tệp sao lưu có đánh số (`.bak.1`, `.bak.2`, v.v.) trước khi ghi đè bằng phiên bản mới.
 
@@ -123,7 +123,7 @@ Khi cài đặt bản cập nhật từ bảng điều khiển Home Assistant, b
 >
 > Trước khi thay thế blueprint hiện tại, tích hợp sẽ xác minh bản sao lưu vừa tạo. Nếu không thể tạo hoặc xác minh bản sao lưu, quá trình cập nhật sẽ dừng lại. Khi khôi phục, tích hợp cũng kiểm tra nội dung YAML có hợp lệ và được mã hóa bằng UTF-8 hay không, đồng thời đối chiếu miền và nguồn của blueprint. Các thao tác khôi phục và cập nhật trên cùng một tệp được thực hiện tuần tự để tránh xung đột.
 
-### Khôi phục bản Sao lưu
+### Phục hồi bản Sao lưu
 
 Nếu bạn phát hiện ra rằng bản blueprint mới cập nhật làm hỏng các automation, script hoặc template hoặc có thay đổi không tương thích, bạn có thể dễ dàng quay về phiên bản trước đó:
 
@@ -161,7 +161,7 @@ Vì Home Assistant không liên tục giám sát tệp hệ thống để tiết
 
 ---
 
-## Nhập (Import) Blueprint
+## Thêm mới Blueprint
 
 Blueprints Updater cung cấp một dịch vụ chuyên dụng để nhập blueprint từ các nguồn bên ngoài trực tiếp vào Home Assistant của bạn.
 
@@ -185,7 +185,7 @@ Hệ thống tự động xác thực nội dung, trích xuất metadata và t�
 
 ---
 
-## Yêu cầu
+## Yêu cầu hệ thống
 
 - **Home Assistant** `>= 2024.12.0`
 - Bộ tích hợp yêu cầu miền `blueprint` và phụ thuộc vào sự sẵn có của `automation`, `script`, `template`.
@@ -200,7 +200,7 @@ blueprint:
 
 ---
 
-## Chất lượng Mã nguồn & Bảo mật
+## Chất lượng mã nguồn và bảo mật
 
 Để duy trì tiêu chuẩn cao về độ tin cậy và an toàn, dự án sử dụng bộ công cụ phát triển và bảo mật tự động hiện đại:
 
@@ -227,11 +227,13 @@ Sự đóng góp từ cộng đồng là yếu tố cốt lõi giúp các dự �
 > Các thư viện phụ thuộc và tiến trình thực thi của dự án được quản lý thông qua `uv`.
 
 - **Nếu bạn tìm thấy lỗi hoặc sự cố**, hãy giúp dự án hoàn thiện hơn bằng cách [mở một issue](https://github.com/luuquangvu/blueprints-updater/issues).
-- **Nếu bạn muốn đóng góp mã nguồn**, hãy Fork kho lưu trữ và tạo Pull Request (đừng quên kiểm tra mã nguồn theo [tiêu chuẩn chung](#chất-lượng-mã-nguồn--bảo-mật) phía trên nhé).
+- **Nếu bạn muốn đóng góp mã nguồn**, hãy Fork kho lưu trữ và tạo Pull Request (đừng quên kiểm tra mã nguồn theo [tiêu chuẩn chung](#chất-lượng-mã-nguồn-và-bảo-mật) phía trên nhé).
 
-## Bản quyền
+## Giấy phép
 
 Dự án được phát hành dưới **Giấy phép MIT**. Xem tệp [LICENSE](LICENSE) để biết thêm thông tin chi tiết.
+
+---
 
 ## Hỗ trợ dự án
 

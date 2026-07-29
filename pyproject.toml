@@ -24,9 +24,6 @@ dev = [
   "ty",
 ]
 
-[tool.uv]
-override-dependencies = ["homeassistant>=2026.7.0"]
-
 [tool.ruff]
 line-length = 100
 target-version = "py313"
@@ -67,6 +64,7 @@ testpaths = ["tests"]
 filterwarnings = [
   "ignore::DeprecationWarning",
   "ignore::pytest.PytestDeprecationWarning",
+  "error::DeprecationWarning:custom_components.blueprints_updater",
 ]
 addopts = [
   "-n",

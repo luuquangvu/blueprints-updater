@@ -181,10 +181,11 @@ async def test_service_handlers(hass: HomeAssistant):
             "path1": {"updatable": True, "remote_content": "...", "last_error": None}
         }
         coordinator_mock.async_install_blueprint = AsyncMock()
-        coordinator_mock.async_reload_services = AsyncMock()
+        coordinator_mock.async_reconcile_reload_services = AsyncMock()
 
         await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {"backup": True}))
         assert coordinator_mock.async_install_blueprint.called
+        coordinator_mock.async_reconcile_reload_services.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
@@ -621,7 +622,7 @@ async def test_async_update_all_handler_continues_on_failure(hass: HomeAssistant
             return
 
         mock_coordinator.async_install_blueprint = AsyncMock(side_effect=mock_install)
-        mock_coordinator.async_reload_services = AsyncMock()
+        mock_coordinator.async_reconcile_reload_services = AsyncMock()
         mock_coordinator.async_request_refresh = AsyncMock()
 
         assert update_all_handler is not None
@@ -629,7 +630,7 @@ async def test_async_update_all_handler_continues_on_failure(hass: HomeAssistant
 
         assert mock_coordinator.async_install_blueprint.call_count == 2
 
-        mock_coordinator.async_reload_services.assert_called_once()
+        mock_coordinator.async_reconcile_reload_services.assert_awaited_once_with()
         mock_coordinator.async_request_refresh.assert_called_once()
 
 

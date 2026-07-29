@@ -141,10 +141,11 @@ async def test_save_metadata_safety(coordinator):
 @pytest.mark.asyncio
 async def test_coordinator_misc(coordinator: BlueprintUpdateCoordinator):
     """Test misc coordinator paths."""
-    coordinator._refresh_lock = MagicMock()
-    coordinator._refresh_lock.locked.return_value = True
     with patch.object(coordinator, "_start_background_refresh") as mock_start:
-        await coordinator._async_background_refresh({})
+        await coordinator._async_background_refresh(
+            {},
+            generation=coordinator._refresh_generation + 1,
+        )
         assert coordinator._background_task is None
         mock_start.assert_not_called()
 
@@ -201,7 +202,7 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
 
     with (
         patch(
-            "custom_components.blueprints_updater.coordinator.get_async_client",
+            "custom_components.blueprints_updater.coordinator.get_guarded_async_client",
             return_value=mock_session,
         ),
         patch(
@@ -252,8 +253,8 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
 
 
 @pytest.mark.asyncio
-async def test_background_refresh_deduplication(hass, coordinator):
-    """Test that multiple refresh requests do not start duplicate background tasks."""
+async def test_background_refresh_replaces_obsolete_generation(hass, coordinator):
+    """A newer local scan replaces, rather than drops, obsolete remote work."""
     blueprints = {
         "path/1": {
             "name": "BP1",
@@ -290,9 +291,10 @@ async def test_background_refresh_deduplication(hass, coordinator):
         await coordinator._async_update_data()
         task2 = coordinator._background_task
 
-        assert task1 is task2
-        assert not task1.done()
-        assert not task1.cancelled()
+        assert task1 is not task2
+        assert task1.cancelled() or task1.cancelling()
+        assert not task2.done()
+        assert not task2.cancelled()
 
         await coordinator.async_shutdown()
 

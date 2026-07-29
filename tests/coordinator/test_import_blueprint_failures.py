@@ -7,6 +7,11 @@ import pytest
 from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.blueprints_updater.const import BLUEPRINTS_DATA_DIR, SourceProviderType
+from custom_components.blueprints_updater.exceptions import FileRevisionMismatchError
+from custom_components.blueprints_updater.file_store import (
+    BlueprintFileStore,
+    FileRevisionPrecondition,
+)
 
 PROVIDER_LOOKUP = "custom_components.blueprints_updater.coordinator.registry.get_provider"
 IMPORT_URL = "https://example.com/bp.yaml"
@@ -251,7 +256,11 @@ async def test_async_import_blueprint_rejects_existing_file_without_source_url(c
             "_parse_provider_response",
             AsyncMock(return_value=IMPORTED_BLUEPRINT),
         ),
-        patch("custom_components.blueprints_updater.coordinator.os.path.exists", return_value=True),
+        patch.object(
+            BlueprintFileStore,
+            "capture_precondition",
+            return_value=FileRevisionPrecondition.existing("existing-hash"),
+        ),
         patch(
             "builtins.open",
             mock_open(read_data=EXISTING_BLUEPRINT),
@@ -261,6 +270,113 @@ async def test_async_import_blueprint_rejects_existing_file_without_source_url(c
         await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
 
     assert err.value.translation_key == "import_path_conflict"
+
+
+@pytest.mark.asyncio
+async def test_import_conflict_inspection_runs_in_executor(coordinator, tmp_path):
+    """Filesystem capture and disk parsing both run outside the event loop."""
+    full_path = str(tmp_path / "name.yaml")
+    coordinator.hass.async_add_executor_job.reset_mock()
+
+    with (
+        patch.object(coordinator, "_is_safe_path", return_value=True),
+        patch.object(
+            BlueprintFileStore,
+            "capture_precondition",
+            return_value=FileRevisionPrecondition.existing("existing-hash"),
+        ) as capture_precondition,
+        patch.object(
+            coordinator,
+            "_read_import_source_url",
+            return_value=IMPORT_URL,
+        ) as read_source_url,
+    ):
+        precondition = await coordinator._check_import_path_conflicts(
+            full_path,
+            "automation/author/name.yaml",
+            IMPORT_URL,
+        )
+
+    assert precondition == FileRevisionPrecondition.existing("existing-hash")
+    coordinator.hass.async_add_executor_job.assert_any_await(
+        capture_precondition,
+        full_path,
+    )
+    coordinator.hass.async_add_executor_job.assert_any_await(
+        read_source_url,
+        full_path,
+    )
+
+
+@pytest.mark.asyncio
+async def test_async_import_blueprint_translates_revision_mismatch(coordinator):
+    """A final-component symlink conflict is exposed as a service validation error."""
+    provider = _provider()
+
+    with (
+        _patched_provider(provider),
+        patch.object(
+            coordinator, "_execute_with_redirect_guard", AsyncMock(return_value=_response())
+        ),
+        patch.object(
+            coordinator,
+            "_parse_provider_response",
+            AsyncMock(return_value=IMPORTED_BLUEPRINT),
+        ),
+        patch.object(
+            BlueprintFileStore,
+            "capture_precondition",
+            side_effect=FileRevisionMismatchError("Blueprint path became a symlink"),
+        ),
+        pytest.raises(ServiceValidationError) as err,
+    ):
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
+
+    assert err.value.translation_key == "import_path_conflict"
+    assert err.value.translation_placeholders == {"existing_url": "automation/author/name.yaml"}
+
+
+@pytest.mark.asyncio
+async def test_async_import_blueprint_allows_symlinked_ancestor(coordinator, tmp_path):
+    """A non-canonical config path with only an ancestor symlink remains importable."""
+    provider = _provider()
+    real_directory = tmp_path / "real"
+    linked_directory = tmp_path / "linked"
+    real_directory.mkdir()
+    linked_directory.symlink_to(real_directory, target_is_directory=True)
+    destination = linked_directory / "name.yaml"
+
+    with (
+        _patched_provider(provider),
+        patch.object(coordinator.hass.config, "path", return_value=str(destination)),
+        patch.object(coordinator, "_is_safe_path", return_value=True),
+        patch.object(
+            coordinator, "_execute_with_redirect_guard", AsyncMock(return_value=_response())
+        ),
+        patch.object(
+            coordinator,
+            "_parse_provider_response",
+            AsyncMock(return_value=IMPORTED_BLUEPRINT),
+        ),
+        patch.object(
+            coordinator,
+            "async_install_blueprint",
+            new_callable=AsyncMock,
+        ) as install_blueprint,
+        patch.object(
+            coordinator,
+            "async_request_refresh",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
+
+    install_blueprint.assert_awaited_once()
+    assert install_blueprint.await_args is not None
+    assert install_blueprint.await_args.args[0] == str(destination)
+    assert install_blueprint.await_args.kwargs["file_precondition"] == (
+        FileRevisionPrecondition.missing()
+    )
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.service import async_register_admin_service
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -25,6 +26,25 @@ def _create_blueprint(hass: HomeAssistant, relative_path: str, content: str) -> 
     full_path.parent.mkdir(parents=True, exist_ok=True)
     full_path.write_text(content, encoding="utf-8")
     return str(full_path)
+
+
+async def _call_restore_for_failure(hass: HomeAssistant, entity_id: str) -> None:
+    """Call restore using the response contract supported by this HA version."""
+    if "supports_response" in inspect.signature(async_register_admin_service).parameters:
+        await hass.services.async_call(
+            DOMAIN,
+            "restore_blueprint",
+            {"entity_id": entity_id, "version": 1},
+            blocking=True,
+            return_response=True,
+        )
+    else:
+        await hass.services.async_call(
+            DOMAIN,
+            "restore_blueprint",
+            {"entity_id": entity_id, "version": 1},
+            blocking=True,
+        )
 
 
 @pytest.mark.asyncio
@@ -169,6 +189,103 @@ async def test_restore_blueprint_service(hass: HomeAssistant, respx_mock) -> Non
 
     restored_content = Path(bp_path).read_text(encoding="utf-8")
     assert "Original" in restored_content
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+@pytest.mark.asyncio
+async def test_restore_service_reports_missing_backup(hass: HomeAssistant) -> None:
+    """Test that restore failures cross the real service boundary safely."""
+    relative_path = "automation/no-backup.yaml"
+    content = (
+        "blueprint:\n"
+        "  name: No Backup\n"
+        "  domain: automation\n"
+        "  source_url: https://example.com/no-backup.yaml\n"
+    )
+    _create_blueprint(hass, relative_path, content)
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={"update_interval": 24, "max_backups": 5},
+        entry_id="missing_backup",
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+        ),
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        unique_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, relative_path)
+        entity_id = er.async_get(hass).async_get_entity_id("update", DOMAIN, unique_id)
+        assert entity_id is not None
+
+        with pytest.raises(ServiceValidationError):
+            await _call_restore_for_failure(hass, entity_id)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+@pytest.mark.asyncio
+async def test_restore_service_translates_preparation_revision_mismatch(
+    hass: HomeAssistant,
+) -> None:
+    """Test actionable handling when the target changes before restore preparation."""
+    relative_path = "automation/revision-mismatch.yaml"
+    content = (
+        "blueprint:\n"
+        "  name: Revision Mismatch\n"
+        "  domain: automation\n"
+        "  source_url: https://example.com/revision-mismatch.yaml\n"
+    )
+    bp_path = Path(_create_blueprint(hass, relative_path, content))
+    Path(f"{bp_path}.bak.1").write_text(content, encoding="utf-8")
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={"update_interval": 24, "max_backups": 5},
+        entry_id="revision_mismatch",
+    )
+    entry.add_to_hass(hass)
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+        ),
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        unique_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, relative_path)
+        entity_id = er.async_get(hass).async_get_entity_id("update", DOMAIN, unique_id)
+        assert entity_id is not None
+
+        bp_path.unlink()
+        bp_path.mkdir()
+
+        try:
+            with pytest.raises(
+                ServiceValidationError,
+                match="Local blueprint changed; refresh and retry the update",
+            ):
+                await _call_restore_for_failure(hass, entity_id)
+        finally:
+            bp_path.rmdir()
+            bp_path.write_text(content, encoding="utf-8")
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()

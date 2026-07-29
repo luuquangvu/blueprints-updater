@@ -29,7 +29,10 @@ from custom_components.blueprints_updater.const import (
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
     BlueprintUpdateEventPayload,
+    RefreshWorkItem,
 )
+from custom_components.blueprints_updater.exceptions import BlueprintRefreshObsoleteError
+from custom_components.blueprints_updater.file_store import FileRevisionPrecondition
 
 
 @pytest.mark.asyncio
@@ -125,6 +128,25 @@ def test_scan_blueprints_skips_non_utf8_file(hass, tmp_path):
     assert list(blueprints) == [str(valid_path)]
 
 
+def test_scan_blueprints_rejects_in_root_symlink_alias(hass, tmp_path):
+    """One physical blueprint cannot be queued twice through a symlink alias."""
+    automation_root = tmp_path / "blueprints" / "automation"
+    automation_root.mkdir(parents=True)
+    target = automation_root / "target.yaml"
+    target.write_text(
+        "blueprint:\n  name: Valid\n  domain: automation\n"
+        "  source_url: https://example.com/valid.yaml\n",
+        encoding="utf-8",
+    )
+    alias = automation_root / "alias.yaml"
+    alias.symlink_to(target)
+    hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+
+    blueprints = BlueprintUpdateCoordinator.scan_blueprints(hass, FILTER_MODE_ALL, [])
+
+    assert list(blueprints) == [str(target)]
+
+
 @pytest.mark.asyncio
 async def test_scan_blueprints_domain_extraction(coordinator, mock_makedirs):
     """Test that domain is extracted correctly from folder structure during scan."""
@@ -205,7 +227,7 @@ async def test_async_fetch_blueprint_force(coordinator, mock_makedirs):
 
     with (
         patch(
-            "custom_components.blueprints_updater.coordinator.get_async_client",
+            "custom_components.blueprints_updater.coordinator.get_guarded_async_client",
             return_value=mock_session,
         ),
         patch.object(coordinator, "_execute_with_redirect_guard", return_value=mock_response),
@@ -340,6 +362,8 @@ async def test_async_update_data_auto_update(mock_translate, coordinator, mock_m
         last_modified=None,
         is_auto_update=True,
         source_url=url,
+        file_precondition=FileRevisionPrecondition.existing("old"),
+        refresh_work=ANY,
     )
 
 
@@ -400,6 +424,106 @@ async def test_async_update_data_auto_update_multiple_sorted(
     call_paths = [call.args[0] for call in coordinator.async_install_blueprint.call_args_list]
     assert set(call_paths) == {"path1", "path2"}
     assert len(call_paths) == 2
+
+
+@pytest.mark.asyncio
+async def test_obsolete_generation_cannot_auto_install(coordinator):
+    """Work from a removed scan generation cannot reach the install boundary."""
+    path = "/config/blueprints/automation/stale.yaml"
+    info = {
+        "name": "Stale",
+        "relative_path": "automation/stale.yaml",
+        "domain": DOMAIN_AUTOMATION,
+        "source_url": "https://example.com/stale.yaml",
+        "local_hash": "local",
+        "local_file_hash": "raw-local",
+    }
+    coordinator._refresh_generation = 2
+    coordinator.data = {}
+    coordinator.async_install_blueprint = AsyncMock()
+
+    handled = await coordinator._handle_auto_update_step(
+        path,
+        info,
+        "blueprint:\n  name: Remote\n",
+        [],
+        [],
+        set(),
+        remote_hash="remote",
+        source_url=info["source_url"],
+        refresh_work=RefreshWorkItem.capture(1, path, info),
+    )
+
+    assert handled is True
+    coordinator.async_install_blueprint.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_install_raises_dedicated_obsolete_refresh_error(coordinator):
+    """The transaction ownership check exposes a distinguishable cancellation."""
+    path = "/config/blueprints/automation/stale-install.yaml"
+    info = {
+        "source_url": "https://example.com/stale-install.yaml",
+        "local_hash": "local",
+        "local_file_hash": "raw-local",
+        "relative_path": "automation/stale-install.yaml",
+    }
+    coordinator._refresh_generation = 2
+
+    with pytest.raises(BlueprintRefreshObsoleteError):
+        await coordinator.async_install_blueprint(
+            path,
+            "blueprint:\n  name: Stale\n",
+            reload_services=False,
+            backup=False,
+            refresh_work=RefreshWorkItem.capture(1, path, info),
+        )
+
+
+def test_refresh_work_item_invalidates_on_revision_change(coordinator) -> None:
+    """One ownership token centralizes every field that makes work current."""
+    path = "/config/blueprints/automation/current.yaml"
+    info = {
+        "source_url": "https://example.com/current.yaml",
+        "local_hash": "semantic-local",
+        "local_file_hash": "raw-local",
+        "relative_path": "automation/current.yaml",
+    }
+    coordinator._refresh_generation = 3
+    coordinator.data = {path: dict(info)}
+    work_item = RefreshWorkItem.capture(3, path, info)
+
+    assert coordinator._is_current_refresh_item(work_item) is True
+
+    coordinator.data[path]["local_file_hash"] = "externally-changed"
+
+    assert coordinator._is_current_refresh_item(work_item) is False
+
+
+@pytest.mark.asyncio
+async def test_background_refresh_broadcasts_once_per_generation(coordinator):
+    """A completed batch emits one coordinator broadcast, not one per blueprint."""
+    blueprints = {
+        f"path-{index}": {
+            "name": f"Blueprint {index}",
+            "relative_path": f"automation/{index}.yaml",
+            "domain": DOMAIN_AUTOMATION,
+            "source_url": f"https://example.com/{index}.yaml",
+            "local_hash": f"hash-{index}",
+        }
+        for index in range(7)
+    }
+    coordinator.data = {path: dict(info) for path, info in blueprints.items()}
+    coordinator._async_update_blueprint_in_place = AsyncMock()
+    coordinator.async_set_updated_data = MagicMock()
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.get_guarded_async_client",
+        return_value=MagicMock(spec=httpx.AsyncClient),
+    ):
+        await coordinator._async_background_refresh(blueprints)
+
+    coordinator.async_set_updated_data.assert_called_once_with(coordinator.data)
 
 
 @pytest.mark.asyncio
@@ -501,7 +625,7 @@ async def test_async_fetch_blueprint_regression_key_error_hash(coordinator, mock
 
     with (
         patch(
-            "custom_components.blueprints_updater.coordinator.get_async_client",
+            "custom_components.blueprints_updater.coordinator.get_guarded_async_client",
             return_value=mock_session,
         ),
         patch.object(coordinator, "_execute_with_redirect_guard", return_value=mock_response),
@@ -746,6 +870,61 @@ async def test_async_install_blueprint_backup(hass, coordinator, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_committed_install_records_and_retries_pending_reload(hass, coordinator, tmp_path):
+    """A reload failure cannot erase commit state and is retried durably."""
+    path = tmp_path / "test.yaml"
+    original = "blueprint:\n  name: Original\n  domain: automation\n"
+    replacement = "blueprint:\n  name: Replacement\n  domain: automation\n"
+    path.write_text(original, encoding="utf-8")
+    coordinator.data[str(path)] = {
+        "name": "Original",
+        "relative_path": "automation/test.yaml",
+        "domain": DOMAIN_AUTOMATION,
+        "source_url": None,
+        "local_hash": coordinator._hash_content(original),
+        "local_file_hash": coordinator._hash_content(original),
+    }
+    hass.services.has_service = MagicMock(return_value=True)
+    hass.services.async_call = AsyncMock(side_effect=HomeAssistantError("reload failed"))
+
+    await coordinator.async_install_blueprint(
+        str(path),
+        replacement,
+        reload_services=True,
+        backup=False,
+    )
+
+    assert path.read_text(encoding="utf-8") == replacement
+    assert coordinator.data[str(path)]["updatable"] is False
+    assert coordinator.data[str(path)]["reload_pending"] is True
+    assert coordinator._pending_reload_domains == {DOMAIN_AUTOMATION}
+
+    hass.services.async_call = AsyncMock()
+    await coordinator._async_retry_pending_reloads()
+
+    assert not coordinator._pending_reload_domains
+    assert coordinator.data[str(path)]["reload_pending"] is False
+
+
+@pytest.mark.asyncio
+async def test_reconcile_keeps_unavailable_reload_service_pending(coordinator):
+    """A missing reload service remains pending for a later retry."""
+    path = "/config/blueprints/automation/test.yaml"
+    coordinator.data = {path: {"domain": DOMAIN_AUTOMATION}}
+    coordinator.hass.services.has_service = MagicMock(return_value=False)
+    coordinator.hass.services.async_call = AsyncMock()
+
+    unreloaded = await coordinator.async_reconcile_reload_services([DOMAIN_AUTOMATION])
+
+    assert unreloaded == {DOMAIN_AUTOMATION}
+    assert coordinator._pending_reload_domains == {DOMAIN_AUTOMATION}
+    assert coordinator._persisted_pending_reload_domains == {DOMAIN_AUTOMATION}
+    assert coordinator.data[path]["reload_pending"] is True
+    coordinator.hass.services.async_call.assert_not_awaited()
+    assert coordinator._store.async_save.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_async_install_blueprint_domain_normalization(hass, coordinator, mock_makedirs):
     """Test that async_install_blueprint correctly normalizes the domain."""
     path = "/config/blueprints/script/test.yaml"
@@ -845,7 +1024,8 @@ async def test_async_install_blueprint_reload_fallback(hass, coordinator, mock_m
     ):
         await coordinator.async_install_blueprint(path, content, reload_services=True)
     coordinator.async_reload_services.assert_called_once_with([DOMAIN_AUTOMATION])
-    coordinator._async_save_metadata.assert_not_called()
+    assert coordinator._async_save_metadata.await_count == 2
+    coordinator._async_save_metadata.assert_awaited_with(force=True)
 
     coordinator.async_reload_services.reset_mock()
     coordinator._async_save_metadata.reset_mock()
@@ -1145,6 +1325,7 @@ async def test_async_update_blueprint_304_auto_update(coordinator, mock_makedirs
             "relative_path": "automation/test.yaml",
             "source_url": source_url,
             "local_hash": "old_hash",
+            "local_file_hash": "old_file_hash",
             "updatable": True,
             "remote_hash": "new_hash",
             "etag": "stored_etag",
@@ -1155,11 +1336,13 @@ async def test_async_update_blueprint_304_auto_update(coordinator, mock_makedirs
     mock_response_304 = MagicMock(spec=httpx.Response)
     mock_response_304.status_code = HTTPStatus.NOT_MODIFIED
     mock_response_304.headers = {"ETag": "stored_etag"}
+    mock_response_304.url = httpx.URL(source_url)
 
     mock_response_200 = MagicMock(spec=httpx.Response)
     mock_response_200.status_code = HTTPStatus.OK
     mock_response_200.headers = {"ETag": "stored_etag", "Content-Type": "text/yaml"}
     mock_response_200.text = "blueprint:\n  name: Test\n  source_url: https://url/test.yaml"
+    mock_response_200.url = httpx.URL(source_url)
     mock_response_200.raise_for_status = MagicMock()
 
     mock_session = MagicMock(spec=httpx.AsyncClient)
@@ -1201,6 +1384,7 @@ async def test_async_update_blueprint_304_last_modified(coordinator, mock_makedi
             "relative_path": "automation/test.yaml",
             "source_url": source_url,
             "local_hash": "old_hash",
+            "local_file_hash": "old_file_hash",
             "updatable": True,
             "remote_hash": "new_hash",
             "last_modified": "stored_mod",
@@ -1211,11 +1395,13 @@ async def test_async_update_blueprint_304_last_modified(coordinator, mock_makedi
     mock_response_304 = MagicMock(spec=httpx.Response)
     mock_response_304.status_code = HTTPStatus.NOT_MODIFIED
     mock_response_304.headers = {"Last-Modified": "stored_mod"}
+    mock_response_304.url = httpx.URL(source_url)
 
     mock_response_200 = MagicMock(spec=httpx.Response)
     mock_response_200.status_code = HTTPStatus.OK
     mock_response_200.headers = {"Last-Modified": "stored_mod", "Content-Type": "text/yaml"}
     mock_response_200.text = "blueprint:\n  name: Test\n  source_url: https://url/test.yaml"
+    mock_response_200.url = httpx.URL(source_url)
     mock_response_200.raise_for_status = MagicMock()
 
     mock_session = MagicMock(spec=httpx.AsyncClient)
@@ -1485,6 +1671,30 @@ async def test_async_handle_notifications_multiple_domains(coordinator, mock_mak
     coordinator.hass.services.async_call.assert_any_call(DOMAIN_SCRIPT, "reload")
 
 
+@pytest.mark.parametrize("domains", [[], set()], ids=["list", "set"])
+@pytest.mark.asyncio
+async def test_reconcile_empty_domains_is_noop(coordinator, domains):
+    """An explicit empty domain collection never means reload every domain."""
+    coord: Any = coordinator
+    coord._pending_reload_domains = {DOMAIN_SCRIPT}
+    coord.data = {
+        "script/test.yaml": {
+            "domain": DOMAIN_SCRIPT,
+            "reload_pending": False,
+        }
+    }
+    coord.async_reload_services = AsyncMock()
+    coord._async_save_metadata = AsyncMock()
+
+    result = await coord.async_reconcile_reload_services(domains)
+
+    assert result == set()
+    assert coord._pending_reload_domains == {DOMAIN_SCRIPT}
+    assert coord.data["script/test.yaml"]["reload_pending"] is False
+    coord.async_reload_services.assert_not_awaited()
+    coord._async_save_metadata.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_async_install_blueprint_fires_event(hass, coordinator, mock_makedirs):
     """Test that async_install_blueprint fires the expected event."""
@@ -1607,14 +1817,18 @@ async def test_async_fetch_blueprint_returns_without_data_or_source_url(coordina
     """Verify fetch exits before networking when path data or source_url is missing."""
     coord: Any = coordinator
 
-    with patch("custom_components.blueprints_updater.coordinator.get_async_client") as mock_client:
+    with patch(
+        "custom_components.blueprints_updater.coordinator.get_guarded_async_client"
+    ) as mock_client:
         await coord.async_fetch_blueprint("/missing.yaml", force=True)
         mock_client.assert_not_called()
 
     path = "/config/blueprints/automation/no_source.yaml"
     coord.data = {path: {"name": "No Source"}}
 
-    with patch("custom_components.blueprints_updater.coordinator.get_async_client") as mock_client:
+    with patch(
+        "custom_components.blueprints_updater.coordinator.get_guarded_async_client"
+    ) as mock_client:
         await coord.async_fetch_blueprint(path, force=True)
         mock_client.assert_not_called()
 
@@ -1685,7 +1899,7 @@ async def test_async_fetch_diff_content_rejects_invalid_remote_yaml(coordinator)
 
     with (
         patch(
-            "custom_components.blueprints_updater.coordinator.get_async_client",
+            "custom_components.blueprints_updater.coordinator.get_guarded_async_client",
             return_value=MagicMock(),
         ),
         patch.object(coord, "_is_safe_url", AsyncMock(return_value=True)),
@@ -1756,6 +1970,7 @@ async def test_handle_auto_update_step_preserves_failure_state(coordinator):
             "name": "Auto Fail",
             "relative_path": "automation/auto_fail.yaml",
             "domain": DOMAIN_AUTOMATION,
+            "local_file_hash": "local-file-hash",
         },
         "remote content",
         [],
@@ -1775,3 +1990,38 @@ async def test_handle_auto_update_step_preserves_failure_state(coordinator):
     assert coord.data[path]["remote_content"] == "remote content"
     assert coord.data[path]["update_blocking_reason"] == BlueprintBlockingReason.SYSTEM_ERROR
     assert coord.data[path]["auto_update_last_error"] == "install exploded"
+
+
+@pytest.mark.asyncio
+async def test_handle_auto_update_step_ignores_obsolete_install(coordinator):
+    """Ownership loss during installation does not become an auto-update failure."""
+    coord: Any = coordinator
+    path = "/config/blueprints/automation/obsolete.yaml"
+    existing_state = {
+        "update_blocking_reason": None,
+        "auto_update_last_error": "previous error",
+    }
+    coord.data = {path: dict(existing_state)}
+    coord.async_install_blueprint = AsyncMock(side_effect=BlueprintRefreshObsoleteError)
+    results_to_notify: list[str] = []
+    updated_domains: set[str] = set()
+
+    result = await coord._handle_auto_update_step(
+        path,
+        {
+            "name": "Obsolete",
+            "relative_path": "automation/obsolete.yaml",
+            "domain": DOMAIN_AUTOMATION,
+            "local_file_hash": "local-file-hash",
+        },
+        "remote content",
+        [],
+        results_to_notify,
+        updated_domains,
+        remote_hash="remote-hash",
+    )
+
+    assert result is True
+    assert coord.data[path] == existing_state
+    assert not results_to_notify
+    assert not updated_domains

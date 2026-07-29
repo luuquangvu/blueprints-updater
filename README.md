@@ -23,16 +23,16 @@
   - [Installation](#installation)
     - [Option 1: Using HACS (Recommended)](#option-1-using-hacs-recommended)
     - [Option 2: Manual Installation](#option-2-manual-installation)
-  - [Setup & Configuration](#setup--configuration)
+  - [Setup and Configuration](#setup-and-configuration)
   - [See it in Action](#see-it-in-action)
-  - [Backup & Restore](#backup--restore)
+  - [Backup and Restore](#backup-and-restore)
     - [Enabling Backups](#enabling-backups)
     - [Restoring a Backup](#restoring-a-backup)
   - [Advanced Compatibility Guard](#advanced-compatibility-guard)
   - [Refreshing the Blueprint List](#refreshing-the-blueprint-list)
   - [Importing Blueprints](#importing-blueprints)
   - [Requirements](#requirements)
-  - [Code Quality & Security](#code-quality--security)
+  - [Code Quality and Security](#code-quality-and-security)
   - [Contributing](#contributing)
   - [License](#license)
   - [Support the Project](#support-the-project)
@@ -77,7 +77,7 @@
 
 ---
 
-## Setup & Configuration
+## Setup and Configuration
 
 1. Go to **Settings** > **Devices & Services**.
 2. Click **Add Integration** and search for **Blueprints Updater**.
@@ -108,7 +108,7 @@ Once imported, **Blueprints Updater** will detect it on the next scheduled scan.
 
 ---
 
-## Backup & Restore
+## Backup and Restore
 
 Blueprints Updater provides a built-in safety net by allowing you to back up blueprints before they are updated and restore them if needed.
 
@@ -200,7 +200,7 @@ blueprint:
 
 ---
 
-## Code Quality & Security
+## Code Quality and Security
 
 To ensure long-term reliability and stability, this project utilizes a modern stack of automated development and security tools:
 
@@ -227,11 +227,13 @@ Contributions are what make the open-source community such an amazing place to l
 > Project dependencies and execution are managed via `uv`.
 
 - **If you find a bug**, please help us improve by [opening an issue](https://github.com/luuquangvu/blueprints-updater/issues).
-- **If you'd like to contribute**, feel free to fork the repo and create a Pull Request (please ensure your code passes the [quality checks](#code-quality--security) mentioned above).
+- **If you'd like to contribute**, feel free to fork the repo and create a Pull Request (please ensure your code passes the [quality checks](#code-quality-and-security) mentioned above).
 
 ## License
 
 Distributed under the **MIT License**. See [LICENSE](LICENSE) for more information.
+
+---
 
 ## Support the Project
 

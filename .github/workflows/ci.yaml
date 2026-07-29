@@ -12,6 +12,8 @@ on:
       - "pyproject.toml"
       - "uv.lock"
   pull_request: *ci_trigger
+  schedule:
+    - cron: "0 12 * * *"
   workflow_dispatch:
 
 permissions:
@@ -55,6 +57,9 @@ jobs:
     runs-on: ubuntu-latest
     name: "Setup Compatibility Matrix"
     outputs:
+      absolute_latest_ha: ${{ steps.set-matrix.outputs.absolute_latest_ha }}
+      matched_latest_ha: ${{ steps.set-matrix.outputs.matched_latest_ha }}
+      matched_latest_harness: ${{ steps.set-matrix.outputs.matched_latest_harness }}
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Checkout repository
@@ -62,56 +67,92 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
       - name: Set matrix
         id: set-matrix
         shell: bash
         run: |
           set -euo pipefail
 
-          LATEST_HA=$(curl -s -f --max-time 20 --retry 3 https://pypi.org/pypi/homeassistant/json | jq -r .info.version 2>/dev/null || echo "null")
+          LATEST_PAIR_JSON=$(uv run --no-project --with orjson --with packaging \
+            python tools/validate_compatibility.py --resolve-latest-json)
+          MATCHED_LATEST_HA=$(jq -r .ha_ver <<< "$LATEST_PAIR_JSON")
+          MATCHED_LATEST_HARNESS=$(jq -r .harness_ver <<< "$LATEST_PAIR_JSON")
+          ABSOLUTE_LATEST_HA=$(jq -r .absolute_latest_ha_ver <<< "$LATEST_PAIR_JSON")
 
-          if [ "$LATEST_HA" = "null" ]; then
-            echo "::error::Failed to fetch latest Home Assistant version"
+          if [[ "$MATCHED_LATEST_HA" = "null" || "$MATCHED_LATEST_HARNESS" = "null" || "$ABSOLUTE_LATEST_HA" = "null" ]]; then
+            echo "::error::Failed to resolve latest matched Home Assistant/test harness pair"
             exit 1
           fi
 
-          if [[ ! "$LATEST_HA" =~ ^[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*$ ]]; then
-            echo "::error::Invalid Home Assistant version format: $LATEST_HA"
-            exit 1
-          fi
+          for version in "$MATCHED_LATEST_HA" "$MATCHED_LATEST_HARNESS" "$ABSOLUTE_LATEST_HA"; do
+            if [[ ! "$version" =~ ^[a-zA-Z0-9]+(\.[a-zA-Z0-9]+)*$ ]]; then
+              echo "::error::Invalid compatibility version format: $version"
+              exit 1
+            fi
+          done
 
           jq -e '
             (type == "array") and all(.[]; (
               (type == "object") and
               (.ha_version | type == "string") and
+              (.harness_version | type == "string") and
               (.python_version | type == "string") and
               (.ha_version == "latest" or (.ha_version | test("^[a-zA-Z0-9]+(\\.[a-zA-Z0-9]+)*$")))
+              and (.harness_version == "latest" or (.harness_version | test("^[a-zA-Z0-9]+(\\.[a-zA-Z0-9]+)*$")))
+              and ((.ha_version == "latest") == (.harness_version == "latest"))
               and (.python_version | test("^[a-zA-Z0-9]+(\\.[a-zA-Z0-9]+)*$"))
             ))
           ' tools/compatibility_matrix.json >/dev/null
 
-          MATRIX_JSON=$(jq -c --arg latest "$LATEST_HA" '
+          MATRIX_JSON=$(jq -c \
+            --arg latest_ha "$MATCHED_LATEST_HA" \
+            --arg latest_harness "$MATCHED_LATEST_HARNESS" '
             map(
               (if .ha_version == "latest" then
                 . + {
-                  ha_version: ("latest (" + $latest + ")"),
-                  ha_real_version: $latest
+                  ha_version: ("latest matched (" + $latest_ha + ")"),
+                  ha_real_version: $latest_ha,
+                  harness_real_version: $latest_harness
                 }
               else
                 . + {
-                  ha_real_version: .ha_version
+                  ha_real_version: .ha_version,
+                  harness_real_version: .harness_version
                 }
               end
             )
             )
             | {include: .}
           ' tools/compatibility_matrix.json)
-          echo "matrix=$MATRIX_JSON" >> $GITHUB_OUTPUT
+          echo "absolute_latest_ha=$ABSOLUTE_LATEST_HA" >> "$GITHUB_OUTPUT"
+          echo "matched_latest_ha=$MATCHED_LATEST_HA" >> "$GITHUB_OUTPUT"
+          echo "matched_latest_harness=$MATCHED_LATEST_HARNESS" >> "$GITHUB_OUTPUT"
+          echo "matrix=$MATRIX_JSON" >> "$GITHUB_OUTPUT"
+
+  latest-harness-canary:
+    needs: setup-matrix
+    runs-on: ubuntu-latest
+    name: "Latest HA/Harness Alignment Canary"
+    steps:
+      - name: Report harness publication lag
+        env:
+          ABSOLUTE_LATEST_HA: ${{ needs.setup-matrix.outputs.absolute_latest_ha }}
+          MATCHED_LATEST_HA: ${{ needs.setup-matrix.outputs.matched_latest_ha }}
+          MATCHED_LATEST_HARNESS: ${{ needs.setup-matrix.outputs.matched_latest_harness }}
+        run: |
+          if [[ "$ABSOLUTE_LATEST_HA" == "$MATCHED_LATEST_HA" ]]; then
+            echo "Latest Home Assistant $ABSOLUTE_LATEST_HA is matched by harness $MATCHED_LATEST_HARNESS"
+            exit 0
+          fi
+          echo "::warning title=Home Assistant harness lag::Newest HA $ABSOLUTE_LATEST_HA is unmatched; compatibility gates use HA $MATCHED_LATEST_HA with harness $MATCHED_LATEST_HARNESS"
 
   compatibility:
     needs: setup-matrix
     runs-on: ubuntu-latest
-    name: ${{ matrix.ha_version && format('Compatibility ({0}, {1})', matrix.ha_version, matrix.python_version) || 'Compatibility' }}
+    name: ${{ matrix.ha_version && format('Compatibility ({0}, harness {1}, Python {2})', matrix.ha_version, matrix.harness_real_version, matrix.python_version) || 'Compatibility' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup-matrix.outputs.matrix) }}
@@ -129,6 +170,7 @@ jobs:
         shell: bash
         env:
           MATRIX_HA_REAL_VERSION: ${{ matrix.ha_real_version }}
+          MATRIX_HARNESS_REAL_VERSION: ${{ matrix.harness_real_version }}
           MATRIX_PYTHON_VERSION: ${{ matrix.python_version }}
         run: |
           set -euo pipefail
@@ -140,12 +182,22 @@ jobs:
             "pytest"
             "pytest-asyncio"
             "pytest-cov"
-            "pytest-homeassistant-custom-component"
+            "pytest-homeassistant-custom-component==$MATRIX_HARNESS_REAL_VERSION"
             "pytest-timeout"
             "pytest-xdist"
           )
-          echo "$HA_SPEC" > overrides.txt
-          uv --no-config pip install --overrides overrides.txt --python .venv/bin/python "$HA_SPEC" "${REQUIRED_TEST_DEPS[@]}"
+          uv --no-config pip install --prerelease allow --python .venv/bin/python "$HA_SPEC" "${REQUIRED_TEST_DEPS[@]}"
+
+      - name: Verify Home Assistant/test harness pair
+        env:
+          MATRIX_HA_REAL_VERSION: ${{ matrix.ha_real_version }}
+          MATRIX_HARNESS_REAL_VERSION: ${{ matrix.harness_real_version }}
+        run: >-
+          uv run --no-project --with orjson --with packaging
+          python tools/validate_compatibility.py
+          --verify-pair-python .venv/bin/python
+          --expected-ha "$MATRIX_HA_REAL_VERSION"
+          --expected-harness "$MATRIX_HARNESS_REAL_VERSION"
 
       - name: Run Pytest
         run: uv run --no-project --python .venv/bin/python pytest --no-cov

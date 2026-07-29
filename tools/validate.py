@@ -38,12 +38,43 @@ _PYTEST_STEP_TIMEOUT_SECONDS = 600
 _VALIDATION_STEP_TIMEOUT_SECONDS = 300
 
 _PACKAGE_NORM_PATTERN = re.compile(r"[._-]+")
+_HA_PACKAGE = "homeassistant"
+_TEST_HARNESS_PACKAGE = "pytest-homeassistant-custom-component"
 
 
 def normalize_package_name(package_name: str) -> str:
     """Normalize a package name to its canonical base form."""
     base_name = package_name.split("[", 1)[0].split(";", 1)[0].split("=", 1)[0].strip()
     return _PACKAGE_NORM_PATTERN.sub("-", base_name).lower()
+
+
+def exact_homeassistant_requirement(requirements: Any, source_name: str) -> str:
+    """Return one exact Home Assistant requirement from package metadata."""
+    if not isinstance(requirements, list):
+        raise ValueError(f"{source_name} metadata has no requires_dist list")
+    matches: list[Requirement] = []
+    for raw_requirement in requirements:
+        if not isinstance(raw_requirement, str):
+            continue
+        try:
+            requirement = Requirement(raw_requirement)
+        except InvalidRequirement:
+            continue
+        if normalize_package_name(requirement.name) == _HA_PACKAGE:
+            matches.append(requirement)
+    if len(matches) != 1:
+        raise ValueError(f"{source_name} must declare exactly one Home Assistant requirement")
+    specifiers = list(matches[0].specifier)
+    if len(specifiers) != 1 or specifiers[0].operator != "==" or "*" in specifiers[0].version:
+        raise ValueError(f"{source_name} must pin Home Assistant with one exact version")
+    required_version = specifiers[0].version
+    try:
+        Version(required_version)
+    except InvalidVersion as err:
+        raise ValueError(
+            f"{source_name} has invalid Home Assistant version {required_version!r}"
+        ) from err
+    return required_version
 
 
 def _format_cmd(cmd_val: object) -> str:
@@ -667,6 +698,38 @@ def _versions_differ(installed: str, required: str) -> bool:
         return installed != required
 
 
+def _check_local_ha_harness_alignment() -> None:
+    """Fail validation when the local harness does not target installed Home Assistant."""
+    command_label = "check local homeassistant/test harness alignment"
+    print(f"STEP_START: {command_label}", flush=True)
+    try:
+        installed_ha = md.version(_HA_PACKAGE)
+        installed_harness = md.version(_TEST_HARNESS_PACKAGE)
+        harness_required_ha = exact_homeassistant_requirement(
+            md.requires(_TEST_HARNESS_PACKAGE),
+            f"installed {_TEST_HARNESS_PACKAGE} {installed_harness}",
+        )
+    except (md.PackageNotFoundError, ValueError) as err:
+        print(f"HARNESS_MISMATCH: {err}", flush=True)
+        raise subprocess.CalledProcessError(1, command_label) from err
+
+    if _versions_differ(installed_ha, harness_required_ha):
+        print(
+            f"HARNESS_MISMATCH: installed {_TEST_HARNESS_PACKAGE} "
+            f"{installed_harness} requires Home Assistant {harness_required_ha}, "
+            f"but the local environment has {installed_ha}",
+            flush=True,
+        )
+        raise subprocess.CalledProcessError(1, command_label)
+
+    print(
+        f"STEP_INFO: local Home Assistant {installed_ha} matches "
+        f"{_TEST_HARNESS_PACKAGE} {installed_harness}",
+        flush=True,
+    )
+    print(f"STEP_OK: {command_label}", flush=True)
+
+
 def _constraint_drift(
     project_packages: set[str],
     required_constraints: Mapping[str, str],
@@ -784,6 +847,7 @@ def _run_dependency_steps(repo_root: str) -> None:
         run_check=_run_uv_sync_check,
         run_repair=_repair_uv_sync,
     )
+    _check_local_ha_harness_alignment()
     _check_and_sync_ha_constraints(repo_root)
     _run_sync_repair_step(
         repo_root,

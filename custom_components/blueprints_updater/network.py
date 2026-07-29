@@ -35,6 +35,7 @@ _IDNA_URL_TEMPLATE = httpx.URL("https://placeholder.invalid/")
 _MAX_CONNECTIONS = 100
 _MAX_KEEPALIVE_CONNECTIONS = 20
 _KEEPALIVE_EXPIRY = 5.0
+_MIN_CONNECT_ATTEMPT_TIMEOUT = 0.5
 
 
 @contextlib.contextmanager
@@ -158,19 +159,31 @@ class SafeAsyncNetworkBackend(httpcore.AsyncNetworkBackend):
             raise httpcore.ConnectError(f"Unsafe or unresolvable destination: {host}")
 
         last_error: Exception | None = None
-        for address in addresses:
+        for index, address in enumerate(addresses):
             remaining_timeout = None if deadline is None else deadline - time.monotonic()
             if remaining_timeout is not None and remaining_timeout <= 0:
                 break
+            remaining_addresses = len(addresses) - index
+            attempt_timeout = (
+                None
+                if remaining_timeout is None
+                else min(
+                    remaining_timeout,
+                    max(
+                        _MIN_CONNECT_ATTEMPT_TIMEOUT,
+                        remaining_timeout / remaining_addresses,
+                    ),
+                )
+            )
             try:
                 return await self._backend.connect_tcp(
                     address,
                     port,
-                    timeout=remaining_timeout,
+                    timeout=attempt_timeout,
                     local_address=local_address,
                     socket_options=socket_options,
                 )
-            except httpcore.ConnectError as err:
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as err:
                 last_error = err
 
         raise httpcore.ConnectError(f"Unable to connect to validated destination: {host}") from (

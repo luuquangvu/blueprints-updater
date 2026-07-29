@@ -260,6 +260,58 @@ async def test_is_safe_url_caches_canonical_idna_hostname(coordinator):
     coordinator._perform_safe_hostname_check.assert_awaited_once_with("xn--bcher-kva.com")
 
 
+@pytest.mark.asyncio
+async def test_background_refresh_clears_inflight_hostname_result(coordinator):
+    """A refresh clears DNS results that began before cache invalidation."""
+
+    class _NotifyingLock:
+        """An async lock that exposes when refresh owns it."""
+
+        def __init__(self) -> None:
+            """Initialize the lock and acquisition signal."""
+            self._lock = asyncio.Lock()
+            self.entered = asyncio.Event()
+
+        async def __aenter__(self) -> "_NotifyingLock":
+            """Acquire the lock and signal ownership."""
+            await self._lock.acquire()
+            self.entered.set()
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            """Release the lock."""
+            self._lock.release()
+
+    lookup_started = asyncio.Event()
+    finish_lookup = asyncio.Event()
+
+    async def _delayed_hostname_check(_hostname: str) -> bool:
+        """Hold a DNS result until refresh begins invalidating the cache."""
+        lookup_started.set()
+        await finish_lookup.wait()
+        return True
+
+    coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
+    coordinator._perform_safe_hostname_check = AsyncMock(side_effect=_delayed_hostname_check)
+    refresh_lock = _NotifyingLock()
+    coordinator._refresh_lock = refresh_lock
+
+    lookup_task = asyncio.create_task(
+        coordinator._is_safe_url("https://example.com/blueprint.yaml")
+    )
+    await lookup_started.wait()
+    refresh_task = asyncio.create_task(
+        coordinator._async_background_refresh({}, coordinator._refresh_generation)
+    )
+    await refresh_lock.entered.wait()
+
+    finish_lookup.set()
+    assert await lookup_task
+    await refresh_task
+
+    assert coordinator._safe_hostname_cache == {}
+
+
 def test_get_validated_filter_mode_normalization():
     """Test that filter mode is normalized (lowercase and stripped)."""
     assert get_validated_filter_mode("  All  ") == "all"

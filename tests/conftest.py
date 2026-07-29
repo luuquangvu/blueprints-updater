@@ -44,9 +44,15 @@ def mock_storage():
 def mock_makedirs():
     """Mock legacy file writes for tests that use synthetic /config paths."""
 
-    def _mock_install(file_path, content, max_backups, create_backup):
+    def _mock_install(
+        file_path,
+        content,
+        max_backups,
+        create_backup,
+        precondition=None,
+    ):
         """Simulate a completed file-store install through existing patched I/O."""
-        del create_backup
+        del create_backup, precondition
         temp_path = f"{file_path}.tmp"
         try:
             with open(temp_path, "w", encoding="utf-8") as file:

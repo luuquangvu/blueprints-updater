@@ -2,7 +2,6 @@
 
 from datetime import timedelta
 from http import HTTPStatus
-from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -14,12 +13,14 @@ from custom_components.blueprints_updater.const import (
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
-from .protocols import BlueprintCoordinatorProtocol
 from .utils import mock_bounded_response
 
 
 @pytest.fixture
-def coordinator(hass) -> BlueprintCoordinatorProtocol:
+def coordinator(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> BlueprintUpdateCoordinator:
     """Fixture for BlueprintUpdateCoordinator."""
     entry = MagicMock()
     entry.entry_id = "test_entry"
@@ -30,29 +31,30 @@ def coordinator(hass) -> BlueprintCoordinatorProtocol:
         "homeassistant.helpers.update_coordinator.DataUpdateCoordinator.__init__",
         return_value=None,
     ):
-        coord = cast(
-            BlueprintCoordinatorProtocol,
-            BlueprintUpdateCoordinator(
-                hass,
-                entry,
-                timedelta(hours=24),
-            ),
+        coord = BlueprintUpdateCoordinator(
+            hass,
+            entry,
+            timedelta(hours=24),
         )
-        coord.hass = hass
-        coord.data = {}
-        coord_any = cast(Any, coord)
-        coord_any.async_set_updated_data = MagicMock(return_value=None)
-        coord_any.setup_complete = True
-        coord_any._is_safe_path = MagicMock(return_value=True)
-        coord_any._is_safe_url = AsyncMock(return_value=True)
-
-        coord_any._async_get_bounded_response = AsyncMock(side_effect=mock_bounded_response)
+        monkeypatch.setattr(
+            coord,
+            "async_set_updated_data",
+            MagicMock(return_value=None),
+        )
+        coord.setup_complete = True
+        monkeypatch.setattr(coord, "_is_safe_path", MagicMock(return_value=True))
+        monkeypatch.setattr(coord, "_is_safe_url", AsyncMock(return_value=True))
+        monkeypatch.setattr(
+            coord,
+            "_async_get_bounded_response",
+            AsyncMock(side_effect=mock_bounded_response),
+        )
         return coord
 
 
 @pytest.mark.asyncio
 async def test_304_response_preserves_updatable_status(
-    hass: HomeAssistant, coordinator: BlueprintCoordinatorProtocol
+    hass: HomeAssistant, coordinator: BlueprintUpdateCoordinator
 ):
     """Test that a 304 response doesn't flip 'Update available' back to 'Up to date'."""
     path = "/config/blueprints/test.yaml"
@@ -107,7 +109,7 @@ async def test_304_response_preserves_updatable_status(
 
 @pytest.mark.asyncio
 async def test_persistence_of_remote_hashes(
-    hass: HomeAssistant, coordinator: BlueprintCoordinatorProtocol
+    hass: HomeAssistant, coordinator: BlueprintUpdateCoordinator
 ):
     """Test that remote hashes are correctly saved and restored."""
     path = "/config/blueprints/test.yaml"
@@ -147,7 +149,7 @@ async def test_persistence_of_remote_hashes(
 
 @pytest.mark.asyncio
 async def test_etag_migration_forces_download(
-    hass: HomeAssistant, coordinator: BlueprintCoordinatorProtocol
+    hass: HomeAssistant, coordinator: BlueprintUpdateCoordinator
 ):
     """Test that if remote_hash is missing from persisted data, the ETag is ignored."""
     path = "/config/blueprints/test.yaml"

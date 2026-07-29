@@ -1,8 +1,9 @@
 """Test the initialization of the integration."""
 
 import socket
+from datetime import timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -13,6 +14,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
+    DOMAIN_AUTOMATION,
+    DOMAIN_SCRIPT,
+    DOMAIN_TEMPLATE,
+    IntegrationService,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
@@ -43,25 +48,45 @@ async def test_setup_integration(hass: HomeAssistant) -> None:
     assert DOMAIN in hass.data
     assert "coordinators" in hass.data[DOMAIN]
     assert entry.entry_id in hass.data[DOMAIN]["coordinators"]
+    for service in IntegrationService:
+        assert hass.services.has_service(DOMAIN, service)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.entry_id not in hass.data[DOMAIN]["coordinators"]
+    for service in IntegrationService:
+        assert not hass.services.has_service(DOMAIN, service)
 
 
+@pytest.mark.parametrize(
+    "blueprint_domain",
+    [DOMAIN_AUTOMATION, DOMAIN_SCRIPT, DOMAIN_TEMPLATE],
+)
 @pytest.mark.asyncio
-async def test_full_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
+async def test_full_update_lifecycle(
+    hass: HomeAssistant,
+    respx_mock,
+    blueprint_domain: str,
+) -> None:
     """Test the full lifecycle from discovery to update via entity service."""
     blueprints_dir = Path(hass.config.path("blueprints"))
-    relative_path = "automation/lifecycle.yaml"
+    relative_path = f"{blueprint_domain}/lifecycle.yaml"
     bp_path = blueprints_dir / relative_path
     bp_path.parent.mkdir(parents=True, exist_ok=True)
 
-    content = "blueprint:\n  name: Life\n  domain: automation\n  source_url: https://example.com/life.yaml\n"
+    source_url = f"https://example.com/{blueprint_domain}-life.yaml"
+    content = (
+        f"blueprint:\n  name: Life\n  domain: {blueprint_domain}\n  source_url: {source_url}\n"
+    )
     bp_path.write_text(content, encoding="utf-8")
 
-    new_content = "blueprint:\n  name: Life Updated\n  domain: automation\n  source_url: https://example.com/life.yaml\n"
-    respx_mock.get("https://example.com/life.yaml").mock(
+    new_content = (
+        "blueprint:\n"
+        "  name: Life Updated\n"
+        f"  domain: {blueprint_domain}\n"
+        f"  source_url: {source_url}\n"
+    )
+    respx_mock.get(source_url).mock(
         return_value=httpx.Response(200, content=new_content, headers={"Content-Type": "text/yaml"})
     )
 
@@ -103,6 +128,100 @@ async def test_full_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
     state = hass.states.get(entity_id)
     assert state is not None
     assert state.state == "off"
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+@pytest.mark.asyncio
+async def test_auto_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
+    """Test that setup can discover and automatically install an update."""
+    relative_path = "automation/auto-update.yaml"
+    bp_path = Path(hass.config.path("blueprints")) / relative_path
+    bp_path.parent.mkdir(parents=True, exist_ok=True)
+    source_url = "https://example.com/auto-update.yaml"
+    bp_path.write_text(
+        f"blueprint:\n  name: Auto\n  domain: automation\n  source_url: {source_url}\n",
+        encoding="utf-8",
+    )
+    respx_mock.get(source_url).mock(
+        return_value=httpx.Response(
+            200,
+            content=(
+                "blueprint:\n"
+                "  name: Auto Updated\n"
+                "  domain: automation\n"
+                f"  source_url: {source_url}\n"
+            ),
+            headers={"Content-Type": "text/yaml"},
+        )
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={"update_interval": 24, "auto_update": True},
+        entry_id="auto_update_entry",
+    )
+    entry.add_to_hass(hass)
+    with patch(
+        "socket.getaddrinfo",
+        return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
+    await coordinator.async_wait_until_done()
+
+    assert "Auto Updated" in bp_path.read_text(encoding="utf-8")
+    assert coordinator.data[str(bp_path)]["updatable"] is False
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+@pytest.mark.asyncio
+async def test_config_migration_and_options_update(hass: HomeAssistant) -> None:
+    """Test legacy data migration and the real options-listener lifecycle."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"update_interval": 12},
+        options={"max_backups": 3},
+        entry_id="migration_entry",
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+        ),
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
+        assert entry.data == {}
+        assert entry.options["update_interval"] == 12
+        assert entry.options["max_backups"] == 3
+
+        with patch.object(
+            coordinator,
+            "async_request_refresh",
+            new_callable=AsyncMock,
+        ) as request_refresh:
+            hass.config_entries.async_update_entry(
+                entry,
+                options={**entry.options, "update_interval": 6},
+            )
+            await hass.async_block_till_done()
+
+        request_refresh.assert_awaited_once()
+        assert coordinator.update_interval == timedelta(hours=6)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()

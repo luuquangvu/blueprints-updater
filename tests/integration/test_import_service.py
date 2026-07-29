@@ -1,21 +1,26 @@
 """Tests for the import_blueprint service."""
 
 import socket
-from unittest.mock import AsyncMock, patch
+from collections.abc import AsyncIterator
+from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import pytest
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
     IntegrationService,
 )
+from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
 @pytest.fixture
-async def setup_integration(hass):
+async def setup_integration(hass: HomeAssistant) -> AsyncIterator[None]:
     """Set up the integration for tests."""
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -41,6 +46,28 @@ async def setup_integration(hass):
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+def _assert_imported_blueprint(
+    hass: HomeAssistant,
+    relative_path: str,
+    source_url: str,
+    etag: str,
+) -> None:
+    """Assert a service import reached disk, coordinator state, and entity registry."""
+    path = Path(hass.config.path("blueprints")) / relative_path
+    assert path.is_file()
+    assert f"source_url: {source_url}" in path.read_text(encoding="utf-8")
+
+    coordinator = hass.data[DOMAIN]["coordinators"]["test_entry"]
+    info = coordinator.data[str(path)]
+    assert info["source_url"] == source_url
+    assert info["etag"] == etag
+    assert info["updatable"] is False
+
+    unique_id = BlueprintUpdateCoordinator.generate_unique_id("test_entry", relative_path)
+    entity_id = er.async_get(hass).async_get_entity_id("update", DOMAIN, unique_id)
+    assert entity_id is not None
 
 
 @pytest.mark.asyncio
@@ -98,25 +125,20 @@ async def test_import_blueprint_success_github(hass, setup_integration, respx_mo
         )
     )
 
-    with patch(
-        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator.async_install_blueprint",
-        new_callable=AsyncMock,
-    ) as mock_install:
-        await hass.services.async_call(
-            DOMAIN,
-            IntegrationService.IMPORT_BLUEPRINT,
-            {"url": url, "confirm": True},
-            blocking=True,
-        )
+    await hass.services.async_call(
+        DOMAIN,
+        IntegrationService.IMPORT_BLUEPRINT,
+        {"url": url, "confirm": True},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
 
-        mock_install.assert_awaited_once()
-        assert mock_install.await_args is not None
-        args, kwargs = mock_install.await_args
-        assert "automation/user/test.yaml" in args[0]
-        assert args[1] == content
-        assert kwargs["source_url"] == raw_url
-        assert kwargs["etag"] == '"abc"'
-        assert kwargs["last_modified"] == "Wed, 13 May 2026 01:00:00 GMT"
+    _assert_imported_blueprint(
+        hass,
+        "automation/user/test.yaml",
+        raw_url,
+        '"abc"',
+    )
 
 
 @pytest.mark.asyncio
@@ -184,22 +206,17 @@ async def test_import_blueprint_success_generic(hass, setup_integration, respx_m
         )
     )
 
-    with patch(
-        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator.async_install_blueprint",
-        new_callable=AsyncMock,
-    ) as mock_install:
-        await hass.services.async_call(
-            DOMAIN,
-            IntegrationService.IMPORT_BLUEPRINT,
-            {"url": url, "confirm": True},
-            blocking=True,
-        )
+    await hass.services.async_call(
+        DOMAIN,
+        IntegrationService.IMPORT_BLUEPRINT,
+        {"url": url, "confirm": True},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
 
-        mock_install.assert_awaited_once()
-        assert mock_install.await_args is not None
-        args, kwargs = mock_install.await_args
-        assert "automation/pastebin.com/generic_blueprint.yaml" in args[0]
-        assert args[1] == content
-        assert kwargs["source_url"] == url
-        assert kwargs["etag"] == '"xyz"'
-        assert kwargs.get("last_modified") is None
+    _assert_imported_blueprint(
+        hass,
+        "automation/pastebin.com/generic_blueprint.yaml",
+        url,
+        '"xyz"',
+    )

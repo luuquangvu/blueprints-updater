@@ -18,6 +18,7 @@ from custom_components.blueprints_updater.const import (
     MIN_SEND_INTERVAL,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.exceptions import BlueprintFetchPolicyError
 from custom_components.blueprints_updater.network import (
     SSL_ALPN_HTTP11,
     GuardedAsyncHTTPTransport,
@@ -301,9 +302,60 @@ async def test_safe_backend_shares_timeout_across_addresses(hass):
 
     assert result is expected_stream
     assert [call.kwargs["timeout"] for call in network_backend.connect_tcp.call_args_list] == [
-        4.0,
+        2.0,
         1.5,
     ]
+
+
+@pytest.mark.asyncio
+async def test_safe_backend_applies_minimum_attempt_timeout_within_deadline(hass):
+    """Short address slices get a practical budget without exceeding the deadline."""
+    backend = SafeAsyncNetworkBackend(hass)
+    expected_stream = MagicMock(spec=httpcore.AsyncNetworkStream)
+    network_backend = MagicMock(spec=httpcore.AsyncNetworkBackend)
+    network_backend.connect_tcp = AsyncMock(
+        side_effect=[httpcore.ConnectTimeout("first timed out"), expected_stream]
+    )
+    backend._backend = network_backend
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.network.async_resolve_public_addresses",
+            AsyncMock(return_value=("1.1.1.1", "8.8.8.8", "9.9.9.9", "4.2.2.2")),
+        ),
+        patch(
+            "custom_components.blueprints_updater.network.time.monotonic",
+            side_effect=[100.0, 100.0, 100.7],
+        ),
+    ):
+        result = await backend.connect_tcp("example.com", 443, timeout=1.0)
+
+    assert result is expected_stream
+    assert [call.kwargs["timeout"] for call in network_backend.connect_tcp.call_args_list] == [
+        0.5,
+        pytest.approx(0.3),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_safe_backend_falls_back_after_connect_timeout(hass):
+    """A timed-out first address leaves budget for a validated fallback."""
+    backend = SafeAsyncNetworkBackend(hass)
+    expected_stream = MagicMock(spec=httpcore.AsyncNetworkStream)
+    network_backend = MagicMock(spec=httpcore.AsyncNetworkBackend)
+    network_backend.connect_tcp = AsyncMock(
+        side_effect=[httpcore.ConnectTimeout("IPv6 timeout"), expected_stream]
+    )
+    backend._backend = network_backend
+
+    with patch(
+        "custom_components.blueprints_updater.network.async_resolve_public_addresses",
+        AsyncMock(return_value=("2606:4700:4700::1111", "1.1.1.1")),
+    ):
+        result = await backend.connect_tcp("example.com", 443, timeout=5.0)
+
+    assert result is expected_stream
+    assert network_backend.connect_tcp.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -374,7 +426,7 @@ async def test_bounded_response_rejects_declared_and_streamed_oversize(coordinat
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(declared_handler)) as client:
-        with pytest.raises(httpx.HTTPError, match="exceeds"):
+        with pytest.raises(HomeAssistantError, match="exceeds"):
             await BlueprintUpdateCoordinator._async_get_bounded_response(
                 client, "https://example.com", {}
             )
@@ -388,10 +440,33 @@ async def test_bounded_response_rejects_declared_and_streamed_oversize(coordinat
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(streamed_handler)) as client:
-        with pytest.raises(httpx.HTTPError, match="exceeds"):
+        with pytest.raises(HomeAssistantError, match="exceeds"):
             await BlueprintUpdateCoordinator._async_get_bounded_response(
                 client, "https://example.com", {}
             )
+
+
+@pytest.mark.asyncio
+async def test_parse_provider_response_rejects_invalid_utf8(coordinator):
+    """Malformed remote bytes are rejected instead of replacement-decoded."""
+    response = httpx.Response(
+        200,
+        headers={"Content-Type": "text/yaml"},
+        content=b"blueprint:\n  name: \xff\n",
+        request=httpx.Request("GET", "https://example.com/test.yaml"),
+    )
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.registry.get_provider",
+            return_value=None,
+        ),
+        pytest.raises(HomeAssistantError, match="not valid UTF-8"),
+    ):
+        await coordinator._parse_provider_response(
+            response,
+            "https://example.com/test.yaml",
+        )
 
 
 @pytest.mark.asyncio
@@ -625,7 +700,7 @@ async def test_execute_with_redirect_guard_security(coordinator):
 
     with (
         patch.object(coordinator, "_is_safe_url", return_value=True),
-        pytest.raises(httpx.HTTPError, match="Too many redirects"),
+        pytest.raises(BlueprintFetchPolicyError, match="Too many redirects"),
     ):
         await coordinator._execute_with_redirect_guard(
             mock_session, "https://example.com/start", {}
@@ -641,7 +716,7 @@ async def test_execute_with_redirect_guard_security(coordinator):
 
     with (
         patch.object(coordinator, "_is_safe_url", side_effect=[True, False]),
-        pytest.raises(httpx.HTTPError, match="Security violation"),
+        pytest.raises(BlueprintFetchPolicyError, match="Security violation"),
     ):
         await coordinator._execute_with_redirect_guard(
             mock_session, "https://example.com/start", {}
@@ -678,7 +753,7 @@ async def test_execute_with_redirect_guard_final_https(coordinator):
 
     with (
         patch.object(coordinator, "_is_safe_url", return_value=True),
-        pytest.raises(httpx.HTTPError, match="Security violation"),
+        pytest.raises(BlueprintFetchPolicyError, match="Security violation"),
     ):
         await coordinator._execute_with_redirect_guard(
             mock_session, "https://start.com/bp.yaml", {}
@@ -748,7 +823,7 @@ async def test_execute_with_redirect_guard_304_https_enforcement(coordinator):
 
     with (
         patch.object(coordinator, "_is_safe_url", return_value=True),
-        pytest.raises(httpx.HTTPError, match="Security violation"),
+        pytest.raises(BlueprintFetchPolicyError, match="Security violation"),
     ):
         await coordinator._execute_with_redirect_guard(
             mock_session, "https://example.com/bp.yaml", {}
@@ -847,6 +922,8 @@ async def test_parse_provider_response_rejects_invalid_content(
         return
 
     if should_parse:
-        provider.parse_content.assert_called_once_with(response.text, expected_json)
+        provider.parse_content.assert_called_once_with(
+            response.content.decode("utf-8-sig"), expected_json
+        )
     else:
         provider.parse_content.assert_not_called()

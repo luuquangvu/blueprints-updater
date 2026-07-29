@@ -32,7 +32,7 @@ from .const import (
 )
 from .coordinator import BlueprintUpdateCoordinator, StructuredRisk
 from .providers import registry
-from .utils import normalize_domain
+from .utils import normalize_domain, redact_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -492,7 +492,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         _LOGGER.info(
             "Starting manual update for %s from %s",
             self._attr_name,
-            info.get("source_url", "<unknown>"),
+            redact_url(info.get("source_url", "<unknown>")),
         )
         remote_content = info.get("remote_content")
 

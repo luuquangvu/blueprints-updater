@@ -8,12 +8,15 @@ import hashlib
 import logging
 import os
 import shutil
+import stat
 import tempfile
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import ClassVar
 from weakref import WeakValueDictionary
+
+from .exceptions import FileRevisionMismatchError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,6 +27,31 @@ class FileTransactionResult:
 
     content_hash: str
     backups_count: int
+
+
+@dataclass(frozen=True)
+class FileRevisionPrecondition:
+    """Expected target state for one compare-and-swap filesystem mutation."""
+
+    must_exist: bool
+    content_hash: str | None = None
+
+    def __post_init__(self) -> None:
+        """Reject contradictory preconditions at construction time."""
+        if self.must_exist and self.content_hash is None:
+            raise ValueError("An existing-file precondition requires a content hash")
+        if not self.must_exist and self.content_hash is not None:
+            raise ValueError("A missing-file precondition cannot include a content hash")
+
+    @classmethod
+    def existing(cls, content_hash: str) -> FileRevisionPrecondition:
+        """Require an existing regular file with the supplied content hash."""
+        return cls(must_exist=True, content_hash=content_hash)
+
+    @classmethod
+    def missing(cls) -> FileRevisionPrecondition:
+        """Require the target path to remain absent until commit."""
+        return cls(must_exist=False)
 
 
 class BlueprintFileStore:
@@ -98,10 +126,82 @@ class BlueprintFileStore:
     def _hash_file(file_path: str) -> str:
         """Hash a file without buffering it in memory."""
         digest = hashlib.sha256()
-        with open(file_path, "rb") as file:
+        no_follow = getattr(os, "O_NOFOLLOW", 0)
+
+        def _open_no_follow(path: str, flags: int) -> int:
+            """Open a file without following a final symlink when supported."""
+            return os.open(path, flags | no_follow)
+
+        with open(file_path, "rb", opener=_open_no_follow) as file:
             while chunk := file.read(64 * 1024):
                 digest.update(chunk)
         return digest.hexdigest()
+
+    @staticmethod
+    def _validate_canonical_file_path(file_path: str) -> None:
+        """Reject a symlink at the final path component."""
+        if os.path.islink(file_path):
+            raise FileRevisionMismatchError(
+                "Blueprint path became a symlink after the operation was prepared"
+            )
+
+    @staticmethod
+    def capture_precondition(file_path: str) -> FileRevisionPrecondition:
+        """Capture the current regular-file revision for a later mutation."""
+        BlueprintFileStore._validate_canonical_file_path(file_path)
+        try:
+            stat_result = os.stat(file_path, follow_symlinks=False)
+        except FileNotFoundError:
+            return FileRevisionPrecondition.missing()
+        if not stat.S_ISREG(stat_result.st_mode):
+            raise FileRevisionMismatchError("Blueprint target is not a regular file")
+        return FileRevisionPrecondition.existing(BlueprintFileStore._hash_file(file_path))
+
+    @staticmethod
+    def _verify_current_revision(
+        file_path: str,
+        precondition: FileRevisionPrecondition | None,
+        expected_identity: tuple[int, int, int, int] | None = None,
+    ) -> tuple[int, int, int, int] | None:
+        """Verify the target revision and return its stable filesystem identity."""
+        BlueprintFileStore._validate_canonical_file_path(file_path)
+        try:
+            stat_result = os.stat(file_path, follow_symlinks=False)
+        except FileNotFoundError:
+            stat_result = None
+
+        if precondition is not None and not precondition.must_exist:
+            if stat_result is not None:
+                raise FileRevisionMismatchError(
+                    "Blueprint was created after the operation was prepared"
+                )
+            return None
+        if precondition is not None and precondition.must_exist and stat_result is None:
+            raise FileRevisionMismatchError(
+                "Blueprint was deleted after the operation was prepared"
+            )
+        if stat_result is None:
+            return None
+        if not stat.S_ISREG(stat_result.st_mode):
+            raise FileRevisionMismatchError("Blueprint target is not a regular file")
+        identity = (
+            stat_result.st_dev,
+            stat_result.st_ino,
+            stat_result.st_size,
+            stat_result.st_mtime_ns,
+        )
+        if expected_identity is not None and identity != expected_identity:
+            raise FileRevisionMismatchError("Blueprint changed after the operation was prepared")
+        if (
+            expected_identity is None
+            and precondition is not None
+            and precondition.content_hash is not None
+            and BlueprintFileStore._hash_file(file_path) != precondition.content_hash
+        ):
+            raise FileRevisionMismatchError(
+                "Blueprint content changed after the operation was prepared"
+            )
+        return identity
 
     @staticmethod
     def rotate_backups(file_path: str, max_backups: int) -> None:
@@ -165,16 +265,38 @@ class BlueprintFileStore:
         content: str,
         max_backups: int,
         create_backup: bool,
+        precondition: FileRevisionPrecondition | None = None,
     ) -> FileTransactionResult:
-        """Atomically install verified content after any requested backup succeeds."""
+        """Atomically install content if the target still has the expected revision."""
+        BlueprintFileStore._validate_canonical_file_path(file_path)
         temp_path, expected_hash = BlueprintFileStore._write_temp(file_path, content)
         try:
             installed_hash = BlueprintFileStore._hash_file(temp_path)
             if installed_hash != expected_hash:
                 raise OSError("Installed blueprint verification failed")
-            if create_backup:
+            identity = BlueprintFileStore._verify_current_revision(
+                file_path,
+                precondition,
+            )
+            if create_backup and (precondition is None or precondition.must_exist):
                 BlueprintFileStore.rotate_backups(file_path, max_backups)
-            os.replace(temp_path, file_path)
+            BlueprintFileStore._verify_current_revision(
+                file_path,
+                precondition,
+                expected_identity=identity,
+            )
+            if precondition is not None and not precondition.must_exist:
+                try:
+                    os.link(temp_path, file_path)
+                except FileExistsError as err:
+                    raise FileRevisionMismatchError(
+                        "Blueprint was created after the operation was prepared"
+                    ) from err
+                os.remove(temp_path)
+            else:
+                # Without a precondition, callers accept last-writer-wins behavior:
+                # a target created after the initial check may be replaced here.
+                os.replace(temp_path, file_path)
             return FileTransactionResult(
                 content_hash=installed_hash,
                 backups_count=BlueprintFileStore.count_backups(file_path, max_backups),
@@ -188,6 +310,7 @@ class BlueprintFileStore:
         file_path: str,
         validated_content: str,
         max_backups: int,
+        precondition: FileRevisionPrecondition | None = None,
     ) -> FileTransactionResult:
         """Restore prevalidated content while preserving the current file as a backup."""
         return BlueprintFileStore.install(
@@ -195,4 +318,5 @@ class BlueprintFileStore:
             validated_content,
             max_backups,
             create_backup=True,
+            precondition=precondition,
         )

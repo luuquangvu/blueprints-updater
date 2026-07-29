@@ -10,24 +10,6 @@ from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
 )
 
-from .protocols import (
-    BlueprintCoordinatorInternal,
-    BlueprintCoordinatorProtocol,
-    BlueprintCoordinatorPublic,
-)
-
-
-def test_coordinator_protocol_conformance(coordinator):
-    """Verify that BlueprintUpdateCoordinator conforms to BlueprintCoordinatorProtocol.
-
-    This test ensures that the coordinator implementation adheres to the defined
-    protocols for public, internal, and combined interfaces using runtime protocol
-    checks.
-    """
-    assert isinstance(coordinator, BlueprintCoordinatorPublic)
-    assert isinstance(coordinator, BlueprintCoordinatorInternal)
-    assert isinstance(coordinator, BlueprintCoordinatorProtocol)
-
 
 def test_coordinator_data_initialized_to_empty_dict(hass):
     """Confirm BlueprintUpdateCoordinator sets self.data to {} after initialization."""

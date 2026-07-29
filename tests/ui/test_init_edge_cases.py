@@ -122,10 +122,13 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
         }
         coordinator.config_entry = entry
         with patch.object(
-            coordinator, "async_reload_services", side_effect=Exception("Update fail")
-        ) as mock_reload:
+            coordinator,
+            "async_reconcile_reload_services",
+            new_callable=AsyncMock,
+            side_effect=Exception("Update fail"),
+        ) as reconcile_reload:
             await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
-            mock_reload.assert_called_once()
+            reconcile_reload.assert_awaited_once_with()
 
         hass.config_entries.async_forward_entry_setups.side_effect = None
         with (
@@ -223,13 +226,14 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
     mock_resp.status_code = HTTPStatus.OK
     mock_resp.url = httpx.URL("https://mock-url.example.com")
     mock_resp.headers = {"Content-Type": "application/json"}
+    mock_resp.content = b"not valid json"
     mock_resp.json = MagicMock(side_effect=ValueError("JSON fail"))
 
     coord_path = "custom_components.blueprints_updater.coordinator"
     prov_path = "custom_components.blueprints_updater.providers"
 
     with (
-        patch(f"{coord_path}.get_async_client") as mock_client,
+        patch(f"{coord_path}.get_guarded_async_client") as mock_client,
         patch.object(
             coordinator,
             "_async_get_bounded_response",

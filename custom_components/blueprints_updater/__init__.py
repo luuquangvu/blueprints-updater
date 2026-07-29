@@ -350,7 +350,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                         continue
 
                 if processed_count > 0:
-                    await active_coordinator.async_reload_services()
+                    await active_coordinator.async_reconcile_reload_services()
                     await active_coordinator.async_request_refresh()
             except Exception:
                 config_entry = getattr(active_coordinator, "config_entry", None)
