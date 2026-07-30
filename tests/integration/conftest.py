@@ -1,12 +1,8 @@
-"""Fixtures for integration tests."""
+"""Fixtures for Home Assistant integration tests."""
 
-import os
-import sys
 from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 
 @pytest.fixture
@@ -28,14 +24,13 @@ def hass_fixture_setup(
 
 @pytest.fixture
 def hass_config_dir(tmp_path: Path) -> str:
-    """Provide a per-test config directory for current HA test helpers."""
+    """Provide a per-test Home Assistant config directory."""
     return str(tmp_path)
 
 
 @pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(enable_custom_integrations):
-    """Enable custom integrations for all integration tests."""
-    return
+def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
+    """Enable custom integrations for every integration test."""
 
 
 @pytest.fixture

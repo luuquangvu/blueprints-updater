@@ -690,7 +690,7 @@ def _resolve_target_ha_constraints(constraints_path: Path) -> dict[str, str]:
     return required_constraints
 
 
-def _versions_differ(installed: str, required: str) -> bool:
+def versions_differ(installed: str, required: str) -> bool:
     """Return whether two dependency versions differ."""
     try:
         return Version(installed) != Version(required)
@@ -713,7 +713,7 @@ def _check_local_ha_harness_alignment() -> None:
         print(f"HARNESS_MISMATCH: {err}", flush=True)
         raise subprocess.CalledProcessError(1, command_label) from err
 
-    if _versions_differ(installed_ha, harness_required_ha):
+    if versions_differ(installed_ha, harness_required_ha):
         print(
             f"HARNESS_MISMATCH: installed {_TEST_HARNESS_PACKAGE} "
             f"{installed_harness} requires Home Assistant {harness_required_ha}, "
@@ -745,7 +745,7 @@ def _constraint_drift(
         except md.PackageNotFoundError:
             drifted.append((package_name, "not installed", required_version))
         else:
-            if _versions_differ(installed_version, required_version):
+            if versions_differ(installed_version, required_version):
                 drifted.append((package_name, installed_version, required_version))
     return drifted
 

@@ -60,6 +60,7 @@ jobs:
       absolute_latest_ha: ${{ steps.set-matrix.outputs.absolute_latest_ha }}
       matched_latest_ha: ${{ steps.set-matrix.outputs.matched_latest_ha }}
       matched_latest_harness: ${{ steps.set-matrix.outputs.matched_latest_harness }}
+      test_dependency_metadata: ${{ steps.set-matrix.outputs.test_dependency_metadata }}
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Checkout repository
@@ -81,6 +82,8 @@ jobs:
           MATCHED_LATEST_HA=$(jq -r .ha_ver <<< "$LATEST_PAIR_JSON")
           MATCHED_LATEST_HARNESS=$(jq -r .harness_ver <<< "$LATEST_PAIR_JSON")
           ABSOLUTE_LATEST_HA=$(jq -r .absolute_latest_ha_ver <<< "$LATEST_PAIR_JSON")
+          TEST_DEPENDENCY_METADATA_JSON=$(uv run --no-project --with orjson --with packaging \
+            python tools/validate_compatibility.py --required-test-dependency-metadata-json)
 
           if [[ "$MATCHED_LATEST_HA" = "null" || "$MATCHED_LATEST_HARNESS" = "null" || "$ABSOLUTE_LATEST_HA" = "null" ]]; then
             echo "::error::Failed to resolve latest matched Home Assistant/test harness pair"
@@ -93,6 +96,22 @@ jobs:
               exit 1
             fi
           done
+
+          jq -e '
+            . as $metadata |
+            (type == "object") and
+            ($metadata.required_packages | type == "array" and
+              (if length == 0 then true else (length == (unique | length) and all(.[]; type == "string" and test("^[a-zA-Z0-9._\\[\\]-]+$"))) end)) and
+            ($metadata.homeassistant_constraint_packages | type == "array" and
+              (if length == 0 then true else (length == (unique | length) and all(.[]; type == "string" and test("^[a-zA-Z0-9._\\[\\]-]+$"))) end)) and
+            ($metadata.test_harness_package | type == "string" and test("^[a-zA-Z0-9._\\[\\]-]+$")) and
+            (($metadata.required_packages | index($metadata.test_harness_package)) != null) and
+            (($metadata.homeassistant_constraint_packages | length) == 0 or all(
+              $metadata.homeassistant_constraint_packages[];
+              . as $package |
+              ($metadata.required_packages | index($package)) != null
+            ))
+          ' <<< "$TEST_DEPENDENCY_METADATA_JSON" >/dev/null
 
           jq -e '
             (type == "array") and all(.[]; (
@@ -130,6 +149,7 @@ jobs:
           echo "absolute_latest_ha=$ABSOLUTE_LATEST_HA" >> "$GITHUB_OUTPUT"
           echo "matched_latest_ha=$MATCHED_LATEST_HA" >> "$GITHUB_OUTPUT"
           echo "matched_latest_harness=$MATCHED_LATEST_HARNESS" >> "$GITHUB_OUTPUT"
+          echo "test_dependency_metadata=$TEST_DEPENDENCY_METADATA_JSON" >> "$GITHUB_OUTPUT"
           echo "matrix=$MATRIX_JSON" >> "$GITHUB_OUTPUT"
 
   latest-harness-canary:
@@ -172,20 +192,74 @@ jobs:
           MATRIX_HA_REAL_VERSION: ${{ matrix.ha_real_version }}
           MATRIX_HARNESS_REAL_VERSION: ${{ matrix.harness_real_version }}
           MATRIX_PYTHON_VERSION: ${{ matrix.python_version }}
+          TEST_DEPENDENCY_METADATA_JSON: ${{ needs.setup-matrix.outputs.test_dependency_metadata }}
         run: |
           set -euo pipefail
 
           uv --no-config venv --no-project --python "$MATRIX_PYTHON_VERSION"
           HA_SPEC="homeassistant==$MATRIX_HA_REAL_VERSION"
-          REQUIRED_TEST_DEPS=(
-            "httpx[http2]"
-            "pytest"
-            "pytest-asyncio"
-            "pytest-cov"
-            "pytest-homeassistant-custom-component==$MATRIX_HARNESS_REAL_VERSION"
-            "pytest-timeout"
-            "pytest-xdist"
+          jq -e '
+            type == "object" and
+            (.test_harness_package | type == "string") and
+            (.required_packages | type == "array") and
+            (.homeassistant_constraint_packages | type == "array")
+          ' <<< "$TEST_DEPENDENCY_METADATA_JSON" >/dev/null
+
+          mapfile -t REQUIRED_TEST_PACKAGES < <(
+            jq -r '.required_packages[]?' <<< "$TEST_DEPENDENCY_METADATA_JSON"
           )
+          mapfile -t HA_CONSTRAINED_TEST_PACKAGES < <(
+            jq -r '.homeassistant_constraint_packages[]?' <<< "$TEST_DEPENDENCY_METADATA_JSON"
+          )
+          TEST_HARNESS_PACKAGE=$(
+            jq -e -r '.test_harness_package' <<< "$TEST_DEPENDENCY_METADATA_JSON"
+          )
+
+          declare -A HA_CONSTRAINT_SPECS=()
+          HAS_CONSTRAINTS=0
+          for package in "${HA_CONSTRAINED_TEST_PACKAGES[@]-}"; do
+            if [[ -n "$package" ]]; then
+              HAS_CONSTRAINTS=1
+              break
+            fi
+          done
+
+          if [[ "$HAS_CONSTRAINTS" -eq 1 ]]; then
+            HA_CONSTRAINTS_CDN_URL="https://cdn.jsdelivr.net/gh/home-assistant/core@$MATRIX_HA_REAL_VERSION/homeassistant/package_constraints.txt"
+            HA_CONSTRAINTS_GITHUB_URL="https://raw.githubusercontent.com/home-assistant/core/$MATRIX_HA_REAL_VERSION/homeassistant/package_constraints.txt"
+            fetch_constraints() {
+              curl -sS -f --max-time 20 --retry 3 "$HA_CONSTRAINTS_CDN_URL" 2>/dev/null \
+                || curl -sS -f --max-time 20 --retry 3 "$HA_CONSTRAINTS_GITHUB_URL"
+            }
+            HA_CONSTRAINTS=$(fetch_constraints)
+            if [[ -z "${HA_CONSTRAINTS//[[:space:]]/}" ]]; then
+              echo "::error::Fetched empty package_constraints.txt for Home Assistant $MATRIX_HA_REAL_VERSION"
+              exit 1
+            fi
+
+            for package in "${HA_CONSTRAINED_TEST_PACKAGES[@]}"; do
+              if [[ -z "$package" ]]; then
+                continue
+              fi
+              if ! package_spec=$(uv run --no-project --with orjson --with packaging \
+                python tools/validate_compatibility.py --parse-constraint-spec "$package" <<< "$HA_CONSTRAINTS"); then
+                echo "::error::Failed to resolve $package from package_constraints.txt (tried CDN and GitHub)"
+                exit 1
+              fi
+              HA_CONSTRAINT_SPECS["$package"]="$package_spec"
+            done
+          fi
+
+          REQUIRED_TEST_DEPS=()
+          for package in "${REQUIRED_TEST_PACKAGES[@]}"; do
+            if [[ "$package" == "$TEST_HARNESS_PACKAGE" ]]; then
+              REQUIRED_TEST_DEPS+=("$package==$MATRIX_HARNESS_REAL_VERSION")
+            elif [[ -n "${HA_CONSTRAINT_SPECS[$package]-}" ]]; then
+              REQUIRED_TEST_DEPS+=("${HA_CONSTRAINT_SPECS[$package]}")
+            else
+              REQUIRED_TEST_DEPS+=("$package")
+            fi
+          done
           uv --no-config pip install --prerelease allow --python .venv/bin/python "$HA_SPEC" "${REQUIRED_TEST_DEPS[@]}"
 
       - name: Verify Home Assistant/test harness pair

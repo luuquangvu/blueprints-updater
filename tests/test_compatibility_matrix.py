@@ -3,9 +3,13 @@
 from pathlib import Path
 
 import orjson
+import pytest
 from packaging.version import Version
 
-from tools.validate_compatibility import _test_matrix
+from tools.validate_compatibility import (
+    _parse_requirements_dependency_version,
+    _test_matrix,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SUPPORTED_RANGE_BOUNDARIES = [
@@ -35,3 +39,31 @@ def test_compatibility_matrix_covers_declared_supported_range() -> None:
     assert all(version >= minimum_supported for version in fixed_versions)
     assert boundaries == _SUPPORTED_RANGE_BOUNDARIES
     assert python_versions == sorted(python_versions)
+
+
+def test_parse_requirements_dependency_version() -> None:
+    """Test parsing package constraint version from requirement text."""
+    constraints = """
+    # Comment line
+    invalid/package_name==1.0.0
+    unpinned-package >= 2.0.0
+    pytest-cov==4.1.0
+    pytest-cov==5.0.0
+    PyYAML==6.0.1; python_version >= '3.10'
+    httpx[http2]==0.27.0
+    """
+    assert _parse_requirements_dependency_version(constraints, "pytest_cov") == "4.1.0"
+    assert _parse_requirements_dependency_version(constraints, "pyyaml") == "6.0.1"
+    assert _parse_requirements_dependency_version(constraints, "httpx") == "0.27.0"
+    assert _parse_requirements_dependency_version(constraints, "httpx[http2]") == "0.27.0"
+
+    with pytest.raises(ValueError, match="Could not find 'nonexistent-package'"):
+        _parse_requirements_dependency_version(constraints, "nonexistent-package")
+
+    invalid_constraints = "broken-package=="
+    with pytest.raises(ValueError, match="expected a version after '=='"):
+        _parse_requirements_dependency_version(invalid_constraints, "broken-package")
+
+    malformed_constraints = "broken-package==not-a-version"
+    with pytest.raises(ValueError, match="Invalid"):
+        _parse_requirements_dependency_version(malformed_constraints, "broken-package")

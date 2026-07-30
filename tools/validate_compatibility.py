@@ -25,13 +25,18 @@ from time import monotonic
 from typing import Any, TypedDict
 
 import orjson
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 try:
-    from .validate import exact_homeassistant_requirement, normalize_package_name
+    from .validate import (
+        exact_homeassistant_requirement,
+        normalize_package_name,
+        versions_differ,
+    )
 except ImportError:
-    from validate import exact_homeassistant_requirement, normalize_package_name
+    from validate import exact_homeassistant_requirement, normalize_package_name, versions_differ
 
 
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -41,8 +46,9 @@ _VENVS_ROOT = os.path.join(_REPO_ROOT, ".venvs")
 _VENV_DEPENDENCY_MARKER = ".blueprints_updater_test_dependencies.json"
 
 _TEST_HARNESS_PACKAGE = "pytest-homeassistant-custom-component"
-
+_HA_CONSTRAINED_TEST_DEPS = ()  # Reserved for future use.
 _REQUIRED_TEST_DEPS = (
+    *_HA_CONSTRAINED_TEST_DEPS,
     "httpx[http2]",
     "pytest",
     "pytest-asyncio",
@@ -93,6 +99,23 @@ class LatestMatchedPair(TypedDict):
     ha_ver: str
     harness_ver: str
     absolute_latest_ha_ver: str
+
+
+class RequiredTestDependencyMetadata(TypedDict):
+    """Validated required test dependency metadata consumed by compatibility CI."""
+
+    required_packages: Sequence[str]
+    homeassistant_constraint_packages: Sequence[str]
+    test_harness_package: str
+
+
+def _required_test_dependency_metadata() -> RequiredTestDependencyMetadata:
+    """Return dependency package metadata consumed by compatibility CI."""
+    return {
+        "required_packages": _REQUIRED_TEST_DEPS,
+        "homeassistant_constraint_packages": _HA_CONSTRAINED_TEST_DEPS,
+        "test_harness_package": _TEST_HARNESS_PACKAGE,
+    }
 
 
 def _expected_required_test_dep_versions(
@@ -179,13 +202,22 @@ def _write_venv_dependency_marker(
     )
 
 
+def _extract_requirement_base_name(spec: str) -> str:
+    """Extract base package name from a requirement specifier."""
+    try:
+        return Requirement(spec).name
+    except InvalidRequirement:
+        return spec.split("[", 1)[0].split(";", 1)[0].split("=", 1)[0].strip()
+
+
 def _parse_requirements_dependency_version(
     requirements_text: str,
     package_name: str,
     source_name: str = "package_constraints.txt",
 ) -> str:
     """Return the exact package version from a requirements file."""
-    package = _validate_package_name("package_name", package_name)
+    base_name = _extract_requirement_base_name(package_name)
+    package = _validate_package_name("package_name", base_name)
     for raw_line in requirements_text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -194,9 +226,10 @@ def _parse_requirements_dependency_version(
         if separator != "==":
             continue
         try:
+            req_base = _extract_requirement_base_name(requirement_name.strip())
             requirement_package = _validate_package_name(
                 "requirements_package_name",
-                requirement_name.strip(),
+                req_base,
             )
         except ValueError:
             continue
@@ -575,15 +608,16 @@ def _get_latest_matched_pair() -> LatestMatchedPair:
     try:
         ha_payload = orjson.loads(_fetch_remote_text(_PYPI_HA_JSON_URL))
         harness_payload = orjson.loads(_fetch_remote_text(_PYPI_TEST_HARNESS_JSON_URL))
+        if not isinstance(ha_payload, dict):
+            raise ValueError("Home Assistant PyPI metadata is not a JSON object")
+        if not isinstance(harness_payload, dict):
+            raise ValueError("Test harness PyPI metadata is not a JSON object")
         absolute_latest = _newest_published_version(ha_payload, "homeassistant")
         harness_version = _newest_published_version(
             harness_payload,
             _TEST_HARNESS_PACKAGE,
         )
-        if not isinstance(harness_payload, dict) or not isinstance(
-            (harness_info := harness_payload.get("info")),
-            dict,
-        ):
+        if not isinstance((harness_info := harness_payload.get("info")), dict):
             raise ValueError("Test harness PyPI metadata has no info object")
         matched_ha = _validate_version_label(
             "harness_homeassistant_version",
@@ -592,12 +626,20 @@ def _get_latest_matched_pair() -> LatestMatchedPair:
                 f"{_TEST_HARNESS_PACKAGE} {harness_version}",
             ),
         )
-        releases = ha_payload.get("releases") if isinstance(ha_payload, dict) else None
-        if (
-            not isinstance(releases, dict)
-            or not isinstance((artifacts := releases.get(matched_ha)), list)
-            or not artifacts
-        ):
+        if not isinstance((releases := ha_payload.get("releases")), dict):
+            raise ValueError("Home Assistant PyPI metadata has no releases object")
+        matched_artifacts = next(
+            (
+                rel_artifacts
+                for rel_ver, rel_artifacts in releases.items()
+                if isinstance(rel_ver, str)
+                and isinstance(rel_artifacts, list)
+                and rel_artifacts
+                and not versions_differ(rel_ver, matched_ha)
+            ),
+            None,
+        )
+        if not matched_artifacts:
             raise ValueError(
                 f"Test harness {harness_version} targets unpublished Home Assistant {matched_ha}"
             )
@@ -609,7 +651,9 @@ def _get_latest_matched_pair() -> LatestMatchedPair:
         TypeError,
         ValueError,
     ) as err:
-        raise ValueError(f"Failed to resolve latest matched HA/harness pair: {err}") from err
+        raise ValueError(
+            f"Failed to resolve latest matched harness-backed Home Assistant pair: {err}"
+        ) from err
     return LatestMatchedPair(
         ha_ver=matched_ha,
         harness_ver=harness_version,
@@ -728,7 +772,7 @@ def _run_uv_pip_install(
     package_args: Sequence[str],
     step_label: str,
 ) -> None:
-    """Run uv pip install with prerelease support and step logging."""
+    """Run uv pip install with prereleases enabled for HA dependency pins."""
     print(f"STEP_START: uv pip install {step_label}", flush=True)
     subprocess.run(
         [
@@ -947,8 +991,12 @@ def _get_installed_harness_pair(python_bin: Path) -> tuple[str, str]:
             _validate_version_label("installed_harness_version", harness_version),
             required_ha,
         )
+    except subprocess.CalledProcessError as err:
+        raise ValueError(
+            "could not inspect installed test harness: "
+            f"{err}; stdout={err.stdout!r}; stderr={err.stderr!r}"
+        ) from err
     except (
-        subprocess.CalledProcessError,
         subprocess.TimeoutExpired,
         orjson.JSONDecodeError,
         OSError,
@@ -969,9 +1017,9 @@ def _verify_harness_pair(
         print(f"HARNESS_MISMATCH: {err}", flush=True)
         return False
     mismatches: list[str] = []
-    if installed_harness != expected_harness_version:
+    if versions_differ(installed_harness, expected_harness_version):
         mismatches.append(f"expected harness {expected_harness_version}, found {installed_harness}")
-    if harness_required_ha != expected_ha_version:
+    if versions_differ(harness_required_ha, expected_ha_version):
         mismatches.append(
             f"harness {installed_harness} requires Home Assistant "
             f"{harness_required_ha}, expected {expected_ha_version}"
@@ -1016,7 +1064,7 @@ def _prepare_version_and_deps(
     ha_ver: str,
     harness_ver: str,
 ) -> tuple[str, str, dict[str, str]]:
-    """Resolve one matched HA/harness pair and retrieve test dependencies."""
+    """Resolve one matched harness-backed Home Assistant pair and retrieve test dependencies."""
     ha_ver_to_install = ha_ver
     harness_ver_to_install = harness_ver
     if (ha_ver_to_install == "latest") != (harness_ver_to_install == "latest"):
@@ -1276,7 +1324,16 @@ def main() -> None:
     parser.add_argument(
         "--resolve-latest-json",
         action="store_true",
-        help="Print the newest matched HA/harness pair as JSON and exit",
+        help="Print newest harness-backed Home Assistant pair JSON",
+    )
+    parser.add_argument(
+        "--required-test-dependency-metadata-json",
+        action="store_true",
+        help="Print compatibility test dependency package metadata as JSON and exit",
+    )
+    parser.add_argument(
+        "--parse-constraint-spec",
+        help="Parse exact constraint spec for a package from requirements text on stdin",
     )
     parser.add_argument(
         "--verify-pair-python",
@@ -1287,6 +1344,10 @@ def main() -> None:
     parser.add_argument("--expected-harness", help="Expected test harness version")
     args = parser.parse_args()
 
+    if args.required_test_dependency_metadata_json:
+        print(orjson.dumps(_required_test_dependency_metadata()).decode(), flush=True)
+        return
+
     if args.resolve_latest_json:
         try:
             print(orjson.dumps(_get_latest_matched_pair()).decode(), flush=True)
@@ -1294,6 +1355,22 @@ def main() -> None:
             print(f"VALIDATION_ERROR: {err}", flush=True)
             sys.exit(1)
         return
+
+    if args.parse_constraint_spec is not None:
+        try:
+            constraints_text = sys.stdin.read()
+            version = _parse_requirements_dependency_version(
+                constraints_text, args.parse_constraint_spec
+            )
+            print(f"{args.parse_constraint_spec}=={version}", flush=True)
+        except (ValueError, OSError) as err:
+            print(f"VALIDATION_ERROR: {err}", flush=True)
+            sys.exit(1)
+        return
+
+    if not shutil.which("uv"):
+        print("VALIDATION_ERROR: 'uv' is not installed.", flush=True)
+        sys.exit(1)
 
     if args.verify_pair_python is not None:
         if args.expected_ha is None or args.expected_harness is None:
@@ -1305,10 +1382,6 @@ def main() -> None:
         ):
             sys.exit(1)
         return
-
-    if not shutil.which("uv"):
-        print("VALIDATION_ERROR: 'uv' is not installed.", flush=True)
-        sys.exit(1)
 
     try:
         if args.clean:
