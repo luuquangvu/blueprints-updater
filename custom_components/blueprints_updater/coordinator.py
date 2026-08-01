@@ -335,6 +335,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._persisted_metadata: dict[str, dict[str, Any]] = {}
         self._pending_reload_domains: set[str] = set()
         self._persisted_pending_reload_domains: set[str] = set()
+        self._reload_lock = asyncio.Lock()
         self._safe_hostname_cache: dict[str, bool] = {}
         self._max_hostname_cache_size = MAX_HOSTNAME_CACHE_SIZE
         self._safe_hostname_lock = asyncio.Lock()
@@ -783,7 +784,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         generation = self._refresh_generation
         self.data = results
         self._first_update_done = True
-        await self._async_retry_pending_reloads()
+        self._mark_pending_reload_state()
         self._start_background_refresh(blueprints, generation)
 
         _LOGGER.debug("Instant setup complete with %d blueprints", len(results))
@@ -1002,6 +1003,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             async with self._refresh_lock:
                 if generation is not None and generation != self._refresh_generation:
                     return
+                await self._async_retry_pending_reloads()
+                if generation is not None and generation != self._refresh_generation:
+                    return
                 async with self._safe_hostname_lock:
                     self._safe_hostname_cache.clear()
                 results_to_notify: list[str] = []
@@ -1178,42 +1182,43 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         domains: list[str] | set[str] | None = None,
     ) -> set[str]:
         """Reload domains while durably retaining failures for later retry."""
-        targets = (
-            set(ALLOWED_RELOAD_DOMAINS)
-            if domains is None
-            else {domain for domain in domains if domain in ALLOWED_RELOAD_DOMAINS}
-        )
-        if not targets:
-            return set()
+        async with self._reload_lock:
+            targets = (
+                set(ALLOWED_RELOAD_DOMAINS)
+                if domains is None
+                else {domain for domain in domains if domain in ALLOWED_RELOAD_DOMAINS}
+            )
+            if not targets:
+                return set()
 
-        self._pending_reload_domains.update(targets)
-        self._mark_pending_reload_state()
-        await self._async_save_metadata(force=True)
+            self._pending_reload_domains.update(targets)
+            self._mark_pending_reload_state()
+            await self._async_save_metadata(force=True)
 
-        unreloaded: set[str] = set()
-        for domain in sorted(targets):
-            try:
-                reloaded = await self.async_reload_services([domain])
-            except Exception:
-                unreloaded.add(domain)
-                _LOGGER.exception(
-                    "Blueprint files were committed, but %s.reload failed; "
-                    "the reload remains pending",
-                    domain,
-                )
-            else:
-                if domain in reloaded:
-                    self._pending_reload_domains.discard(domain)
-                else:
+            unreloaded: set[str] = set()
+            for domain in sorted(targets):
+                try:
+                    reloaded = await self.async_reload_services([domain])
+                except Exception:
                     unreloaded.add(domain)
-                    _LOGGER.debug(
-                        "%s.reload is unavailable; the reload remains pending",
+                    _LOGGER.exception(
+                        "Blueprint files were committed, but %s.reload failed; "
+                        "the reload remains pending",
                         domain,
                     )
+                else:
+                    if domain in reloaded:
+                        self._pending_reload_domains.discard(domain)
+                    else:
+                        unreloaded.add(domain)
+                        _LOGGER.debug(
+                            "%s.reload is unavailable; the reload remains pending",
+                            domain,
+                        )
 
-        self._mark_pending_reload_state()
-        await self._async_save_metadata(force=True)
-        return unreloaded
+            self._mark_pending_reload_state()
+            await self._async_save_metadata(force=True)
+            return unreloaded
 
     async def _async_retry_pending_reloads(self) -> None:
         """Retry reloads left pending by an earlier committed operation."""

@@ -9,7 +9,7 @@
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/github-code-scanning/codeql?style=flat&logo=github&label=CodeQL)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/github-code-scanning/codeql)
 [![Prettier](https://img.shields.io/github/actions/workflow/status/luuquangvu/blueprints-updater/prettier.yaml?style=flat&logo=prettier&label=Prettier)](https://github.com/luuquangvu/blueprints-updater/actions/workflows/prettier.yaml)
 
-**[ [🇺🇸 English](README.md) | 🇻🇳 Tiếng Việt ]**
+**[🇺🇸 English](README.md) | 🇻🇳 Tiếng Việt**
 
 **Blueprints Updater** giúp các bản thiết kế (blueprint) trên Home Assistant luôn duy trì ở phiên bản mới nhất thông qua cơ chế tự động theo dõi và cập nhật (hỗ trợ Automations, Scripts và Template Entities). Tiện ích tích hợp sâu như một thực thể cập nhật gốc, cho phép bạn nâng cấp toàn bộ hệ thống chỉ với một cú nhấp chuột ngay trên bảng điều khiển.
 

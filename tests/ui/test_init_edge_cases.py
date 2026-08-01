@@ -128,7 +128,7 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
             side_effect=Exception("Update fail"),
         ) as reconcile_reload:
             await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
-            reconcile_reload.assert_awaited_once_with()
+            reconcile_reload.assert_awaited_once_with({DOMAIN_AUTOMATION})
 
         hass.config_entries.async_forward_entry_setups.side_effect = None
         with (

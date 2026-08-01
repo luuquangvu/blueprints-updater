@@ -234,6 +234,35 @@ async def test_cold_start_rehydration(coordinator, mock_makedirs):
 
 
 @pytest.mark.asyncio
+async def test_startup_defers_pending_reload_recovery(coordinator, mock_makedirs):
+    """Pending reload recovery must not delay the first refresh."""
+    path = "/config/blueprints/automation/test.yaml"
+    blueprints = {
+        path: {
+            "name": "Test",
+            "relative_path": "automation/test.yaml",
+            "domain": DOMAIN_AUTOMATION,
+            "source_url": "https://example.com/test.yaml",
+            "local_hash": "local_hash",
+        }
+    }
+    coordinator._pending_reload_domains = {DOMAIN_AUTOMATION}
+
+    with (
+        patch.object(coordinator, "scan_blueprints", return_value=blueprints),
+        patch.object(
+            coordinator, "_async_retry_pending_reloads", new_callable=AsyncMock
+        ) as retry_pending,
+        patch.object(coordinator, "_start_background_refresh") as start_background,
+    ):
+        results = await coordinator._async_update_data()
+
+    retry_pending.assert_not_awaited()
+    start_background.assert_called_once_with(blueprints, coordinator._refresh_generation)
+    assert results[path]["reload_pending"] is True
+
+
+@pytest.mark.asyncio
 async def test_etag_invalidation_on_mismatch(coordinator, mock_makedirs):
     """Test that ETag is invalidated when local and remote hashes mismatch on startup."""
     path = "/config/blueprints/automation/test.yaml"

@@ -33,10 +33,16 @@ try:
     from .validate import (
         exact_homeassistant_requirement,
         normalize_package_name,
+        resolve_global_uv_path,
         versions_differ,
     )
 except ImportError:
-    from validate import exact_homeassistant_requirement, normalize_package_name, versions_differ
+    from validate import (
+        exact_homeassistant_requirement,
+        normalize_package_name,
+        resolve_global_uv_path,
+        versions_differ,
+    )
 
 
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -1368,9 +1374,16 @@ def main() -> None:
             sys.exit(1)
         return
 
-    if not shutil.which("uv"):
-        print("VALIDATION_ERROR: 'uv' is not installed.", flush=True)
+    try:
+        uv_executable_path = resolve_global_uv_path()
+    except FileNotFoundError as err:
+        missing_path = err.filename or "global uv executable"
+        print(f"VALIDATION_ERROR: {missing_path!r} not found.", flush=True)
         sys.exit(1)
+    print(
+        f"STEP_INFO: Resolved global uv executable (available on PATH): {uv_executable_path}",
+        flush=True,
+    )
 
     if args.verify_pair_python is not None:
         if args.expected_ha is None or args.expected_harness is None:

@@ -24,7 +24,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, IntegrationService
 from .coordinator import BlueprintUpdateCoordinator
-from .utils import get_update_interval
+from .utils import get_update_interval, normalize_domain
 
 try:
     _ADMIN_SVC_SIG = inspect.signature(async_register_admin_service)
@@ -326,7 +326,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                     config_entry.entry_id,
                 )
 
-                processed_count = 0
+                updated_domains: set[str] = set()
                 for path, info in targets:
                     try:
                         remote_content = info.get("remote_content")
@@ -341,7 +341,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                             await active_coordinator.async_install_blueprint(
                                 path, remote_content, reload_services=False, backup=backup_pref
                             )
-                            processed_count += 1
+                            updated_domains.add(normalize_domain(info.get("domain")))
                     except Exception:
                         _LOGGER.exception(
                             "Failed to update blueprint path %s",
@@ -349,8 +349,8 @@ def _async_register_services(hass: HomeAssistant) -> None:
                         )
                         continue
 
-                if processed_count > 0:
-                    await active_coordinator.async_reconcile_reload_services()
+                if updated_domains:
+                    await active_coordinator.async_reconcile_reload_services(updated_domains)
                     await active_coordinator.async_request_refresh()
             except Exception:
                 config_entry = getattr(active_coordinator, "config_entry", None)

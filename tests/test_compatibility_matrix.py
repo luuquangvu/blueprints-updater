@@ -1,11 +1,13 @@
 """Tests for the declared Home Assistant compatibility range."""
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import orjson
 import pytest
 from packaging.version import Version
 
+from tools import validate_compatibility
 from tools.validate_compatibility import (
     _parse_requirements_dependency_version,
     _test_matrix,
@@ -67,3 +69,52 @@ def test_parse_requirements_dependency_version() -> None:
     malformed_constraints = "broken-package==not-a-version"
     with pytest.raises(ValueError, match="Invalid"):
         _parse_requirements_dependency_version(malformed_constraints, "broken-package")
+
+
+def test_compatibility_main_configures_global_uv_before_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configure the global uv PATH before running an uv-dependent mode."""
+    python_bin = Path(".venv/bin/python")
+    resolve_global_uv = MagicMock(return_value="/global/bin/uv")
+    verify_pair = MagicMock(return_value=True)
+    monkeypatch.setattr(validate_compatibility, "resolve_global_uv_path", resolve_global_uv)
+    monkeypatch.setattr(validate_compatibility, "_verify_harness_pair", verify_pair)
+    monkeypatch.setattr(
+        validate_compatibility.sys,
+        "argv",
+        [
+            "validate_compatibility.py",
+            "--verify-pair-python",
+            str(python_bin),
+            "--expected-ha",
+            "2026.8.0b3",
+            "--expected-harness",
+            "0.13.351",
+        ],
+    )
+
+    validate_compatibility.main()
+
+    resolve_global_uv.assert_called_once_with()
+    verify_pair.assert_called_once_with(python_bin, "2026.8.0b3", "0.13.351")
+
+
+def test_compatibility_main_exits_when_global_uv_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Stop compatibility validation when no uv exists outside the active environment."""
+    missing_uv = FileNotFoundError(2, "not found", "global uv executable")
+    monkeypatch.setattr(
+        validate_compatibility,
+        "resolve_global_uv_path",
+        MagicMock(side_effect=missing_uv),
+    )
+    monkeypatch.setattr(validate_compatibility.sys, "argv", ["validate_compatibility.py"])
+
+    with pytest.raises(SystemExit, match="1"):
+        validate_compatibility.main()
+
+    output = capsys.readouterr().out
+    assert "VALIDATION_ERROR: 'global uv executable' not found." in output

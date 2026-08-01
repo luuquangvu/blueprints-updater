@@ -23,6 +23,7 @@ import textwrap
 import tomllib
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from string import ascii_letters, digits
 from typing import Any
 
 import orjson
@@ -40,6 +41,79 @@ _VALIDATION_STEP_TIMEOUT_SECONDS = 300
 _PACKAGE_NORM_PATTERN = re.compile(r"[._-]+")
 _HA_PACKAGE = "homeassistant"
 _TEST_HARNESS_PACKAGE = "pytest-homeassistant-custom-component"
+_ALLOWED_PATH_COMPONENT_CHARS = f"{ascii_letters}{digits}._-+@ "
+
+
+def _validate_path_entry(raw_entry: str) -> str:
+    """Return a safely reconstructed absolute POSIX PATH entry, or an empty string.
+
+    Each path component is rebuilt from a fixed character source before it is
+    passed to a filesystem API. The indexed mapping and ``os.path.basename`` calls
+    intentionally mirror the CodeQL taint-breaking validation used by the
+    compatibility matrix's package and version validators.
+    """
+    if not raw_entry.startswith(os.sep):
+        return ""
+
+    safe_components: list[str] = []
+    for raw_component in raw_entry.split(os.sep):
+        if not raw_component:
+            continue
+        if raw_component in {".", ".."}:
+            return ""
+        safe_chars: list[str] = []
+        for char in raw_component:
+            idx = _ALLOWED_PATH_COMPONENT_CHARS.find(char)
+            if idx == -1:
+                return ""
+            safe_chars.append(_ALLOWED_PATH_COMPONENT_CHARS[idx])
+        safe_component = os.path.basename("".join(safe_chars))
+        if not safe_component or safe_component != "".join(safe_chars):
+            return ""
+        safe_components.append(safe_component)
+
+    return os.path.join(os.sep, *safe_components)
+
+
+def resolve_global_uv_path() -> str:
+    """Configure PATH for validation and return its global uv executable."""
+    active_environment_bin = (
+        (Path(sys.prefix).resolve() / "bin").resolve() if sys.base_prefix != sys.prefix else None
+    )
+    global_path_entries: list[str] = []
+    for raw_entry in os.environ.get("PATH", "").split(os.pathsep):
+        safe_entry = _validate_path_entry(raw_entry)
+        if not safe_entry:
+            continue
+        try:
+            path_entry = Path(safe_entry).resolve()
+        except OSError:
+            continue
+        if active_environment_bin is None or path_entry != active_environment_bin:
+            global_path_entries.append(str(path_entry))
+
+    candidate_path: Path | None = None
+    for path_entry in global_path_entries:
+        try:
+            executable_path = (Path(path_entry) / "uv").resolve()
+        except OSError:
+            continue
+        if (
+            (active_environment_bin is None or executable_path.parent != active_environment_bin)
+            and executable_path.is_file()
+            and os.access(executable_path, os.X_OK)
+        ):
+            candidate_path = executable_path
+            break
+
+    if candidate_path is None:
+        raise FileNotFoundError(
+            2,
+            "global uv executable not found outside the active virtual environment",
+            "global uv executable",
+        )
+    os.environ["PATH"] = os.pathsep.join(global_path_entries)
+    return str(candidate_path)
 
 
 def normalize_package_name(package_name: str) -> str:
@@ -370,7 +444,15 @@ def _repair_npm_sync(repo_root: str) -> None:
 def _run_uv_dependency_update_check(repo_root: str) -> subprocess.CompletedProcess[str]:
     """Run the uv dependency-update dry run."""
     return subprocess.run(
-        ["uv", "sync", "--all-groups", "--upgrade", "--dry-run", "--output-format", "json"],
+        [
+            "uv",
+            "sync",
+            "--all-groups",
+            "--upgrade",
+            "--dry-run",
+            "--output-format",
+            "json",
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -413,6 +495,11 @@ def _run_pipeline() -> None:
         sys.exit(1)
 
     try:
+        uv_executable_path = resolve_global_uv_path()
+        print(
+            f"STEP_INFO: Resolved global uv executable (available on PATH): {uv_executable_path}",
+            flush=True,
+        )
         _validate_pipeline()
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
         ret_code = getattr(e, "returncode", 1)

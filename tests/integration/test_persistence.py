@@ -2,7 +2,7 @@
 
 import asyncio
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -36,15 +36,16 @@ async def test_pending_reload_persists_and_retries_after_restart(hass: HomeAssis
     )
     entry.add_to_hass(hass)
 
-    background_refresh = (
+    remote_refresh = (
         "custom_components.blueprints_updater.coordinator."
-        "BlueprintUpdateCoordinator._async_background_refresh"
+        "BlueprintUpdateCoordinator._async_update_blueprint_in_place"
     )
-    with patch(background_refresh):
+    with patch(remote_refresh, new_callable=AsyncMock):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
+        coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
+        await coordinator.async_wait_until_done()
 
-    coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
     assert not hass.services.has_service(DOMAIN_AUTOMATION, "reload")
     unreloaded = await coordinator.async_reconcile_reload_services([DOMAIN_AUTOMATION])
 
@@ -61,11 +62,12 @@ async def test_pending_reload_persists_and_retries_after_restart(hass: HomeAssis
         reload_called.set()
 
     hass.services.async_register(DOMAIN_AUTOMATION, "reload", _handle_reload)
-    with patch(background_refresh):
+    with patch(remote_refresh, new_callable=AsyncMock):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
+        restarted = hass.data[DOMAIN]["coordinators"][entry.entry_id]
+        await restarted.async_wait_until_done()
 
-    restarted = hass.data[DOMAIN]["coordinators"][entry.entry_id]
     assert reload_called.is_set()
     assert restarted._pending_reload_domains == set()
     assert restarted._persisted_pending_reload_domains == set()

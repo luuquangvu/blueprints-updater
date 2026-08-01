@@ -527,6 +527,100 @@ async def test_background_refresh_broadcasts_once_per_generation(coordinator):
 
 
 @pytest.mark.asyncio
+async def test_background_refresh_retries_pending_reloads_before_remote_work(coordinator):
+    """Background startup recovery precedes remote blueprint processing."""
+    path = "automation/test.yaml"
+    blueprints = {
+        path: {
+            "name": "Test",
+            "relative_path": path,
+            "domain": DOMAIN_AUTOMATION,
+            "source_url": "https://example.com/test.yaml",
+            "local_hash": "local_hash",
+        }
+    }
+    coordinator.data = {path: dict(blueprints[path])}
+    call_order: list[str] = []
+
+    async def retry_pending() -> None:
+        """Record pending reload recovery."""
+        call_order.append("reload")
+
+    async def update_blueprint(*_args: Any, **_kwargs: Any) -> None:
+        """Record remote blueprint processing."""
+        call_order.append("remote")
+
+    coordinator._async_retry_pending_reloads = AsyncMock(side_effect=retry_pending)
+    coordinator._async_update_blueprint_in_place = AsyncMock(side_effect=update_blueprint)
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.get_guarded_async_client",
+        return_value=MagicMock(spec=httpx.AsyncClient),
+    ):
+        await coordinator._async_background_refresh(blueprints)
+
+    assert call_order == ["reload", "remote"]
+
+
+@pytest.mark.asyncio
+async def test_obsolete_generation_stops_after_pending_reload_recovery(coordinator):
+    """A superseded refresh cannot start remote work after reload recovery."""
+    path = "automation/test.yaml"
+    blueprints = {
+        path: {
+            "name": "Test",
+            "relative_path": path,
+            "domain": DOMAIN_AUTOMATION,
+            "source_url": "https://example.com/test.yaml",
+            "local_hash": "local_hash",
+        }
+    }
+    coordinator.data = {path: dict(blueprints[path])}
+    coordinator._refresh_generation = 1
+    retry_started = asyncio.Event()
+    finish_retry = asyncio.Event()
+
+    async def retry_pending() -> None:
+        """Pause recovery while a newer refresh supersedes this one."""
+        retry_started.set()
+        await finish_retry.wait()
+
+    coordinator._async_retry_pending_reloads = AsyncMock(side_effect=retry_pending)
+    coordinator._async_update_blueprint_in_place = AsyncMock()
+
+    refresh = asyncio.create_task(coordinator._async_background_refresh(blueprints, generation=1))
+    await retry_started.wait()
+    coordinator._refresh_generation = 2
+    finish_retry.set()
+    await refresh
+
+    coordinator._async_update_blueprint_in_place.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_background_refresh_cancellation_during_pending_reload_recovery(coordinator):
+    """Cancellation during recovery releases the refresh lock and stops remote work."""
+    retry_started = asyncio.Event()
+
+    async def retry_pending() -> None:
+        """Block recovery until the owning background task is cancelled."""
+        retry_started.set()
+        await asyncio.Event().wait()
+
+    coordinator._async_retry_pending_reloads = AsyncMock(side_effect=retry_pending)
+    coordinator._async_update_blueprint_in_place = AsyncMock()
+
+    refresh = asyncio.create_task(coordinator._async_background_refresh({}))
+    await retry_started.wait()
+    refresh.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await refresh
+
+    assert coordinator._refresh_lock.locked() is False
+    coordinator._async_update_blueprint_in_place.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_async_update_blueprint_unsafe_url_invalidates_cache(coordinator, mock_makedirs):
     """Test that switching to an unsafe URL invalidates previous cache."""
     path = "automation/test.yaml"
@@ -922,6 +1016,43 @@ async def test_reconcile_keeps_unavailable_reload_service_pending(coordinator):
     assert coordinator.data[path]["reload_pending"] is True
     coordinator.hass.services.async_call.assert_not_awaited()
     assert coordinator._store.async_save.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_reload_reconciliation_preserves_later_failure(coordinator):
+    """Concurrent reload attempts serialize so a later failure remains pending."""
+    path = "/config/blueprints/automation/test.yaml"
+    coordinator.data = {path: {"domain": DOMAIN_AUTOMATION}}
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    reload_calls = 0
+
+    async def reload_services(_domains: list[str] | None) -> set[str]:
+        """Succeed once, then simulate a conflicting later reload failure."""
+        nonlocal reload_calls
+        reload_calls += 1
+        if reload_calls == 1:
+            first_started.set()
+            await release_first.wait()
+            return {DOMAIN_AUTOMATION}
+        raise HomeAssistantError("later reload failed")
+
+    coordinator.async_reload_services = AsyncMock(side_effect=reload_services)
+    coordinator._async_save_metadata = AsyncMock()
+
+    first = asyncio.create_task(coordinator.async_reconcile_reload_services([DOMAIN_AUTOMATION]))
+    await first_started.wait()
+    second = asyncio.create_task(coordinator.async_reconcile_reload_services([DOMAIN_AUTOMATION]))
+    await asyncio.sleep(0)
+    assert reload_calls == 1
+
+    release_first.set()
+    first_result, second_result = await asyncio.gather(first, second)
+
+    assert first_result == set()
+    assert second_result == {DOMAIN_AUTOMATION}
+    assert coordinator._pending_reload_domains == {DOMAIN_AUTOMATION}
+    assert coordinator.data[path]["reload_pending"] is True
 
 
 @pytest.mark.asyncio
