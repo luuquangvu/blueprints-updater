@@ -22,7 +22,7 @@ async def test_detect_risks_system_error_on_exception(hass):
 
     path = "/config/blueprints/automation/test.yaml"
     relative_path = "automation/test.yaml"
-    info = {"relative_path": relative_path, "name": "Test Blueprint"}
+    info: dict[str, object] = {"relative_path": relative_path, "name": "Test Blueprint"}
     coordinator.data = {path: info}
 
     remote_content = "blueprint:\n  name: New\n  domain: automation\n"
@@ -51,7 +51,7 @@ async def test_detect_risks_missing_relative_path(hass):
         coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
 
     path = "/config/blueprints/automation/test.yaml"
-    info = {"name": "Test Blueprint"}
+    info: dict[str, object] = {"name": "Test Blueprint"}
     coordinator.data = {path: info}
 
     risks = await coordinator._detect_risks_for_update(path, info, "content", None)

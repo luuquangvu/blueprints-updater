@@ -9,7 +9,6 @@ import socket
 import ssl
 import time
 from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
-from typing import cast
 
 import httpcore
 import httpx
@@ -142,7 +141,10 @@ class SafeAsyncNetworkBackend(httpcore.AsyncNetworkBackend):
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize the guarded backend."""
         self._hass = hass
-        self._backend = cast(httpcore.AsyncNetworkBackend, httpcore.AnyIOBackend())
+        backend = httpcore.AnyIOBackend()
+        if not isinstance(backend, httpcore.AsyncNetworkBackend):
+            raise TypeError("Backend must be an AsyncNetworkBackend")
+        self._backend = backend
 
     async def connect_tcp(
         self,
@@ -207,7 +209,7 @@ class SafeAsyncNetworkBackend(httpcore.AsyncNetworkBackend):
 class GuardedAsyncResponseStream(httpx.AsyncByteStream):
     """Adapt an httpcore response stream to httpx's public stream API."""
 
-    def __init__(self, stream: AsyncIterable[bytes]) -> None:
+    def __init__(self, stream: AsyncIterable[object]) -> None:
         """Initialize the response stream adapter."""
         self._stream = stream
 
@@ -215,6 +217,8 @@ class GuardedAsyncResponseStream(httpx.AsyncByteStream):
         """Yield response chunks while preserving httpx exception types."""
         with _map_httpcore_exceptions():
             async for chunk in self._stream:
+                if not isinstance(chunk, bytes):
+                    raise TypeError(f"Expected bytes chunk from stream, got {type(chunk).__name__}")
                 yield chunk
 
     async def aclose(self) -> None:
@@ -265,7 +269,7 @@ class GuardedAsyncHTTPTransport(httpx.AsyncBaseTransport):
         return httpx.Response(
             status_code=core_response.status,
             headers=core_response.headers,
-            stream=GuardedAsyncResponseStream(cast(AsyncIterable[bytes], core_response.stream)),
+            stream=GuardedAsyncResponseStream(core_response.stream),
             extensions=core_response.extensions,
         )
 

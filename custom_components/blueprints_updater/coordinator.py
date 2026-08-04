@@ -13,13 +13,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from http import HTTPStatus
-from typing import Any, Self, TypedDict, cast
+from typing import Self, TypedDict
 from urllib.parse import urlparse
 
 import httpx
 import orjson
 import voluptuous as vol
-import yaml
 from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.automation.config import AUTOMATION_BLUEPRINT_SCHEMA
 from homeassistant.components.automation.config import (
@@ -51,7 +50,7 @@ try:
         TEMPLATE_BLUEPRINT_SCHEMA,
     )
 except ImportError:
-    TEMPLATE_BLUEPRINT_SCHEMA: Any = None
+    TEMPLATE_BLUEPRINT_SCHEMA: object = None
 
 try:
     from homeassistant.util.ssl import SSL_ALPN_HTTP11_HTTP2
@@ -171,6 +170,32 @@ class BlueprintMetadata(ParsedBlueprintData):
     backups_count: int
 
 
+class BlueprintInfo(TypedDict, total=False):
+    """Coordinator state entry for a blueprint."""
+
+    name: str
+    relative_path: str
+    domain: str
+    source_url: str | None
+    local_hash: str
+    local_file_hash: str
+    updatable: bool
+    remote_hash: str | None
+    invalid_remote_hash: str | None
+    remote_content: str | None
+    last_error: str | None
+    etag: str | None
+    last_modified: str | None
+    persisted_source_url: str | None
+    backups_count: int
+    update_blocking_reason: str | None
+    breaking_risks: list[StructuredRisk]
+    reload_pending: bool
+    auto_update_last_error: str | None
+    _cached_git_diff: dict[str, object]
+    provider_type: str | None
+
+
 @dataclass(frozen=True)
 class GitDiffResult:
     """Structure for git diff generation results."""
@@ -196,17 +221,17 @@ class RefreshWorkItem:
 
     generation: int
     path: str
-    source_url: Any
-    local_hash: Any
-    local_file_hash: Any
-    relative_path: Any
+    source_url: object
+    local_hash: object
+    local_file_hash: object
+    relative_path: object
 
     @classmethod
     def capture(
         cls,
         generation: int,
         path: str,
-        info: Mapping[str, Any],
+        info: Mapping[str, object],
     ) -> Self:
         """Capture the fields that make queued refresh work authoritative."""
         return cls(
@@ -221,7 +246,7 @@ class RefreshWorkItem:
     def matches(
         self,
         generation: int,
-        data: Mapping[str, Mapping[str, Any]],
+        data: Mapping[str, Mapping[str, object]],
     ) -> bool:
         """Return whether coordinator state still owns this work item."""
         current = data.get(self.path)
@@ -240,10 +265,10 @@ class PreparedBlueprintInstall:
     """Validated inputs and resolved metadata for one file installation."""
 
     real_path: str
-    parsed: dict[str, Any] | None
-    blueprint_block: dict[str, Any] | None
+    parsed: dict[str, object] | None
+    blueprint_block: dict[str, object] | None
     functional_domain: str
-    current: dict[str, Any] | None
+    current: dict[str, object] | None
     name: str
     source_url: str | None
     relative_path: str
@@ -257,7 +282,7 @@ class PreparedBlueprintRestore:
     real_path: str
     content: str
     domain: str
-    tracked_source_url: Any
+    tracked_source_url: object
     precondition: FileRevisionPrecondition
 
 
@@ -271,10 +296,10 @@ _LOCAL_REVISION_MISMATCH_ERROR = "Local blueprint changed; refresh and retry the
 _RESTORE_REVISION_MISMATCH = "revision_mismatch"
 
 
-class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
+class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, object]]]):
     """Class to manage fetching blueprint updates."""
 
-    _client_kwargs_cache: dict[str, Any] | None = None
+    _client_kwargs_cache: dict[str, tuple[str, ...] | None] | None = None
 
     @staticmethod
     def generate_unique_id(entry_id: str, relative_path: str) -> str:
@@ -320,7 +345,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             name=DOMAIN,
             update_interval=update_interval,
         )
-        self.data: dict[str, dict[str, Any]] = {}
+        self.data: dict[str, dict[str, object]] = {}
         self._translations: dict[tuple[str, str], dict[str, str]] = {}
         self._translation_index: dict[str, dict[str, str]] = {}
         self._indexed_translation_keys: set[tuple[str, str]] = set()
@@ -332,7 +357,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._last_request_times: dict[str, float] = {}
         self._pacing_lock = asyncio.Lock()
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY_DATA)
-        self._persisted_metadata: dict[str, dict[str, Any]] = {}
+        self._persisted_metadata: dict[str, dict[str, object]] = {}
         self._pending_reload_domains: set[str] = set()
         self._persisted_pending_reload_domains: set[str] = set()
         self._reload_lock = asyncio.Lock()
@@ -429,7 +454,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.warning("Malformed metadata storage found, starting fresh")
             metadata = {}
 
-        validated_metadata: dict[str, dict[str, Any]] = {}
+        validated_metadata: dict[str, dict[str, object]] = {}
         for relative_path, entry in metadata.items():
             if isinstance(relative_path, str) and (
                 validated := BlueprintUpdateCoordinator._validate_metadata_entry(entry)
@@ -453,7 +478,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             len(self._persisted_metadata),
         )
 
-    async def async_translate(self, key: str, category: str = "common", **kwargs: Any) -> str:
+    async def async_translate(self, key: str, category: str = "common", **kwargs: object) -> str:
         """Translate a key using the current language and category.
 
         This method builds a unified translation index across all loaded
@@ -549,8 +574,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return filter_mode, selected_blueprints
 
     def _filter_existing_metadata(
-        self, root: str, metadata: dict[str, dict[str, Any]]
-    ) -> dict[str, dict[str, Any]]:
+        self, root: str, metadata: dict[str, dict[str, object]]
+    ) -> dict[str, dict[str, object]]:
         """Filter metadata to only include paths that exist on disk.
 
         This is a synchronous method intended to be run in an executor.
@@ -563,7 +588,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A filtered metadata dictionary.
 
         """
-        filtered: dict[str, dict[str, Any]] = {}
+        filtered: dict[str, dict[str, object]] = {}
         for relative_path, data in metadata.items():
             abs_path = os.path.join(root, relative_path)
             if os.path.isfile(abs_path) and (
@@ -575,7 +600,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return filtered
 
     @staticmethod
-    def _validate_metadata_entry(entry: Any) -> dict[str, Any] | None:
+    def _validate_metadata_entry(entry: object) -> dict[str, object] | None:
         """Validate and normalize a single metadata entry.
 
         Args:
@@ -588,7 +613,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not isinstance(entry, dict):
             return None
 
-        validated: dict[str, Any] = {}
+        validated: dict[str, object] = {}
         for field in METADATA_STORAGE_FIELDS:
             val = entry.get(field)
             if val is None or isinstance(val, str):
@@ -653,7 +678,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     async def _async_initialize_results(
         self, blueprints: dict[str, BlueprintMetadata]
-    ) -> dict[str, dict[str, Any]]:
+    ) -> dict[str, dict[str, object]]:
         """Create the initial results structure from disk scan.
 
         Pre-populates basic metadata and local hashes. Remote metadata
@@ -694,7 +719,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             }
         return results
 
-    def _merge_previous_data(self, results: dict[str, dict[str, Any]]) -> None:
+    def _merge_previous_data(self, results: dict[str, dict[str, object]]) -> None:
         """Merge previous scan metadata and detect synchronization issues.
 
         This method synchronizes current scan results with the existing
@@ -707,7 +732,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             results: The newly initialized results dictionary to update.
 
         """
-        if self.data is None or not self.data:
+        if not self.data:
             for info in results.values():
                 if remote_hash := info.get("remote_hash"):
                     prev_url = info.get("persisted_source_url")
@@ -745,7 +770,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     }
                 )
 
-    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
+    async def _async_update_data(self) -> dict[str, dict[str, object]]:
         """Fetch and synchronize blueprint update data.
 
         Performs a fast local disk scan to identify blueprints and
@@ -790,7 +815,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         _LOGGER.debug("Instant setup complete with %d blueprints", len(results))
         return results
 
-    def _is_semantically_equal(self, content: str, target_hash: str, source_url: str) -> bool:
+    def _is_semantically_equal(self, content: object, target_hash: object, source_url: str) -> bool:
         """Check if content is semantically equal to a target hash.
 
         Args:
@@ -814,8 +839,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content_hash == target_hash
 
     def _handle_source_url_change(
-        self, path: str, info: dict[str, Any], prev: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, path: str, info: dict[str, object], prev: dict[str, object]
+    ) -> dict[str, object]:
         """Handle detected change in blueprint source URL.
 
         If the URL changed, invalidate all remote-derived metadata and trigger
@@ -833,13 +858,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         prev_url = prev.get("source_url")
         curr_url = info.get("source_url")
 
-        if prev_url and curr_url and prev_url != curr_url:
+        if (
+            prev_url
+            and curr_url
+            and prev_url != curr_url
+            and isinstance(prev_url, str)
+            and isinstance(curr_url, str)
+        ):
             return self._invalidate_blueprint_metadata(path, prev_url, curr_url, prev)
         return prev
 
     def _invalidate_blueprint_metadata(
-        self, path: str, prev_url: str, curr_url: str, prev: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, path: str, prev_url: str, curr_url: str, prev: dict[str, object]
+    ) -> dict[str, object]:
         """Invalidate all remote-derived metadata for a blueprint.
 
         This is called when the source URL changes, ensuring that old ETags,
@@ -864,7 +895,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not (relative_path := prev.get("relative_path")):
             relative_path = get_blueprint_relative_path(self.hass, path)
 
-        if relative_path:
+        if relative_path and isinstance(relative_path, str):
             self._persisted_metadata.pop(relative_path, None)
 
         invalidated = {
@@ -886,7 +917,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return invalidated
 
     def _apply_ghost_update_detection(
-        self, path: str, info: dict[str, Any], prev_data: dict[str, Any]
+        self, path: str, info: dict[str, object], prev_data: dict[str, object]
     ) -> tuple[bool, str | None, str | None, str | None]:
         """Apply ghost update detection to a blueprint.
 
@@ -910,11 +941,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         if is_updatable and self._is_ghost_update(local_hash, prev_data):
             _LOGGER.debug("Ghost update detected for %s; forcing updatable=False", path)
-            return False, None, None, local_hash
+            return False, None, None, str(local_hash) if local_hash else None
 
-        return is_updatable, next_invalid, next_error, remote_hash
+        return (
+            is_updatable,
+            str(next_invalid) if isinstance(next_invalid, str) else None,
+            str(next_error) if isinstance(next_error, str) else None,
+            str(remote_hash) if isinstance(remote_hash, str) else None,
+        )
 
-    def _is_ghost_update(self, current_local_hash: Any, prev_data: dict[str, Any]) -> bool:
+    def _is_ghost_update(self, current_local_hash: object, prev_data: dict[str, object]) -> bool:
         """Check if a detected update is actually a 'ghost update'.
 
         A ghost update occurs when the content is effectively identical
@@ -941,7 +977,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     def _start_background_refresh(
         self,
-        blueprints: dict[str, Any],
+        blueprints: Mapping[str, Mapping[str, object]],
         generation: int | None = None,
     ) -> None:
         """Start background work for the newest local scan generation.
@@ -979,7 +1015,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     async def _async_background_refresh(
         self,
-        blueprints: dict[str, Any],
+        blueprints: Mapping[str, Mapping[str, object]],
         generation: int | None = None,
     ) -> None:
         """Fetch remote updates in the background using a task queue.
@@ -1010,17 +1046,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     self._safe_hostname_cache.clear()
                 results_to_notify: list[str] = []
                 updated_domains: set[str] = set()
-                queue: asyncio.Queue[tuple[str, dict[str, Any], RefreshWorkItem | None] | None] = (
-                    asyncio.Queue()
-                )
+                queue: asyncio.Queue[
+                    tuple[str, dict[str, object], RefreshWorkItem | None] | None
+                ] = asyncio.Queue()
 
                 for path, info in blueprints.items():
+                    info_dict = dict(info)
                     work_item = (
-                        RefreshWorkItem.capture(generation, path, info)
+                        RefreshWorkItem.capture(generation, path, info_dict)
                         if generation is not None
                         else None
                     )
-                    queue.put_nowait((path, info, work_item))
+                    queue.put_nowait((path, info_dict, work_item))
 
                 session = get_guarded_async_client(self.hass, **self._get_client_kwargs())
 
@@ -1109,10 +1146,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not self.setup_complete:
             return
 
-        final_metadata: dict[str, dict[str, Any]] = {}
+        final_metadata: dict[str, dict[str, object]] = {}
         all_relative_paths = set(self._persisted_metadata.keys())
         for _, info in self.data.items():
-            if relative_path := info.get("relative_path"):
+            if (relative_path := info.get("relative_path")) and isinstance(relative_path, str):
                 all_relative_paths.add(relative_path)
 
         blueprints_root = self.hass.config.path(BLUEPRINTS_DATA_DIR)
@@ -1226,7 +1263,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             await self.async_reconcile_reload_services(set(self._pending_reload_domains))
 
     @staticmethod
-    def _has_meaningful_metadata(entry: dict[str, Any]) -> bool:
+    def _has_meaningful_metadata(entry: dict[str, object]) -> bool:
         """Return True if this metadata entry has any meaningful value set.
 
         Uses ``is not None`` checks rather than truthiness so that falsy-but-
@@ -1235,12 +1272,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return any(entry.get(field) is not None for field in METADATA_STORAGE_FIELDS)
 
     @staticmethod
-    def _get_client_kwargs() -> dict[str, Any]:
+    def _get_client_kwargs() -> dict[str, tuple[str, ...] | None]:
         """Get the default httpx client kwargs with ALPN support if available."""
         if BlueprintUpdateCoordinator._client_kwargs_cache is not None:
             return BlueprintUpdateCoordinator._client_kwargs_cache
 
-        client_kwargs: dict[str, Any] = (
+        client_kwargs: dict[str, tuple[str, ...] | None] = (
             {"alpn_protocols": SSL_ALPN_HTTP11_HTTP2} if SSL_ALPN_HTTP11_HTTP2 is not None else {}
         )
 
@@ -1281,7 +1318,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.exception("Failed to send auto-update notification")
 
     @staticmethod
-    def _validate_blueprint(data: Any, source_url: str, expected_domain: str) -> str | None:
+    def _validate_blueprint(
+        data: dict[str, object], source_url: str, expected_domain: str
+    ) -> str | None:
         """Validate blueprint data using HA Core's Blueprint class.
 
         Performs basic structure check, structural validation,
@@ -1332,7 +1371,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self,
         path: str,
         content: str | None = None,
-        parsed_data: dict[str, Any] | None = None,
+        parsed_data: dict[str, object] | None = None,
     ) -> str:
         """Determine the functional domain for a blueprint path.
 
@@ -1468,7 +1507,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return content, canonical_url, author, name, response
 
     @staticmethod
-    def _read_import_source_url(full_path: str) -> Any:
+    def _read_import_source_url(full_path: str) -> object:
         """Read an existing import target's source URL off the event loop."""
         try:
             with open(full_path, encoding="utf-8") as file:
@@ -1810,7 +1849,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             real_path,
             source_url=source_url,
         )
-        final_source_url = cast(str | None, metadata["source_url"])
+        final_source_url_val = metadata.get("source_url")
+        final_source_url = (
+            str(final_source_url_val) if isinstance(final_source_url_val, str) else None
+        )
         content = (
             self._ensure_source_url(remote_content, final_source_url)
             if final_source_url
@@ -1820,15 +1862,24 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if remote_hash is not None and remote_hash != expected_hash:
             raise HomeAssistantError("Remote hash does not match validated install content")
 
+        current_val = metadata.get("current")
+        current_dict: dict[str, object] | None = (
+            {str(k): v for k, v in current_val.items()} if isinstance(current_val, dict) else None
+        )
+        name_val = metadata.get("name")
+        name_str = str(name_val) if name_val is not None else ""
+        rel_val = metadata.get("relative_path")
+        rel_str = str(rel_val) if rel_val is not None else ""
+
         return PreparedBlueprintInstall(
             real_path=real_path,
             parsed=parsed,
             blueprint_block=blueprint_block,
             functional_domain=functional_domain,
-            current=cast(dict[str, Any] | None, metadata["current"]),
-            name=cast(str, metadata["name"]),
+            current=current_dict,
+            name=name_str,
             source_url=final_source_url,
-            relative_path=cast(str, metadata["relative_path"]),
+            relative_path=rel_str,
             content=content,
         )
 
@@ -1852,7 +1903,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     def _parse_blueprint_install_content(
         path: str,
         remote_content: str,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         """Parse install content, retaining the existing permissive fallback."""
         try:
             parsed = yaml_util.parse_yaml(remote_content)
@@ -1860,12 +1911,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             _LOGGER.warning("Failed to parse blueprint at %s", path)
             _LOGGER.debug("Blueprint YAML parse error at %s: %s", path, err, exc_info=err)
             return None
-        return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else None
+        return parsed if isinstance(parsed, dict) else None
 
     @staticmethod
     def _warn_if_blueprint_domain_mismatches(
         path: str,
-        parsed: dict[str, Any] | None,
+        parsed: dict[str, object] | None,
         functional_domain: str,
     ) -> None:
         """Warn when YAML metadata conflicts with the path-derived domain."""
@@ -1892,7 +1943,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         file_result: FileTransactionResult,
         etag: str | None,
         last_modified: str | None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Build the synchronized coordinator state for an installation."""
         current = prepared.current
         final_etag = etag if etag is not None else (current.get("etag") if current else None)
@@ -1925,8 +1976,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     async def _async_store_installed_blueprint_metadata(
         self,
         path: str,
-        blueprint_block: dict[str, Any] | None,
-        metadata: dict[str, Any],
+        blueprint_block: dict[str, object] | None,
+        metadata: dict[str, object],
         persist: bool = True,
     ) -> None:
         """Persist install metadata when the blueprint is tracked or parseable."""
@@ -1957,7 +2008,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             prepared.functional_domain,
         )
         current = prepared.current
-        previous_hash = current.get("local_hash") if current else None
+        prev_hash_val = current.get("local_hash") if current else None
+        previous_hash = str(prev_hash_val) if prev_hash_val is not None else None
         had_breaking_risks = bool(current.get("breaking_risks")) if current else False
         metadata = self._build_installed_blueprint_metadata(
             prepared,
@@ -1988,10 +2040,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     def _resolve_blueprint_metadata(
         self,
         path: str,
-        bp_block: dict[str, Any] | None,
+        bp_block: dict[str, object] | None,
         real_path: str,
         source_url: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Resolve blueprint metadata merging new content with cached data.
 
         This method merges newly parsed content with existing cache. It:
@@ -2028,14 +2080,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             final_source_url = None
 
         relative_path = get_blueprint_relative_path(self.hass, real_path) or (
-            current.get("relative_path") if current else ""
+            str(current.get("relative_path")) if (current and current.get("relative_path")) else ""
+        )
+
+        current_dict: dict[str, object] | None = (
+            {str(k): v for k, v in current.items()} if isinstance(current, Mapping) else None
         )
 
         return {
-            "name": name,
+            "name": str(name),
             "source_url": final_source_url,
             "relative_path": relative_path,
-            "current": current,
+            "current": current_dict,
         }
 
     def _fire_update_event(
@@ -2128,13 +2184,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         except (ValueError, OSError):
             return False
 
-    async def async_restore_blueprint(self, path: str, version: int = 1) -> dict[str, Any]:
+    async def async_restore_blueprint(self, path: str, version: int = 1) -> dict[str, object]:
         """Serialize and restore a validated backup as one per-path transaction."""
         real_path = os.path.realpath(path)
         async with self._file_store.transaction(real_path):
             return await self._async_restore_blueprint_locked(path, version)
 
-    async def _async_restore_blueprint_locked(self, path: str, version: int = 1) -> dict[str, Any]:
+    async def _async_restore_blueprint_locked(
+        self, path: str, version: int = 1
+    ) -> dict[str, object]:
         """Restore a blueprint from a numbered backup file.
 
         The current blueprint is preserved as a new backup before the
@@ -2219,7 +2277,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         translation_key: str,
         error: str | None = None,
         **translation_kwargs: str,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Build the translated service result for a restore attempt."""
         if error is not None:
             translation_kwargs["error"] = error
@@ -2234,7 +2292,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         real_path: str,
         version: int,
         max_backups: int,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         """Return an error result for an unsafe or invalid restore request."""
         if not self._is_safe_path(real_path):
             _LOGGER.error("Security violation: Attempted to restore unsafe path: %s", real_path)
@@ -2287,20 +2345,34 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         domain = self._get_functional_domain(real_path)
         source_info = self.data.get(path) or self.data.get(real_path) or {}
         tracked_source_url = source_info.get("source_url")
-        backup_block = self._get_blueprint_block(
-            real_path,
-            parsed_data=parsed_backup if isinstance(parsed_backup, dict) else None,
+        parsed_dict: dict[str, object] | None = (
+            {str(k): v for k, v in parsed_backup.items()}
+            if isinstance(parsed_backup, dict)
+            else None
         )
-        backup_source_url = backup_block.get("source_url") if backup_block else None
+        bp_block = (
+            self._get_blueprint_block(
+                real_path,
+                parsed_data=parsed_dict,
+            )
+            if parsed_dict
+            else None
+        )
+        backup_source_url = bp_block.get("source_url") if bp_block else None
         if tracked_source_url and backup_source_url != tracked_source_url:
             raise BlueprintRestoreValidationError(
                 "blueprint_validation_error",
                 error="Backup source URL does not match the tracked blueprint",
             )
 
+        src_url = tracked_source_url or backup_source_url or real_path
+        src_url_str = str(src_url) if src_url else real_path
+        bp_dict: dict[str, object] = (
+            {str(k): v for k, v in parsed_backup.items()} if isinstance(parsed_backup, dict) else {}
+        )
         if validation_error := self._validate_blueprint(
-            parsed_backup,
-            tracked_source_url or backup_source_url or real_path,
+            bp_dict,
+            src_url_str,
             domain,
         ):
             _, separator, detail = validation_error.partition("|")
@@ -2317,7 +2389,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         )
 
     @staticmethod
-    def _parse_blueprint_backup(backup_content: str) -> Any:
+    def _parse_blueprint_backup(backup_content: str) -> object:
         """Parse backup YAML and present a sanitized validation error."""
         try:
             return yaml_util.parse_yaml(backup_content)
@@ -2390,11 +2462,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             c_diff = cached.get("diff")
             c_semantic = cached.get("semantic_sync", False)
             if local_hash == c_local and remote_hash == c_remote and isinstance(c_diff, str):
-                return GitDiffResult(diff_text=c_diff, is_semantic_sync=c_semantic)
+                c_semantic_bool = bool(c_semantic)
+                return GitDiffResult(diff_text=c_diff, is_semantic_sync=c_semantic_bool)
         return None
 
     @staticmethod
-    def _extract_inputs_schema(content: str) -> tuple[dict[str, Any], str | None]:
+    def _extract_inputs_schema(
+        content: str,
+    ) -> tuple[dict[str, dict[str, object]], str | None]:
         """Extract input schema from blueprint YAML content.
 
         Args:
@@ -2419,43 +2494,37 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if not isinstance(inputs, dict):
                 return {}, None
 
-            schema: dict[str, Any] = {}
+            schema: dict[str, dict[str, object]] = {}
 
-            def _process_inputs(input_dict: dict[str, Any]) -> None:
+            def _process_inputs(input_dict: dict[str, object], *, top_level: bool = True) -> None:
                 """Flatten inputs, recursing into sections (HA 2024.6+)."""
                 for key, val in input_dict.items():
-                    if not isinstance(val, dict):
-                        schema[key] = {"mandatory": True, "selector": None}
+                    if top_level and key in TOP_LEVEL_SELECTOR_PRESENTATION_KEYS:
                         continue
+                    if isinstance(val, dict):
+                        if "input" in val:
+                            input_val = val.get("input")
+                            if isinstance(input_val, dict) and input_val:
+                                _process_inputs(
+                                    {str(k): v for k, v in input_val.items()},
+                                    top_level=False,
+                                )
+                            continue
+                        sel = val.get("selector")
+                        if isinstance(sel, dict) and sel:
+                            selector_name = str(next(iter(sel.keys())))
+                        else:
+                            selector_name = None
+                        mandatory = "default" not in val
+                        schema[key] = {
+                            "mandatory": mandatory,
+                            "selector": selector_name,
+                            "selector_config": sel,
+                        }
+                    else:
+                        schema[key] = {"mandatory": True, "selector": None, "selector_config": None}
 
-                    if "input" in val:
-                        input_val = val.get("input")
-                        if isinstance(input_val, dict) and input_val:
-                            _process_inputs(input_val)
-                        continue
-
-                    selector_dict = val.get("selector")
-                    selector = (
-                        next(iter(selector_dict), None)
-                        if isinstance(selector_dict, dict) and selector_dict
-                        else None
-                    )
-                    selector_config = (
-                        BlueprintUpdateCoordinator._normalize_selector_config(
-                            selector_dict.get(selector) or {}
-                        )
-                        if selector is not None and isinstance(selector_dict, dict)
-                        else None
-                    )
-                    is_mandatory = "default" not in val
-
-                    schema[key] = {
-                        "mandatory": is_mandatory,
-                        "selector": selector,
-                        "selector_config": selector_config,
-                    }
-
-            _process_inputs(inputs)
+            _process_inputs({str(k): v for k, v in inputs.items()})
             return schema, None
         except HomeAssistantError as err:
             _LOGGER.warning("Failed to extract inputs schema from blueprint")
@@ -2463,7 +2532,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return {}, str(err)
 
     @staticmethod
-    def _normalize_selector_config(value: Any, *, top_level: bool = True) -> JSONValue:
+    def _normalize_selector_config(value: object, *, top_level: bool = True) -> JSONValue:
         """Return a stable selector contract without cosmetic presentation keys."""
         if isinstance(value, dict):
             return {
@@ -2486,7 +2555,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             return value
         return str(value)
 
-    def _get_entities_configs(self, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
+    def _get_entities_configs(self, entity_ids: list[str]) -> dict[str, dict[str, object]]:
         """Get input configurations for blueprint-based entities.
 
         Args:
@@ -2496,7 +2565,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A dictionary mapping entity IDs to their configured input values.
 
         """
-        configs: dict[str, dict[str, Any]] = {}
+        configs: dict[str, dict[str, object]] = {}
         remaining_ids = set(entity_ids)
 
         for domain in (DOMAIN_AUTOMATION, DOMAIN_SCRIPT):
@@ -2543,7 +2612,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     @staticmethod
     def _populate_config_from_entity(
-        entity: Any, entity_id: str, configs: dict[str, dict[str, Any]]
+        entity: object, entity_id: str, configs: dict[str, dict[str, object]]
     ) -> None:
         """Extract and validate blueprint configuration from a HA entity.
 
@@ -2571,24 +2640,41 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             configs[entity_id] = cfg
 
     @staticmethod
-    def _get_affected_entities(configs: dict[str, dict[str, Any]], key: str) -> list[str]:
+    def _get_affected_entities(configs: Mapping[str, Mapping[str, object]], key: str) -> list[str]:
         """Find entities using a specific input key."""
         return [eid for eid, inputs in configs.items() if key in inputs]
 
     @staticmethod
+    def _is_input_mandatory(props: object) -> bool:
+        """Check if an input schema property dictionary represents a mandatory input."""
+        if not isinstance(props, dict):
+            return True
+        if "mandatory" in props:
+            return bool(props.get("mandatory"))
+        return "default" not in props
+
+    @staticmethod
     def _detect_new_mandatory_inputs(
-        old_schema: dict[str, Any], new_schema: dict[str, Any]
+        old_schema: Mapping[str, object], new_schema: Mapping[str, object]
     ) -> list[StructuredRisk]:
         """Detect new mandatory inputs in the schema."""
-        return [
-            {"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": key}}
-            for key, props in new_schema.items()
-            if props["mandatory"] and (key not in old_schema or not old_schema[key]["mandatory"])
-        ]
+        risks: list[StructuredRisk] = []
+        for key, props in new_schema.items():
+            if BlueprintUpdateCoordinator._is_input_mandatory(props):
+                old_props = old_schema.get(key)
+                old_mandatory = (
+                    BlueprintUpdateCoordinator._is_input_mandatory(old_props)
+                    if old_props is not None
+                    else False
+                )
+                if not old_mandatory:
+                    risks.append({"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": key}})
+        return risks
 
     @staticmethod
     def _detect_missing_inputs(
-        new_schema: dict[str, Any], configs: dict[str, dict[str, Any]]
+        new_schema: Mapping[str, Mapping[str, object]],
+        configs: Mapping[str, Mapping[str, object]],
     ) -> list[StructuredRisk]:
         """Detect missing mandatory inputs for existing entities."""
         risks: list[StructuredRisk] = []
@@ -2599,24 +2685,28 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     "args": {"entity": entity_id, "input": key},
                 }
                 for key, props in new_schema.items()
-                if props["mandatory"] and key not in inputs
+                if isinstance(props, dict) and props.get("mandatory") and key not in inputs
             )
         return risks
 
     def _detect_selector_mismatches(
         self,
-        old_schema: dict[str, Any],
-        new_schema: dict[str, Any],
-        configs: dict[str, dict[str, Any]],
+        old_schema: Mapping[str, Mapping[str, object]],
+        new_schema: Mapping[str, Mapping[str, object]],
+        configs: Mapping[str, Mapping[str, object]],
     ) -> list[StructuredRisk]:
         """Detect changes in selectors for existing inputs."""
         risks: list[StructuredRisk] = []
         for key in old_schema:
             if key in new_schema:
-                old_selector = old_schema[key].get("selector")
-                new_selector = new_schema[key].get("selector")
-                old_config = old_schema[key].get("selector_config")
-                new_config = new_schema[key].get("selector_config")
+                old_val = old_schema[key]
+                new_val = new_schema[key]
+                old_props = old_val if isinstance(old_val, dict) else {}
+                new_props = new_val if isinstance(new_val, dict) else {}
+                old_selector = old_props.get("selector")
+                new_selector = new_props.get("selector")
+                old_config = old_props.get("selector_config")
+                new_config = new_props.get("selector_config")
                 if (old_selector != new_selector or old_config != new_config) and (
                     affected := self._get_affected_entities(configs, key)
                 ):
@@ -2625,8 +2715,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                             "type": BlueprintRiskType.SELECTOR_MISMATCH,
                             "args": {
                                 "input": key,
-                                "old_type": old_selector or "none",
-                                "new_type": new_selector or "none",
+                                "old_type": str(old_selector) if old_selector else "none",
+                                "new_type": str(new_selector) if new_selector else "none",
                                 "count": len(affected),
                             },
                         }
@@ -2635,9 +2725,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
     def _detect_removed_inputs(
         self,
-        old_schema: dict[str, Any],
-        new_schema: dict[str, Any],
-        configs: dict[str, dict[str, Any]],
+        old_schema: Mapping[str, Mapping[str, object]],
+        new_schema: Mapping[str, Mapping[str, object]],
+        configs: Mapping[str, Mapping[str, object]],
     ) -> list[StructuredRisk]:
         """Detect inputs that were removed but are still used."""
         risks: list[StructuredRisk] = []
@@ -2685,7 +2775,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self,
         old_content: str,
         new_content: str,
-        configs: dict[str, dict[str, Any]],
+        configs: Mapping[str, Mapping[str, object]],
     ) -> list[StructuredRisk]:
         """Detect potential breaking changes between two versions of a blueprint.
 
@@ -2750,7 +2840,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self,
         relative_path: str,
         blueprint_content: str,
-        configs: dict[str, dict[str, Any]],
+        configs: dict[str, dict[str, object]],
     ) -> list[StructuredRisk]:
         """Validate all consumers of a blueprint against specific content.
 
@@ -2855,7 +2945,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         return risks
 
-    async def async_summarize_risks(self, risks: list[StructuredRisk]) -> str:
+    async def async_summarize_risks(self, risks: Iterable[Mapping[str, object]]) -> str:
         """Create a localized newline-separated string of risks.
 
         This shared helper provides a consistent formatting and translation
@@ -2869,25 +2959,41 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             A formatted string with bullet points for each risk.
         """
 
-        async def _translate_risk(risk: StructuredRisk) -> str:
+        async def _translate_risk(risk: Mapping[str, object]) -> str:
             """Translate a single risk to a bullet-point string."""
-            rtype = risk.get("type", BlueprintRiskType.SYSTEM_ERROR)
-            rargs = dict(risk.get("args", {}))
+            rtype_raw = risk.get("type")
+            if isinstance(rtype_raw, BlueprintRiskType):
+                rtype: object = rtype_raw
+            elif isinstance(rtype_raw, str):
+                try:
+                    rtype = BlueprintRiskType(rtype_raw)
+                except ValueError:
+                    rtype = rtype_raw
+            else:
+                rtype = BlueprintRiskType.SYSTEM_ERROR
 
-            translation_key = RISK_TYPE_TRANSLATIONS.get(rtype)
+            rargs_raw = risk.get("args")
+            rargs = dict(rargs_raw) if isinstance(rargs_raw, dict) else {}
+
+            translation_key = (
+                RISK_TYPE_TRANSLATIONS.get(rtype) if isinstance(rtype, BlueprintRiskType) else None
+            )
 
             if translation_key is None:
                 translation_key = "risk_unknown"
                 rargs.pop("type", None)
                 rargs.setdefault("error", str(rtype or risk))
-                msg = await self.async_translate(translation_key, **cast(Any, rargs))
-            else:
-                rargs.pop("type", None)
-                msg = await self.async_translate(
-                    translation_key, type=str(rtype), **cast(Any, rargs)
-                )
+                rargs_str = {k: str(v) for k, v in rargs.items()}
+                if rtype:
+                    translated = await self.async_translate(
+                        translation_key, type=str(rtype), **rargs_str
+                    )
+                    return f"- {translated}"
+                translated = await self.async_translate(translation_key, **rargs_str)
+                return f"- {translated}"
 
-            return f"- {msg}"
+            rargs_str = {k: str(v) for k, v in rargs.items()}
+            return f"- {await self.async_translate(translation_key, **rargs_str)}"
 
         lines = await asyncio.gather(*[_translate_risk(r) for r in risks])
         return "\n".join(lines)
@@ -2932,7 +3038,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not info or not info.get("updatable"):
             return None
 
-        source_url = info.get("source_url", "")
+        source_url_val = info.get("source_url")
+        source_url = source_url_val if isinstance(source_url_val, str) else ""
         normalized_url = normalize_url(source_url)
         if not normalized_url:
             return None
@@ -2956,8 +3063,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
 
         remote_content_with_url = self._ensure_source_url(remote_content, source_url)
         try:
-            blueprint_dict = yaml_util.parse_yaml(remote_content_with_url)
-            expected_domain = self._get_functional_domain(path, remote_content_with_url)
+            remote_parsed = yaml_util.parse_yaml(remote_content_with_url)
+            blueprint_dict: dict[str, object] = (
+                {str(k): v for k, v in remote_parsed.items()}
+                if isinstance(remote_parsed, dict)
+                else {}
+            )
+            expected_domain = self._get_functional_domain(path)
             last_error = self._validate_blueprint(
                 blueprint_dict, source_url, expected_domain=expected_domain
             )
@@ -2991,6 +3103,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         info = self.data[path]
         local_hash = info.get("local_hash")
         remote_hash = info.get("remote_hash")
+        source_url = info.get("source_url")
 
         if remote_hash is None and info.get("updatable"):
             _LOGGER.error(
@@ -3000,7 +3113,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             return None
 
-        if (result := self.get_cached_git_diff(path, local_hash, remote_hash)) is not None:
+        source_url_str = str(source_url) if source_url else ""
+        local_hash_str = str(local_hash) if local_hash else None
+        remote_hash_str = str(remote_hash) if remote_hash else None
+        if (result := self.get_cached_git_diff(path, local_hash_str, remote_hash_str)) is not None:
             return result
 
         remote_content = info.get("remote_content")
@@ -3015,30 +3131,27 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 )
                 return None
 
-        if not remote_content:
+        if not isinstance(remote_content, str) or not remote_content:
             return None
 
         try:
             diff_text = await self.hass.async_add_executor_job(
-                self._read_and_diff, path, remote_content, info.get("source_url", "")
+                BlueprintUpdateCoordinator._read_and_diff,
+                path,
+                remote_content,
+                source_url_str,
             )
-        except OSError:
-            _LOGGER.warning("I/O error generating diff for %s", path)
-            return None
-        except Exception:
-            _LOGGER.exception("Unexpected error generating diff for %s", path)
+        except Exception as err:
+            _LOGGER.warning("Failed to generate diff for %s: %s", path, err)
             return None
 
-        is_semantic_sync = (
-            not (diff_text or "").strip()
-            and isinstance(remote_content, str)
-            and isinstance(local_hash, str)
-            and isinstance(info.get("source_url"), str)
-            and self._is_semantically_equal(
-                remote_content, local_hash, cast(str, info.get("source_url"))
-            )
+        remote_content_str = remote_content if isinstance(remote_content, str) else ""
+        is_semantic_sync = self._is_semantically_equal(
+            remote_content_str, local_hash_str or "", source_url_str
         )
-        self.set_cached_git_diff(path, local_hash, remote_hash, diff_text or "", is_semantic_sync)
+        self.set_cached_git_diff(
+            path, local_hash_str, remote_hash_str, diff_text or "", is_semantic_sync
+        )
         return GitDiffResult(diff_text=diff_text or "", is_semantic_sync=is_semantic_sync)
 
     def is_auto_update_enabled(self) -> bool:
@@ -3053,7 +3166,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return get_config_bool(self.config_entry, CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
 
     def _update_error_state(
-        self, path: str, error_type: str, detail: Any, clear_etag: bool = False
+        self, path: str, error_type: str, detail: object, clear_etag: bool = False
     ) -> None:
         """Update the blueprint state with a specific error.
 
@@ -3085,28 +3198,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self,
         session: httpx.AsyncClient,
         path: str,
-        info: dict[str, Any],
+        info: Mapping[str, object],
         results_to_notify: list[str],
         updated_domains: set[str],
         force: bool = False,
         refresh_work: RefreshWorkItem | None = None,
     ) -> None:
-        """Update a single blueprint directly in self.data.
-
-        Args:
-            session: Async HTTP client session.
-            path: Local path of the blueprint.
-            info: Current blueprint metadata.
-            results_to_notify: List of names for notification.
-            updated_domains: Set of domains affected.
-            force: If True, ignore ETag and force a full download.
-            refresh_work: Optional ownership token for background work.
-
-        """
+        """Update a single blueprint directly in self.data."""
         if not self._is_current_refresh_item(refresh_work):
             return
-        if not (source_url := info.get("source_url")):
+        source_url_obj = info.get("source_url")
+        if not isinstance(source_url_obj, str) or not source_url_obj:
             return
+        source_url = source_url_obj
 
         if not await self._is_safe_url(source_url):
             if not self._is_current_refresh_item(refresh_work):
@@ -3130,8 +3234,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         stored_last_modified = self.data.get(path, {}).get("last_modified")
         stored_remote_hash = self.data.get(path, {}).get("remote_hash")
 
-        etag = stored_etag if (stored_remote_hash and not force) else None
-        last_modified = stored_last_modified if (stored_remote_hash and not force) else None
+        etag = str(stored_etag) if (stored_remote_hash and not force and stored_etag) else None
+        last_modified = (
+            str(stored_last_modified)
+            if (stored_remote_hash and not force and stored_last_modified)
+            else None
+        )
 
         try:
             remote_content, new_etag, new_last_modified = await self._async_fetch_content(
@@ -3197,30 +3305,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self,
         session: httpx.AsyncClient,
         path: str,
-        info: dict[str, Any],
+        info: Mapping[str, object],
         normalized_url: str,
         new_etag: str | None = None,
         new_last_modified: str | None = None,
         refresh_work: RefreshWorkItem | None = None,
     ) -> tuple[str | None, str | None, str | None]:
-        """Handle the 304 Not Modified case for a blueprint.
-
-        Args:
-            session: Async HTTP client session.
-            path: Local path of the blueprint.
-            info: Current blueprint metadata.
-            normalized_url: The URL used to fetch.
-            new_etag: The ETag returned (if any).
-            new_last_modified: The Last-Modified returned (if any).
-            refresh_work: Optional ownership token for background work.
-
-        Returns:
-            A tuple of (content, etag, last_modified). Content is None if still not modified.
-
-        """
+        """Handle the 304 Not Modified case for a blueprint."""
         if not self._is_current_refresh_item(refresh_work):
             return None, new_etag, new_last_modified
-        _LOGGER.debug("[304] '%s' is up to date on server", info["name"])
+        _LOGGER.debug("[304] '%s' is up to date on server", info.get("name"))
         if not (self.data and path in self.data):
             return None, new_etag, new_last_modified
 
@@ -3234,13 +3328,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not remote_hash:
             return None, new_etag, new_last_modified
 
-        local_hash = info["local_hash"]
+        local_hash = info.get("local_hash")
         self.data[path]["updatable"] = local_hash != remote_hash
 
         if self.data[path]["updatable"] and self.is_auto_update_enabled():
             _LOGGER.debug(
                 "Auto-update enabled for '%s', fetching on-demand",
-                info["name"],
+                info.get("name"),
             )
             return await self._async_fetch_content(
                 session,
@@ -3255,7 +3349,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     async def _process_blueprint_content(
         self,
         path: str,
-        info: dict[str, Any],
+        info: Mapping[str, object],
         remote_content: str,
         source_url: str,
         results_to_notify: list[str],
@@ -3264,37 +3358,36 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         new_last_modified: str | None = None,
         refresh_work: RefreshWorkItem | None = None,
     ) -> None:
-        """Process and validate newly fetched blueprint content.
-
-        Args:
-            path: Local path of the blueprint.
-            info: Current blueprint metadata.
-            remote_content: Raw YAML content.
-            new_etag: ETag from response.
-            source_url: Original source URL.
-            results_to_notify: List to track auto-updates for notification.
-            updated_domains: Set to track domains requiring reload.
-            new_last_modified: Last-Modified from response.
-            refresh_work: Optional ownership token for background work.
-
-        """
+        """Process and validate newly fetched blueprint content."""
         if not self._is_current_refresh_item(refresh_work):
             return
+        real_path = os.path.realpath(path)
+        source_url_str = source_url if isinstance(source_url, str) else ""
+        remote_content_with_url = remote_content
         try:
-            remote_content = self._ensure_source_url(remote_content, source_url)
-            remote_hash = self._hash_content(remote_content, source_url, already_normalized=True)
-            local_hash = info["local_hash"]
-            updatable = bool(remote_hash and remote_hash != local_hash)
-
-            blueprint_dict = yaml_util.parse_yaml(remote_content)
-            expected_domain = self._get_functional_domain(path, remote_content)
-            last_error = self._validate_blueprint(
-                blueprint_dict, source_url, expected_domain=expected_domain
+            remote_content_with_url = self._ensure_source_url(remote_content, source_url_str)
+            remote_parsed = yaml_util.parse_yaml(remote_content_with_url)
+            expected_domain = self._get_functional_domain(real_path)
+            blueprint_dict: dict[str, object] = (
+                {str(k): v for k, v in remote_parsed.items()}
+                if isinstance(remote_parsed, dict)
+                else {}
             )
+            if validation_error := self._validate_blueprint(
+                blueprint_dict, source_url_str, expected_domain=expected_domain
+            ):
+                updatable = False
+                remote_hash = None
+                last_error = validation_error
+            else:
+                remote_hash = self._hash_content(remote_content, source_url_str)
+                local_hash = info.get("local_hash")
+                updatable = bool(remote_hash and remote_hash != local_hash)
+                last_error = None
         except (HomeAssistantError, InvalidBlueprint) as err:
             _LOGGER.warning(
                 "Invalid blueprint content from %s: %s",
-                redact_url(source_url),
+                redact_url(source_url_str),
                 sanitize_error_detail(str(err)),
             )
             updatable = False
@@ -3306,7 +3399,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             remote_hash = None
             last_error = f"processing_error|{sanitize_error_detail(str(err))}"
 
-        risks = await self._detect_risks_for_update(path, info, remote_content, last_error)
+        risks = await self._detect_risks_for_update(path, info, remote_content)
         if not self._is_current_refresh_item(refresh_work):
             return
         if self.data and path in self.data:
@@ -3316,14 +3409,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             auto_update_handled = await self._handle_auto_update_step(
                 path,
                 info,
-                remote_content,
-                risks,
+                remote_content_with_url,
+                risks or [],
                 results_to_notify,
                 updated_domains,
                 remote_hash=remote_hash,
                 new_etag=new_etag,
                 new_last_modified=new_last_modified,
-                source_url=source_url,
+                source_url=source_url_str,
                 refresh_work=refresh_work,
             )
             if auto_update_handled or (
@@ -3334,7 +3427,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         self._update_coordinator_status_data(
             path,
             updatable,
-            remote_content,
+            remote_content_with_url,
             risks=risks,
             last_error=last_error,
             remote_hash=remote_hash,
@@ -3345,25 +3438,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     async def _detect_risks_for_update(
         self,
         path: str,
-        info: dict[str, Any],
+        info: Mapping[str, object],
         remote_content: str,
-        last_error: str | None,
+        session: httpx.AsyncClient | None = None,
     ) -> list[StructuredRisk]:
-        """Detect potential breaking changes for a blueprint update.
-
-        Args:
-            path: Local path of the blueprint.
-            info: Current blueprint metadata.
-            remote_content: New remote content.
-            last_error: Any validation error already found.
-
-        Returns:
-            A list of identified breaking risks or system errors to preserve.
-
-        """
+        """Detect potential breaking changes for a blueprint update."""
         risks = []
-        relative_path = info.get("relative_path")
-        if not relative_path:
+        relative_path_obj = info.get("relative_path")
+        if not isinstance(relative_path_obj, str) or not relative_path_obj:
             _LOGGER.warning(
                 "Missing relative path for blueprint at %s, skipping risk detection", path
             )
@@ -3373,16 +3455,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     "args": {"error": "missing_path", "path": os.path.basename(path)},
                 }
             ]
+        relative_path = relative_path_obj
 
-        if not last_error and self.data and path in self.data:
+        if self.data and path in self.data:
             local_file = self.hass.config.path(BLUEPRINTS_DATA_DIR, relative_path)
             try:
                 entity_ids = self._get_entities_using_blueprint(relative_path)
                 full_configs = self._get_entities_configs(entity_ids)
-                configs = {
-                    eid: cfg.get("use_blueprint", {}).get("input", {})
-                    for eid, cfg in full_configs.items()
-                }
+                configs: dict[str, dict[str, object]] = {}
+                for eid, cfg in full_configs.items():
+                    inp = cfg.get("input") if isinstance(cfg, dict) else None
+                    configs[eid] = (
+                        {str(k): v for k, v in inp.items()} if isinstance(inp, dict) else {}
+                    )
 
                 old_content = await self.hass.async_add_executor_job(read_local_file, local_file)
                 if old_content:
@@ -3429,7 +3514,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     async def _handle_auto_update_step(
         self,
         path: str,
-        info: dict[str, Any],
+        info: Mapping[str, object],
         remote_content: str,
         risks: list[StructuredRisk],
         results_to_notify: list[str],
@@ -3440,25 +3525,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         source_url: str | None = None,
         refresh_work: RefreshWorkItem | None = None,
     ) -> bool:
-        """Execute auto-update flow if safe.
-
-        Args:
-            path: Local path of the blueprint.
-            info: Current blueprint metadata.
-            remote_content: Content to install.
-            remote_hash: Hash of remote content.
-            new_etag: New response ETag.
-            risks: Detected risks.
-            results_to_notify: Accumulator for notifications.
-            updated_domains: Accumulator for service reloads.
-            new_last_modified: New response Last-Modified.
-            source_url: Original source URL for event reporting.
-            refresh_work: Optional ownership token for background work.
-
-        Returns:
-            True if processing for this blueprint should stop.
-
-        """
+        """Execute auto-update flow if safe."""
         if remote_hash is None:
             _LOGGER.error(
                 "Internal error: Attempted auto-update with None remote_hash for %s", path
@@ -3467,7 +3534,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if not self._is_current_refresh_item(refresh_work):
             return True
 
-        relative_path = info.get("relative_path")
+        relative_path_obj = info.get("relative_path")
+        relative_path = relative_path_obj if isinstance(relative_path_obj, str) else None
         in_use_entities = self._get_entities_using_blueprint(relative_path) if relative_path else []
         guard_failed = any(risk.get("type") == BlueprintRiskType.SYSTEM_ERROR for risk in risks)
         is_breaking = bool(risks) and (guard_failed or bool(in_use_entities))
@@ -3504,8 +3572,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 file_precondition=FileRevisionPrecondition.existing(local_file_hash),
                 refresh_work=refresh_work,
             )
-            results_to_notify.append(info["name"])
-            updated_domains.add(info.get("domain", DOMAIN_AUTOMATION))
+            name_val = info.get("name")
+            if isinstance(name_val, str):
+                results_to_notify.append(name_val)
+            domain_val = info.get("domain")
+            updated_domains.add(str(domain_val) if domain_val else DOMAIN_AUTOMATION)
             return True
         except BlueprintRefreshObsoleteError:
             _LOGGER.debug("Skipping obsolete auto-update for %s", path)
@@ -3530,7 +3601,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     async def _async_handle_auto_update_blocked(
         self,
         path: str,
-        info: dict[str, Any],
+        info: Mapping[str, object],
         remote_hash: str,
         remote_content: str,
         risks: list[StructuredRisk],
@@ -3539,9 +3610,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         new_last_modified: str | None = None,
     ) -> None:
         """Handle notification and state when auto-update is blocked."""
+        bp_name = str(info.get("name", "Unknown"))
         _LOGGER.warning(
             "Auto-update blocked for '%s' due to %d detected breaking changes.",
-            info["name"],
+            bp_name,
             len(risks),
         )
         title_key = (
@@ -3549,12 +3621,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             if guard_failed
             else "auto_update_blocked_by_breaking_change"
         )
-        title = await self.async_translate(title_key, name=info["name"])
+        title = await self.async_translate(title_key, name=bp_name)
         risk_summary = await self.async_summarize_risks(risks)
         message = await self.async_translate(
-            "breaking_risks_report", name=info["name"], risks=risk_summary
+            "breaking_risks_report", name=bp_name, risks=risk_summary
         )
-        relative_path = info.get("relative_path")
+        relative_path_obj = info.get("relative_path")
+        relative_path = relative_path_obj if isinstance(relative_path_obj, str) else None
         await self._async_send_auto_update_notification(
             title,
             message,
@@ -3590,24 +3663,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         new_etag: str | None = None,
         new_last_modified: str | None = None,
     ) -> None:
-        """Update internal data state for a blueprint.
-
-        Args:
-            path: Local path.
-            updatable: If an update is available.
-            last_error: Latest error string or None.
-            remote_hash: Hash of remote content.
-            remote_content: Content if updatable.
-            new_etag: Associated ETag.
-            new_last_modified: Associated Last-Modified header.
-            risks: Optional list of identified breaking risks to store/preserve.
-
-        """
+        """Update internal data state for a blueprint."""
         if not (self.data and path in self.data):
             return
 
         if last_error:
-            update_data: dict[str, Any] = {
+            update_data: dict[str, object] = {
                 "last_error": last_error,
                 "etag": new_etag,
                 "last_modified": new_last_modified,
@@ -3624,7 +3685,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                     "but received None remote_hash",
                     path,
                 )
-            update_data: dict[str, Any] = {
+            update_data: dict[str, object] = {
                 "last_error": last_error,
                 "etag": new_etag,
                 "last_modified": new_last_modified,
@@ -3637,8 +3698,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             }
 
         if risks is None:
-            risks = self.data[path].get("breaking_risks", [])
-        update_data["breaking_risks"] = risks
+            existing_risks = self.data[path].get("breaking_risks")
+            final_risks: list[Mapping[str, object]] = (
+                [{str(k): v for k, v in r.items()} for r in existing_risks if isinstance(r, dict)]
+                if isinstance(existing_risks, list)
+                else []
+            )
+        else:
+            final_risks = list(risks)
+        update_data["breaking_risks"] = final_risks
 
         self.data[path].update(update_data)
 
@@ -4035,7 +4103,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _get_blueprint_schema(domain: str) -> Any:
+    def _get_blueprint_schema(domain: str) -> vol.Schema | vol.All:
         """Return the appropriate Home Assistant blueprint schema for a given domain.
 
         Args:
@@ -4048,7 +4116,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
         if domain == DOMAIN_AUTOMATION:
             return AUTOMATION_BLUEPRINT_SCHEMA
         if domain == DOMAIN_TEMPLATE:
-            return TEMPLATE_BLUEPRINT_SCHEMA or BLUEPRINT_SCHEMA
+            if isinstance(TEMPLATE_BLUEPRINT_SCHEMA, vol.Schema):
+                return TEMPLATE_BLUEPRINT_SCHEMA
+            return BLUEPRINT_SCHEMA
         return BLUEPRINT_SCHEMA
 
     @staticmethod
@@ -4086,14 +4156,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 err,
             )
 
-        try:
-            return yaml_util.dump(target_data)
-        except (HomeAssistantError, yaml.YAMLError, TypeError, ValueError) as err:
-            _LOGGER.warning("YAML canonicalization failed for %s: %s", redact_url(source_url), err)
-            return BlueprintUpdateCoordinator._normalize_content(content)
+        if isinstance(target_data, (dict, list)):
+            try:
+                return yaml_util.dump(target_data)
+            except Exception as err:
+                _LOGGER.warning(
+                    "YAML canonicalization failed for %s: %s",
+                    redact_url(source_url),
+                    err,
+                )
+                return BlueprintUpdateCoordinator._normalize_content(content)
+        return ""
 
     @staticmethod
-    def _ensure_source_url(content: str, source_url: str) -> str:
+    def _ensure_source_url(content: object, source_url: object) -> str:
         """Ensure the target source_url is present in the blueprint metadata.
 
         Always uses structured YAML parsing to guarantee data integrity and
@@ -4126,56 +4202,41 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
                 "Non-string source_url passed to _ensure_source_url: %s", type(source_url)
             )
             return BlueprintUpdateCoordinator._normalize_content(content)
-
         return BlueprintUpdateCoordinator._ensure_source_url_cached(content, source_url)
 
     @staticmethod
-    def _stabilize_yaml_structure(original: Any, normalized: Any) -> Any:
-        """Stabilize YAML structure by merging normalized data into original order.
+    def _stabilize_yaml_structure(orig_data: object, normalized_data: object) -> object:
+        """Recursively update normalized structures using original key ordering.
 
-        Args:
-            original: The original dict from parsing.
-            normalized: The dictionary returned by the schema.
-
-        Returns:
-            A dict with preserved order and deterministic new keys.
-
+        Preserves existing dict/list identities when possible.
         """
-        if original is not None and not (
-            isinstance(original, type(normalized)) or isinstance(normalized, type(original))
-        ):
-            return normalized
-
-        if isinstance(normalized, dict):
-            orig_dict = original if isinstance(original, dict) else {}
-
-            res: dict[str, Any] = {
-                key: BlueprintUpdateCoordinator._stabilize_yaml_structure(
-                    orig_dict[key], normalized[key]
-                )
-                for key in orig_dict
-                if key in normalized
+        if isinstance(orig_data, dict) and isinstance(normalized_data, dict):
+            orig_dict: dict[object, object] = dict(orig_data.items())
+            norm_dict: dict[object, object] = dict(normalized_data.items())
+            res: dict[object, object] = {
+                k: BlueprintUpdateCoordinator._stabilize_yaml_structure(orig_val, norm_dict[k])
+                for k, orig_val in orig_dict.items()
+                if k in norm_dict
             }
-            new_keys = sorted(k for k in normalized if k not in res)
+            new_keys = sorted([k for k in norm_dict if k not in res], key=str)
             for key in new_keys:
                 res[key] = BlueprintUpdateCoordinator._stabilize_yaml_structure(
-                    None, normalized[key]
+                    norm_dict[key], norm_dict[key]
                 )
-
             return res
 
-        if isinstance(normalized, list):
-            res_list: list[Any] = []
-            orig_list = original if isinstance(original, list) else []
+        if isinstance(normalized_data, list):
+            orig_list = orig_data if isinstance(orig_data, list) else []
+            res_list: list[object] = []
 
-            for i, item in enumerate(normalized):
+            for i, item in enumerate(normalized_data):
                 orig_item = orig_list[i] if i < len(orig_list) else None
                 res_list.append(
                     BlueprintUpdateCoordinator._stabilize_yaml_structure(orig_item, item)
                 )
             return res_list
 
-        return normalized
+        return normalized_data
 
     @staticmethod
     def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
@@ -4227,8 +4288,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
     def _get_blueprint_block(
         path: str,
         content: str | None = None,
-        parsed_data: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
+        parsed_data: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
         """Extract the blueprint block from YAML content or pre-parsed data."""
         parsed = parsed_data
         if not parsed and content:
@@ -4267,7 +4328,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]
             )
             return None
 
-        return bp_info
+        return {str(k): v for k, v in bp_info.items()} if isinstance(bp_info, dict) else None
 
     @staticmethod
     def _parse_blueprint_data(

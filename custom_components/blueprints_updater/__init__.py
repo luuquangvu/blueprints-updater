@@ -337,7 +337,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
                             info = active_coordinator.data.get(path, info)
                             remote_content = info.get("remote_content")
 
-                        if remote_content:
+                        if isinstance(remote_content, str) and remote_content:
                             await active_coordinator.async_install_blueprint(
                                 path, remote_content, reload_services=False, backup=backup_pref
                             )

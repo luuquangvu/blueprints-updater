@@ -4,9 +4,8 @@ import contextlib
 import hashlib
 import html
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import orjson
@@ -109,7 +108,7 @@ class SourceProvider(ABC):
         """Extract metadata (author, name) from URL or content."""
 
     def parse_content(
-        self, response_text: str, response_json: dict[str, Any] | None = None
+        self, response_text: str, response_json: Mapping[str, object] | None = None
     ) -> str | None:
         """Parse the response content to extract the blueprint YAML."""
         return response_text
@@ -274,7 +273,7 @@ class HAForumProvider(SourceProvider):
         return {"author": hostname, "name": topic_id}
 
     def parse_content(
-        self, response_text: str, response_json: dict[str, Any] | None = None
+        self, response_text: str, response_json: Mapping[str, object] | None = None
     ) -> str | None:
         """Extract YAML blueprint from Forum JSON response."""
         if not isinstance(response_json, dict):

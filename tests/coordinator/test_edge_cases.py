@@ -383,3 +383,21 @@ def test_update_error_state_clears_state_and_keeps_etag(coordinator):
     assert entry["last_error"].startswith("download_error|")
     assert "Failed to fetch content" in entry["last_error"]
     assert "\n" not in entry["last_error"]
+
+
+def test_stabilize_yaml_structure_preserves_non_string_keys():
+    """Test that _stabilize_yaml_structure preserves non-string key types and order."""
+    orig = {1: "int_val", "1": "str_val", 2.5: "float_val"}
+    norm = {1: "int_val_norm", "1": "str_val_norm", 2.5: "float_val_norm", 3: "new_int"}
+
+    res = BlueprintUpdateCoordinator._stabilize_yaml_structure(orig, norm)
+
+    assert isinstance(res, dict)
+    res_dict: dict[object, object] = dict(res.items())
+    # Check that key identity/types are preserved
+    assert list(res_dict.keys()) == [1, "1", 2.5, 3]
+    assert [type(key) for key in res_dict] == [int, str, float, int]
+    assert res_dict[1] == "int_val_norm"
+    assert res_dict["1"] == "str_val_norm"
+    assert res_dict[2.5] == "float_val_norm"
+    assert res_dict[3] == "new_int"

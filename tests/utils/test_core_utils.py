@@ -153,9 +153,6 @@ def test_retry_async_invalid_args():
         async def mock_func_3():
             """Mock mock_func_3."""
 
-    with pytest.raises(TypeError, match="exceptions must be a tuple of Exception subclasses"):
-        cast(Any, retry_async)(3, [Exception])
-
     with pytest.raises(TypeError, match="All items in exceptions must be subclasses of Exception"):
         cast(Any, retry_async)(3, (str,))
 

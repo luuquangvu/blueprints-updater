@@ -24,7 +24,6 @@ import tomllib
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from string import ascii_letters, digits
-from typing import Any
 
 import orjson
 from packaging.requirements import InvalidRequirement, Requirement
@@ -122,7 +121,7 @@ def normalize_package_name(package_name: str) -> str:
     return _PACKAGE_NORM_PATTERN.sub("-", base_name).lower()
 
 
-def exact_homeassistant_requirement(requirements: Any, source_name: str) -> str:
+def exact_homeassistant_requirement(requirements: object, source_name: str) -> str:
     """Return one exact Home Assistant requirement from package metadata."""
     if not isinstance(requirements, list):
         raise ValueError(f"{source_name} metadata has no requires_dist list")
@@ -675,7 +674,7 @@ def _load_ha_manifest_constraints() -> dict[str, str]:
     return constraints
 
 
-def _add_requirement_list(packages: set[str], requirements: Any) -> None:
+def _add_requirement_list(packages: set[str], requirements: object) -> None:
     """Add package names from a TOML requirement list."""
     if not isinstance(requirements, list):
         return
@@ -686,7 +685,7 @@ def _add_requirement_list(packages: set[str], requirements: Any) -> None:
             packages.add(package_name)
 
 
-def _project_table_packages(project_table: Any) -> set[str]:
+def _project_table_packages(project_table: object) -> set[str]:
     """Return packages declared by the PEP 621 project table."""
     packages: set[str] = set()
     if not isinstance(project_table, dict):
@@ -701,7 +700,7 @@ def _project_table_packages(project_table: Any) -> set[str]:
 
 def _add_dependency_group(
     packages: set[str],
-    dependency_groups: Mapping[str, Any],
+    dependency_groups: Mapping[str, object],
     group_name: str,
     active_path: frozenset[str] = frozenset(),
 ) -> None:
@@ -728,14 +727,18 @@ def _add_dependency_group(
                 )
 
 
-def _dependency_group_packages(dependency_groups: Any) -> set[str]:
+def _dependency_group_packages(dependency_groups: object) -> set[str]:
     """Return packages declared by PEP 735 dependency groups."""
     packages: set[str] = set()
     if not isinstance(dependency_groups, dict):
         return packages
-    for group_name in dependency_groups:
-        if isinstance(group_name, str):
-            _add_dependency_group(packages, dependency_groups, group_name)
+    typed_groups: dict[str, object] = {
+        group_name: items
+        for group_name, items in dependency_groups.items()
+        if isinstance(group_name, str)
+    }
+    for group_name in typed_groups:
+        _add_dependency_group(packages, typed_groups, group_name)
     return packages
 
 

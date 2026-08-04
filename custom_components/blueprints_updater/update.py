@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from collections.abc import Mapping
 from functools import cached_property
-from typing import Any, ClassVar
+from typing import ClassVar
 from urllib.parse import quote
 
 from homeassistant.components.automation import automations_with_blueprint
@@ -30,7 +31,7 @@ from .const import (
     DOMAIN_TEMPLATE,
     URL_BLUEPRINT_DASHBOARD,
 )
-from .coordinator import BlueprintUpdateCoordinator, StructuredRisk
+from .coordinator import BlueprintUpdateCoordinator
 from .providers import registry
 from .utils import normalize_domain, redact_url
 
@@ -104,7 +105,10 @@ def async_update_entities(
 
     entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
     known_ids = {
-        BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, info["relative_path"])
+        BlueprintUpdateCoordinator.generate_unique_id(
+            entry.entry_id,
+            str(rel_val) if (rel_val := info.get("relative_path")) is not None else "",
+        )
         for info in coordinator.data.values()
     }
 
@@ -158,7 +162,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         self,
         coordinator: BlueprintUpdateCoordinator,
         path: str,
-        info: dict[str, Any],
+        info: Mapping[str, object],
     ) -> None:
         """Initialize the update entity.
 
@@ -169,12 +173,19 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         """
         super().__init__(coordinator)
         self._path = path
-        self._attr_name = info["name"]
+        name_val = info.get("name")
+        name_str = str(name_val) if name_val is not None else ""
+        rel_val = info.get("relative_path")
+        rel_str = str(rel_val) if rel_val is not None else ""
+        url_val = info.get("source_url")
+        url_str = str(url_val) if isinstance(url_val, str) else None
+
+        self._attr_name = name_str
         self._attr_unique_id = BlueprintUpdateCoordinator.generate_unique_id(
-            coordinator.config_entry.entry_id, info["relative_path"]
+            coordinator.config_entry.entry_id, rel_str
         )
-        self._attr_title = info["name"]
-        self._attr_release_url = info.get("source_url")
+        self._attr_title = name_str
+        self._attr_release_url = url_str
         self._attr_release_summary = None
         self._localized_error: str | None = None
         self._localized_blocking_reason: str | None = None
@@ -204,7 +215,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
     def provider_type(self) -> str | None:
         """Return the provider type of the blueprint."""
         source_url = self.coordinator.data.get(self._path, {}).get("source_url")
-        if not source_url:
+        if not source_url or not isinstance(source_url, str):
             return None
         provider = registry.get_provider(source_url)
         return provider.provider_type if provider else None
@@ -219,7 +230,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
     @cached_property
     def relative_path(self) -> str:
         """Return the relative path of the blueprint."""
-        return self.coordinator.data.get(self._path, {}).get("relative_path", "")
+        rel_val = self.coordinator.data.get(self._path, {}).get("relative_path")
+        return str(rel_val) if rel_val is not None else ""
 
     @cached_property
     def blueprint_id(self) -> str:
@@ -255,7 +267,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         """
         if self._path in self.coordinator.data:
-            return self.coordinator.data[self._path]["local_hash"][:8]
+            local_hash = self.coordinator.data[self._path].get("local_hash")
+            return str(local_hash)[:8] if local_hash else None
         return None
 
     async def async_release_notes(self) -> str | None:
@@ -312,7 +325,12 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 "usage_warning", count=total_usage, domain=domain, usage_url=usage_url
             )
 
-        breaking_risks: list[StructuredRisk] = info.get("breaking_risks", [])
+        risks_obj = info.get("breaking_risks")
+        breaking_risks: list[Mapping[str, object]] = (
+            [{str(k): v for k, v in r.items()} for r in risks_obj if isinstance(r, dict)]
+            if isinstance(risks_obj, list)
+            else []
+        )
         if breaking_risks:
             risks_title = await self.coordinator.async_translate("breaking_risks_title")
             risk_summary = await self.coordinator.async_summarize_risks(breaking_risks)
@@ -354,11 +372,13 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             return None
         data = self.coordinator.data[self._path]
         if data.get("updatable") and "remote_hash" in data:
-            return data["remote_hash"][:8]
-        return data["local_hash"][:8]
+            r_hash = data.get("remote_hash")
+            return str(r_hash)[:8] if r_hash else None
+        l_hash = data.get("local_hash")
+        return str(l_hash)[:8] if l_hash else None
 
     @property
-    def extra_state_attributes(self) -> dict[str, Any]:  # pyright: ignore[reportIncompatibleVariableOverride]
+    def extra_state_attributes(self) -> dict[str, object]:  # pyright: ignore[reportIncompatibleVariableOverride]
         """Return the extra state attributes like last_error.
 
         Returns:
@@ -410,11 +430,16 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         Triggered whenever the coordinator finishes a refresh.
         """
+        if (
+            (info := self.coordinator.data.get(self._path))
+            and (name := info.get("name"))
+            and isinstance(name, str)
+        ):
+            self._attr_name = name
+            self._attr_title = name
         if info := self.coordinator.data.get(self._path):
-            if name := info.get("name"):
-                self._attr_name = name
-                self._attr_title = name
-            self._attr_release_url = info.get("source_url")
+            source_url = info.get("source_url")
+            self._attr_release_url = source_url if isinstance(source_url, str) else None
         self._clear_cached_properties()
         if self.hass:
             self.hass.async_create_task(self._async_localize_strings())
@@ -436,7 +461,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             )
 
         self._localized_error = None
-        if error := info.get("last_error"):
+        if (error := info.get("last_error")) and isinstance(error, str):
             if "|" in error:
                 key, val = error.split("|", 1)
                 self._localized_error = await self.coordinator.async_translate(
@@ -446,18 +471,21 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 self._localized_error = await self.coordinator.async_translate(error)
 
         self._localized_blocking_reason = None
-        if blocking := info.get("update_blocking_reason"):
-            name = info.get("name") or self.name
+        if (blocking := info.get("update_blocking_reason")) and isinstance(blocking, str):
+            name_val = info.get("name") or self.name
+            name_str = str(name_val) if name_val else ""
             self._localized_blocking_reason = await self.coordinator.async_translate(
-                blocking, name=name
+                blocking, name=name_str
             )
 
         if self.hass:
             super()._handle_coordinator_update()
 
-    async def _translate_and_raise_last_error(self, info: dict[str, Any]) -> None:
+    async def _translate_and_raise_last_error(self, info: Mapping[str, object]) -> None:
         """Translate the last error and raise HomeAssistantError."""
-        if error := info.get("last_error"):
+        error_val = info.get("last_error")
+        error = str(error_val) if error_val is not None else None
+        if error:
             if "|" in error:
                 key, val = error.split("|", 1)
                 msg = await self.coordinator.async_translate(key, errors=val, error=val)
@@ -473,7 +501,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         await super().async_added_to_hass()
         await self._async_localize_strings()
 
-    async def async_install(self, version: str | None, backup: bool, **kwargs: Any) -> None:
+    async def async_install(self, version: str | None, backup: bool, **kwargs: object) -> None:
         """Install the update.
 
         Args:
@@ -492,7 +520,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         _LOGGER.info(
             "Starting manual update for %s from %s",
             self._attr_name,
-            redact_url(info.get("source_url", "<unknown>")),
+            redact_url(str(info.get("source_url", "<unknown>"))),
         )
         remote_content = info.get("remote_content")
 
@@ -509,7 +537,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             _LOGGER.debug("Blueprint %s already updated during forced fetch", self._path)
             return
 
-        if remote_content is None:
+        if not isinstance(remote_content, str):
             _LOGGER.error("Failed to install blueprint: content is missing for %s", self._path)
             raise HomeAssistantError(
                 await self.coordinator.async_translate("install_error", error="content_missing")

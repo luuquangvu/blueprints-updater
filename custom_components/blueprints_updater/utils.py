@@ -11,7 +11,7 @@ import random
 import textwrap
 from collections.abc import Callable, Coroutine
 from functools import wraps
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import TYPE_CHECKING, ParamSpec, TypeVar
 
 import httpx
 
@@ -40,8 +40,8 @@ from .providers import registry
 
 _LOGGER = logging.getLogger(__name__)
 
+P = ParamSpec("P")
 _T = TypeVar("_T")
-AsyncFunc = Callable[..., Coroutine[Any, Any, _T]]
 
 
 def retry_async(
@@ -50,7 +50,10 @@ def retry_async(
     base_delay: float = 5.0,
     exponential: bool = True,
     jitter: bool = True,
-) -> Callable[[AsyncFunc[_T]], AsyncFunc[_T]]:
+) -> Callable[
+    [Callable[P, Coroutine[object, object, _T]]],
+    Callable[P, Coroutine[object, object, _T]],
+]:
     """Decorator to retry an async function with exponential backoff and jitter.
 
     Args:
@@ -69,15 +72,15 @@ def retry_async(
         raise ValueError("max_retries must be greater than or equal to 0")
     if base_delay < 0:
         raise ValueError("base_delay must be greater than or equal to 0")
-    if not isinstance(exceptions, tuple):
-        raise TypeError("exceptions must be a tuple of Exception subclasses")
     if not exceptions:
         raise ValueError("exceptions tuple must not be empty")
     for exc in exceptions:
         if not (inspect.isclass(exc) and issubclass(exc, Exception)):
             raise TypeError(f"All items in exceptions must be subclasses of Exception, got {exc}")
 
-    def decorator(func: AsyncFunc[_T]) -> AsyncFunc[_T]:
+    def decorator(
+        func: Callable[P, Coroutine[object, object, _T]],
+    ) -> Callable[P, Coroutine[object, object, _T]]:
         """Decorator for retry_async."""
         try:
             sig = inspect.signature(func)
@@ -85,7 +88,7 @@ def retry_async(
             sig = None
 
         @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> _T:
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> _T:
             """Wrapper for retry_async."""
             if sig:
                 try:
@@ -150,7 +153,7 @@ def retry_async(
     return decorator
 
 
-def get_config_value[T](config: Any, key: str, default: T) -> T:
+def get_config_value(config: object, key: str, default: object) -> object:
     """Get a value from config entry options strictly (no data fallback).
 
     Args:
@@ -166,16 +169,20 @@ def get_config_value[T](config: Any, key: str, default: T) -> T:
         return default
 
     if hasattr(config, "options"):
-        val = config.options.get(key, default)
-    elif isinstance(config, dict):
-        val = config.get(key, default)
-    else:
-        val = default
+        options = getattr(config, "options", None)
+        get_fn = getattr(options, "get", None)
+        if callable(get_fn):
+            val = get_fn(key, default)
+            return default if val is None else val
+    get_cfg_fn = getattr(config, "get", None)
+    if callable(get_cfg_fn):
+        val = get_cfg_fn(key, default)
+        return default if val is None else val
 
-    return cast(T, val)
+    return default
 
 
-def get_config_bool(config: Any, key: str, default: bool) -> bool:
+def get_config_bool(config: object, key: str, default: bool) -> bool:
     """Get a boolean value from config entry options strictly (no data fallback).
 
     Args:
@@ -195,7 +202,7 @@ def get_config_bool(config: Any, key: str, default: bool) -> bool:
     return bool(val)
 
 
-def get_config_str(config: Any, key: str, default: str) -> str:
+def get_config_str(config: object, key: str, default: str) -> str:
     """Get a string value from config entry options strictly (no data fallback).
 
     Args:
@@ -211,7 +218,7 @@ def get_config_str(config: Any, key: str, default: str) -> str:
 
 
 def get_config_int(
-    config: Any,
+    config: object,
     key: str,
     default: int,
     min_val: int | None = None,
@@ -244,7 +251,7 @@ def get_config_int(
     return res
 
 
-def get_update_interval(config: Any) -> int:
+def get_update_interval(config: object) -> int:
     """Get the normalized update interval in hours.
 
     Args:
@@ -263,7 +270,7 @@ def get_update_interval(config: Any) -> int:
     )
 
 
-def get_max_backups(config: Any) -> int:
+def get_max_backups(config: object) -> int:
     """Get the normalized maximum number of backups.
 
     Args:
@@ -297,7 +304,7 @@ def normalize_url(url: str) -> str:
     return url
 
 
-def normalize_domain(domain: Any) -> str:
+def normalize_domain(domain: object) -> str:
     """Normalize and validate the blueprint domain, defaulting to automation.
 
     Args:
@@ -323,7 +330,7 @@ def normalize_domain(domain: Any) -> str:
     return DOMAIN_AUTOMATION
 
 
-def get_validated_filter_mode(filter_mode: Any) -> str:
+def get_validated_filter_mode(filter_mode: object) -> str:
     """Normalize and validate filter mode.
 
     Args:
@@ -348,7 +355,7 @@ def get_validated_filter_mode(filter_mode: Any) -> str:
     return FILTER_MODE_ALL
 
 
-def get_validated_selected_blueprints(selected: Any) -> list[str]:
+def get_validated_selected_blueprints(selected: object) -> list[str]:
     """Validate and coerce selected blueprints into a list of strings.
 
     Args:

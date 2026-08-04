@@ -7,7 +7,6 @@ It performs safety checks to prevent overwriting dynamic versions.
 
 import os
 import sys
-from typing import Any
 
 import orjson
 import tomlkit
@@ -51,7 +50,7 @@ def _update_pyproject(version: str) -> None:
     with open(path, encoding="utf-8") as f:
         doc = tomlkit.parse(f.read())
 
-    project: Any = doc.get("project")
+    project: object = doc.get("project")
     if project is None:
         print("Error: [project] table not found in pyproject.toml", file=sys.stderr)
         sys.exit(1)
@@ -63,7 +62,7 @@ def _update_pyproject(version: str) -> None:
         )
         sys.exit(1)
 
-    dynamic: Any = project.get("dynamic", [])
+    dynamic: object = project.get("dynamic", [])
 
     if isinstance(dynamic, str):
         dynamic_fields = {dynamic}

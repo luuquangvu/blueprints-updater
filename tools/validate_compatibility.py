@@ -22,7 +22,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from string import ascii_letters, digits
 from time import monotonic
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import orjson
 from packaging.requirements import InvalidRequirement, Requirement
@@ -431,13 +431,13 @@ def _stale_test_deps(
     return tuple(f"{package}=={version}" for package, (_old, version) in sorted(stale.items()))
 
 
-def _load_matrix_data() -> list[dict[str, Any]]:
+def _load_matrix_data() -> list[dict[str, object]]:
     """Load compatibility matrix from the repository tools directory."""
     with open(_MATRIX_FILE, encoding="utf-8") as f:
         loaded = orjson.loads(f.read())
     if not isinstance(loaded, list):
         raise ValueError("Compatibility matrix must be a list")
-    matrix: list[dict[str, Any]] = []
+    matrix: list[dict[str, object]] = []
     for index, entry in enumerate(loaded, start=1):
         if not isinstance(entry, dict):
             raise ValueError(f"Compatibility matrix entry {index} must be an object")
@@ -445,7 +445,7 @@ def _load_matrix_data() -> list[dict[str, Any]]:
     return matrix
 
 
-def _matrix_entry_text(entry: dict[str, Any], key: str) -> str:
+def _matrix_entry_text(entry: dict[str, object], key: str) -> str:
     """Return a required text field from a matrix entry."""
     return _require_str_field(key, entry.get(key))
 
@@ -579,14 +579,14 @@ def _ensure_within_root(root_path: str, candidate_path: str) -> str:
     return fullpath
 
 
-def _format_cmd_str(cmd: Any) -> str:
+def _format_cmd_str(cmd: object) -> str:
     """Return a human-readable string for a subprocess command."""
     if isinstance(cmd, (list, tuple)):
         return " ".join(str(arg) for arg in cmd)
     return str(cmd)
 
 
-def _newest_published_version(payload: Any, package_name: str) -> str:
+def _newest_published_version(payload: object, package_name: str) -> str:
     """Return the newest valid version with at least one published artifact."""
     if not isinstance(payload, dict) or not isinstance(
         (releases := payload.get("releases")),

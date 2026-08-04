@@ -6,7 +6,6 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import orjson
 
@@ -24,7 +23,7 @@ class ReleaseGateResult:
     prerelease: bool = False
 
 
-def _normalized_version(value: Any) -> str | None:
+def _normalized_version(value: object) -> str | None:
     """Return a valid release version string or None."""
     if not isinstance(value, str):
         return None

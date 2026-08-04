@@ -1000,3 +1000,26 @@ def test_cached_property_names_no_drift():
         f"  Missing from tuple: {set(actual_cached) - set(declared)}\n"
         f"  Extraneous in tuple: {set(declared) - set(actual_cached)}"
     )
+
+
+def test_relative_path_none_normalization():
+    """Test that explicit None values for relative_path normalize to empty string."""
+    coordinator = MagicMock()
+    coordinator.config_entry.entry_id = "test_entry"
+    coordinator.data = {"path/test.yaml": {"relative_path": None, "name": "Test"}}
+
+    entity = BlueprintUpdateEntity(
+        coordinator, "path/test.yaml", coordinator.data["path/test.yaml"]
+    )
+    assert entity.relative_path == ""
+
+    from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+
+    expected_unique_id = BlueprintUpdateCoordinator.generate_unique_id("test_entry", "")
+    assert entity.unique_id == expected_unique_id
+
+    rel_val = coordinator.data["path/test.yaml"].get("relative_path")
+    known_id = BlueprintUpdateCoordinator.generate_unique_id(
+        "test_entry", str(rel_val) if rel_val is not None else ""
+    )
+    assert known_id == expected_unique_id

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -15,6 +14,7 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -49,7 +49,7 @@ from .utils import (
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, Any]]:
+async def _async_get_blueprint_options(hass: HomeAssistant) -> list[SelectOptionDict]:
     """Scan blueprints and return options for the selector.
 
     Args:
@@ -62,22 +62,24 @@ async def _async_get_blueprint_options(hass: HomeAssistant) -> list[dict[str, An
     blueprints = await hass.async_add_executor_job(
         BlueprintUpdateCoordinator.scan_blueprints, hass, FILTER_MODE_ALL, []
     )
-    options: list[dict[str, Any]] = []
+    options: list[SelectOptionDict] = []
     for path, info in blueprints.items():
         if relative_path := info.get("relative_path") or get_blueprint_relative_path(hass, path):
+            name_val = info.get("name")
+            name_str = str(name_val) if name_val else "Unknown"
             options.append(
-                {
-                    "value": relative_path,
-                    "label": f"{info['name']} [{relative_path}]",
-                }
+                SelectOptionDict(
+                    value=relative_path,
+                    label=f"{name_str} [{relative_path}]",
+                )
             )
     options.sort(key=lambda x: x["label"])
     return options
 
 
 def _get_config_schema(
-    config: Any,
-    blueprint_options: list[dict[str, Any]],
+    config: object,
+    blueprint_options: list[SelectOptionDict],
 ) -> vol.Schema:
     """Return the configuration schema for the flow.
 
@@ -125,14 +127,11 @@ def _get_config_schema(
                 default=filter_mode,
             ): SelectSelector(
                 SelectSelectorConfig(
-                    options=cast(
-                        Any,
-                        [
-                            {"value": FILTER_MODE_ALL, "label": FILTER_MODE_ALL},
-                            {"value": FILTER_MODE_WHITELIST, "label": FILTER_MODE_WHITELIST},
-                            {"value": FILTER_MODE_BLACKLIST, "label": FILTER_MODE_BLACKLIST},
-                        ],
-                    ),
+                    options=[
+                        SelectOptionDict(value=FILTER_MODE_ALL, label=FILTER_MODE_ALL),
+                        SelectOptionDict(value=FILTER_MODE_WHITELIST, label=FILTER_MODE_WHITELIST),
+                        SelectOptionDict(value=FILTER_MODE_BLACKLIST, label=FILTER_MODE_BLACKLIST),
+                    ],
                     mode=SelectSelectorMode.DROPDOWN,
                     translation_key="filter_mode",
                 )
@@ -142,7 +141,7 @@ def _get_config_schema(
                 default=selected_blueprints,
             ): SelectSelector(
                 SelectSelectorConfig(
-                    options=cast(Any, blueprint_options),
+                    options=blueprint_options,
                     mode=SelectSelectorMode.DROPDOWN,
                     multiple=True,
                 )
@@ -156,7 +155,9 @@ class BlueprintsUpdaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, object] | None = None
+    ) -> ConfigFlowResult:
         """Handle the initial step."""
         _LOGGER.debug("User step in config flow (submitted: %s)", user_input is not None)
         if self._async_current_entries():
@@ -188,7 +189,9 @@ class BlueprintsUpdaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class BlueprintsUpdaterOptionsFlowHandler(OptionsFlow):
     """Handle options flow for Blueprints Updater."""
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_init(
+        self, user_input: dict[str, object] | None = None
+    ) -> ConfigFlowResult:
         """Manage the options."""
         _LOGGER.debug("Options flow step init (submitted: %s)", user_input is not None)
         if user_input is not None:
