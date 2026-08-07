@@ -225,3 +225,30 @@ async def test_config_migration_and_options_update(hass: HomeAssistant) -> None:
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+@pytest.mark.asyncio
+async def test_setup_failure_rollback_cleans_up_coordinator(hass: HomeAssistant) -> None:
+    """Test that platform setup failure rolls back coordinator registration."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={"update_interval": 24},
+        entry_id="failed_setup_entry",
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
+        ),
+        patch(
+            "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+            side_effect=RuntimeError("Platform setup failed"),
+        ),
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    coordinators = hass.data.get(DOMAIN, {}).get("coordinators", {})
+    assert entry.entry_id not in coordinators

@@ -289,3 +289,29 @@ async def test_restore_service_translates_preparation_revision_mismatch(
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+@pytest.mark.asyncio
+async def test_async_purge_entity_registry_removes_registry_and_state(
+    hass: HomeAssistant,
+) -> None:
+    """Test _async_purge_entity_registry removes entity entry and state machine state."""
+    from custom_components.blueprints_updater.update import _async_purge_entity_registry
+
+    entity_reg = er.async_get(hass)
+    entry = entity_reg.async_get_or_create(
+        domain="update",
+        platform=DOMAIN,
+        unique_id="test_purge_unique_id",
+        suggested_object_id="test_purge_entity",
+    )
+    entity_id = entry.entity_id
+
+    hass.states.async_set(entity_id, "on", {"friendly_name": "Purge Test"})
+    assert hass.states.get(entity_id) is not None
+    assert entity_reg.async_get(entity_id) is not None
+
+    await _async_purge_entity_registry(hass, entity_reg, entity_id)
+
+    assert hass.states.get(entity_id) is None
+    assert entity_reg.async_get(entity_id) is None
