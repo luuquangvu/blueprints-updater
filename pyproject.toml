@@ -61,11 +61,6 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["."]
 testpaths = ["tests"]
-filterwarnings = [
-  "ignore::DeprecationWarning",
-  "ignore::pytest.PytestDeprecationWarning",
-  "error::DeprecationWarning:custom_components.blueprints_updater",
-]
 addopts = [
   "-n",
   "auto",
@@ -80,9 +75,6 @@ markers = ["real_network: tests that require real network access"]
 
 [tool.pyright]
 typeCheckingMode = "standard"
-reportUnreachable = "warning"           # Keep until ty implements this feature
-reportUnnecessaryComparison = "warning" # Keep until ty implements this feature
-reportUnnecessaryContains = "warning"   # Keep until ty implements this feature
 
 [tool.interrogate]
 fail-under = 100

@@ -52,7 +52,7 @@ _VENVS_ROOT = os.path.join(_REPO_ROOT, ".venvs")
 _VENV_DEPENDENCY_MARKER = ".blueprints_updater_test_dependencies.json"
 
 _TEST_HARNESS_PACKAGE = "pytest-homeassistant-custom-component"
-_HA_CONSTRAINED_TEST_DEPS = ()  # Reserved for future use.
+_HA_CONSTRAINED_TEST_DEPS = ("aiodns",)
 _REQUIRED_TEST_DEPS = (
     *_HA_CONSTRAINED_TEST_DEPS,
     "httpx[http2]",
@@ -82,6 +82,7 @@ _PACKAGE_NAME_PATTERN = re.compile(
 )
 
 _MATRIX_FILE = os.path.join(_REPO_ROOT, "tools", "compatibility_matrix.json")
+_HACS_FILE = os.path.join(_REPO_ROOT, "hacs.json")
 
 _PYPI_HA_JSON_URL = "https://pypi.org/pypi/homeassistant/json"
 _PYPI_TEST_HARNESS_JSON_URL = "https://pypi.org/pypi/pytest-homeassistant-custom-component/json"
@@ -154,6 +155,24 @@ def _required_test_deps(test_dependency_versions: dict[str, str]) -> list[str]:
         if normalize_package_name(package) not in seen
     )
     return deps
+
+
+def _transitive_compatibility_specs(
+    test_dependency_versions: dict[str, str],
+) -> tuple[str, ...]:
+    """Constrain transitive packages whose later majors broke historical HA pins."""
+    aiodns_version = test_dependency_versions.get("aiodns")
+    if aiodns_version is not None and Version(aiodns_version).release[0] < 4:
+        return ("pycares<5",)
+    return ()
+
+
+def _validate_package_version(label_name: str, label_value: str) -> str:
+    """Return a normalized PEP 440 package version."""
+    try:
+        return str(Version(label_value))
+    except InvalidVersion as err:
+        raise ValueError(f"Invalid {label_name} value {label_value!r}") from err
 
 
 def _dependency_pin_marker_payload(
@@ -248,7 +267,7 @@ def _parse_requirements_dependency_version(
                 "expected a version after '=='."
             )
         version = version_tokens[0]
-        return _validate_version_label(f"{package}_version", version)
+        return _validate_package_version(f"{package}_version", version)
     raise ValueError(f"Could not find {package!r} in Home Assistant {source_name}")
 
 
@@ -481,7 +500,45 @@ def _test_matrix() -> list[CompatibilityConfig]:
                 python_ver=py_ver,
             )
         )
+    _validate_matrix_supported_range(entries, _minimum_supported_ha_version())
     return entries
+
+
+def _minimum_supported_ha_version() -> str:
+    """Return the minimum Home Assistant version declared to HACS."""
+    with open(_HACS_FILE, encoding="utf-8") as file_handle:
+        loaded = orjson.loads(file_handle.read())
+    if not isinstance(loaded, dict):
+        raise ValueError("HACS metadata must be an object")
+    return _validate_version_label(
+        "hacs_homeassistant",
+        _require_str_field("hacs_homeassistant", loaded.get("homeassistant")),
+    )
+
+
+def _validate_matrix_supported_range(
+    entries: Sequence[CompatibilityConfig],
+    minimum_ha_version: str,
+) -> None:
+    """Require ordered transition checkpoints across the declared HA support range."""
+    if not entries:
+        raise ValueError("Compatibility matrix must not be empty")
+    if entries[-1]["ha_ver"] != "latest" or entries[-1]["harness_ver"] != "latest":
+        raise ValueError("Compatibility matrix must end with the moving latest pair")
+    if any(entry["ha_ver"] == "latest" for entry in entries[:-1]):
+        raise ValueError("Compatibility matrix latest pair must be the final row")
+
+    fixed_versions = [Version(entry["ha_ver"]) for entry in entries[:-1]]
+    minimum_version = Version(minimum_ha_version)
+    if not fixed_versions or fixed_versions[0] != minimum_version:
+        raise ValueError(
+            "Compatibility matrix first row must match the HACS minimum "
+            f"Home Assistant version {minimum_ha_version}"
+        )
+    if len(set(fixed_versions)) != len(fixed_versions):
+        raise ValueError("Compatibility matrix contains duplicate fixed Home Assistant versions")
+    if fixed_versions != sorted(fixed_versions):
+        raise ValueError("Compatibility matrix fixed Home Assistant versions must be ordered")
 
 
 def _require_str_field(label_name: str, value: object) -> str:
@@ -809,10 +866,11 @@ def _install_compatibility_dependencies(
 ) -> None:
     """Install Home Assistant and required test dependencies."""
     required_test_deps = _required_test_deps(test_dependency_versions)
+    transitive_specs = _transitive_compatibility_specs(test_dependency_versions)
     ha_spec = f"homeassistant=={ha_version}"
     _run_uv_pip_install(
         python_bin,
-        [ha_spec, *required_test_deps],
+        [ha_spec, *required_test_deps, *transitive_specs],
         ha_spec,
     )
 
@@ -820,11 +878,13 @@ def _install_compatibility_dependencies(
 def _refresh_compatibility_dependencies(
     python_bin: Path,
     refresh_dependencies: tuple[str, ...],
+    test_dependency_versions: dict[str, str],
 ) -> None:
     """Upgrade selected compatibility dependencies."""
+    transitive_specs = _transitive_compatibility_specs(test_dependency_versions)
     _run_uv_pip_install(
         python_bin,
-        refresh_dependencies,
+        [*refresh_dependencies, *transitive_specs],
         " ".join(refresh_dependencies),
     )
 
@@ -926,6 +986,7 @@ def _install_dependencies(
         _refresh_compatibility_dependencies(
             python_bin,
             refresh_deps,
+            test_dependency_versions,
         )
     if needs_install or refresh_deps:
         _cleanup_compatibility_bytecode(venv_path)
@@ -1333,9 +1394,23 @@ def main() -> None:
         help="Print newest harness-backed Home Assistant pair JSON",
     )
     parser.add_argument(
+        "--validate-matrix",
+        action="store_true",
+        help="Validate the source compatibility matrix and exit",
+    )
+    parser.add_argument(
         "--required-test-dependency-metadata-json",
         action="store_true",
         help="Print compatibility test dependency package metadata as JSON and exit",
+    )
+    parser.add_argument(
+        "--transitive-compatibility-specs-json",
+        action="store_true",
+        help="Print transitive compatibility specs for a resolved aiodns version",
+    )
+    parser.add_argument(
+        "--aiodns-version",
+        help="Resolved Home Assistant aiodns version for transitive compatibility specs",
     )
     parser.add_argument(
         "--parse-constraint-spec",
@@ -1352,6 +1427,30 @@ def main() -> None:
 
     if args.required_test_dependency_metadata_json:
         print(orjson.dumps(_required_test_dependency_metadata()).decode(), flush=True)
+        return
+
+    if args.validate_matrix:
+        try:
+            entries = _test_matrix()
+        except (OSError, ValueError) as err:
+            print(f"VALIDATION_ERROR: {err}", flush=True)
+            sys.exit(1)
+        print(f"STEP_OK: compatibility matrix validated ({len(entries)} rows)", flush=True)
+        return
+
+    if args.transitive_compatibility_specs_json:
+        if args.aiodns_version is None:
+            parser.error("--transitive-compatibility-specs-json requires --aiodns-version")
+        try:
+            aiodns_version = _validate_package_version(
+                "aiodns_version",
+                args.aiodns_version,
+            )
+            specs = _transitive_compatibility_specs({"aiodns": aiodns_version})
+        except ValueError as err:
+            print(f"VALIDATION_ERROR: {err}", flush=True)
+            sys.exit(1)
+        print(orjson.dumps(specs).decode(), flush=True)
         return
 
     if args.resolve_latest_json:

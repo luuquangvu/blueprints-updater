@@ -60,3 +60,32 @@ async def test_template_config_extraction(hass: HomeAssistant):
 
     assert "template.my_entity" in configs
     assert configs["template.my_entity"]["use_blueprint"]["input"]["my_input"] == "my_value"
+
+
+@pytest.mark.asyncio
+async def test_blueprint_config_extraction_falls_back_after_substitution(
+    hass: HomeAssistant,
+) -> None:
+    """Recover original inputs when HA exposes a substituted public config."""
+    coordinator = BlueprintUpdateCoordinator(hass, MagicMock(), timedelta(hours=24))
+    entity = MagicMock()
+    entity.raw_config = {"trigger": [], "action": []}
+    entity.config = {"sequence": []}
+    entity._blueprint_inputs = {
+        "use_blueprint": {
+            "path": "test.yaml",
+            "input": {"my_input": "my_value"},
+        }
+    }
+
+    configs: dict[str, dict[str, object]] = {}
+    coordinator._populate_config_from_entity(entity, "automation.consumer", configs)
+
+    assert configs == {
+        "automation.consumer": {
+            "use_blueprint": {
+                "path": "test.yaml",
+                "input": {"my_input": "my_value"},
+            }
+        }
+    }

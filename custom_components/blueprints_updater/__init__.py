@@ -96,27 +96,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry,
         timedelta(hours=interval_hours),
     )
-    await blueprint_coordinator.async_setup()
-    await blueprint_coordinator.async_config_entry_first_refresh()
-
     coordinators = hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})
-    coordinators[entry.entry_id] = blueprint_coordinator
+    platform_forwarding_started = False
 
-    platforms_forwarded = False
+    async def _async_rollback_setup() -> None:
+        """Release resources acquired during a partial config-entry setup."""
+        try:
+            if platform_forwarding_started:
+                await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        finally:
+            coordinators.pop(entry.entry_id, None)
+            await blueprint_coordinator.async_shutdown()
+
     try:
+        await blueprint_coordinator.async_setup()
+        await blueprint_coordinator.async_config_entry_first_refresh()
+        coordinators[entry.entry_id] = blueprint_coordinator
+        platform_forwarding_started = True
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        platforms_forwarded = True
         _async_register_services(hass)
         entry.async_on_unload(entry.add_update_listener(async_update_options))
         blueprint_coordinator.setup_complete = True
         blueprint_coordinator.async_set_updated_data(blueprint_coordinator.data)
     except asyncio.CancelledError:
+        await _async_rollback_setup()
         raise
     except Exception as err:
         _LOGGER.debug("Setup failed for entry %s, performing rollback: %s", entry.entry_id, err)
-        coordinators.pop(entry.entry_id, None)
-        if platforms_forwarded:
-            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        await _async_rollback_setup()
         raise
 
     return True
@@ -453,15 +460,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         True if the entry was unloaded successfully.
 
     """
-    if domain_data := hass.data.get(DOMAIN):
-        coordinators = domain_data.get("coordinators", {})
-        if blueprint_coordinator := coordinators.get(entry.entry_id):
-            await blueprint_coordinator.async_shutdown()
-
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok and (domain_data := hass.data.get(DOMAIN)):
         coordinators = domain_data.get("coordinators", {})
-        coordinators.pop(entry.entry_id, None)
+        if blueprint_coordinator := coordinators.pop(entry.entry_id, None):
+            await blueprint_coordinator.async_shutdown()
 
         if not coordinators:
             domain_data.pop("translation_cache", None)

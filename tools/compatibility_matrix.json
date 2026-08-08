@@ -5,8 +5,8 @@
     "python_version": "3.12"
   },
   {
-    "ha_version": "2025.1.0",
-    "harness_version": "0.13.201",
+    "ha_version": "2025.1.4",
+    "harness_version": "0.13.205",
     "python_version": "3.12"
   },
   {
@@ -15,8 +15,8 @@
     "python_version": "3.13"
   },
   {
-    "ha_version": "2026.2.0",
-    "harness_version": "0.13.313",
+    "ha_version": "2026.2.3",
+    "harness_version": "0.13.316",
     "python_version": "3.13"
   },
   {

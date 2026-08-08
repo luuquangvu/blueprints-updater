@@ -2617,9 +2617,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         """Extract and validate blueprint configuration from a HA entity.
 
         Attempts to recover blueprint inputs from available entity attributes.
-        Prioritizes public attributes (raw_config, config) before falling back
-        to internal attributes (_blueprint_inputs) used by Home Assistant Core
-        integrations like automation, script, and template.
+        Prefers public attributes when they still contain the blueprint instance
+        configuration, then falls back to the internal ``_blueprint_inputs``
+        attribute used by Home Assistant Core integrations.
 
         Args:
             entity: The Home Assistant entity object.
@@ -2627,17 +2627,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             configs: Dictionary to store the extracted configurations.
 
         """
-        raw_config = getattr(entity, "raw_config", None)
-        cfg = raw_config if isinstance(raw_config, dict) else None
-        if cfg is None:
-            entity_config = getattr(entity, "config", None)
-            if isinstance(entity_config, dict):
-                cfg = entity_config
-        if cfg is None:
-            cfg = getattr(entity, "_blueprint_inputs", None)
-
-        if isinstance(cfg, dict) and "use_blueprint" in cfg:
-            configs[entity_id] = cfg
+        candidates = (
+            getattr(entity, "raw_config", None),
+            getattr(entity, "config", None),
+            getattr(entity, "_blueprint_inputs", None),
+        )
+        for candidate in candidates:
+            if isinstance(candidate, dict) and "use_blueprint" in candidate:
+                configs[entity_id] = candidate
+                return
 
     @staticmethod
     def _get_affected_entities(configs: Mapping[str, Mapping[str, object]], key: str) -> list[str]:
@@ -3464,7 +3462,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 full_configs = self._get_entities_configs(entity_ids)
                 configs: dict[str, dict[str, object]] = {}
                 for eid, cfg in full_configs.items():
-                    inp = cfg.get("input") if isinstance(cfg, dict) else None
+                    use_blueprint = cfg.get("use_blueprint") if isinstance(cfg, dict) else None
+                    inp = use_blueprint.get("input") if isinstance(use_blueprint, dict) else None
                     configs[eid] = (
                         {str(k): v for k, v in inp.items()} if isinstance(inp, dict) else {}
                     )

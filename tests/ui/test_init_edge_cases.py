@@ -290,9 +290,11 @@ async def test_unload_failure_does_not_clear_services(hass: HomeAssistant) -> No
     """
     entry = MagicMock()
     entry.entry_id = "unload_failure_entry"
+    coordinator = MagicMock()
+    coordinator.async_shutdown = AsyncMock()
 
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN].setdefault("coordinators", {"dummy": object()})
+    hass.data[DOMAIN]["coordinators"] = {entry.entry_id: coordinator}
 
     with (
         patch.object(
@@ -307,7 +309,8 @@ async def test_unload_failure_does_not_clear_services(hass: HomeAssistant) -> No
         result = await async_unload_entry(hass, entry)
 
     assert result is False
-    assert hass.data[DOMAIN]["coordinators"]
+    assert hass.data[DOMAIN]["coordinators"] == {entry.entry_id: coordinator}
+    coordinator.async_shutdown.assert_not_awaited()
     mock_remove.assert_not_called()
 
     mock_unload_platforms.assert_called_once()
@@ -342,6 +345,7 @@ async def test_setup_entry_rollback(hass: HomeAssistant) -> None:
     coordinator_mock = MagicMock()
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.async_shutdown = AsyncMock()
     coordinator_mock.data = {}
 
     with (
@@ -363,6 +367,7 @@ async def test_setup_entry_rollback(hass: HomeAssistant) -> None:
 
         assert entry.entry_id not in hass.data.get(DOMAIN, {}).get("coordinators", {})
         mock_unload.assert_called_once()
+        coordinator_mock.async_shutdown.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -377,6 +382,7 @@ async def test_setup_entry_rollback_on_forward_failure(hass: HomeAssistant) -> N
     coordinator_mock = MagicMock()
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.async_shutdown = AsyncMock()
     coordinator_mock.data = {}
 
     with (
@@ -400,5 +406,39 @@ async def test_setup_entry_rollback_on_forward_failure(hass: HomeAssistant) -> N
             await async_setup_entry(hass, entry)
 
         assert entry.entry_id not in hass.data.get(DOMAIN, {}).get("coordinators", {})
-        mock_unload.assert_not_called()
+        mock_unload.assert_awaited_once_with(entry, bp_updater.PLATFORMS)
         mock_register_services.assert_not_called()
+        coordinator_mock.async_shutdown.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_setup_entry_rollback_on_initial_refresh_failure(hass: HomeAssistant) -> None:
+    """Shut down coordinator resources when the initial refresh fails."""
+    entry = MagicMock()
+    entry.entry_id = "refresh_failure_entry"
+    entry.data = {}
+    entry.options = {}
+    entry.state = ConfigEntryState.SETUP_IN_PROGRESS
+
+    coordinator_mock = MagicMock()
+    coordinator_mock.async_setup = AsyncMock()
+    coordinator_mock.async_config_entry_first_refresh = AsyncMock(
+        side_effect=HomeAssistantError("Refresh Failed")
+    )
+    coordinator_mock.async_shutdown = AsyncMock()
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.BlueprintUpdateCoordinator",
+            return_value=coordinator_mock,
+        ),
+        patch.object(
+            hass.config_entries, "async_forward_entry_setups", new_callable=AsyncMock
+        ) as mock_forward,
+        pytest.raises(HomeAssistantError, match="Refresh Failed"),
+    ):
+        await async_setup_entry(hass, entry)
+
+    assert entry.entry_id not in hass.data.get(DOMAIN, {}).get("coordinators", {})
+    mock_forward.assert_not_awaited()
+    coordinator_mock.async_shutdown.assert_awaited_once()

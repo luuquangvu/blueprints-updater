@@ -16,9 +16,9 @@ from tools.validate_compatibility import (
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SUPPORTED_RANGE_BOUNDARIES = [
     ("2024.12.0", "0.13.190", "3.12"),
-    ("2025.1.0", "0.13.201", "3.12"),
+    ("2025.1.4", "0.13.205", "3.12"),
     ("2025.2.0", "0.13.210", "3.13"),
-    ("2026.2.0", "0.13.313", "3.13"),
+    ("2026.2.3", "0.13.316", "3.13"),
     ("2026.3.1", "0.13.317", "3.14"),
     ("latest", "latest", "3.14"),
 ]
@@ -118,3 +118,35 @@ def test_compatibility_main_exits_when_global_uv_is_missing(
 
     output = capsys.readouterr().out
     assert "VALIDATION_ERROR: 'global uv executable' not found." in output
+
+
+def test_refresh_dependencies_preserves_selection_and_legacy_transitive_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Apply legacy transitive constraints during a targeted dependency refresh."""
+    calls: list[tuple[Path, tuple[str, ...], str]] = []
+
+    def record_install(
+        python_bin: Path,
+        package_args: tuple[str, ...] | list[str],
+        step_label: str,
+    ) -> None:
+        calls.append((python_bin, tuple(package_args), step_label))
+
+    monkeypatch.setattr(validate_compatibility, "_run_uv_pip_install", record_install)
+    python_bin = Path("python")
+    selected = ("aiodns==3.5.0", "home-assistant-intents==2025.10.1")
+
+    validate_compatibility._refresh_compatibility_dependencies(
+        python_bin,
+        selected,
+        {"aiodns": "3.5.0"},
+    )
+
+    assert calls == [
+        (
+            python_bin,
+            (*selected, "pycares<5"),
+            "aiodns==3.5.0 home-assistant-intents==2025.10.1",
+        )
+    ]

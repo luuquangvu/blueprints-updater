@@ -126,6 +126,9 @@ jobs:
             ))
           ' tools/compatibility_matrix.json >/dev/null
 
+          uv run --no-project --with orjson --with packaging \
+            python tools/validate_compatibility.py --validate-matrix
+
           MATRIX_JSON=$(jq -c \
             --arg latest_ha "$MATCHED_LATEST_HA" \
             --arg latest_harness "$MATCHED_LATEST_HARNESS" '
@@ -260,7 +263,25 @@ jobs:
               REQUIRED_TEST_DEPS+=("$package")
             fi
           done
-          uv --no-config pip install --prerelease allow --python .venv/bin/python "$HA_SPEC" "${REQUIRED_TEST_DEPS[@]}"
+          AIODNS_SPEC="${HA_CONSTRAINT_SPECS[aiodns]-}"
+          if [[ "$AIODNS_SPEC" != aiodns==?* ]]; then
+            echo "::error::Invalid resolved aiodns constraint: $AIODNS_SPEC"
+            exit 1
+          fi
+          AIODNS_VERSION="${AIODNS_SPEC#aiodns==}"
+          TRANSITIVE_COMPATIBILITY_SPECS_JSON=$(uv run --no-project --with orjson --with packaging \
+            python tools/validate_compatibility.py --transitive-compatibility-specs-json \
+            --aiodns-version "$AIODNS_VERSION")
+          if ! jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' \
+            <<< "$TRANSITIVE_COMPATIBILITY_SPECS_JSON" >/dev/null; then
+            echo "::error::Invalid transitive compatibility specs"
+            exit 1
+          fi
+          mapfile -t TRANSITIVE_COMPATIBILITY_SPECS < <(
+            jq -r '.[]' <<< "$TRANSITIVE_COMPATIBILITY_SPECS_JSON"
+          )
+          uv --no-config pip install --prerelease allow --python .venv/bin/python \
+            "$HA_SPEC" "${REQUIRED_TEST_DEPS[@]}" "${TRANSITIVE_COMPATIBILITY_SPECS[@]}"
 
       - name: Verify Home Assistant/test harness pair
         env:

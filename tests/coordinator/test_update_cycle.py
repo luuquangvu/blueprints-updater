@@ -921,6 +921,54 @@ async def test_detect_risks_missing_relative_path(coordinator, mock_makedirs):
 
 
 @pytest.mark.asyncio
+async def test_detect_risks_uses_nested_consumer_inputs(coordinator):
+    """Pass inputs from HA's use_blueprint wrapper to schema risk checks."""
+    path = "/config/blueprints/automation/test.yaml"
+    info = {"relative_path": "automation/test.yaml", "name": "Test Blueprint"}
+    coordinator.data = {path: info}
+    full_configs = {
+        "automation.consumer": {
+            "id": "consumer",
+            "use_blueprint": {
+                "path": "test.yaml",
+                "input": {"target_boolean": "input_boolean.target"},
+            },
+        }
+    }
+
+    with (
+        patch.object(
+            coordinator,
+            "_get_entities_using_blueprint",
+            return_value=["automation.consumer"],
+        ),
+        patch.object(coordinator, "_get_entities_configs", return_value=full_configs),
+        patch.object(
+            coordinator.hass,
+            "async_add_executor_job",
+            new=AsyncMock(return_value="old blueprint"),
+        ),
+        patch.object(
+            coordinator,
+            "_detect_breaking_changes",
+            return_value=[],
+        ) as detect_breaking_changes,
+        patch.object(
+            coordinator,
+            "_async_validate_blueprint_consumers",
+            new=AsyncMock(return_value=[]),
+        ),
+    ):
+        await coordinator._detect_risks_for_update(path, info, "new blueprint")
+
+    detect_breaking_changes.assert_called_once_with(
+        "old blueprint",
+        "new blueprint",
+        {"automation.consumer": {"target_boolean": "input_boolean.target"}},
+    )
+
+
+@pytest.mark.asyncio
 async def test_async_install_blueprint(hass, coordinator, mock_makedirs):
     """Test installing a blueprint and reloading services."""
     path = "/config/blueprints/automation/test.yaml"
