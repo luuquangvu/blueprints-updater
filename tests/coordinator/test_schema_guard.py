@@ -95,6 +95,93 @@ blueprint:
     )
 
 
+def test_detect_breaking_changes_invalid_falsy_selector_config(coordinator):
+    """An invalid falsy selector config changing to an empty config is risky."""
+    old_content = """
+blueprint:
+  name: Old
+  input:
+    controlled_entity:
+      selector:
+        entity: false
+"""
+    new_content = """
+blueprint:
+  name: New
+  input:
+    controlled_entity:
+      selector:
+        entity: {}
+"""
+
+    risks = coordinator._detect_breaking_changes(
+        old_content,
+        new_content,
+        {"automation.consumer": {"controlled_entity": "light.kitchen"}},
+    )
+
+    assert any(
+        risk["type"] == BlueprintRiskType.SELECTOR_MISMATCH
+        and risk["args"]["input"] == "controlled_entity"
+        for risk in risks
+    )
+
+
+def test_detect_breaking_changes_equivalent_normalized_selectors(coordinator):
+    """Home Assistant schema expansion does not create selector risks."""
+    old_content = """
+blueprint:
+  name: Old
+  input:
+    motion_sensor:
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+    target_entity:
+      selector:
+        target:
+          entity:
+            domain:
+              - light
+              - switch
+"""
+    new_content = """
+blueprint:
+  name: New
+  input:
+    motion_sensor:
+      selector:
+        entity:
+          domain:
+            - binary_sensor
+          device_class:
+            - motion
+          multiple: false
+    target_entity:
+      selector:
+        target:
+          entity:
+            - domain:
+                - light
+                - switch
+"""
+
+    risks = coordinator._detect_breaking_changes(
+        old_content,
+        new_content,
+        {
+            "automation.consumer": {
+                "motion_sensor": "binary_sensor.motion",
+                "target_entity": {"entity_id": "light.kitchen"},
+            }
+        },
+    )
+
+    assert all(risk["type"] != BlueprintRiskType.VALIDATION_FAILED for risk in risks)
+    assert all(risk["type"] != BlueprintRiskType.SELECTOR_MISMATCH for risk in risks)
+
+
 def test_normalize_selector_config_preserves_nested_presentation_keys():
     """Only presentation keys on the selector config itself are ignored."""
     normalized = BlueprintUpdateCoordinator._normalize_selector_config(

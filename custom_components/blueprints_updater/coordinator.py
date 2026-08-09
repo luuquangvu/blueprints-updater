@@ -39,6 +39,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import async_get_platforms
+from homeassistant.helpers.selector import validate_selector
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -2513,13 +2514,28 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                         sel = val.get("selector")
                         if isinstance(sel, dict) and sel:
                             selector_name = str(next(iter(sel.keys())))
+                            selector_value = sel.get(selector_name)
+                            try:
+                                validated_selector = validate_selector(sel)
+                                selector_config = (
+                                    BlueprintUpdateCoordinator._normalize_selector_config(
+                                        validated_selector.get(selector_name) or {}
+                                    )
+                                )
+                            except vol.Invalid:
+                                selector_config = (
+                                    BlueprintUpdateCoordinator._normalize_selector_config(
+                                        selector_value
+                                    )
+                                )
                         else:
                             selector_name = None
+                            selector_config = None
                         mandatory = "default" not in val
                         schema[key] = {
                             "mandatory": mandatory,
                             "selector": selector_name,
-                            "selector_config": sel,
+                            "selector_config": selector_config,
                         }
                     else:
                         schema[key] = {"mandatory": True, "selector": None, "selector_config": None}
