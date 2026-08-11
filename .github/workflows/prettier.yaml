@@ -1,7 +1,7 @@
 name: Prettier
 
 on:
-  push:
+  push: &ci_trigger
     branches:
       - main
     paths:
@@ -10,18 +10,14 @@ on:
       - "**.json"
       - "**.md"
       - "**.toml"
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "**.yaml"
-      - "**.yml"
-      - "**.json"
-      - "**.md"
-      - "**.toml"
+  pull_request: *ci_trigger
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   prettier:
@@ -37,6 +33,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: 24
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci

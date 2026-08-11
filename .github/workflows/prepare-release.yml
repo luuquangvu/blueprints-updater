@@ -21,6 +21,10 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   prepare-release:
     name: "Prepare Release Pull Request"
@@ -41,6 +45,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: 24
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
