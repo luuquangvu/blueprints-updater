@@ -38,7 +38,7 @@ repos:
 
       - id: taplo
         name: Run Taplo
-        entry: uv run taplo format pyproject.toml
+        entry: uv run taplo format .
         language: system
         pass_filenames: false
         always_run: true

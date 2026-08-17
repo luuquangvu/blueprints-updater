@@ -55,7 +55,7 @@ jobs:
         run: uv run interrogate
 
       - name: Run Taplo
-        run: uv run taplo format --check pyproject.toml
+        run: uv run taplo format --check .
 
       - name: Run Pytest
         run: uv run pytest
