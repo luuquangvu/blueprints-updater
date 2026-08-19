@@ -16,6 +16,7 @@ from homeassistant.exceptions import HomeAssistantError
 from custom_components.blueprints_updater.const import (
     DOMAIN,
     DOMAIN_AUTOMATION,
+    ERROR_SEPARATOR,
     MAX_CONCURRENT_REQUESTS,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
@@ -248,7 +249,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
         mock_session, path, info, results_to_notify, updated_domains
     )
 
-    assert coordinator.data[path]["last_error"].startswith("fetch_error|")
+    assert coordinator.data[path]["last_error"].startswith(f"fetch_error{ERROR_SEPARATOR}")
     assert coordinator.data[path]["updatable"] is False
 
 
@@ -353,7 +354,7 @@ def test_update_error_state_clears_state_and_etag(coordinator):
     assert entry["updatable"] is False
     assert entry["etag"] is None
     assert entry["invalid_remote_hash"] is None
-    assert entry["last_error"] == "parse_error|Invalid YAML found"
+    assert entry["last_error"] == f"parse_error{ERROR_SEPARATOR}Invalid YAML found"
 
 
 def test_update_error_state_clears_state_and_keeps_etag(coordinator):
@@ -380,7 +381,7 @@ def test_update_error_state_clears_state_and_keeps_etag(coordinator):
     assert entry["updatable"] is False
     assert entry["invalid_remote_hash"] is None
     assert entry["etag"] == "etag-123"
-    assert entry["last_error"].startswith("download_error|")
+    assert entry["last_error"].startswith(f"download_error{ERROR_SEPARATOR}")
     assert "Failed to fetch content" in entry["last_error"]
     assert "\n" not in entry["last_error"]
 

@@ -14,6 +14,7 @@ import custom_components.blueprints_updater.update as update_module
 from custom_components.blueprints_updater.const import (
     DOMAIN,
     DOMAIN_AUTOMATION,
+    ERROR_SEPARATOR,
     URL_BLUEPRINT_DASHBOARD,
 )
 from custom_components.blueprints_updater.coordinator import (
@@ -908,7 +909,7 @@ async def test_async_install_unsafe_url_protection(coordinator):
         await entity.async_generate_release_notes()
 
     assert info.get("remote_content") is None
-    assert "unsafe_url|" in str(info.get("last_error") or "")
+    assert f"unsafe_url{ERROR_SEPARATOR}" in str(info.get("last_error") or "")
 
     with pytest.raises(HomeAssistantError):
         await entity.async_install(version=None, backup=False)

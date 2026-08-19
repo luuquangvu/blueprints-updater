@@ -7,7 +7,11 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from custom_components.blueprints_updater.const import CONF_MAX_BACKUPS, CONF_UPDATE_INTERVAL
+from custom_components.blueprints_updater.const import (
+    CONF_MAX_BACKUPS,
+    CONF_UPDATE_INTERVAL,
+    ERROR_SEPARATOR,
+)
 from custom_components.blueprints_updater.utils import (
     get_config_bool,
     get_config_int,
@@ -297,7 +301,7 @@ def test_redact_url():
 def test_sanitize_error_detail():
     """Test sanitize_error_detail utility."""
     assert sanitize_error_detail("normal error") == "normal error"
-    assert sanitize_error_detail("error | with | pipe") == "error / with / pipe"
+    assert sanitize_error_detail("error | with | pipe") == "error | with | pipe"
     assert (
         sanitize_error_detail("failed at https://u:p@github.com/p?q=1")
         == "failed at https://github.com/p"
@@ -306,6 +310,9 @@ def test_sanitize_error_detail():
     sanitized = sanitize_error_detail(long_msg, max_length=50)
     assert len(sanitized) <= 50
     assert sanitized.endswith("...")
+    assert sanitize_error_detail("invalid {{ value | upper }}" + ERROR_SEPARATOR + "detail") == (
+        "invalid {{ value | upper }}/detail"
+    )
 
 
 def test_retry_async_rejects_bool_max_retries():

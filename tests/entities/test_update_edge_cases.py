@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.blueprints_updater.const import ERROR_SEPARATOR
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.update import BlueprintUpdateEntity, async_update_entities
 
@@ -139,7 +140,7 @@ async def test_extra_state_attributes(mock_coordinator):
     info = {
         "name": "Test",
         "relative_path": path,
-        "last_error": "err_key|detail",
+        "last_error": f"err_key{ERROR_SEPARATOR}detail",
         "breaking_risks": ["risk1"],
         "update_blocking_reason": "auto_update_blocked_by_breaking_change",
     }

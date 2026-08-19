@@ -18,6 +18,7 @@ from custom_components.blueprints_updater.const import (
     DOMAIN_AUTOMATION,
     DOMAIN_SCRIPT,
     DOMAIN_TEMPLATE,
+    ERROR_SEPARATOR,
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
     FILTER_MODE_ALL,
     MAX_CONCURRENT_REQUESTS,
@@ -641,7 +642,7 @@ async def test_async_update_blueprint_unsafe_url_invalidates_cache(coordinator, 
     assert coordinator.data[path]["etag"] is None
     assert coordinator.data[path]["remote_hash"] is None
     assert coordinator.data[path]["updatable"] is False
-    assert coordinator.data[path]["last_error"].startswith("unsafe_url|")
+    assert coordinator.data[path]["last_error"].startswith(f"unsafe_url{ERROR_SEPARATOR}")
 
 
 @pytest.mark.asyncio
@@ -856,7 +857,7 @@ async def test_process_blueprint_content_yaml_error(coordinator, mock_makedirs):
         new_etag="etag",
     )
 
-    assert coordinator.data[path]["last_error"].startswith("yaml_syntax_error|")
+    assert coordinator.data[path]["last_error"].startswith(f"yaml_syntax_error{ERROR_SEPARATOR}")
 
 
 @pytest.mark.asyncio
@@ -877,7 +878,7 @@ async def test_process_blueprint_content_unhandled_error(coordinator, mock_maked
             new_etag="etag",
         )
 
-    assert coordinator.data[path]["last_error"] == "processing_error|Boom"
+    assert coordinator.data[path]["last_error"] == f"processing_error{ERROR_SEPARATOR}Boom"
 
 
 @pytest.mark.asyncio
@@ -1647,7 +1648,7 @@ async def test_async_update_blueprint_failure_paths(coordinator, error_case):
     )
 
     entry = coordinator.data[path]
-    assert entry["last_error"].startswith(f"{error_case}|")
+    assert entry["last_error"].startswith(f"{error_case}{ERROR_SEPARATOR}")
     assert entry["updatable"] is False
     assert entry["remote_hash"] is None
     assert entry["remote_content"] is None
@@ -1699,7 +1700,7 @@ async def test_async_handle_auto_update_blocked(coordinator, mock_makedirs):
 @pytest.mark.parametrize(
     ("error_type", "response_text", "side_effect", "expected_error"),
     [
-        ("empty_content", "", None, "empty_content|"),
+        ("empty_content", "", None, f"empty_content{ERROR_SEPARATOR}"),
         ("yaml_syntax_error", "}invalid yaml: {\n", None, "yaml_syntax_error"),
         (
             "invalid_blueprint",
@@ -1947,7 +1948,7 @@ async def test_async_update_blueprint_blocks_special_use_tld_home_arpa(coordinat
 
         last_error = coordinator.data[path].get("last_error")
         assert last_error
-        assert last_error.startswith("unsafe_url|")
+        assert last_error.startswith(f"unsafe_url{ERROR_SEPARATOR}")
 
         mock_logger.warning.assert_called()
         warning_args = mock_logger.warning.call_args.args
@@ -1984,7 +1985,7 @@ async def test_async_update_blueprint_blocks_special_use_tld_local(coordinator, 
 
         last_error = coordinator.data[path].get("last_error")
         assert last_error
-        assert last_error.startswith("unsafe_url|")
+        assert last_error.startswith(f"unsafe_url{ERROR_SEPARATOR}")
 
         mock_logger.warning.assert_called()
         warning_args = mock_logger.warning.call_args.args
@@ -2089,7 +2090,7 @@ async def test_async_fetch_diff_content_rejects_invalid_remote_yaml(coordinator)
     assert coord.data[path].get("remote_content") is None
     last_error = coord.data[path]["last_error"]
     assert isinstance(last_error, str)
-    assert last_error.startswith("yaml_syntax_error|")
+    assert last_error.startswith(f"yaml_syntax_error{ERROR_SEPARATOR}")
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ from custom_components.blueprints_updater.const import (
     DOMAIN_AUTOMATION,
     DOMAIN_SCRIPT,
     DOMAIN_TEMPLATE,
+    ERROR_SEPARATOR,
 )
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
@@ -293,6 +294,100 @@ def test_validate_blueprint_valid(coordinator):
         data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
     )
     assert result is None
+
+
+def test_validate_blueprint_validates_nested_templates_and_keys(coordinator):
+    """Test valid templates across executable blueprint structures."""
+    input_data = yaml_util.parse_yaml("value: !input input_name")
+    assert isinstance(input_data, dict)
+
+    data = {
+        "blueprint": {
+            "name": "Test",
+            "domain": DOMAIN_AUTOMATION,
+            "description": "Documentation with an unfinished example: {{ value",
+            "input": {"input_name": None},
+        },
+        "variables": {"value": "{{ value | default('') }}"},
+        "input_value": input_data["value"],
+        "conditions": [{"condition": "template", "value_template": "{{ value is defined }}"}],
+        "actions": [
+            {
+                "choose": [
+                    {
+                        "conditions": [{"condition": "template", "value_template": "{{ value }}"}],
+                        "sequence": [
+                            {
+                                "action": "{{ action_name }}",
+                                "data": {"{{ data_key }}": "{{ value }}"},
+                            }
+                        ],
+                    }
+                ]
+            }
+        ],
+        "wait_template": "{{ value | default(false) }}",
+    }
+
+    coordinator.hass.data = {}
+
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+    )
+
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_path"),
+    [
+        ({"variables": {"broken": "{{ value | }}"}}, "variables.broken"),
+        (
+            {
+                "actions": [
+                    {
+                        "choose": [
+                            {
+                                "conditions": [
+                                    {
+                                        "condition": "template",
+                                        "value_template": "{{ value | }}",
+                                    }
+                                ],
+                                "sequence": [],
+                            }
+                        ]
+                    }
+                ]
+            },
+            "actions[0].choose[0].conditions[0].value_template",
+        ),
+        (
+            {"variables": {"{{ broken | }}": "value"}},
+            "variables['{{ broken | }}']",
+        ),
+    ],
+)
+def test_validate_blueprint_rejects_invalid_template(coordinator, body, expected_path):
+    """Test invalid Jinja2 syntax is reported with its blueprint path."""
+    data = {
+        "blueprint": {
+            "name": "Test",
+            "domain": DOMAIN_AUTOMATION,
+            "input": {},
+        },
+        **body,
+    }
+    coordinator.hass.data = {}
+
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+    )
+
+    assert result is not None
+    assert result.startswith(f"blueprint_validation_error{ERROR_SEPARATOR}Invalid template at ")
+    assert expected_path in result
+    assert "expected token" in result
 
 
 def test_validate_blueprint_script_valid(coordinator):

@@ -12,6 +12,10 @@ CONF_AUTO_UPDATE = "auto_update"
 CONF_MAX_BACKUPS = "max_backups"
 EVENT_BLUEPRINTS_UPDATER_UPDATED = f"{DOMAIN}_updated"
 
+# ASCII Unit Separator is not a Jinja2 syntax character. It separates a
+# structured error key from its detail without colliding with template pipes.
+ERROR_SEPARATOR = "\x1f"
+
 DEFAULT_AUTO_UPDATE = False
 DEFAULT_MAX_BACKUPS = 3
 MIN_BACKUPS = 1

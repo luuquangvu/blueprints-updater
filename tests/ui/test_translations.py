@@ -8,6 +8,7 @@ import pytest
 from custom_components.blueprints_updater.const import (
     DOMAIN,
     DOMAIN_AUTOMATION,
+    ERROR_SEPARATOR,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.update import BlueprintUpdateEntity
@@ -97,7 +98,7 @@ async def test_entity_localized_error(hass, coordinator):
             "name": "Test",
             "relative_path": "test.yaml",
             "updatable": True,
-            "last_error": "yaml_syntax_error|Line 5",
+            "last_error": f"yaml_syntax_error{ERROR_SEPARATOR}Line 5",
             "local_hash": "old",
         }
     }
@@ -117,7 +118,7 @@ async def test_entity_localized_error(hass, coordinator):
     ):
         assert entity.extra_state_attributes == {
             "domain": DOMAIN_AUTOMATION,
-            "last_error": "yaml_syntax_error|Line 5",
+            "last_error": f"yaml_syntax_error{ERROR_SEPARATOR}Line 5",
             "relative_path": "test.yaml",
             "backups_count": 0,
             "provider_type": None,
@@ -133,6 +134,42 @@ async def test_entity_localized_error(hass, coordinator):
             "provider_type": None,
         }
         assert entity.release_summary == "Có bản cập nhật"
+
+
+@pytest.mark.asyncio
+async def test_entity_localized_blueprint_validation_error(hass, coordinator):
+    """Test localization of validation errors framed with the safe separator."""
+    path = "/config/blueprints/test.yaml"
+    detail = "Invalid template at variables['{{ value | upper }}']"
+    coordinator.data = {
+        path: {
+            "name": "Test",
+            "relative_path": "test.yaml",
+            "updatable": True,
+            "last_error": f"blueprint_validation_error{ERROR_SEPARATOR}{detail}",
+            "local_hash": "old",
+        }
+    }
+
+    entity = BlueprintUpdateEntity(coordinator, path, coordinator.data[path])
+    entity.hass = hass
+    entity.entity_id = "update.test"
+
+    translations = {
+        f"component.{DOMAIN}.common.blueprint_validation_error": "Template: {error}",
+        f"component.{DOMAIN}.common.update_available_short": "Update available",
+    }
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.async_get_translations",
+            return_value=translations,
+        ),
+        patch.object(entity, "async_write_ha_state"),
+    ):
+        await entity._async_localize_strings()
+
+    assert entity.extra_state_attributes["last_error"] == f"Template: {detail}"
 
 
 @pytest.mark.asyncio

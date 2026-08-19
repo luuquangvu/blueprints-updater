@@ -17,7 +17,11 @@ import voluptuous as vol
 from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.blueprints_updater.const import DOMAIN_AUTOMATION, BlueprintRiskType
+from custom_components.blueprints_updater.const import (
+    DOMAIN_AUTOMATION,
+    ERROR_SEPARATOR,
+    BlueprintRiskType,
+)
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.utils import (
     get_validated_filter_mode,
@@ -121,7 +125,7 @@ async def test_process_blueprint_content_error_handling(coordinator):
     await coordinator._process_blueprint_content(
         path2, info, "invalid: yaml: [data", "etag", "url", [], set()
     )
-    assert coordinator.data[path2]["last_error"].startswith("yaml_syntax_error|")
+    assert coordinator.data[path2]["last_error"].startswith(f"yaml_syntax_error{ERROR_SEPARATOR}")
 
     path3 = "automation/schema.yaml"
     coordinator.data[path3] = dict(info)
@@ -138,8 +142,35 @@ async def test_process_blueprint_content_error_handling(coordinator):
             [],
             set(),
         )
-        assert coordinator.data[path3]["last_error"].startswith("blueprint_validation_error|")
+        assert coordinator.data[path3]["last_error"].startswith(
+            f"blueprint_validation_error{ERROR_SEPARATOR}"
+        )
         assert "Mock Schema Failure" in coordinator.data[path3]["last_error"]
+
+    path4 = "automation/template.yaml"
+    coordinator.data[path4] = dict(info)
+    await coordinator._process_blueprint_content(
+        path4,
+        info,
+        """
+blueprint:
+  name: Test
+  domain: automation
+  description: "Documentation with an unfinished example: {{ value"
+  input: {}
+variables:
+  broken: "{{ value | }}"
+""",
+        "https://example.com/blueprint.yaml",
+        [],
+        set(),
+    )
+    assert coordinator.data[path4]["last_error"].startswith(
+        f"blueprint_validation_error{ERROR_SEPARATOR}"
+    )
+    assert "variables.broken" in coordinator.data[path4]["last_error"]
+    assert coordinator.data[path4]["remote_hash"] is None
+    assert coordinator.data[path4]["updatable"] is False
 
 
 @pytest.mark.asyncio

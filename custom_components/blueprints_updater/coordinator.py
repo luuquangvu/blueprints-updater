@@ -37,10 +37,11 @@ from homeassistant.components.template.config import (
 from homeassistant.components.template.helpers import templates_with_blueprint
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError, TemplateError
 from homeassistant.helpers.entity_platform import async_get_platforms
 from homeassistant.helpers.selector import validate_selector
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.template import Template, is_template_string
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import slugify
@@ -107,6 +108,7 @@ from .network import (
 )
 from .providers import registry
 from .utils import (
+    format_error_message,
     get_blueprint_relative_path,
     get_config_bool,
     get_max_backups,
@@ -119,6 +121,7 @@ from .utils import (
     retry_async,
     sanitize_error_detail,
     should_include_blueprint,
+    split_error_message,
     verify_https_enforcement,
 )
 
@@ -1318,14 +1321,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         except Exception:
             _LOGGER.exception("Failed to send auto-update notification")
 
-    @staticmethod
     def _validate_blueprint(
-        data: dict[str, object], source_url: str, expected_domain: str
+        self,
+        data: dict[str, object],
+        source_url: str,
+        expected_domain: str,
     ) -> str | None:
         """Validate blueprint data using HA Core's Blueprint class.
 
         Performs basic structure check, structural validation,
-        and min_version compatibility check.
+        min_version compatibility check, and Jinja2 syntax validation.
 
         Args:
             data: Parsed YAML dictionary of the blueprint.
@@ -1358,15 +1363,72 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     redact_url(source_url),
                     error_msg,
                 )
-                return f"incompatible|{sanitize_error_detail(error_msg)}"
+                return format_error_message("incompatible", error_msg)
         except InvalidBlueprint as err:
             _LOGGER.warning(
                 "Blueprint validation failed for %s: %s",
                 redact_url(source_url),
                 err,
             )
-            return f"blueprint_validation_error|{sanitize_error_detail(str(err))}"
+            return format_error_message("blueprint_validation_error", err)
+
+        if template_error := self._validate_template_value(data, "", skip_blueprint_metadata=True):
+            path, error = template_error
+            error_msg = sanitize_error_detail(f"Invalid template at {path}: {error}")
+            _LOGGER.warning(
+                "Blueprint template validation failed for %s: %s",
+                redact_url(source_url),
+                error_msg,
+            )
+            return format_error_message("blueprint_validation_error", error_msg)
+
         return None
+
+    def _validate_template_value(
+        self,
+        value: object,
+        path: str,
+        *,
+        skip_blueprint_metadata: bool = False,
+    ) -> tuple[str, str] | None:
+        """Validate one value and recursively inspect nested YAML structures."""
+        if isinstance(value, str):
+            if not is_template_string(value):
+                return None
+            try:
+                Template(value, self.hass).ensure_valid()
+            except TemplateError as err:
+                return path, str(err)
+            return None
+
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                if skip_blueprint_metadata and key == "blueprint":
+                    continue
+                child_path = self._template_path(path, key)
+                if isinstance(key, str) and (
+                    template_error := self._validate_template_value(key, child_path)
+                ):
+                    return template_error
+                if template_error := self._validate_template_value(child, child_path):
+                    return template_error
+            return None
+
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            for index, child in enumerate(value):
+                if template_error := self._validate_template_value(child, f"{path}[{index}]"):
+                    return template_error
+
+        return None
+
+    @staticmethod
+    def _template_path(path: str, key: object) -> str:
+        """Build a concrete YAML-style path for a mapping entry."""
+        if not path:
+            return str(key)
+        if isinstance(key, str) and key.isidentifier():
+            return f"{path}.{key}"
+        return f"{path}[{key!r}]"
 
     def _get_functional_domain(
         self,
@@ -1632,11 +1694,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         )
 
         if validation_error := self._validate_blueprint(parsed, canonical_url, domain):
-            error_key = validation_error.split("|")[0]
+            error_parts = split_error_message(validation_error)
+            error_key, error_detail = error_parts or (validation_error, validation_error)
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key=error_key,
-                translation_placeholders={"error": validation_error.split("|")[-1]},
+                translation_placeholders={"error": error_detail},
             )
 
         await self.async_install_blueprint(
@@ -2376,10 +2439,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             src_url_str,
             domain,
         ):
-            _, separator, detail = validation_error.partition("|")
+            error_parts = split_error_message(validation_error)
             raise BlueprintRestoreValidationError(
                 "blueprint_validation_error",
-                error=detail if separator else validation_error.replace("_", " "),
+                error=(error_parts[1] if error_parts else validation_error.replace("_", " ")),
             )
         return PreparedBlueprintRestore(
             real_path=real_path,
@@ -3088,7 +3151,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 blueprint_dict, source_url, expected_domain=expected_domain
             )
         except (HomeAssistantError, InvalidBlueprint) as err:
-            last_error = f"yaml_syntax_error|{sanitize_error_detail(str(err))}"
+            last_error = format_error_message("yaml_syntax_error", err)
 
         if last_error:
             _LOGGER.warning("Remote content for diff at %s is invalid: %s", path, last_error)
@@ -3196,7 +3259,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 "remote_hash": None,
                 "remote_content": None,
                 "updatable": False,
-                "last_error": f"{error_type}|{sanitize_error_detail(str(detail))}",
+                "last_error": format_error_message(error_type, detail),
                 "invalid_remote_hash": None,
                 "update_blocking_reason": None,
                 "breaking_risks": [],
@@ -3406,12 +3469,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             )
             updatable = False
             remote_hash = None
-            last_error = f"yaml_syntax_error|{sanitize_error_detail(str(err))}"
+            last_error = format_error_message("yaml_syntax_error", err)
         except Exception as err:
             _LOGGER.exception("Unexpected error processing blueprint for %s", path)
             updatable = False
             remote_hash = None
-            last_error = f"processing_error|{sanitize_error_detail(str(err))}"
+            last_error = format_error_message("processing_error", err)
 
         risks = await self._detect_risks_for_update(path, info, remote_content)
         if not self._is_current_refresh_item(refresh_work):

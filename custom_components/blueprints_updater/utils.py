@@ -26,6 +26,7 @@ from .const import (
     DEFAULT_MAX_BACKUPS,
     DEFAULT_UPDATE_INTERVAL_HOURS,
     DOMAIN_AUTOMATION,
+    ERROR_SEPARATOR,
     FILTER_MODE_ALL,
     FILTER_MODE_BLACKLIST,
     FILTER_MODE_WHITELIST,
@@ -441,8 +442,21 @@ def sanitize_error_detail(detail: str, max_length: int = 120) -> str:
 
     """
     cleaned = RE_URL_REDACTION.sub(lambda m: redact_url(m.group(0)), detail)
-    cleaned = cleaned.replace("|", "/")
+    cleaned = cleaned.replace(ERROR_SEPARATOR, "/")
     return textwrap.shorten(cleaned, width=max_length, placeholder="...")
+
+
+def format_error_message(error_key: str, detail: object) -> str:
+    """Format a structured error with a sanitized detail."""
+    return f"{error_key}{ERROR_SEPARATOR}{sanitize_error_detail(str(detail))}"
+
+
+def split_error_message(error: str) -> tuple[str, str] | None:
+    """Split a structured error into its key and detail."""
+    if ERROR_SEPARATOR not in error:
+        return None
+    key, detail = error.split(ERROR_SEPARATOR, 1)
+    return key, detail
 
 
 def verify_https_enforcement(response: httpx.Response, original_url: str) -> None:

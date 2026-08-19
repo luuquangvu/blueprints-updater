@@ -6,7 +6,11 @@ import httpx
 import pytest
 from homeassistant.exceptions import ServiceValidationError
 
-from custom_components.blueprints_updater.const import BLUEPRINTS_DATA_DIR, SourceProviderType
+from custom_components.blueprints_updater.const import (
+    BLUEPRINTS_DATA_DIR,
+    ERROR_SEPARATOR,
+    SourceProviderType,
+)
 from custom_components.blueprints_updater.exceptions import FileRevisionMismatchError
 from custom_components.blueprints_updater.file_store import (
     BlueprintFileStore,
@@ -395,7 +399,9 @@ async def test_async_import_blueprint_surfaces_blueprint_validation_error(coordi
             AsyncMock(return_value=IMPORTED_BLUEPRINT),
         ),
         patch.object(
-            coordinator, "_validate_blueprint", return_value="blueprint_validation_error|bad schema"
+            coordinator,
+            "_validate_blueprint",
+            return_value=f"blueprint_validation_error{ERROR_SEPARATOR}bad schema",
         ),
         pytest.raises(ServiceValidationError) as err,
     ):

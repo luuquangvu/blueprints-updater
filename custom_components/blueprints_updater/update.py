@@ -33,7 +33,7 @@ from .const import (
 )
 from .coordinator import BlueprintUpdateCoordinator
 from .providers import registry
-from .utils import normalize_domain, redact_url
+from .utils import normalize_domain, redact_url, split_error_message
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -462,8 +462,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
 
         self._localized_error = None
         if (error := info.get("last_error")) and isinstance(error, str):
-            if "|" in error:
-                key, val = error.split("|", 1)
+            if error_parts := split_error_message(error):
+                key, val = error_parts
                 self._localized_error = await self.coordinator.async_translate(
                     key, errors=val, error=val
                 )
@@ -486,8 +486,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         error_val = info.get("last_error")
         error = str(error_val) if error_val is not None else None
         if error:
-            if "|" in error:
-                key, val = error.split("|", 1)
+            if error_parts := split_error_message(error):
+                key, val = error_parts
                 msg = await self.coordinator.async_translate(key, errors=val, error=val)
             else:
                 msg = await self.coordinator.async_translate(error)

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.blueprints_updater.const import ERROR_SEPARATOR
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
@@ -108,7 +109,7 @@ def test_update_error_state_with_existing_path(mock_coordinator) -> None:
     assert info["invalid_remote_hash"] is None
     assert info["updatable"] is False
     assert isinstance(info["last_error"], str)
-    assert "fetch_error|detail" in info["last_error"]
+    assert f"fetch_error{ERROR_SEPARATOR}detail" in info["last_error"]
     assert info["etag"] is None
 
 
