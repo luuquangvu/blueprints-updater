@@ -9,7 +9,6 @@ on:
       - "**.yml"
       - "**.json"
       - "**.md"
-      - "**.toml"
   pull_request: *ci_trigger
 
 permissions:

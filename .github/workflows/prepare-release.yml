@@ -41,6 +41,9 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
+      - name: Install dependencies
+        run: uv sync --locked
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
@@ -96,7 +99,12 @@ jobs:
         run: uv run tools/update_project_metadata.py
 
       - name: Format release metadata
-        run: npx prettier --write custom_components/blueprints_updater/manifest.json pyproject.toml
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npx prettier --write custom_components/blueprints_updater/manifest.json
+          uv run taplo format pyproject.toml
 
       - name: Update uv.lock
         run: uv lock
