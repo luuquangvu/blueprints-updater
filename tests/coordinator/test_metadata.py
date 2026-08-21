@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, mock_open, patch
 import pytest
 import yaml
 from homeassistant.util import yaml as yaml_util
+from homeassistant.util.yaml.objects import Input
 
 import custom_components.blueprints_updater.coordinator as coord_mod
 from custom_components.blueprints_updater.const import (
@@ -481,6 +482,156 @@ def test_validate_blueprint_missing_key(coordinator):
     )
     assert result is not None
     assert "invalid_blueprint" in result
+
+
+def test_validate_blueprint_rejects_undefined_input(coordinator):
+    """Test _validate_blueprint rejects blueprints referencing undefined !input tags."""
+    yaml_text = (
+        "blueprint:\n"
+        "  name: Test\n"
+        "  domain: automation\n"
+        "  input:\n"
+        "    valid_input:\n"
+        "      name: Valid\n"
+        "trigger: []\n"
+        "action:\n"
+        "  - action: light.turn_on\n"
+        "    target:\n"
+        "      entity_id: !input undefined_target\n"
+    )
+    data = yaml_util.parse_yaml(yaml_text)
+    assert isinstance(data, dict)
+
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+    )
+    assert result is not None
+    assert "blueprint_validation_error" in result
+    assert "Undefined input referenced: '!input undefined_target'" in result
+
+
+def test_validate_blueprint_rejects_multiple_undefined_inputs(coordinator):
+    """Test _validate_blueprint formats multiple undefined !input references."""
+    yaml_text = (
+        "blueprint:\n"
+        "  name: Test\n"
+        "  domain: automation\n"
+        "  input: {}\n"
+        "trigger:\n"
+        "  - platform: state\n"
+        "    entity_id: !input trigger_entity\n"
+        "action:\n"
+        "  - action: light.turn_on\n"
+        "    target:\n"
+        "      entity_id: !input action_target\n"
+    )
+    data = yaml_util.parse_yaml(yaml_text)
+    assert isinstance(data, dict)
+
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+    )
+    assert result is not None
+    assert "blueprint_validation_error" in result
+    assert "Undefined inputs referenced: '!input action_target', '!input trigger_entity'" in result
+
+
+def test_validate_blueprint_accepts_nested_section_inputs(coordinator):
+    """Test _validate_blueprint accepts !input references defined in nested sections."""
+    yaml_text = (
+        "blueprint:\n"
+        "  name: Test\n"
+        "  domain: automation\n"
+        "  input:\n"
+        "    section_header:\n"
+        "      name: Section\n"
+        "      input:\n"
+        "        nested_target:\n"
+        "          name: Nested\n"
+        "trigger: []\n"
+        "action:\n"
+        "  - action: light.turn_on\n"
+        "    target:\n"
+        "      entity_id: !input nested_target\n"
+    )
+    data = yaml_util.parse_yaml(yaml_text)
+    assert isinstance(data, dict)
+
+    coordinator.hass.data = {}
+    result = coordinator._validate_blueprint(
+        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+    )
+    assert result is None
+
+
+def test_extract_defined_inputs_helper(coordinator):
+    """Test _extract_defined_inputs helper handles non-mappings and nested structures."""
+    assert coordinator._extract_defined_inputs(None) == set()
+    assert coordinator._extract_defined_inputs([]) == set()
+    assert coordinator._extract_defined_inputs("string") == set()
+
+    inputs_data = {
+        "top_level": {"name": "Top"},
+        "section": {
+            "name": "Section",
+            "input": {
+                "sub_level": {"name": "Sub"},
+                "nested_section": {
+                    "input": {
+                        "deep_level": None,
+                    }
+                },
+                42: {"name": "Ignored integer key"},
+                object(): {"name": "Ignored non-string key"},
+            },
+        },
+    }
+    extracted = coordinator._extract_defined_inputs(inputs_data)
+    assert extracted == {"top_level", "sub_level", "deep_level"}
+
+
+def test_extract_used_inputs_helper(coordinator):
+    """Test _extract_used_inputs helper handles various object structures."""
+    assert coordinator._extract_used_inputs(None) == []
+    assert coordinator._extract_used_inputs("string") == []
+    assert coordinator._extract_used_inputs(123) == []
+
+    parsed = yaml_util.parse_yaml(
+        "list_inputs:\n  - !input first\n  - item:\n      key: !input second\n"
+    )
+    assert coordinator._extract_used_inputs(parsed) == ["first", "second"]
+
+    mapping_with_input_key = yaml_util.parse_yaml(
+        "mapping_inputs:\n  ? !input key_input\n  : some_value\n"
+    )
+    assert coordinator._extract_used_inputs(mapping_with_input_key) == ["key_input"]
+
+    nested_key_input = Input("nested_key")
+    inner_input = Input("inner_input")
+    list_inner_input = Input("list_inner")
+    direct_key_input = Input("direct_key")
+
+    complex_structure = {
+        # Direct Input as a mapping key
+        direct_key_input: {"value": "ignored"},
+        "tuple_key_mapping": {
+            # Non-string/bytes key (tuple) containing an Input
+            (nested_key_input, "other"): [
+                {"inner": inner_input},
+                "no_input",
+                [list_inner_input],
+            ],
+        },
+    }
+
+    assert coordinator._extract_used_inputs(complex_structure) == [
+        "direct_key",
+        "nested_key",
+        "inner_input",
+        "list_inner",
+    ]
 
 
 def test_ensure_source_url_structured_modification(coordinator):

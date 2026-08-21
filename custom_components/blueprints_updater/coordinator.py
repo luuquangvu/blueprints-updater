@@ -46,6 +46,7 @@ from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import slugify
 from homeassistant.util import yaml as yaml_util
+from homeassistant.util.yaml.objects import Input
 
 try:
     from homeassistant.components.template.config import (
@@ -1321,6 +1322,80 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         except Exception:
             _LOGGER.exception("Failed to send auto-update notification")
 
+    @staticmethod
+    def _extract_defined_inputs(input_dict: object) -> set[str]:
+        """Extract all input keys defined in blueprint.input (including nested sections).
+
+        Args:
+            input_dict: The raw input mapping from the blueprint block.
+
+        Returns:
+            A set of all defined input key names.
+
+        """
+        keys: set[str] = set()
+        if not isinstance(input_dict, Mapping):
+            return keys
+
+        for k, v in input_dict.items():
+            if isinstance(v, Mapping) and "input" in v and isinstance(v["input"], Mapping):
+                keys.update(BlueprintUpdateCoordinator._extract_defined_inputs(v["input"]))
+            elif isinstance(k, str):
+                keys.add(k)
+        return keys
+
+    @staticmethod
+    def _extract_used_inputs(obj: object) -> list[str]:
+        """Recursively find all !input references in the parsed structure.
+
+        Args:
+            obj: Parsed blueprint YAML data or nested object.
+
+        Returns:
+            A list of input names referenced via !input tags.
+
+        """
+        used: list[str] = []
+        if isinstance(obj, Input):
+            used.append(obj.name)
+        elif isinstance(obj, Mapping):
+            for k, v in obj.items():
+                if isinstance(k, Input):
+                    used.append(k.name)
+                elif not isinstance(k, (str, bytes, bytearray)):
+                    used.extend(BlueprintUpdateCoordinator._extract_used_inputs(k))
+                used.extend(BlueprintUpdateCoordinator._extract_used_inputs(v))
+        elif isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray)):
+            for item in obj:
+                used.extend(BlueprintUpdateCoordinator._extract_used_inputs(item))
+        return used
+
+    @staticmethod
+    def _validate_input_references(data: dict[str, object]) -> str | None:
+        """Verify that all !input tags reference defined blueprint inputs.
+
+        Args:
+            data: Parsed YAML dictionary of the blueprint.
+
+        Returns:
+            An error message if undefined inputs are referenced, or None if valid.
+
+        """
+        blueprint_meta = data.get("blueprint")
+        if not isinstance(blueprint_meta, Mapping):
+            return None
+
+        defined = BlueprintUpdateCoordinator._extract_defined_inputs(blueprint_meta.get("input"))
+        used = BlueprintUpdateCoordinator._extract_used_inputs(data)
+
+        if undefined := sorted({name for name in used if name not in defined}):
+            if len(undefined) == 1:
+                return f"Undefined input referenced: '!input {undefined[0]}'"
+            formatted = ", ".join(f"'!input {name}'" for name in undefined)
+            return f"Undefined inputs referenced: {formatted}"
+
+        return None
+
     def _validate_blueprint(
         self,
         data: dict[str, object],
@@ -1351,6 +1426,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 redact_url(source_url),
             )
             return "invalid_blueprint"
+
+        if input_error := BlueprintUpdateCoordinator._validate_input_references(data):
+            _LOGGER.warning(
+                "Blueprint input validation failed for %s: %s",
+                redact_url(source_url),
+                input_error,
+            )
+            return format_error_message("blueprint_validation_error", input_error)
 
         schema = BlueprintUpdateCoordinator._get_blueprint_schema(expected_domain)
 
