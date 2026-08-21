@@ -3,6 +3,7 @@
 import contextlib
 import hashlib
 import html
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -26,6 +27,8 @@ from .const import (
     RE_GIST_RAW,
     SourceProviderType,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _normalize_hostname(hostname: str | None) -> str:
@@ -209,6 +212,29 @@ class GistProvider(SourceProvider):
         return {"author": author, "name": name}
 
 
+def _extract_blueprint_from_forum_post(post: object) -> str | None:
+    """Extract and validate blueprint YAML block from a single forum post object."""
+    if not isinstance(post, dict):
+        return None
+    post_content = post.get("cooked")
+    if not isinstance(post_content, str):
+        return None
+    code_blocks: list[str] = RE_FORUM_CODE_BLOCK.findall(post_content)
+    for block in code_blocks:
+        if "blueprint:" not in block:
+            continue
+        unquoted_block = html.unescape(block).strip()
+        if "blueprint:" not in unquoted_block:
+            continue
+        try:
+            parsed = yaml_util.parse_yaml(unquoted_block)
+            if isinstance(parsed, dict) and isinstance(parsed.get("blueprint"), dict):
+                return unquoted_block
+        except HomeAssistantError as err:
+            _LOGGER.debug("Skipping forum code block, not a valid blueprint YAML mapping: %s", err)
+    return None
+
+
 class HAForumProvider(SourceProvider):
     """Provider for Home Assistant Community Forum blueprints."""
 
@@ -251,20 +277,27 @@ class HAForumProvider(SourceProvider):
                 if isinstance(data, dict):
                     post_stream = data.get("post_stream")
                     posts = post_stream.get("posts", []) if isinstance(post_stream, dict) else []
-                    target_post = posts[0] if posts and isinstance(posts, list) else None
+                    target_post: dict[str, object] | None = None
 
                     for post in posts:
                         if not isinstance(post, dict):
                             continue
-                        cooked = post.get("cooked", "")
-                        if "blueprint:" in cooked:
+                        if _extract_blueprint_from_forum_post(post) is not None:
                             target_post = post
                             break
+
+                    if target_post is None and posts and isinstance(posts[0], dict):
+                        target_post = posts[0]
 
                     if target_post and isinstance(target_post, dict):
                         username = target_post.get("username")
                         slug = data.get("slug")
-                        if username and slug:
+                        if (
+                            isinstance(username, str)
+                            and isinstance(slug, str)
+                            and username
+                            and slug
+                        ):
                             return {"author": username, "name": slug}
         parsed = urlparse(url)
         hostname = parsed.hostname.lower() if parsed.hostname else DOMAIN_HA_FORUM
@@ -284,24 +317,16 @@ class HAForumProvider(SourceProvider):
             return None
 
         posts = post_stream.get("posts")
-        if not isinstance(posts, list):
+        if not isinstance(posts, list) or not posts:
             return None
 
-        for post in posts:
-            if not isinstance(post, dict):
-                continue
+        if result := _extract_blueprint_from_forum_post(posts[0]):
+            return result
 
-            post_content = post.get("cooked")
-            if not isinstance(post_content, str):
-                continue
+        for post in posts[1:]:
+            if result := _extract_blueprint_from_forum_post(post):
+                return result
 
-            code_blocks: list[str] = RE_FORUM_CODE_BLOCK.findall(post_content)
-            for block in code_blocks:
-                if "blueprint:" not in block:
-                    continue
-                unquoted_block = html.unescape(block).strip()
-                if "blueprint:" in unquoted_block:
-                    return unquoted_block
         return None
 
 

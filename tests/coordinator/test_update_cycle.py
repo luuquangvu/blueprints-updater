@@ -121,7 +121,9 @@ def test_scan_blueprints_skips_non_utf8_file(hass, tmp_path):
         "  source_url: https://example.com/valid.yaml\n",
         encoding="utf-8",
     )
-    (automation_root / "invalid.yaml").write_bytes(b"blueprint:\n  name: \xff\n")
+    (automation_root / "invalid.yaml").write_bytes(
+        b"blueprint:\n  name: \xff\n  source_url: https://example.com/invalid.yaml\n"
+    )
     hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
 
     blueprints = BlueprintUpdateCoordinator.scan_blueprints(hass, FILTER_MODE_ALL, [])

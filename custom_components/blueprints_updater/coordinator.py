@@ -2787,17 +2787,29 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 if (old_selector != new_selector or old_config != new_config) and (
                     affected := self._get_affected_entities(configs, key)
                 ):
-                    risks.append(
-                        {
-                            "type": BlueprintRiskType.SELECTOR_MISMATCH,
-                            "args": {
-                                "input": key,
-                                "old_type": str(old_selector) if old_selector else "none",
-                                "new_type": str(new_selector) if new_selector else "none",
-                                "count": len(affected),
-                            },
-                        }
-                    )
+                    if old_selector != new_selector:
+                        risks.append(
+                            {
+                                "type": BlueprintRiskType.SELECTOR_MISMATCH,
+                                "args": {
+                                    "input": key,
+                                    "old_type": str(old_selector) if old_selector else "none",
+                                    "new_type": str(new_selector) if new_selector else "none",
+                                    "count": len(affected),
+                                },
+                            }
+                        )
+                    else:
+                        risks.append(
+                            {
+                                "type": BlueprintRiskType.SELECTOR_CONFIG_CHANGED,
+                                "args": {
+                                    "input": key,
+                                    "type": str(old_selector) if old_selector else "unknown",
+                                    "count": len(affected),
+                                },
+                            }
+                        )
         return risks
 
     def _detect_removed_inputs(
@@ -4410,7 +4422,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
     @staticmethod
     def _parse_blueprint_data(
-        path: str, content: str, relative_path: str | None = None
+        path: str,
+        content: str,
+        relative_path: str | None = None,
+        file_hash: str | None = None,
     ) -> ParsedBlueprintData | None:
         """Parse raw YAML content and extract blueprint metadata if valid.
 
@@ -4451,8 +4466,30 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             "domain": domain,
             "source_url": source_url.strip(),
             "local_hash": BlueprintUpdateCoordinator._hash_content(content, source_url),
-            "local_file_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            "local_file_hash": (
+                file_hash
+                if file_hash is not None
+                else hashlib.sha256(content.encode("utf-8")).hexdigest()
+            ),
         }
+
+    @staticmethod
+    def _read_blueprint_file(full_path: str) -> tuple[str, str]:
+        """Read a blueprint file, decode as UTF-8, and compute physical SHA-256 hash.
+
+        Handles binary bytes (standard runtime) and str mocks (unit test fixtures).
+        """
+        with open(full_path, "rb") as f:
+            raw_bytes = f.read()
+
+        if isinstance(raw_bytes, bytes):
+            content = raw_bytes.decode("utf-8")
+            file_hash = hashlib.sha256(raw_bytes).hexdigest()
+        else:
+            content = str(raw_bytes)
+            file_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+        return content, file_hash
 
     @staticmethod
     def _scan_single_blueprint_file(
@@ -4483,11 +4520,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             return None
 
         try:
-            with open(full_path, encoding="utf-8") as f:
-                content = f.read()
+            content, file_hash = BlueprintUpdateCoordinator._read_blueprint_file(full_path)
 
             parsed_data = BlueprintUpdateCoordinator._parse_blueprint_data(
-                full_path, content, relative_path
+                full_path, content, relative_path, file_hash=file_hash
             )
             if not parsed_data:
                 return None

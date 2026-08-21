@@ -88,9 +88,9 @@ blueprint:
     )
 
     assert any(
-        risk["type"] == BlueprintRiskType.SELECTOR_MISMATCH
-        and risk["args"]["old_type"] == "entity"
-        and risk["args"]["new_type"] == "entity"
+        risk["type"] == BlueprintRiskType.SELECTOR_CONFIG_CHANGED
+        and risk["args"]["type"] == "entity"
+        and risk["args"]["input"] == "controlled_entity"
         for risk in risks
     )
 
@@ -121,7 +121,7 @@ blueprint:
     )
 
     assert any(
-        risk["type"] == BlueprintRiskType.SELECTOR_MISMATCH
+        risk["type"] == BlueprintRiskType.SELECTOR_CONFIG_CHANGED
         and risk["args"]["input"] == "controlled_entity"
         for risk in risks
     )
@@ -232,7 +232,7 @@ blueprint:
         {"automation.consumer": {"mode": "one"}},
     )
 
-    assert any(risk["type"] == BlueprintRiskType.SELECTOR_MISMATCH for risk in risks)
+    assert any(risk["type"] == BlueprintRiskType.SELECTOR_CONFIG_CHANGED for risk in risks)
 
 
 def test_detect_breaking_changes_new_mandatory(coordinator):
@@ -321,3 +321,60 @@ blueprint:
         and risk["args"]["input"] == "motion_sensor"
     }
     assert found_entities == {"automation.test", "automation.no_input"}
+
+
+def test_detect_breaking_changes_selector_type_vs_config_clarity(coordinator):
+    """Verify distinct risk types for selector type change vs selector config change."""
+    old_content = """
+blueprint:
+  name: Old
+  input:
+    switch_device:
+      selector:
+        device:
+          integration: zwave_js
+          manufacturer: Zooz
+          model: ZEN30
+    light_target:
+      selector:
+        entity:
+          domain: light
+"""
+    new_content = """
+blueprint:
+  name: New
+  input:
+    switch_device:
+      selector:
+        device:
+          integration: zwave_js
+    light_target:
+      selector:
+        target:
+          entity:
+            domain: light
+"""
+    configs = {
+        "automation.auto_1": {
+            "switch_device": "dev_123",
+            "light_target": "light.kitchen",
+        }
+    }
+
+    risks = coordinator._detect_breaking_changes(old_content, new_content, configs)
+
+    assert len(risks) == 2
+    assert {r["args"]["input"] for r in risks} == {"switch_device", "light_target"}
+
+    # switch_device selector changed config only (device -> device)
+    device_risk = next(r for r in risks if r["args"]["input"] == "switch_device")
+    assert device_risk["type"] == BlueprintRiskType.SELECTOR_CONFIG_CHANGED
+    assert device_risk["args"]["type"] == "device"
+    assert device_risk["args"]["count"] == 1
+
+    # light_target selector changed type (entity -> target)
+    target_risk = next(r for r in risks if r["args"]["input"] == "light_target")
+    assert target_risk["type"] == BlueprintRiskType.SELECTOR_MISMATCH
+    assert target_risk["args"]["old_type"] == "entity"
+    assert target_risk["args"]["new_type"] == "target"
+    assert target_risk["args"]["count"] == 1

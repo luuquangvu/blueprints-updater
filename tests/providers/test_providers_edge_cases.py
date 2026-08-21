@@ -178,3 +178,177 @@ def test_ha_forum_metadata_prefers_post_containing_blueprint():
     metadata = provider.get_metadata(url, content=content)
 
     assert metadata == {"author": "blueprint_author", "name": "target-blueprint"}
+
+
+def test_ha_forum_content_extraction_prefers_post0_and_ignores_replies():
+    """Verify that HAForumProvider extracts blueprint from the initial post only."""
+    provider = HAForumProvider()
+    response_json = {
+        "post_stream": {
+            "posts": [
+                {
+                    "username": "op_author",
+                    "cooked": (
+                        "<pre><code>blueprint:\n"
+                        "  name: Original OP Blueprint\n"
+                        "  domain: automation\n"
+                        "</code></pre>"
+                    ),
+                },
+                {
+                    "username": "reply_user",
+                    "cooked": (
+                        "<pre><code>blueprint:\n"
+                        "  name: Forked Reply Blueprint\n"
+                        "  domain: automation\n"
+                        "</code></pre>"
+                    ),
+                },
+            ]
+        }
+    }
+    content = provider.parse_content("", response_json=response_json)
+    assert content is not None
+    assert "Original OP Blueprint" in content
+    assert "Forked Reply Blueprint" not in content
+
+
+def test_ha_forum_content_extraction_prioritizes_valid_yaml_block_over_inline_code():
+    """Verify HAForumProvider picks a valid blueprint mapping over inline references."""
+    provider = HAForumProvider()
+    response_json = {
+        "post_stream": {
+            "posts": [
+                {
+                    "username": "op_author",
+                    "cooked": (
+                        "<p>Check this <code>blueprint: something</code> inline snippet.</p>"
+                        "<pre><code>blueprint:\n"
+                        "  name: Real Valid Blueprint\n"
+                        "  domain: automation\n"
+                        "  input: {}\n"
+                        "</code></pre>"
+                    ),
+                }
+            ]
+        }
+    }
+    content = provider.parse_content("", response_json=response_json)
+    assert content is not None
+    assert content.strip() != "blueprint: something"
+    assert "Real Valid Blueprint" in content
+
+
+def test_ha_forum_content_extraction_falls_back_to_reply_when_post0_has_no_blueprint():
+    """Verify that HAForumProvider falls back to reply blueprint when post 0 has none."""
+    provider = HAForumProvider()
+    response_json = {
+        "post_stream": {
+            "posts": [
+                {
+                    "username": "op_author",
+                    "cooked": "<p>This is a regular post without any blueprint code block.</p>",
+                },
+                {
+                    "username": "reply_user",
+                    "cooked": (
+                        "<pre><code>blueprint:\n"
+                        "  name: Fallback Reply Blueprint\n"
+                        "  domain: automation\n"
+                        "</code></pre>"
+                    ),
+                },
+            ]
+        }
+    }
+    content = provider.parse_content("", response_json=response_json)
+    assert content is not None
+    assert "Fallback Reply Blueprint" in content
+
+
+def test_ha_forum_content_extraction_ignores_non_dict_posts():
+    """Non-dict entries in posts should be ignored and return None if no valid posts."""
+    provider = HAForumProvider()
+    response_json = {
+        "post_stream": {
+            "posts": [
+                "not-a-dict",
+                123,
+                None,
+            ]
+        }
+    }
+    content = provider.parse_content("", response_json=response_json)
+    assert content is None
+
+
+def test_ha_forum_content_extraction_ignores_posts_without_cooked():
+    """Posts missing cooked or with non-string cooked should return None if no valid posts."""
+    provider = HAForumProvider()
+    response_json = {
+        "post_stream": {
+            "posts": [
+                {"username": "user_without_cooked"},
+                {"username": "user_with_int_cooked", "cooked": 42},
+                {"username": "user_with_none_cooked", "cooked": None},
+            ]
+        }
+    }
+    content = provider.parse_content("", response_json=response_json)
+    assert content is None
+
+
+def test_ha_forum_content_extraction_returns_none_when_all_code_blocks_fail_parsing():
+    """Verify that HAForumProvider returns None when all blueprint: blocks fail YAML parsing."""
+    provider = HAForumProvider()
+    response_json = {
+        "post_stream": {
+            "posts": [
+                {
+                    "username": "op_author",
+                    "cooked": (
+                        "<pre><code>blueprint: [unclosed list\n  name: Bad YAML\n</code></pre>"
+                    ),
+                }
+            ]
+        }
+    }
+    content = provider.parse_content("", response_json=response_json)
+    assert content is None
+
+
+def test_ha_forum_skips_malformed_post_before_valid_blueprint():
+    """Verify HAForumProvider selects the first valid post when earlier posts are malformed."""
+    provider = HAForumProvider()
+    response_json = {
+        "slug": "awesome-blueprint",
+        "post_stream": {
+            "posts": [
+                {
+                    "username": "bad_author",
+                    "cooked": (
+                        "<pre><code>blueprint: [unclosed list\n  name: Bad YAML\n</code></pre>"
+                    ),
+                },
+                {
+                    "username": "good_author",
+                    "cooked": (
+                        "<pre><code>blueprint:\n"
+                        "  name: Valid Fallback Blueprint\n"
+                        "  domain: automation\n"
+                        "  input: {}\n"
+                        "</code></pre>"
+                    ),
+                },
+            ]
+        },
+    }
+    content = provider.parse_content("", response_json=response_json)
+    assert content is not None
+    assert "Valid Fallback Blueprint" in content
+
+    meta = provider.get_metadata(
+        "https://community.home-assistant.io/t/awesome-blueprint/12345",
+        content=orjson.dumps(response_json).decode("utf-8"),
+    )
+    assert meta == {"author": "good_author", "name": "awesome-blueprint"}

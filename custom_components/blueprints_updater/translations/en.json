@@ -182,6 +182,7 @@
     "risk_missing_input": "Entity {entity} is missing mandatory input {input} required by new version.",
     "risk_removed_input": "Input {input} removed, but currently used by {count} entities.",
     "risk_selector_mismatch": "Selector type changed for {input}: from {old_type} to {new_type} (affects {count} entities).",
+    "risk_selector_config_changed": "Selector options/filters changed for {input} ({type} selector) (affects {count} entities).",
     "risk_validation_failed_blueprint": "New blueprint content is invalid: {error}",
     "risk_unknown": "Unknown risk",
     "risk_compatibility": "Compatibility Error for {entity}: {error}",

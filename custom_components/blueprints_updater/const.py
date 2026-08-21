@@ -105,6 +105,7 @@ class BlueprintRiskType(StrEnum):
     MISSING_INPUT = "missing_input"
     REMOVED_INPUT = "removed_input"
     SELECTOR_MISMATCH = "selector_mismatch"
+    SELECTOR_CONFIG_CHANGED = "selector_config_changed"
     COMPATIBILITY = "compatibility_risk"
     VALIDATION_FAILED = "validation_failed_blueprint"
     SYSTEM_ERROR = "system_error"
@@ -122,6 +123,7 @@ RISK_TYPE_TRANSLATIONS = {
     BlueprintRiskType.MISSING_INPUT: "risk_missing_input",
     BlueprintRiskType.REMOVED_INPUT: "risk_removed_input",
     BlueprintRiskType.SELECTOR_MISMATCH: "risk_selector_mismatch",
+    BlueprintRiskType.SELECTOR_CONFIG_CHANGED: "risk_selector_config_changed",
     BlueprintRiskType.COMPATIBILITY: "risk_compatibility",
     BlueprintRiskType.VALIDATION_FAILED: "risk_validation_failed_blueprint",
     BlueprintRiskType.SYSTEM_ERROR: "risk_system_error",

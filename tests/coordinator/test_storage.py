@@ -1,6 +1,7 @@
 """Tests for coordinator storage, persistence, and metadata pruning."""
 
 import asyncio
+import hashlib
 import os
 from types import MappingProxyType
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,8 +10,12 @@ import pytest
 
 from custom_components.blueprints_updater.const import (
     DOMAIN_AUTOMATION,
+    FILTER_MODE_ALL,
 )
-from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.coordinator import (
+    BlueprintScanContext,
+    BlueprintUpdateCoordinator,
+)
 from custom_components.blueprints_updater.exceptions import FileRevisionMismatchError
 
 
@@ -641,3 +646,52 @@ def test_execute_restore_file_returns_system_error_on_oserror(tmp_path):
     assert success is False
     assert message == "system_error"
     assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_async_install_blueprint_with_crlf_file(coordinator, tmp_path):
+    """Verify that updating a blueprint with CRLF line endings succeeds without error."""
+    bp_file = tmp_path / "crlf_test.yaml"
+    crlf_content = (
+        "blueprint:\r\n"
+        "  name: CRLF Blueprint\r\n"
+        "  domain: automation\r\n"
+        "  source_url: https://example.com/bp.yaml\r\n"
+    )
+    bp_file.write_bytes(crlf_content.encode("utf-8"))
+
+    context = BlueprintScanContext(
+        hass=coordinator.hass,
+        real_blueprint_path=str(tmp_path),
+        filter_mode=FILTER_MODE_ALL,
+        selected_set=set(),
+        max_backups=3,
+    )
+    with patch(
+        "custom_components.blueprints_updater.coordinator.get_blueprint_relative_path",
+        return_value="automation/crlf_test.yaml",
+    ):
+        scanned = BlueprintUpdateCoordinator._scan_single_blueprint_file(str(bp_file), context)
+
+    assert scanned is not None
+    assert scanned["local_file_hash"] == hashlib.sha256(crlf_content.encode("utf-8")).hexdigest()
+
+    coordinator.data = {str(bp_file): dict(scanned)}
+    coordinator.config_entry = MagicMock()
+    coordinator.config_entry.options = MappingProxyType({"max_backups": 3})
+    coordinator.hass.async_add_executor_job = AsyncMock(side_effect=lambda fn, *args: fn(*args))
+
+    new_content = (
+        "blueprint:\n"
+        "  name: Updated Blueprint\n"
+        "  domain: automation\n"
+        "  source_url: https://example.com/bp.yaml\n"
+        "  input: {}\n"
+    )
+    await coordinator.async_install_blueprint(
+        str(bp_file), new_content, reload_services=False, backup=True
+    )
+
+    assert bp_file.read_bytes() == new_content.encode("utf-8")
+    backup_file = bp_file.with_name(f"{bp_file.name}.bak.1")
+    assert backup_file.read_bytes() == crlf_content.encode("utf-8")
