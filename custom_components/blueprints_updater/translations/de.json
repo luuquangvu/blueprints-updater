@@ -39,6 +39,13 @@
         "whitelist": "Whitelist (Nur ausgewählte Blueprints aktualisieren)",
         "blacklist": "Blacklist (Ausgewählte Blueprints nicht aktualisieren)"
       }
+    },
+    "repair_risk_action": {
+      "options": {
+        "proceed": "Mit Update fortfahren (Backup erstellen)",
+        "different_url": "Eine andere URL eingeben",
+        "stop_tracking": "Abbrechen und Nachverfolgung beenden"
+      }
     }
   },
   "entity": {
@@ -88,6 +95,54 @@
         "confirm": {
           "name": "Externe Quelle bestätigen",
           "description": "Erforderlich, um den Import aus externen/unverifizierten Quellen zu bestätigen."
+        }
+      }
+    }
+  },
+  "issues": {
+    "withdrawn_blueprint": {
+      "title": "Blueprint-Quelle nicht mehr verfügbar: {name}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Zurückgezogenen Blueprint beheben",
+            "description": "Der Blueprint {name} ({path}) wurde von {source_url} zurückgezogen. Was möchten Sie tun?",
+            "menu_options": {
+              "change_url": "Quell-URL aktualisieren",
+              "stop_tracking": "Lokale Kopie behalten und Nachverfolgung beenden",
+              "delete_blueprint": "Blueprint löschen"
+            }
+          },
+          "change_url": {
+            "title": "Quell-URL aktualisieren",
+            "description": "Geben Sie eine neue Quell-URL für {name} ({path}) ein.",
+            "data": {
+              "url": "Neue Blueprint-URL"
+            }
+          },
+          "confirm_risks": {
+            "title": "Kompatibilitätsrisiken überprüfen",
+            "description": "Mögliche fehlerhafte Änderungen für {name} erkannt:\n\n{risk_report}\n\nWie möchten Sie vorgehen?",
+            "data": {
+              "risk_action": "Aktion"
+            }
+          },
+          "delete_blueprint": {
+            "title": "Blueprint löschen",
+            "description": "Sind Sie sicher, dass Sie {name} ({path}) löschen möchten?\n\nDerzeit verwendet von {usage_count} Entität(en): {entities}.",
+            "data": {
+              "confirm_delete_in_use": "Ich verstehe, dass dies abhängige Automatisierungen/Skripte beschädigen wird"
+            }
+          }
+        },
+        "error": {
+          "missing_url": "URL ist erforderlich.",
+          "invalid_url": "Ungültige oder nicht erreichbare Blueprint-URL.",
+          "confirmation_required": "Zur Löschung eines verwendeten Blueprints ist eine Bestätigung erforderlich.",
+          "usage_discovery_failed": "Die Blueprint-Nutzung konnte nicht ermittelt werden. Bitte versuchen Sie es erneut."
+        },
+        "abort": {
+          "missing_issue_data": "Erforderliche Blueprint-Problem-Daten fehlen."
         }
       }
     }
@@ -188,6 +243,7 @@
     "risk_compatibility": "Kompatibilitätsfehler für {entity}: {error}",
     "risk_system_error": "Systemfehler: {error}",
     "breaking_risks_report": "Das automatische Update für {name} wurde vorsorglich blockiert. Erkannte Risiken:\n{risks}\n\nBitte überprüfen Sie diese und installieren Sie sie manuell, falls sie korrekt sind.",
-    "auto_update_blocked_by_system_error": "Automatisches Update für {name} pausiert; ein unerwarteter Fehler trat bei der Kompatibilitätsprüfung auf."
+    "auto_update_blocked_by_system_error": "Automatisches Update für {name} pausiert; ein unerwarteter Fehler trat bei der Kompatibilitätsprüfung auf.",
+    "withdrawn_blueprint_error": "Blueprint-Quelle nicht mehr verfügbar: {error}"
   }
 }

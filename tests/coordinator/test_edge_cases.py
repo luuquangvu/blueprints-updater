@@ -15,9 +15,9 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
-    DOMAIN_AUTOMATION,
     ERROR_SEPARATOR,
     MAX_CONCURRENT_REQUESTS,
+    FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
@@ -227,7 +227,7 @@ async def test_async_background_refresh_semaphore_limit(coordinator):
             "name": f"BP{i}",
             "relative_path": f"automation/bp{i}.yaml",
             "source_url": f"https://url/bp{i}",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "local_hash": "h",
         }
         for i in range(num_blueprints)
@@ -287,7 +287,7 @@ async def test_async_fetch_content_forum_invalid_json_sets_fetch_error(coordinat
         "name": "Test",
         "relative_path": "automation/test.yaml",
         "source_url": source_url,
-        "domain": DOMAIN_AUTOMATION,
+        "domain": FunctionalDomain.AUTOMATION,
         "local_hash": "old_hash",
     }
     coordinator.data = {path: info}
@@ -321,7 +321,7 @@ async def test_background_refresh_replaces_obsolete_generation(hass, coordinator
         "path/1": {
             "name": "BP1",
             "relative_path": "path/1",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "source_url": "url1",
             "local_hash": "h1",
         }

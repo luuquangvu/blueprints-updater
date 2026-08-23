@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.blueprints_updater.const import (
-    DOMAIN_AUTOMATION,
-    FILTER_MODE_ALL,
+    FilterMode,
+    FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import (
     BlueprintScanContext,
@@ -116,7 +116,7 @@ async def test_metadata_pruning(coordinator, mock_makedirs):
         path_valid: {
             "name": "Valid",
             "relative_path": "automation/valid.yaml",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "source_url": "https://url",
             "local_hash": "hash1",
         }
@@ -221,7 +221,7 @@ async def test_cold_start_rehydration(coordinator, mock_makedirs):
         path: {
             "name": "Test",
             "relative_path": "automation/test.yaml",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "source_url": "https://url",
             "local_hash": local_hash,
         }
@@ -246,12 +246,12 @@ async def test_startup_defers_pending_reload_recovery(coordinator, mock_makedirs
         path: {
             "name": "Test",
             "relative_path": "automation/test.yaml",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "source_url": "https://example.com/test.yaml",
             "local_hash": "local_hash",
         }
     }
-    coordinator._pending_reload_domains = {DOMAIN_AUTOMATION}
+    coordinator._pending_reload_domains = {FunctionalDomain.AUTOMATION}
 
     with (
         patch.object(coordinator, "scan_blueprints", return_value=blueprints),
@@ -283,7 +283,7 @@ async def test_etag_invalidation_on_mismatch(coordinator, mock_makedirs):
         path: {
             "name": "Test",
             "relative_path": "automation/test.yaml",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "source_url": "https://url",
             "local_hash": local_hash,
         }
@@ -319,7 +319,7 @@ async def test_persisted_metadata_not_reused_after_first_update(coordinator, moc
         path: {
             "name": "Test",
             "relative_path": "automation/test.yaml",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "source_url": "https://url",
             "local_hash": initial_hash,
         }
@@ -371,7 +371,7 @@ async def test_metadata_preservation_during_scan(coordinator, mock_makedirs):
         path: {
             "name": "Test",
             "relative_path": "automation/test.yaml",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "source_url": "https://url",
             "local_hash": local_hash,
         }
@@ -442,7 +442,7 @@ async def test_async_restore_blueprint_error(hass, coordinator, tmp_path):
     coordinator.data = {
         path: {
             "updatable": False,
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "source_url": source_url,
         }
     }
@@ -473,7 +473,7 @@ async def test_async_restore_blueprint_translates_revision_mismatch(coordinator,
     (tmp_path / "test.yaml.bak.1").write_text(backup_content, encoding="utf-8")
     coordinator.data = {
         str(path): {
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "source_url": source_url,
         }
     }
@@ -549,7 +549,7 @@ async def test_async_restore_blueprint_success(hass, coordinator, tmp_path):
     coordinator.data = {
         path: {
             "updatable": False,
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "source_url": source_url,
         }
     }
@@ -564,7 +564,7 @@ async def test_async_restore_blueprint_success(hass, coordinator, tmp_path):
     assert result["success"] is True
     assert result["translation_key"] == "success"
     assert "name: Backup" in (tmp_path / "test.yaml").read_text(encoding="utf-8")
-    hass.services.async_call.assert_any_call(DOMAIN_AUTOMATION, "reload")
+    hass.services.async_call.assert_any_call(FunctionalDomain.AUTOMATION, "reload")
     assert coordinator._async_save_metadata.await_count == 2
 
 
@@ -591,7 +591,7 @@ async def test_restore_versioned(coordinator, tmp_path):
     (tmp_path / "test.yaml.bak.1").write_text(content("backup_v1"), encoding="utf-8")
     (tmp_path / "test.yaml.bak.2").write_text(content("backup_v2"), encoding="utf-8")
     coordinator.data[str(bp_file)] = {
-        "domain": DOMAIN_AUTOMATION,
+        "domain": FunctionalDomain.AUTOMATION,
         "source_url": source_url,
     }
 
@@ -663,7 +663,7 @@ async def test_async_install_blueprint_with_crlf_file(coordinator, tmp_path):
     context = BlueprintScanContext(
         hass=coordinator.hass,
         real_blueprint_path=str(tmp_path),
-        filter_mode=FILTER_MODE_ALL,
+        filter_mode=FilterMode.ALL,
         selected_set=set(),
         max_backups=3,
     )

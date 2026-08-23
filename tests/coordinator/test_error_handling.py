@@ -8,7 +8,7 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import (
-    DOMAIN_AUTOMATION,
+    FunctionalDomain,
 )
 
 
@@ -113,7 +113,7 @@ async def test_notification_handling(coordinator, mock_makedirs):
     coordinator.hass.services.async_call = AsyncMock()
     coordinator.async_translate = AsyncMock(return_value="translated")
 
-    await coordinator._async_handle_notifications(["BP1", "BP2"], {DOMAIN_AUTOMATION})
+    await coordinator._async_handle_notifications(["BP1", "BP2"], {FunctionalDomain.AUTOMATION})
     coordinator.hass.services.async_call.assert_any_call("persistent_notification", "create", ANY)
 
 

@@ -19,7 +19,6 @@ from urllib.parse import urlparse
 import httpx
 import orjson
 import voluptuous as vol
-from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.automation.config import AUTOMATION_BLUEPRINT_SCHEMA
 from homeassistant.components.automation.config import (
     async_validate_config_item as async_validate_automation_config,
@@ -27,17 +26,16 @@ from homeassistant.components.automation.config import (
 from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
-from homeassistant.components.script import scripts_with_blueprint
 from homeassistant.components.script.config import (
     async_validate_config_item as async_validate_script_config,
 )
 from homeassistant.components.template.config import (
     async_validate_config_section as async_validate_template_config,
 )
-from homeassistant.components.template.helpers import templates_with_blueprint
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError, TemplateError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import async_get_platforms
 from homeassistant.helpers.selector import validate_selector
 from homeassistant.helpers.storage import Store
@@ -70,11 +68,7 @@ from .const import (
     DEFAULT_AUTO_UPDATE,
     DEFAULT_MAX_BACKUPS,
     DOMAIN,
-    DOMAIN_AUTOMATION,
-    DOMAIN_SCRIPT,
-    DOMAIN_TEMPLATE,
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
-    FILTER_MODE_ALL,
     MAX_CONCURRENT_REQUESTS,
     MAX_RESPONSE_BYTES,
     MAX_RETRIES,
@@ -88,6 +82,9 @@ from .const import (
     STORAGE_VERSION,
     BlueprintBlockingReason,
     BlueprintRiskType,
+    FilterMode,
+    FunctionalDomain,
+    RepairIssueType,
     SourceProviderType,
 )
 from .exceptions import (
@@ -111,6 +108,7 @@ from .providers import registry
 from .utils import (
     format_error_message,
     get_blueprint_relative_path,
+    get_blueprint_usage_entities,
     get_config_bool,
     get_max_backups,
     get_validated_filter_mode,
@@ -215,7 +213,7 @@ class BlueprintScanContext:
 
     hass: HomeAssistant
     real_blueprint_path: str
-    filter_mode: str
+    filter_mode: FilterMode
     selected_set: set[str]
     max_backups: int
 
@@ -561,7 +559,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             )
             return template
 
-    def _get_scan_config(self) -> tuple[str, list[str]]:
+    def _get_scan_config(self) -> tuple[FilterMode, list[str]]:
         """Extract and validate filtering configuration from the entry.
 
         Returns:
@@ -569,9 +567,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         """
         filter_mode = get_validated_filter_mode(
-            self.config_entry.options.get(CONF_FILTER_MODE, FILTER_MODE_ALL)
+            self.config_entry.options.get(CONF_FILTER_MODE, FilterMode.ALL)
             if self.config_entry
-            else FILTER_MODE_ALL
+            else FilterMode.ALL
         )
         selected_blueprints = get_validated_selected_blueprints(
             self.config_entry.options.get(CONF_SELECTED_BLUEPRINTS, []) if self.config_entry else []
@@ -666,14 +664,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
             removed_relative_paths = candidate_relative_paths - set(valid_metadata.keys())
 
-            self._persisted_metadata = {
-                k: v for k, v in self._persisted_metadata.items() if k not in removed_relative_paths
-            }
-
             if removed_relative_paths:
                 for rel in removed_relative_paths:
                     abs_path = os.path.join(blueprints_root, rel)
                     self.data.pop(abs_path, None)
+                    meta = metadata_to_check.get(rel) or {}
+                    domain_obj = meta.get("domain")
+                    domain = normalize_domain(domain_obj) if domain_obj else None
+                    self._async_delete_withdrawn_issue_by_relative_path(rel, domain)
+
+            self._persisted_metadata = {
+                k: v for k, v in self._persisted_metadata.items() if k not in removed_relative_paths
+            }
 
         if len(self._persisted_metadata) < old_count:
             _LOGGER.debug("Pruned stale blueprint metadata from memory, triggering save")
@@ -1234,7 +1236,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
     async def async_reconcile_reload_services(
         self,
-        domains: list[str] | set[str] | None = None,
+        domains: Iterable[str | FunctionalDomain] | None = None,
     ) -> set[str]:
         """Reload domains while durably retaining failures for later retry."""
         async with self._reload_lock:
@@ -1565,7 +1567,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if bp_block:
             return normalize_domain(bp_block.get("domain"))
 
-        return DOMAIN_AUTOMATION
+        return FunctionalDomain.AUTOMATION
 
     async def async_reload_services(
         self,
@@ -1594,6 +1596,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 await self.hass.services.async_call(domain, "reload")
                 reloaded.add(domain)
         return reloaded
+
+    async def async_fetch_import_data(self, url: str) -> tuple[str, str, str, str, httpx.Response]:
+        """Fetch blueprint content, canonical url, and validate basic metadata."""
+        return await self._async_fetch_import_data(url)
+
+    async def async_detect_risks_for_update(
+        self,
+        path: str,
+        info: Mapping[str, object],
+        remote_content: str,
+        session: httpx.AsyncClient | None = None,
+    ) -> list[StructuredRisk]:
+        """Detect potential breaking changes for a blueprint update."""
+        return await self._detect_risks_for_update(path, info, remote_content, session=session)
 
     async def _async_fetch_import_data(self, url: str) -> tuple[str, str, str, str, httpx.Response]:
         """Fetch blueprint content, canonical url, and validate basic metadata."""
@@ -2743,7 +2759,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         configs: dict[str, dict[str, object]] = {}
         remaining_ids = set(entity_ids)
 
-        for domain in (DOMAIN_AUTOMATION, DOMAIN_SCRIPT):
+        for domain in (FunctionalDomain.AUTOMATION, FunctionalDomain.SCRIPT):
             if not remaining_ids:
                 break
 
@@ -2775,7 +2791,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                         self._populate_config_from_entity(entity, entity_id, configs)
 
         if remaining_ids:
-            for platform in async_get_platforms(self.hass, DOMAIN_TEMPLATE):
+            for platform in async_get_platforms(self.hass, FunctionalDomain.TEMPLATE):
                 for entity_id, entity in platform.entities.items():
                     if entity_id in remaining_ids:
                         self._populate_config_from_entity(entity, entity_id, configs)
@@ -2998,28 +3014,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         return self._dedupe_risks(risks)
 
-    def _get_entities_using_blueprint(self, relative_path: str) -> list[str]:
-        """Get entity IDs of automations and scripts using the given blueprint.
+    def _get_blueprint_consumers(self, relative_path: str) -> list[str] | None:
+        """Return unique entity IDs referencing this blueprint.
 
-        Args:
-            relative_path: Relative path of the blueprint.
-
-        Returns:
-            List of entity IDs.
+        Consumer discovery is resilient to non-standard or missing domain prefixes.
 
         """
         parts = relative_path.split("/", 1)
         domain = parts[0] if len(parts) > 1 else None
         bp_id = parts[-1] if len(parts) > 1 else relative_path
+        return get_blueprint_usage_entities(self.hass, domain, bp_id)
 
-        result: list[str] = []
-        if domain in (None, DOMAIN_AUTOMATION):
-            result.extend(automations_with_blueprint(self.hass, bp_id))
-        if domain in (None, DOMAIN_SCRIPT):
-            result.extend(scripts_with_blueprint(self.hass, bp_id))
-        if domain in (None, DOMAIN_TEMPLATE):
-            result.extend(templates_with_blueprint(self.hass, bp_id))
-        return list(dict.fromkeys(result))
+    def _get_entities_using_blueprint(self, relative_path: str) -> list[str] | None:
+        """Get entity IDs of automations, scripts, and templates using the given blueprint."""
+        return self._get_blueprint_consumers(relative_path)
 
     async def _async_validate_blueprint_consumers(
         self,
@@ -3095,13 +3103,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     blueprint_inputs = BlueprintInputs(blueprint_obj, config)
                     blueprint_inputs.validate()
                     substituted_config = blueprint_inputs.async_substitute()
-                    if domain == DOMAIN_AUTOMATION:
+                    if domain == FunctionalDomain.AUTOMATION:
                         await async_validate_automation_config(
                             self.hass,
                             config_key=entity_id,
                             config=substituted_config,
                         )
-                    elif domain == DOMAIN_TEMPLATE:
+                    elif domain == FunctionalDomain.TEMPLATE:
                         await async_validate_template_config(
                             self.hass,
                             config=substituted_config,
@@ -3350,6 +3358,121 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         """
         return get_config_bool(self.config_entry, CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
 
+    @classmethod
+    def get_coordinator_for_flow(
+        cls,
+        hass: HomeAssistant,
+        config_entry_id: str | None = None,
+    ) -> Self | None:
+        """Find the relevant coordinator instance for a repair or options flow."""
+        domain_data = hass.data.get(DOMAIN)
+        if not isinstance(domain_data, dict):
+            return None
+        coordinators_map = domain_data.get("coordinators")
+        if not isinstance(coordinators_map, dict):
+            return None
+
+        if config_entry_id:
+            candidate = coordinators_map.get(config_entry_id)
+            return candidate if isinstance(candidate, cls) else None
+
+        coordinators = list(coordinators_map.values())
+        if len(coordinators) == 1 and isinstance(coordinators[0], cls):
+            return coordinators[0]
+        return None
+
+    @staticmethod
+    def get_withdrawn_issue_id(
+        relative_path: str, domain: str | FunctionalDomain | None = None
+    ) -> str:
+        """Return the deterministic repair issue ID for a withdrawn blueprint."""
+        normalized_rel = relative_path.replace("\\", "/").strip("/")
+        norm_domain: str | None = None
+        if isinstance(domain, FunctionalDomain):
+            norm_domain = domain.value
+        elif isinstance(domain, str) and domain.strip():
+            norm_domain = domain.strip().lower()
+
+        if norm_domain and not normalized_rel.startswith(f"{norm_domain}/"):
+            normalized_rel = f"{norm_domain}/{normalized_rel}"
+        path_hash = hashlib.sha256(normalized_rel.encode("utf-8")).hexdigest()[:16]
+        return f"{RepairIssueType.WITHDRAWN_BLUEPRINT}_{path_hash}"
+
+    def _async_create_withdrawn_issue(
+        self,
+        path: str,
+        info: Mapping[str, object],
+        status_code: int = 404,
+    ) -> None:
+        """Raise a Home Assistant repair issue for a withdrawn blueprint."""
+        relative_path_obj = info.get("relative_path")
+        relative_path = (
+            str(relative_path_obj)
+            if relative_path_obj
+            else get_blueprint_relative_path(self.hass, path)
+        )
+        if not relative_path:
+            return
+
+        name = str(info.get("name") or relative_path)
+        source_url = str(info.get("source_url") or "")
+        domain_obj = info.get("domain")
+        domain = normalize_domain(domain_obj) if domain_obj else None
+        domain_str = domain.value if domain else ""
+
+        issue_id = self.get_withdrawn_issue_id(relative_path, domain)
+        ir.async_create_issue(
+            hass=self.hass,
+            domain=DOMAIN,
+            issue_id=issue_id,
+            is_fixable=True,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=RepairIssueType.WITHDRAWN_BLUEPRINT,
+            translation_placeholders={
+                "name": name,
+                "path": relative_path,
+                "source_url": redact_url(source_url),
+                "domain": domain_str,
+                "status_code": str(status_code),
+            },
+            data={
+                "config_entry_id": self.config_entry.entry_id if self.config_entry else None,
+                "path": path,
+                "relative_path": relative_path,
+                "domain": domain_str,
+                "name": name,
+                "source_url": source_url,
+            },
+        )
+
+    def _async_delete_withdrawn_issue(self, path: str) -> None:
+        """Delete any repair issue for the given blueprint path."""
+        info = self.data.get(path, {})
+        relative_path_obj = info.get("relative_path")
+        domain_obj = info.get("domain")
+        domain = normalize_domain(domain_obj) if domain_obj else None
+        relative_path = (
+            str(relative_path_obj)
+            if relative_path_obj
+            else get_blueprint_relative_path(self.hass, path)
+        )
+        if relative_path:
+            self._async_delete_withdrawn_issue_by_relative_path(relative_path, domain)
+
+    def _async_delete_withdrawn_issue_by_relative_path(
+        self, relative_path: str, domain: str | FunctionalDomain | None = None
+    ) -> None:
+        """Delete repair issue by relative path and optional domain."""
+        if (
+            domain is None
+            and relative_path in self._persisted_metadata
+            and (domain_val := self._persisted_metadata[relative_path].get("domain"))
+        ):
+            domain = normalize_domain(domain_val)
+        issue_id = self.get_withdrawn_issue_id(relative_path, domain)
+        ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
     def _update_error_state(
         self, path: str, error_type: str, detail: object, clear_etag: bool = False
     ) -> None:
@@ -3452,7 +3575,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 sanitize_error_detail(str(err)),
             )
             if self._is_current_refresh_item(refresh_work):
-                self._update_error_state(path, "fetch_error", err)
+                if isinstance(err, httpx.HTTPStatusError) and err.response.status_code in (
+                    HTTPStatus.NOT_FOUND,
+                    HTTPStatus.GONE,
+                ):
+                    self._async_create_withdrawn_issue(
+                        path, info, status_code=err.response.status_code
+                    )
+                    self._update_error_state(
+                        path, "withdrawn_blueprint_error", err, clear_etag=True
+                    )
+                else:
+                    self._update_error_state(path, "fetch_error", err)
             return
 
         if not self._is_current_refresh_item(refresh_work):
@@ -3502,6 +3636,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         _LOGGER.debug("[304] '%s' is up to date on server", info.get("name"))
         if not (self.data and path in self.data):
             return None, new_etag, new_last_modified
+
+        self._async_delete_withdrawn_issue(path)
 
         if new_etag:
             self.data[path]["etag"] = new_etag
@@ -3584,6 +3720,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             remote_hash = None
             last_error = format_error_message("processing_error", err)
 
+        if not last_error:
+            self._async_delete_withdrawn_issue(path)
+
         risks = await self._detect_risks_for_update(path, info, remote_content)
         if not self._is_current_refresh_item(refresh_work):
             return
@@ -3646,6 +3785,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             local_file = self.hass.config.path(BLUEPRINTS_DATA_DIR, relative_path)
             try:
                 entity_ids = self._get_entities_using_blueprint(relative_path)
+                if entity_ids is None:
+                    raise HomeAssistantError("Could not determine blueprint consumers")
                 full_configs = self._get_entities_configs(entity_ids)
                 configs: dict[str, dict[str, object]] = {}
                 for eid, cfg in full_configs.items():
@@ -3723,7 +3864,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         relative_path_obj = info.get("relative_path")
         relative_path = relative_path_obj if isinstance(relative_path_obj, str) else None
         in_use_entities = self._get_entities_using_blueprint(relative_path) if relative_path else []
-        guard_failed = any(risk.get("type") == BlueprintRiskType.SYSTEM_ERROR for risk in risks)
+        guard_failed = in_use_entities is None or any(
+            risk.get("type") == BlueprintRiskType.SYSTEM_ERROR for risk in risks
+        )
         is_breaking = bool(risks) and (guard_failed or bool(in_use_entities))
 
         if is_breaking:
@@ -3762,7 +3905,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             if isinstance(name_val, str):
                 results_to_notify.append(name_val)
             domain_val = info.get("domain")
-            updated_domains.add(str(domain_val) if domain_val else DOMAIN_AUTOMATION)
+            updated_domains.add(str(domain_val) if domain_val else FunctionalDomain.AUTOMATION)
             return True
         except BlueprintRefreshObsoleteError:
             _LOGGER.debug("Skipping obsolete auto-update for %s", path)
@@ -4299,9 +4442,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             The corresponding voluptuous Schema.
 
         """
-        if domain == DOMAIN_AUTOMATION:
+        if domain == FunctionalDomain.AUTOMATION:
             return AUTOMATION_BLUEPRINT_SCHEMA
-        if domain == DOMAIN_TEMPLATE:
+        if domain == FunctionalDomain.TEMPLATE:
             if isinstance(TEMPLATE_BLUEPRINT_SCHEMA, vol.Schema):
                 return TEMPLATE_BLUEPRINT_SCHEMA
             return BLUEPRINT_SCHEMA
@@ -4331,7 +4474,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         target_data = parsed
         try:
-            domain = blueprint_info.get("domain", DOMAIN_AUTOMATION)
+            domain = blueprint_info.get("domain", FunctionalDomain.AUTOMATION)
             schema = BlueprintUpdateCoordinator._get_blueprint_schema(domain)
             normalized = schema(parsed)
             target_data = BlueprintUpdateCoordinator._stabilize_yaml_structure(parsed, normalized)
@@ -4647,7 +4790,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
     @staticmethod
     def scan_blueprints(
         hass: HomeAssistant,
-        filter_mode: str,
+        filter_mode: FilterMode,
         selected_blueprints: list[str],
         max_backups: int = DEFAULT_MAX_BACKUPS,
     ) -> dict[str, BlueprintMetadata]:

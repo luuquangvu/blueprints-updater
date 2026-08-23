@@ -1,5 +1,6 @@
 """Tests for async_import_blueprint failure handling."""
 
+from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import httpx
@@ -42,7 +43,7 @@ def _patched_provider(provider):
 def _response(url: str = IMPORT_URL) -> httpx.Response:
     """Build a successful YAML response for import tests."""
     return httpx.Response(
-        200,
+        HTTPStatus.OK,
         content=IMPORTED_BLUEPRINT.encode("utf-8"),
         headers={"Content-Type": "text/yaml"},
         request=httpx.Request("GET", url),

@@ -10,7 +10,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
-    DOMAIN_AUTOMATION,
+    FunctionalDomain,
 )
 
 
@@ -46,11 +46,11 @@ async def test_pending_reload_persists_and_retries_after_restart(hass: HomeAssis
         coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
         await coordinator.async_wait_until_done()
 
-    assert not hass.services.has_service(DOMAIN_AUTOMATION, "reload")
-    unreloaded = await coordinator.async_reconcile_reload_services([DOMAIN_AUTOMATION])
+    assert not hass.services.has_service(FunctionalDomain.AUTOMATION, "reload")
+    unreloaded = await coordinator.async_reconcile_reload_services([FunctionalDomain.AUTOMATION])
 
-    assert unreloaded == {DOMAIN_AUTOMATION}
-    assert coordinator._persisted_pending_reload_domains == {DOMAIN_AUTOMATION}
+    assert unreloaded == {FunctionalDomain.AUTOMATION}
+    assert coordinator._persisted_pending_reload_domains == {FunctionalDomain.AUTOMATION}
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
@@ -61,7 +61,7 @@ async def test_pending_reload_persists_and_retries_after_restart(hass: HomeAssis
         """Record the persisted reload retry."""
         reload_called.set()
 
-    hass.services.async_register(DOMAIN_AUTOMATION, "reload", _handle_reload)
+    hass.services.async_register(FunctionalDomain.AUTOMATION, "reload", _handle_reload)
     with patch(remote_refresh, new_callable=AsyncMock):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -76,7 +76,7 @@ async def test_pending_reload_persists_and_retries_after_restart(hass: HomeAssis
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    hass.services.async_remove(DOMAIN_AUTOMATION, "reload")
+    hass.services.async_remove(FunctionalDomain.AUTOMATION, "reload")
 
 
 async def _setup_unmocked_store_coordinator(

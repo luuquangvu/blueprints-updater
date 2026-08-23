@@ -10,7 +10,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 
-from custom_components.blueprints_updater.const import DOMAIN, DOMAIN_AUTOMATION
+from custom_components.blueprints_updater.const import DOMAIN, FunctionalDomain
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.exceptions import FileRevisionMismatchError
 from custom_components.blueprints_updater.file_store import (
@@ -390,7 +390,7 @@ async def test_invalid_backup_is_rejected_before_restore(coordinator, tmp_path):
     (tmp_path / "test.yaml.bak.1").write_text("invalid: yaml: [", encoding="utf-8")
     coordinator.data[str(blueprint_path)] = {
         "name": "Original",
-        "domain": DOMAIN_AUTOMATION,
+        "domain": FunctionalDomain.AUTOMATION,
         "relative_path": "automation/test.yaml",
         "source_url": source_url,
     }
@@ -414,7 +414,7 @@ async def test_restore_source_mismatch_returns_validation_error(coordinator, tmp
     (tmp_path / "test.yaml.bak.1").write_text(backup, encoding="utf-8")
     coordinator.data[str(blueprint_path)] = {
         "name": "Original",
-        "domain": DOMAIN_AUTOMATION,
+        "domain": FunctionalDomain.AUTOMATION,
         "relative_path": "automation/test.yaml",
         "source_url": tracked_url,
     }
@@ -450,7 +450,7 @@ async def test_entity_extra_state_attributes_includes_backups_count(coordinator)
         path: {
             "name": "Test",
             "relative_path": "test.yaml",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "backups_count": 3,
             "provider_type": "generic",
             "updatable": True,

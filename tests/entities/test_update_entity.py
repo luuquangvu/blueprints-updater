@@ -10,12 +10,12 @@ from urllib.parse import quote
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
-import custom_components.blueprints_updater.update as update_module
+import custom_components.blueprints_updater.utils as utils_module
 from custom_components.blueprints_updater.const import (
     DOMAIN,
-    DOMAIN_AUTOMATION,
     ERROR_SEPARATOR,
     URL_BLUEPRINT_DASHBOARD,
+    FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
@@ -154,7 +154,7 @@ def coordinator():
             "updatable": True,
             "last_error": None,
             "remote_content": "blueprint:\n  name: Test",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
         }
     }
     comp.config_entry = MagicMock()
@@ -227,7 +227,7 @@ async def test_entity_properties(coordinator):
         "before installing updates to ensure you can revert if needed."
     )
     assert entity.extra_state_attributes == {
-        "domain": DOMAIN_AUTOMATION,
+        "domain": FunctionalDomain.AUTOMATION,
         "relative_path": "test.yaml",
         "backups_count": 0,
         "provider_type": "generic",
@@ -251,7 +251,7 @@ async def test_entity_properties(coordinator):
     await await_scheduled_update(entity, coordinator)
     assert entity.extra_state_attributes == {
         "last_error": "Fetch Error",
-        "domain": DOMAIN_AUTOMATION,
+        "domain": FunctionalDomain.AUTOMATION,
         "relative_path": "test.yaml",
         "backups_count": 0,
         "provider_type": "generic",
@@ -388,7 +388,7 @@ async def test_entity_release_summary_with_usage(coordinator):
     entity_auto.hass = coordinator.hass
 
     with (
-        patch.object(update_module, "automations_with_blueprint", return_value=["auto1", "auto2"]),
+        patch.object(utils_module, "automations_with_blueprint", return_value=["auto1", "auto2"]),
         patch.object(entity_auto, "async_write_ha_state"),
     ):
         await entity_auto._async_localize_strings()
@@ -417,7 +417,7 @@ async def test_entity_release_summary_with_usage(coordinator):
     entity_script.hass = coordinator.hass
 
     with (
-        patch.object(update_module, "scripts_with_blueprint", return_value=["script1"]),
+        patch.object(utils_module, "scripts_with_blueprint", return_value=["script1"]),
         patch.object(entity_script, "async_write_ha_state"),
     ):
         await entity_script._async_localize_strings()
@@ -444,7 +444,7 @@ async def test_entity_release_summary_with_usage(coordinator):
     entity_template.hass = coordinator.hass
 
     with (
-        patch.object(update_module, "templates_with_blueprint", return_value=["template1"]),
+        patch.object(utils_module, "templates_with_blueprint", return_value=["template1"]),
         patch.object(entity_template, "async_write_ha_state"),
     ):
         await entity_template._async_localize_strings()
@@ -472,7 +472,7 @@ async def test_entity_release_notes_encoding(coordinator):
     entity.hass = coordinator.hass
 
     with (
-        patch.object(update_module, "automations_with_blueprint", return_value=["auto1"]),
+        patch.object(utils_module, "automations_with_blueprint", return_value=["auto1"]),
         patch.object(entity, "async_write_ha_state"),
     ):
         await entity._async_localize_strings()
@@ -507,7 +507,7 @@ async def test_script_release_notes_encoding(coordinator):
     entity.hass = coordinator.hass
 
     with (
-        patch.object(update_module, "scripts_with_blueprint", return_value=["script1"]),
+        patch.object(utils_module, "scripts_with_blueprint", return_value=["script1"]),
         patch.object(entity, "async_write_ha_state"),
     ):
         await entity._async_localize_strings()
@@ -538,15 +538,13 @@ async def test_entity_release_notes_usage_error_handled(coordinator):
     entity.hass = coordinator.hass
 
     with (
-        patch.object(update_module, "automations_with_blueprint", side_effect=HomeAssistantError),
-        patch("custom_components.blueprints_updater.update._LOGGER") as mock_logger,
+        patch.object(utils_module, "automations_with_blueprint", side_effect=HomeAssistantError),
+        patch("custom_components.blueprints_updater.utils._LOGGER") as mock_logger,
     ):
         notes = await entity.async_generate_release_notes()
         assert notes is not None
         assert "affect" not in notes
-        mock_logger.warning.assert_called()
-        _, kwargs = mock_logger.warning.call_args
-        assert kwargs.get("exc_info") is True
+        mock_logger.warning.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -565,7 +563,7 @@ async def test_entity_release_notes_usage_error_unhandled(coordinator):
     entity.hass = coordinator.hass
 
     with (
-        patch.object(update_module, "automations_with_blueprint", side_effect=TypeError),
+        patch.object(utils_module, "automations_with_blueprint", side_effect=TypeError),
         pytest.raises(TypeError),
     ):
         await entity.async_generate_release_notes()

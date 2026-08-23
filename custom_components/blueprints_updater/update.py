@@ -9,9 +9,6 @@ from functools import cached_property
 from typing import ClassVar
 from urllib.parse import quote
 
-from homeassistant.components.automation import automations_with_blueprint
-from homeassistant.components.script import scripts_with_blueprint
-from homeassistant.components.template.helpers import templates_with_blueprint
 from homeassistant.components.update import (
     UpdateDeviceClass,
     UpdateEntity,
@@ -26,14 +23,17 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DOMAIN,
-    DOMAIN_AUTOMATION,
-    DOMAIN_SCRIPT,
-    DOMAIN_TEMPLATE,
     URL_BLUEPRINT_DASHBOARD,
+    FunctionalDomain,
 )
 from .coordinator import BlueprintUpdateCoordinator
 from .providers import registry
-from .utils import normalize_domain, redact_url, split_error_message
+from .utils import (
+    get_blueprint_usage_entities,
+    normalize_domain,
+    redact_url,
+    split_error_message,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -252,7 +252,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             have a dedicated dashboard, so the main blueprint list is used.
 
         """
-        if domain == DOMAIN_TEMPLATE:
+        if domain == FunctionalDomain.TEMPLATE:
             return URL_BLUEPRINT_DASHBOARD
 
         encoded_id = quote(blueprint_id, safe="")
@@ -300,23 +300,10 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         )
         domain = self.domain
         bp_id = self.blueprint_id
-
-        total_usage = 0
-        try:
-            if domain == DOMAIN_AUTOMATION:
-                total_usage = len(automations_with_blueprint(self.coordinator.hass, bp_id))
-            elif domain == DOMAIN_SCRIPT:
-                total_usage = len(scripts_with_blueprint(self.coordinator.hass, bp_id))
-            elif domain == DOMAIN_TEMPLATE:
-                total_usage = len(templates_with_blueprint(self.coordinator.hass, bp_id))
-        except HomeAssistantError as err:
-            _LOGGER.warning(
-                "Error calculating %s usage for blueprint %s: %s",
-                domain,
-                bp_id,
-                err,
-                exc_info=True,
-            )
+        usage_entities = (
+            get_blueprint_usage_entities(self.coordinator.hass, domain, bp_id) if bp_id else []
+        ) or []
+        total_usage = len(usage_entities)
 
         if total_usage > 0 and bp_id:
             usage_url = self._get_usage_url(domain, bp_id)

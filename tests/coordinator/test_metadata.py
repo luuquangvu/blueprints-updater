@@ -10,10 +10,8 @@ from homeassistant.util.yaml.objects import Input
 
 import custom_components.blueprints_updater.coordinator as coord_mod
 from custom_components.blueprints_updater.const import (
-    DOMAIN_AUTOMATION,
-    DOMAIN_SCRIPT,
-    DOMAIN_TEMPLATE,
     ERROR_SEPARATOR,
+    FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
@@ -284,7 +282,7 @@ def test_validate_blueprint_valid(coordinator):
     data = {
         "blueprint": {
             "name": "Test",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "input": {},
         },
         "trigger": [],
@@ -292,7 +290,7 @@ def test_validate_blueprint_valid(coordinator):
     }
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+        data, "https://example.com/bp.yaml", expected_domain=FunctionalDomain.AUTOMATION
     )
     assert result is None
 
@@ -305,7 +303,7 @@ def test_validate_blueprint_validates_nested_templates_and_keys(coordinator):
     data = {
         "blueprint": {
             "name": "Test",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "description": "Documentation with an unfinished example: {{ value",
             "input": {"input_name": None},
         },
@@ -333,7 +331,7 @@ def test_validate_blueprint_validates_nested_templates_and_keys(coordinator):
     coordinator.hass.data = {}
 
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+        data, "https://example.com/bp.yaml", expected_domain=FunctionalDomain.AUTOMATION
     )
 
     assert result is None
@@ -374,7 +372,7 @@ def test_validate_blueprint_rejects_invalid_template(coordinator, body, expected
     data = {
         "blueprint": {
             "name": "Test",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "input": {},
         },
         **body,
@@ -382,7 +380,7 @@ def test_validate_blueprint_rejects_invalid_template(coordinator, body, expected
     coordinator.hass.data = {}
 
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+        data, "https://example.com/bp.yaml", expected_domain=FunctionalDomain.AUTOMATION
     )
 
     assert result is not None
@@ -396,14 +394,14 @@ def test_validate_blueprint_script_valid(coordinator):
     data = {
         "blueprint": {
             "name": "Test Script",
-            "domain": DOMAIN_SCRIPT,
+            "domain": FunctionalDomain.SCRIPT,
             "input": {},
         },
         "sequence": [],
     }
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/script.yaml", expected_domain=DOMAIN_SCRIPT
+        data, "https://example.com/script.yaml", expected_domain=FunctionalDomain.SCRIPT
     )
     assert result is None
 
@@ -413,13 +411,13 @@ def test_validate_blueprint_template_valid(coordinator):
     data = {
         "blueprint": {
             "name": "Test Template",
-            "domain": DOMAIN_TEMPLATE,
+            "domain": FunctionalDomain.TEMPLATE,
             "input": {},
         },
     }
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/template.yaml", expected_domain=DOMAIN_TEMPLATE
+        data, "https://example.com/template.yaml", expected_domain=FunctionalDomain.TEMPLATE
     )
     assert result is None
 
@@ -429,14 +427,14 @@ def test_validate_blueprint_domain_mismatch(coordinator):
     data = {
         "blueprint": {
             "name": "Mismatch",
-            "domain": DOMAIN_SCRIPT,
+            "domain": FunctionalDomain.SCRIPT,
             "input": {},
         },
         "sequence": [],
     }
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+        data, "https://example.com/bp.yaml", expected_domain=FunctionalDomain.AUTOMATION
     )
     assert result is not None
     assert "Found incorrect blueprint type script, expected automation" in result
@@ -447,7 +445,7 @@ def test_validate_blueprint_incompatible_version(coordinator):
     data = {
         "blueprint": {
             "name": "Test",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "input": {},
             "homeassistant": {"min_version": "2099.1.0"},
         },
@@ -456,7 +454,7 @@ def test_validate_blueprint_incompatible_version(coordinator):
     }
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+        data, "https://example.com/bp.yaml", expected_domain=FunctionalDomain.AUTOMATION
     )
     assert result is not None
     assert "incompatible" in result
@@ -468,7 +466,7 @@ def test_validate_blueprint_schema_error(coordinator):
     data = {"blueprint": {"name": "Test"}}
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+        data, "https://example.com/bp.yaml", expected_domain=FunctionalDomain.AUTOMATION
     )
     assert result is not None
     assert "blueprint_validation_error" in result
@@ -478,7 +476,9 @@ def test_validate_blueprint_missing_key(coordinator):
     """Test _validate_blueprint with data missing the 'blueprint' key."""
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        {"not_blueprint": {}}, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+        {"not_blueprint": {}},
+        "https://example.com/bp.yaml",
+        expected_domain=FunctionalDomain.AUTOMATION,
     )
     assert result is not None
     assert "invalid_blueprint" in result
@@ -504,7 +504,7 @@ def test_validate_blueprint_rejects_undefined_input(coordinator):
 
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+        data, "https://example.com/bp.yaml", expected_domain=FunctionalDomain.AUTOMATION
     )
     assert result is not None
     assert "blueprint_validation_error" in result
@@ -531,7 +531,7 @@ def test_validate_blueprint_rejects_multiple_undefined_inputs(coordinator):
 
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+        data, "https://example.com/bp.yaml", expected_domain=FunctionalDomain.AUTOMATION
     )
     assert result is not None
     assert "blueprint_validation_error" in result
@@ -561,7 +561,7 @@ def test_validate_blueprint_accepts_nested_section_inputs(coordinator):
 
     coordinator.hass.data = {}
     result = coordinator._validate_blueprint(
-        data, "https://example.com/bp.yaml", expected_domain=DOMAIN_AUTOMATION
+        data, "https://example.com/bp.yaml", expected_domain=FunctionalDomain.AUTOMATION
     )
     assert result is None
 
@@ -798,7 +798,7 @@ def test_ensure_source_url_script(coordinator):
     parsed = yaml.safe_load(new_content)
     assert parsed["blueprint"]["source_url"] == source_url
     assert parsed["blueprint"]["name"] == "Test Script"
-    assert parsed["blueprint"]["domain"] == DOMAIN_SCRIPT
+    assert parsed["blueprint"]["domain"] == FunctionalDomain.SCRIPT
 
 
 def test_deterministic_yaml_hashing(coordinator):
@@ -879,11 +879,11 @@ def test_parse_blueprint_data_domain_override(coordinator):
         content,
         relative_path="script/test.yaml",
     )
-    assert result["domain"] == DOMAIN_SCRIPT
+    assert result["domain"] == FunctionalDomain.SCRIPT
 
     result = coordinator._parse_blueprint_data(
         "/config/blueprints/template/test.yaml",
         content,
         relative_path="template/test.yaml",
     )
-    assert result["domain"] == DOMAIN_TEMPLATE
+    assert result["domain"] == FunctionalDomain.TEMPLATE

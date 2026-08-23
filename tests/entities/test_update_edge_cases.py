@@ -64,7 +64,7 @@ async def test_update_entity_release_notes_risks(mock_coordinator):
 
     with (
         patch(
-            "custom_components.blueprints_updater.update.automations_with_blueprint",
+            "custom_components.blueprints_updater.utils.automations_with_blueprint",
             return_value=[],
         ),
         patch.object(

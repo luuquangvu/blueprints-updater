@@ -88,6 +88,63 @@ class BlueprintFileStore:
             return file.read()
 
     @staticmethod
+    def _find_backup_files(file_path: str, min_version: int = 1) -> list[tuple[int, str]]:
+        """Find all valid numbered backup files for a blueprint, sorted by version number.
+
+        Args:
+            file_path: Path to the blueprint file.
+            min_version: Minimum version number to include (default 1).
+
+        Returns:
+            List of (version_number, backup_file_path) tuples.
+
+        """
+        directory = os.path.dirname(file_path)
+        prefix = f"{os.path.basename(file_path)}.bak."
+        if not os.path.isdir(directory):
+            return []
+
+        backups: list[tuple[int, str]] = []
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if not entry.name.startswith(prefix):
+                    continue
+                suffix = entry.name[len(prefix) :]
+                if not suffix.isdigit():
+                    continue
+                version = int(suffix)
+                if version < min_version:
+                    continue
+                try:
+                    if entry.is_file():
+                        backups.append((version, entry.path))
+                except OSError as err:
+                    _LOGGER.warning("Failed to inspect stale backup %s: %s", entry.path, err)
+
+        return sorted(backups, key=lambda x: x[0])
+
+    @staticmethod
+    def remove_blueprint_and_backups(file_path: str) -> None:
+        """Remove a blueprint file and all its associated backups from disk."""
+        if os.path.isfile(file_path):
+            try:
+                os.remove(file_path)
+            except OSError as err:
+                _LOGGER.warning("Failed to remove blueprint file '%s': %s", file_path, err)
+
+        try:
+            backup_files = BlueprintFileStore._find_backup_files(file_path)
+        except OSError as err:
+            _LOGGER.warning("Failed to scan directory for backups of '%s': %s", file_path, err)
+            return
+
+        for _, backup_path in backup_files:
+            try:
+                os.remove(backup_path)
+            except OSError as err:
+                _LOGGER.warning("Failed to remove blueprint backup '%s': %s", backup_path, err)
+
+    @staticmethod
     def _new_temp_path(file_path: str) -> tuple[int, str]:
         """Create a unique temporary file in the target directory."""
         directory = os.path.dirname(file_path)
@@ -209,22 +266,9 @@ class BlueprintFileStore:
         if not os.path.isfile(file_path):
             return
 
-        directory = os.path.dirname(file_path)
-        prefix = f"{os.path.basename(file_path)}.bak."
-        stale_paths: list[str] = []
-        with os.scandir(directory) as entries:
-            for entry in entries:
-                if not entry.name.startswith(prefix):
-                    continue
-                suffix = entry.name[len(prefix) :]
-                if not suffix.isdigit() or int(suffix) <= max_backups:
-                    continue
-                try:
-                    if entry.is_file():
-                        stale_paths.append(entry.path)
-                except OSError as err:
-                    _LOGGER.warning("Failed to inspect stale backup %s: %s", entry.path, err)
-        for stale_path in stale_paths:
+        for _, stale_path in BlueprintFileStore._find_backup_files(
+            file_path, min_version=max_backups + 1
+        ):
             try:
                 os.remove(stale_path)
             except OSError as err:

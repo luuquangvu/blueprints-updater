@@ -39,6 +39,13 @@
         "whitelist": "Whitelist (Alleen geselecteerde blueprints bijwerken)",
         "blacklist": "Blacklist (Geselecteerde blueprints niet bijwerken)"
       }
+    },
+    "repair_risk_action": {
+      "options": {
+        "proceed": "Doorgaan met bijwerken (maak back-up)",
+        "different_url": "Voer een andere URL in",
+        "stop_tracking": "Annuleren en stoppen met volgen"
+      }
     }
   },
   "entity": {
@@ -88,6 +95,54 @@
         "confirm": {
           "name": "Externe bron bevestigen",
           "description": "Vereist om het importeren uit externe/niet-geverifieerde bronnen te bevestigen."
+        }
+      }
+    }
+  },
+  "issues": {
+    "withdrawn_blueprint": {
+      "title": "Blueprint-bron niet meer beschikbaar: {name}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Ingetrokken blueprint oplossen",
+            "description": "De blueprint {name} ({path}) is ingetrokken van {source_url}. Wat wilt u doen?",
+            "menu_options": {
+              "change_url": "Bron-URL bijwerken",
+              "stop_tracking": "Lokale kopie behouden en stoppen met volgen",
+              "delete_blueprint": "Blueprint verwijderen"
+            }
+          },
+          "change_url": {
+            "title": "Bron-URL bijwerken",
+            "description": "Voer een nieuwe bron-URL in voor {name} ({path}).",
+            "data": {
+              "url": "Nieuwe blueprint-URL"
+            }
+          },
+          "confirm_risks": {
+            "title": "Compatibiliteitsrisico's bekijken",
+            "description": "Mogelijke ingrijpende wijzigingen gedetecteerd voor {name}:\n\n{risk_report}\n\nHoe wilt u verdergaan?",
+            "data": {
+              "risk_action": "Actie"
+            }
+          },
+          "delete_blueprint": {
+            "title": "Blueprint verwijderen",
+            "description": "Weet u zeker dat u {name} ({path}) wilt verwijderen?\n\nMomenteel gebruikt door {usage_count} entiteit(en): {entities}.",
+            "data": {
+              "confirm_delete_in_use": "Ik begrijp dat dit afhankelijke automatiseringen/scripts zal breken"
+            }
+          }
+        },
+        "error": {
+          "missing_url": "URL is verplicht.",
+          "invalid_url": "Ongeldige of onbereikbare blueprint-URL.",
+          "confirmation_required": "Bevestiging is vereist om een in gebruik zijnde blueprint te verwijderen.",
+          "usage_discovery_failed": "Kan het blueprintgebruik niet bepalen. Probeer het opnieuw."
+        },
+        "abort": {
+          "missing_issue_data": "Vereiste gegevens voor blueprint-probleem ontbreken."
         }
       }
     }
@@ -188,6 +243,7 @@
     "risk_compatibility": "Compatibiliteitsfout voor {entity}: {error}",
     "risk_system_error": "Systeemfout: {error}",
     "breaking_risks_report": "Automatische update voor {name} is uit voorzorg geblokkeerd. Gedetecteerde risico's:\n{risks}\n\nControleer dit en installeer handmatig als het correct is.",
-    "auto_update_blocked_by_system_error": "Automatische update voor {name} gepauzeerd door een onverwachte fout tijdens de compatibiliteitscontrole."
+    "auto_update_blocked_by_system_error": "Automatische update voor {name} gepauzeerd door een onverwachte fout tijdens de compatibiliteitscontrole.",
+    "withdrawn_blueprint_error": "Blueprint-bron niet meer beschikbaar: {error}"
   }
 }

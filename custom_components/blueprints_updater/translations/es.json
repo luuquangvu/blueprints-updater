@@ -39,6 +39,13 @@
         "whitelist": "Lista blanca (Solo actualizar blueprints seleccionados)",
         "blacklist": "Lista negra (No actualizar blueprints seleccionados)"
       }
+    },
+    "repair_risk_action": {
+      "options": {
+        "proceed": "Continuar con la actualización (crear copia de seguridad)",
+        "different_url": "Introducir una URL diferente",
+        "stop_tracking": "Cancelar y dejar de seguir"
+      }
     }
   },
   "entity": {
@@ -88,6 +95,54 @@
         "confirm": {
           "name": "Confirmar fuente externa",
           "description": "Requerido para reconocer la importación desde fuentes externas/no verificadas."
+        }
+      }
+    }
+  },
+  "issues": {
+    "withdrawn_blueprint": {
+      "title": "La fuente del blueprint ya no está disponible: {name}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Resolver blueprint retirado",
+            "description": "El blueprint {name} ({path}) fue retirado de {source_url}. ¿Qué le gustaría hacer?",
+            "menu_options": {
+              "change_url": "Actualizar URL de origen",
+              "stop_tracking": "Conservar copia local y dejar de seguir",
+              "delete_blueprint": "Eliminar blueprint"
+            }
+          },
+          "change_url": {
+            "title": "Actualizar URL de origen",
+            "description": "Introduzca una nueva URL de origen para {name} ({path}).",
+            "data": {
+              "url": "Nueva URL del blueprint"
+            }
+          },
+          "confirm_risks": {
+            "title": "Revisar riesgos de compatibilidad",
+            "description": "Se detectaron posibles cambios importantes para {name}:\n\n{risk_report}\n\n¿Cómo desea proceder?",
+            "data": {
+              "risk_action": "Acción"
+            }
+          },
+          "delete_blueprint": {
+            "title": "Eliminar blueprint",
+            "description": "¿Está seguro de que desea eliminar {name} ({path})?\n\nActualmente utilizado por {usage_count} entidad(es): {entities}.",
+            "data": {
+              "confirm_delete_in_use": "Entiendo que esto romperá las automatizaciones/scripts dependientes"
+            }
+          }
+        },
+        "error": {
+          "missing_url": "La URL es obligatoria.",
+          "invalid_url": "URL del blueprint no válida o inaccesible.",
+          "confirmation_required": "Se requiere confirmación para eliminar un blueprint en uso.",
+          "usage_discovery_failed": "No se pudo determinar el uso del blueprint. Inténtelo de nuevo."
+        },
+        "abort": {
+          "missing_issue_data": "Faltan datos requeridos del problema del blueprint."
         }
       }
     }
@@ -188,6 +243,7 @@
     "risk_compatibility": "Error de compatibilidad para {entity}: {error}",
     "risk_system_error": "Error del sistema: {error}",
     "breaking_risks_report": "La actualización automática para {name} se bloqueó como precaución. Riesgos detectados:\n{risks}\n\nPor favor, revise e instale manualmente si es correcto.",
-    "auto_update_blocked_by_system_error": "Actualización automática de {name} pausada por un error inesperado en la comprobación de compatibilidad."
+    "auto_update_blocked_by_system_error": "Actualización automática de {name} pausada por un error inesperado en la comprobación de compatibilidad.",
+    "withdrawn_blueprint_error": "La fuente del blueprint ya no está disponible: {error}"
   }
 }

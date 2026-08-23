@@ -1,7 +1,7 @@
 [project]
 name = "blueprints-updater"
 version = "2.13.3"
-description = "Blueprints Updater for Home Assistant"
+description = "Automatically update Home Assistant blueprints via native update entities."
 requires-python = ">=3.14.2"
 dependencies = ["httpx[http2]"]
 
@@ -76,9 +76,9 @@ markers = ["real_network: tests that require real network access"]
 
 [tool.pyright]
 typeCheckingMode = "standard"
+reportUnreachable = "warning"
 
 [tool.interrogate]
 fail-under = 100
 ignore-nested-functions = true
-ignore-overloaded-functions = true
 exclude = ["scratch"]

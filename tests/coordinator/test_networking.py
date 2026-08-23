@@ -172,7 +172,7 @@ async def test_guarded_transport_adapts_response_and_maps_errors(hass):
     response_stream = _ChunkedStream([b"blueprint"])
     pool.handle_async_request = AsyncMock(
         return_value=httpcore.Response(
-            200,
+            HTTPStatus.OK,
             headers=[(b"content-type", b"text/yaml")],
             content=response_stream,
         )
@@ -419,7 +419,7 @@ async def test_bounded_response_rejects_declared_and_streamed_oversize(coordinat
     async def declared_handler(request: httpx.Request) -> httpx.Response:
         """Return a response whose declared size is excessive."""
         return httpx.Response(
-            200,
+            HTTPStatus.OK,
             headers={"Content-Length": str(MAX_RESPONSE_BYTES + 1)},
             content=b"small",
             request=request,
@@ -434,7 +434,7 @@ async def test_bounded_response_rejects_declared_and_streamed_oversize(coordinat
     async def streamed_handler(request: httpx.Request) -> httpx.Response:
         """Return chunks that cross the decoded-content ceiling."""
         return httpx.Response(
-            200,
+            HTTPStatus.OK,
             stream=_ChunkedStream([b"a" * MAX_RESPONSE_BYTES, b"b"]),
             request=request,
         )
@@ -450,7 +450,7 @@ async def test_bounded_response_rejects_declared_and_streamed_oversize(coordinat
 async def test_parse_provider_response_rejects_invalid_utf8(coordinator):
     """Malformed remote bytes are rejected instead of replacement-decoded."""
     response = httpx.Response(
-        200,
+        HTTPStatus.OK,
         headers={"Content-Type": "text/yaml"},
         content=b"blueprint:\n  name: \xff\n",
         request=httpx.Request("GET", "https://example.com/test.yaml"),
@@ -476,7 +476,7 @@ async def test_bounded_response_accepts_exact_limit(coordinator):
     async def handler(request: httpx.Request) -> httpx.Response:
         """Return a body exactly at the decoded-content ceiling."""
         return httpx.Response(
-            200,
+            HTTPStatus.OK,
             content=b"a" * MAX_RESPONSE_BYTES,
             request=request,
         )
@@ -497,7 +497,7 @@ async def test_bounded_response_requests_identity_encoding():
         """Return plain YAML after verifying the explicit encoding preference."""
         assert request.headers["Accept-Encoding"] == "identity"
         assert request.headers["If-None-Match"] == '"test-etag"'
-        return httpx.Response(200, content=b"blueprint: plain text", request=request)
+        return httpx.Response(HTTPStatus.OK, content=b"blueprint: plain text", request=request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         response = await BlueprintUpdateCoordinator._async_get_bounded_response(
@@ -517,7 +517,7 @@ async def test_bounded_response_rejects_malformed_compression():
         """Return plain bytes incorrectly advertised as gzip encoded."""
         assert request.headers["Accept-Encoding"] == "identity"
         return httpx.Response(
-            200,
+            HTTPStatus.OK,
             headers={"Content-Encoding": "gzip"},
             content=b"blueprint: plain text",
             request=request,
@@ -903,7 +903,7 @@ async def test_parse_provider_response_rejects_invalid_content(
         provider.parse_content.return_value = None
 
     response = httpx.Response(
-        200,
+        HTTPStatus.OK,
         headers={"Content-Type": content_type},
         content=body,
         request=httpx.Request("GET", url),

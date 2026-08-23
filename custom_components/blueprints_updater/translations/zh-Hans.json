@@ -39,6 +39,13 @@
         "whitelist": "白名单（仅更新所选蓝图）",
         "blacklist": "黑名单（不更新所选蓝图）"
       }
+    },
+    "repair_risk_action": {
+      "options": {
+        "proceed": "继续更新（创建备份）",
+        "different_url": "输入其他 URL",
+        "stop_tracking": "取消并停止跟踪"
+      }
     }
   },
   "entity": {
@@ -88,6 +95,54 @@
         "confirm": {
           "name": "确认外部来源",
           "description": "确认从外部/未验证的来源导入所需的确认。"
+        }
+      }
+    }
+  },
+  "issues": {
+    "withdrawn_blueprint": {
+      "title": "蓝图源不再可用：{name}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "处理已撤回的蓝图",
+            "description": "蓝图“{name}”（{path}）已从 {source_url} 撤回。您想如何操作？",
+            "menu_options": {
+              "change_url": "更新源 URL",
+              "stop_tracking": "保留本地副本并停止跟踪",
+              "delete_blueprint": "删除蓝图"
+            }
+          },
+          "change_url": {
+            "title": "更新源 URL",
+            "description": "为“{name}”（{path}）输入新的源 URL。",
+            "data": {
+              "url": "新蓝图 URL"
+            }
+          },
+          "confirm_risks": {
+            "title": "审查兼容性风险",
+            "description": "检测到“{name}”可能存在不兼容的重大更改：\n\n{risk_report}\n\n您想如何处理？",
+            "data": {
+              "risk_action": "操作"
+            }
+          },
+          "delete_blueprint": {
+            "title": "删除蓝图",
+            "description": "确定要删除“{name}”（{path}）吗？\n\n当前正被 {usage_count} 个实体使用：{entities}。",
+            "data": {
+              "confirm_delete_in_use": "我了解这将破坏依赖此蓝图的自动化/脚本"
+            }
+          }
+        },
+        "error": {
+          "missing_url": "URL 为必填项。",
+          "invalid_url": "蓝图 URL 无效或无法访问。",
+          "confirmation_required": "删除使用中的蓝图需要确认。",
+          "usage_discovery_failed": "无法确定蓝图使用情况。请重试。"
+        },
+        "abort": {
+          "missing_issue_data": "缺少必需的蓝图问题数据。"
         }
       }
     }
@@ -188,6 +243,7 @@
     "risk_compatibility": "{entity} 的兼容性错误：{error}",
     "risk_system_error": "系统错误：{error}",
     "breaking_risks_report": "为了预防起见，{name} 的自动更新已阻止。检测到的风险：\n{risks}\n\n如果正确，请检查并手动安装。",
-    "auto_update_blocked_by_system_error": "{name} 的自动更新已暂停，因为兼容性检查过程中出现意外错误。"
+    "auto_update_blocked_by_system_error": "{name} 的自动更新已暂停，因为兼容性检查过程中出现意外错误。",
+    "withdrawn_blueprint_error": "蓝图源不再可用：{error}"
   }
 }

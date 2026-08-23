@@ -39,6 +39,13 @@
         "whitelist": "Whitelist (Only update selected blueprints)",
         "blacklist": "Blacklist (Do not update selected blueprints)"
       }
+    },
+    "repair_risk_action": {
+      "options": {
+        "proceed": "Proceed with update (create backup)",
+        "different_url": "Enter a different URL",
+        "stop_tracking": "Cancel and stop tracking"
+      }
     }
   },
   "entity": {
@@ -88,6 +95,54 @@
         "confirm": {
           "name": "Confirm External Source",
           "description": "Required to acknowledge importing from external/unverified sources."
+        }
+      }
+    }
+  },
+  "issues": {
+    "withdrawn_blueprint": {
+      "title": "Blueprint source no longer available: {name}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Resolve Withdrawn Blueprint",
+            "description": "The blueprint {name} ({path}) was withdrawn from {source_url}. What would you like to do?",
+            "menu_options": {
+              "change_url": "Update source URL",
+              "stop_tracking": "Keep local copy and stop tracking",
+              "delete_blueprint": "Delete blueprint"
+            }
+          },
+          "change_url": {
+            "title": "Update Source URL",
+            "description": "Enter a new source URL for {name} ({path}).",
+            "data": {
+              "url": "New Blueprint URL"
+            }
+          },
+          "confirm_risks": {
+            "title": "Review Compatibility Risks",
+            "description": "Potential breaking changes detected for {name}:\n\n{risk_report}\n\nHow would you like to proceed?",
+            "data": {
+              "risk_action": "Action"
+            }
+          },
+          "delete_blueprint": {
+            "title": "Delete Blueprint",
+            "description": "Are you sure you want to delete {name} ({path})?\n\nCurrently used by {usage_count} entity(ies): {entities}.",
+            "data": {
+              "confirm_delete_in_use": "I understand this will break dependent automations/scripts"
+            }
+          }
+        },
+        "error": {
+          "missing_url": "URL is required.",
+          "invalid_url": "Invalid or unreachable blueprint URL.",
+          "confirmation_required": "Confirmation is required to delete a blueprint in use.",
+          "usage_discovery_failed": "Unable to determine blueprint usage. Please try again."
+        },
+        "abort": {
+          "missing_issue_data": "Missing required blueprint issue data."
         }
       }
     }
@@ -188,6 +243,7 @@
     "risk_compatibility": "Compatibility Error for {entity}: {error}",
     "risk_system_error": "System error: {error}",
     "breaking_risks_report": "Auto-update for {name} was blocked as a precaution. Detected risks:\n{risks}\n\nPlease review and install manually if correct.",
-    "auto_update_blocked_by_system_error": "Auto-update for {name} was paused due to an unexpected error during compatibility check."
+    "auto_update_blocked_by_system_error": "Auto-update for {name} was paused due to an unexpected error during compatibility check.",
+    "withdrawn_blueprint_error": "Blueprint source no longer available: {error}"
   }
 }

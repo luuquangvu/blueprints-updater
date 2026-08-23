@@ -18,9 +18,10 @@ from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import (
-    DOMAIN_AUTOMATION,
     ERROR_SEPARATOR,
     BlueprintRiskType,
+    FilterMode,
+    FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.utils import (
@@ -56,7 +57,7 @@ async def test_async_validate_blueprint_consumers_isolated_from_hub(hass, coordi
     original_bp = MagicMock()
     mock_hub._blueprints = {"test.yaml": original_bp}
 
-    hass.data["blueprint"] = {DOMAIN_AUTOMATION: mock_hub}
+    hass.data["blueprint"] = {FunctionalDomain.AUTOMATION: mock_hub}
 
     configs: dict[str, dict[str, Any]] = {
         "automation.test": {
@@ -131,7 +132,9 @@ async def test_process_blueprint_content_error_handling(coordinator):
     coordinator.data[path3] = dict(info)
     with patch(
         "custom_components.blueprints_updater.coordinator.Blueprint",
-        side_effect=InvalidBlueprint(DOMAIN_AUTOMATION, "test", {}, "Mock Schema Failure"),
+        side_effect=InvalidBlueprint(
+            FunctionalDomain.AUTOMATION, "test", {}, "Mock Schema Failure"
+        ),
     ):
         await coordinator._process_blueprint_content(
             path3,
@@ -344,13 +347,14 @@ async def test_background_refresh_clears_inflight_hostname_result(coordinator):
 
 
 def test_get_validated_filter_mode_normalization():
-    """Test that filter mode is normalized (lowercase and stripped)."""
-    assert get_validated_filter_mode("  All  ") == "all"
-    assert get_validated_filter_mode("WHITELIST") == "whitelist"
-    assert get_validated_filter_mode("Blacklist") == "blacklist"
-    assert get_validated_filter_mode("invalid") == "all"
-    assert get_validated_filter_mode(None) == "all"
-    assert get_validated_filter_mode(123) == "all"
+    """Test that filter mode is normalized (lowercase and stripped) to FilterMode enum."""
+    assert get_validated_filter_mode("  All  ") is FilterMode.ALL
+    assert get_validated_filter_mode("WHITELIST") is FilterMode.WHITELIST
+    assert get_validated_filter_mode("Blacklist") is FilterMode.BLACKLIST
+    assert get_validated_filter_mode(FilterMode.WHITELIST) is FilterMode.WHITELIST
+    assert get_validated_filter_mode("invalid") is FilterMode.ALL
+    assert get_validated_filter_mode(None) is FilterMode.ALL
+    assert get_validated_filter_mode(123) is FilterMode.ALL
 
 
 def test_get_validated_selected_blueprints_hardening():
@@ -394,7 +398,7 @@ async def test_async_validate_blueprint_consumers_voluptuous_error(hass, coordin
 
     mock_hub = MagicMock()
     mock_hub._blueprints = {}
-    hass.data["blueprint"] = {DOMAIN_AUTOMATION: mock_hub}
+    hass.data["blueprint"] = {FunctionalDomain.AUTOMATION: mock_hub}
 
     configs = {
         "automation.test": {

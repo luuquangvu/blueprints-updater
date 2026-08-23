@@ -17,8 +17,7 @@ from custom_components.blueprints_updater.__init__ import (
 )
 from custom_components.blueprints_updater.const import (
     DOMAIN,
-    DOMAIN_AUTOMATION,
-    DOMAIN_SCRIPT,
+    FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
@@ -183,19 +182,19 @@ async def test_service_handlers(hass: HomeAssistant):
 
         coordinator_mock.data = {
             "path1": {
-                "domain": DOMAIN_AUTOMATION,
+                "domain": FunctionalDomain.AUTOMATION,
                 "updatable": True,
                 "remote_content": "...",
                 "last_error": None,
             },
             "path2": {
-                "domain": DOMAIN_AUTOMATION,
+                "domain": FunctionalDomain.AUTOMATION,
                 "updatable": True,
                 "remote_content": "...",
                 "last_error": None,
             },
             "path3": {
-                "domain": DOMAIN_SCRIPT,
+                "domain": FunctionalDomain.SCRIPT,
                 "updatable": True,
                 "remote_content": "...",
                 "last_error": None,
@@ -207,7 +206,7 @@ async def test_service_handlers(hass: HomeAssistant):
         await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {"backup": True}))
         assert coordinator_mock.async_install_blueprint.await_count == 3
         coordinator_mock.async_reconcile_reload_services.assert_awaited_once_with(
-            {DOMAIN_AUTOMATION, DOMAIN_SCRIPT}
+            {FunctionalDomain.AUTOMATION, FunctionalDomain.SCRIPT}
         )
 
 
@@ -595,14 +594,14 @@ async def test_async_update_all_handler_continues_on_failure(hass: HomeAssistant
     mock_coordinator.config_entry = entry
     mock_coordinator.data = {
         "fail.yaml": {
-            "domain": DOMAIN_SCRIPT,
+            "domain": FunctionalDomain.SCRIPT,
             "relative_path": "fail.yaml",
             "updatable": True,
             "remote_content": "...",
             "last_error": None,
         },
         "success.yaml": {
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "relative_path": "success.yaml",
             "updatable": True,
             "remote_content": "...",
@@ -656,7 +655,7 @@ async def test_async_update_all_handler_continues_on_failure(hass: HomeAssistant
         assert mock_coordinator.async_install_blueprint.call_count == 2
 
         mock_coordinator.async_reconcile_reload_services.assert_awaited_once_with(
-            {DOMAIN_AUTOMATION}
+            {FunctionalDomain.AUTOMATION}
         )
         mock_coordinator.async_request_refresh.assert_called_once()
 

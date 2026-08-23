@@ -205,3 +205,32 @@ async def test_auto_update_guard_blocks_on_system_error(coordinator: BlueprintUp
     entry = coordinator.data[blueprint_path]
     assert entry["updatable"] is True
     assert entry["update_blocking_reason"] == BlueprintBlockingReason.SYSTEM_ERROR
+
+
+@pytest.mark.asyncio
+async def test_auto_update_guard_blocks_on_usage_lookup_failure(
+    coordinator: BlueprintUpdateCoordinator,
+):
+    """Auto-update is blocked when consumer discovery fails."""
+    blueprint_path = "automation/usage_lookup_failure.yaml"
+    _prepare_blueprint_entry(coordinator, blueprint_path)
+
+    with (
+        patch.object(coordinator, "_get_entities_using_blueprint", return_value=None),
+        patch.object(coordinator, "_async_send_auto_update_notification", return_value=None),
+    ):
+        result = await coordinator._handle_auto_update_step(
+            blueprint_path,
+            coordinator.data[blueprint_path],
+            "blueprint: name: New",
+            [{"type": BlueprintRiskType.COMPATIBILITY, "args": {}}],
+            [],
+            set(),
+            remote_hash="new_hash",
+            new_etag="new_etag",
+        )
+
+    assert result is True
+    assert coordinator.data[blueprint_path]["update_blocking_reason"] == (
+        BlueprintBlockingReason.SYSTEM_ERROR
+    )

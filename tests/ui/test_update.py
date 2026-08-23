@@ -7,7 +7,7 @@ import pytest
 from custom_components.blueprints_updater.const import (
     ALLOWED_RELOAD_DOMAINS,
     DOMAIN,
-    DOMAIN_AUTOMATION,
+    FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.update import (
@@ -24,12 +24,12 @@ async def test_async_setup_entry_update(hass):
 
     coordinator = MagicMock()
     coordinator._normalize_domain = lambda d: (
-        d if d in ALLOWED_RELOAD_DOMAINS else DOMAIN_AUTOMATION
+        d if d in ALLOWED_RELOAD_DOMAINS else FunctionalDomain.AUTOMATION
     )
     data = {
         "automation/test.yaml": {
             "name": "Test BP",
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "relative_path": "automation/test.yaml",
             "updatable": True,
             "curr_version": "1.0",
@@ -53,12 +53,12 @@ def test_update_entity_properties():
     """Test properties of BlueprintUpdateEntity."""
     coordinator = MagicMock()
     coordinator._normalize_domain = lambda d: (
-        d if d in ALLOWED_RELOAD_DOMAINS else DOMAIN_AUTOMATION
+        d if d in ALLOWED_RELOAD_DOMAINS else FunctionalDomain.AUTOMATION
     )
     coordinator.config_entry.entry_id = "test_entry"
     info = {
         "name": "Test BP",
-        "domain": DOMAIN_AUTOMATION,
+        "domain": FunctionalDomain.AUTOMATION,
         "relative_path": "automation/test.yaml",
         "updatable": True,
         "curr_version": "1.0",
@@ -80,5 +80,5 @@ def test_update_entity_properties():
     assert entity.latest_version == "remot123"
 
     attrs = entity.extra_state_attributes
-    assert attrs["domain"] == DOMAIN_AUTOMATION
+    assert attrs["domain"] == FunctionalDomain.AUTOMATION
     assert attrs["relative_path"] == "automation/test.yaml"

@@ -2,6 +2,7 @@
 
 import socket
 from datetime import timedelta
+from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -14,9 +15,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
-    DOMAIN_AUTOMATION,
-    DOMAIN_SCRIPT,
-    DOMAIN_TEMPLATE,
+    FunctionalDomain,
     IntegrationService,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
@@ -60,7 +59,7 @@ async def test_setup_integration(hass: HomeAssistant) -> None:
 
 @pytest.mark.parametrize(
     "blueprint_domain",
-    [DOMAIN_AUTOMATION, DOMAIN_SCRIPT, DOMAIN_TEMPLATE],
+    [FunctionalDomain.AUTOMATION, FunctionalDomain.SCRIPT, FunctionalDomain.TEMPLATE],
 )
 @pytest.mark.asyncio
 async def test_full_update_lifecycle(
@@ -87,7 +86,9 @@ async def test_full_update_lifecycle(
         f"  source_url: {source_url}\n"
     )
     respx_mock.get(source_url).mock(
-        return_value=httpx.Response(200, content=new_content, headers={"Content-Type": "text/yaml"})
+        return_value=httpx.Response(
+            HTTPStatus.OK, content=new_content, headers={"Content-Type": "text/yaml"}
+        )
     )
 
     entry = MockConfigEntry(
@@ -146,7 +147,7 @@ async def test_auto_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
     )
     respx_mock.get(source_url).mock(
         return_value=httpx.Response(
-            200,
+            HTTPStatus.OK,
             content=(
                 "blueprint:\n"
                 "  name: Auto Updated\n"

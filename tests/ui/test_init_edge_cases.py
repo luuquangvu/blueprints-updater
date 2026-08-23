@@ -22,7 +22,7 @@ from custom_components.blueprints_updater import (
 from custom_components.blueprints_updater.const import (
     ALLOWED_RELOAD_DOMAINS,
     DOMAIN,
-    DOMAIN_AUTOMATION,
+    FunctionalDomain,
     IntegrationService,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
@@ -128,7 +128,7 @@ async def test_initialization_lifecycle_handling(hass: HomeAssistant) -> None:
             side_effect=Exception("Update fail"),
         ) as reconcile_reload:
             await update_all_handler(ServiceCall(hass, DOMAIN, "update_all", {}))
-            reconcile_reload.assert_awaited_once_with({DOMAIN_AUTOMATION})
+            reconcile_reload.assert_awaited_once_with({FunctionalDomain.AUTOMATION})
 
         hass.config_entries.async_forward_entry_setups.side_effect = None
         with (
@@ -269,7 +269,7 @@ async def test_coordinator_error_paths_fetch_refresh_and_configs(hass: HomeAssis
 
     mock_comp = MagicMock()
     mock_comp.get_entity.return_value = None
-    hass.data[DOMAIN_AUTOMATION] = mock_comp
+    hass.data[FunctionalDomain.AUTOMATION] = mock_comp
     assert coordinator._get_entities_configs(["automation.missing"]) == {}
 
     with (

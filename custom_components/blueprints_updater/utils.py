@@ -11,12 +11,14 @@ import random
 import textwrap
 from collections.abc import Callable, Coroutine
 from functools import wraps
-from typing import TYPE_CHECKING, ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar
 
 import httpx
-
-if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
+from homeassistant.components.automation import automations_with_blueprint
+from homeassistant.components.script import scripts_with_blueprint
+from homeassistant.components.template.helpers import templates_with_blueprint
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     ALLOWED_RELOAD_DOMAINS,
@@ -25,16 +27,14 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     DEFAULT_MAX_BACKUPS,
     DEFAULT_UPDATE_INTERVAL_HOURS,
-    DOMAIN_AUTOMATION,
     ERROR_SEPARATOR,
-    FILTER_MODE_ALL,
-    FILTER_MODE_BLACKLIST,
-    FILTER_MODE_WHITELIST,
     MAX_BACKUPS,
     MAX_UPDATE_INTERVAL_HOURS,
     MIN_BACKUPS,
     MIN_UPDATE_INTERVAL,
     RE_URL_REDACTION,
+    FilterMode,
+    FunctionalDomain,
 )
 from .exceptions import BlueprintFetchPolicyError
 from .providers import registry
@@ -305,20 +305,24 @@ def normalize_url(url: str) -> str:
     return url
 
 
-def normalize_domain(domain: object) -> str:
+def normalize_domain(domain: object) -> FunctionalDomain:
     """Normalize and validate the blueprint domain, defaulting to automation.
 
     Args:
         domain: The domain to normalize.
 
     Returns:
-        The normalized lowercase domain string.
+        The normalized FunctionalDomain enum.
 
     """
+    if isinstance(domain, FunctionalDomain):
+        return domain
+
     if isinstance(domain, str):
         norm_domain = domain.strip().lower()
-        if norm_domain in ALLOWED_RELOAD_DOMAINS:
-            return norm_domain
+        for fd in FunctionalDomain:
+            if norm_domain == fd.value:
+                return fd
 
     if domain and str(domain).strip():
         _LOGGER.warning(
@@ -328,32 +332,85 @@ def normalize_domain(domain: object) -> str:
             ", ".join(ALLOWED_RELOAD_DOMAINS),
         )
 
-    return DOMAIN_AUTOMATION
+    return FunctionalDomain.AUTOMATION
 
 
-def get_validated_filter_mode(filter_mode: object) -> str:
+def get_validated_filter_mode(filter_mode: object) -> FilterMode:
     """Normalize and validate filter mode.
 
     Args:
         filter_mode: The filter mode to validate.
 
     Returns:
-        A valid filter mode, using all as fallback.
+        A valid FilterMode enum, falling back to FilterMode.ALL.
 
     """
+    if isinstance(filter_mode, FilterMode):
+        return filter_mode
+
     if not isinstance(filter_mode, str):
         if filter_mode is not None:
             _LOGGER.warning(
                 "Invalid filter mode type '%s'; falling back to all", type(filter_mode).__name__
             )
-        return FILTER_MODE_ALL
+        return FilterMode.ALL
 
     normalized_mode = filter_mode.strip().lower()
-    if normalized_mode in (FILTER_MODE_ALL, FILTER_MODE_WHITELIST, FILTER_MODE_BLACKLIST):
-        return normalized_mode
+    for mode in FilterMode:
+        if normalized_mode == mode.value:
+            return mode
 
     _LOGGER.warning("Invalid filter mode '%s' in config; falling back to all", filter_mode)
-    return FILTER_MODE_ALL
+    return FilterMode.ALL
+
+
+def get_blueprint_usage_entities(
+    hass: HomeAssistant,
+    domain: str | FunctionalDomain | None,
+    blueprint_id: str,
+) -> list[str] | None:
+    """Return all entity IDs currently using the specified blueprint.
+
+    Args:
+        hass: Home Assistant instance.
+        domain: FunctionalDomain (automation, script, template) or None for all.
+        blueprint_id: Blueprint identifier (e.g. author/name.yaml).
+
+    Returns:
+        List of unique entity IDs using the blueprint.
+        None if one or more domain lookups failed.
+
+    """
+    result: list[str] = []
+    lookup_failed = False
+    norm_domain: FunctionalDomain | None
+    if isinstance(domain, FunctionalDomain):
+        norm_domain = domain
+    elif domain:
+        norm_domain = normalize_domain(domain)
+    else:
+        norm_domain = None
+
+    domain_fetchers = (
+        (FunctionalDomain.AUTOMATION, automations_with_blueprint),
+        (FunctionalDomain.SCRIPT, scripts_with_blueprint),
+        (FunctionalDomain.TEMPLATE, templates_with_blueprint),
+    )
+
+    for target_domain, fetcher in domain_fetchers:
+        if norm_domain is None or norm_domain == target_domain:
+            try:
+                result.extend(fetcher(hass, blueprint_id))
+            except HomeAssistantError as err:
+                lookup_failed = True
+                _LOGGER.warning(
+                    "Could not calculate %s usage for blueprint %s: %s",
+                    target_domain,
+                    blueprint_id,
+                    err,
+                )
+
+    return None if lookup_failed else list(dict.fromkeys(result))
 
 
 def get_validated_selected_blueprints(selected: object) -> list[str]:
@@ -392,12 +449,16 @@ def get_validated_selected_blueprints(selected: object) -> list[str]:
     return []
 
 
-def should_include_blueprint(relative_path: str, filter_mode: str, selected_set: set[str]) -> bool:
+def should_include_blueprint(
+    relative_path: str,
+    filter_mode: FilterMode,
+    selected_set: set[str],
+) -> bool:
     """Check if a blueprint should be included based on filtering rules."""
-    if filter_mode == FILTER_MODE_BLACKLIST:
+    if filter_mode == FilterMode.BLACKLIST:
         return relative_path not in selected_set
 
-    if filter_mode == FILTER_MODE_WHITELIST:
+    if filter_mode == FilterMode.WHITELIST:
         return relative_path in selected_set
 
     return True

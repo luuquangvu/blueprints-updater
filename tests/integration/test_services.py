@@ -2,6 +2,7 @@
 
 import inspect
 import socket
+from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import patch
 
@@ -92,7 +93,9 @@ async def test_update_all_service(hass: HomeAssistant, respx_mock) -> None:
 
     new_content = "blueprint:\n  name: Test Updated\n  domain: automation\n  source_url: https://raw.githubusercontent.com/user/repo/main/test.yaml\n"
     respx_mock.get("https://raw.githubusercontent.com/user/repo/main/test.yaml").mock(
-        return_value=httpx.Response(200, content=new_content, headers={"Content-Type": "text/yaml"})
+        return_value=httpx.Response(
+            HTTPStatus.OK, content=new_content, headers={"Content-Type": "text/yaml"}
+        )
     )
 
     entry = MockConfigEntry(

@@ -1,6 +1,7 @@
 """Tests for Blueprints Updater Last-Modified logic."""
 
 from datetime import timedelta
+from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -33,7 +34,7 @@ async def test_async_fetch_content_sends_if_modified_since(coordinator):
     last_modified = "Mon, 10 May 2021 10:00:00 GMT"
 
     mock_response = MagicMock(spec=httpx.Response)
-    mock_response.status_code = 200
+    mock_response.status_code = HTTPStatus.OK
     mock_response.headers = httpx.Headers(
         {"Last-Modified": last_modified, "Content-Type": "text/yaml"}
     )

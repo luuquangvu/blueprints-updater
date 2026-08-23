@@ -7,8 +7,8 @@ import pytest
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
-    DOMAIN_AUTOMATION,
     ERROR_SEPARATOR,
+    FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.update import BlueprintUpdateEntity
@@ -117,7 +117,7 @@ async def test_entity_localized_error(hass, coordinator):
         return_value=translations,
     ):
         assert entity.extra_state_attributes == {
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "last_error": f"yaml_syntax_error{ERROR_SEPARATOR}Line 5",
             "relative_path": "test.yaml",
             "backups_count": 0,
@@ -127,7 +127,7 @@ async def test_entity_localized_error(hass, coordinator):
         with patch.object(entity, "async_write_ha_state"):
             await entity._async_localize_strings()
         assert entity.extra_state_attributes == {
-            "domain": DOMAIN_AUTOMATION,
+            "domain": FunctionalDomain.AUTOMATION,
             "last_error": "Lỗi cú pháp: Line 5",
             "relative_path": "test.yaml",
             "backups_count": 0,

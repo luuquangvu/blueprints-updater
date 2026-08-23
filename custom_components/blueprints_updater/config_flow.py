@@ -28,13 +28,11 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     DEFAULT_AUTO_UPDATE,
     DOMAIN,
-    FILTER_MODE_ALL,
-    FILTER_MODE_BLACKLIST,
-    FILTER_MODE_WHITELIST,
     MAX_BACKUPS,
     MAX_UPDATE_INTERVAL_HOURS,
     MIN_BACKUPS,
     MIN_UPDATE_INTERVAL,
+    FilterMode,
 )
 from .coordinator import BlueprintUpdateCoordinator
 from .utils import (
@@ -60,7 +58,7 @@ async def _async_get_blueprint_options(hass: HomeAssistant) -> list[SelectOption
 
     """
     blueprints = await hass.async_add_executor_job(
-        BlueprintUpdateCoordinator.scan_blueprints, hass, FILTER_MODE_ALL, []
+        BlueprintUpdateCoordinator.scan_blueprints, hass, FilterMode.ALL, []
     )
     options: list[SelectOptionDict] = []
     for path, info in blueprints.items():
@@ -92,7 +90,7 @@ def _get_config_schema(
 
     """
     auto_update = get_config_bool(config, CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
-    filter_mode = get_config_str(config, CONF_FILTER_MODE, FILTER_MODE_ALL)
+    filter_mode = get_config_str(config, CONF_FILTER_MODE, FilterMode.ALL.value)
     selected_blueprints = get_config_value(config, CONF_SELECTED_BLUEPRINTS, [])
 
     return vol.Schema(
@@ -128,9 +126,13 @@ def _get_config_schema(
             ): SelectSelector(
                 SelectSelectorConfig(
                     options=[
-                        SelectOptionDict(value=FILTER_MODE_ALL, label=FILTER_MODE_ALL),
-                        SelectOptionDict(value=FILTER_MODE_WHITELIST, label=FILTER_MODE_WHITELIST),
-                        SelectOptionDict(value=FILTER_MODE_BLACKLIST, label=FILTER_MODE_BLACKLIST),
+                        SelectOptionDict(value=FilterMode.ALL.value, label=FilterMode.ALL.value),
+                        SelectOptionDict(
+                            value=FilterMode.WHITELIST.value, label=FilterMode.WHITELIST.value
+                        ),
+                        SelectOptionDict(
+                            value=FilterMode.BLACKLIST.value, label=FilterMode.BLACKLIST.value
+                        ),
                     ],
                     mode=SelectSelectorMode.DROPDOWN,
                     translation_key="filter_mode",

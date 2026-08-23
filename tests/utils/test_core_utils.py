@@ -1,18 +1,23 @@
 """Tests for Blueprints Updater utilities."""
 
 import asyncio
+import logging
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import (
     CONF_MAX_BACKUPS,
     CONF_UPDATE_INTERVAL,
     ERROR_SEPARATOR,
+    FilterMode,
+    FunctionalDomain,
 )
 from custom_components.blueprints_updater.utils import (
+    get_blueprint_usage_entities,
     get_config_bool,
     get_config_int,
     get_config_str,
@@ -20,6 +25,8 @@ from custom_components.blueprints_updater.utils import (
     get_max_backups,
     get_relative_path,
     get_update_interval,
+    get_validated_filter_mode,
+    normalize_domain,
     normalize_url,
     redact_url,
     retry_async,
@@ -330,11 +337,105 @@ def test_should_include_blueprint_filter_modes():
     """Verify whitelist and blacklist filtering make opposite inclusion decisions."""
     selected = {"automation/blocked.yaml"}
 
-    assert not should_include_blueprint("automation/blocked.yaml", "blacklist", selected)
-    assert should_include_blueprint("automation/allowed.yaml", "blacklist", selected)
-    assert should_include_blueprint("automation/blocked.yaml", "whitelist", selected)
-    assert not should_include_blueprint("automation/allowed.yaml", "whitelist", selected)
-    assert should_include_blueprint("automation/allowed.yaml", "all", selected)
+    # FilterMode enums
+    assert not should_include_blueprint("automation/blocked.yaml", FilterMode.BLACKLIST, selected)
+    assert should_include_blueprint("automation/allowed.yaml", FilterMode.BLACKLIST, selected)
+    assert should_include_blueprint("automation/blocked.yaml", FilterMode.WHITELIST, selected)
+    assert not should_include_blueprint("automation/allowed.yaml", FilterMode.WHITELIST, selected)
+    assert should_include_blueprint("automation/allowed.yaml", FilterMode.ALL, selected)
+
+    # Validated string modes
+    assert not should_include_blueprint(
+        "automation/blocked.yaml", get_validated_filter_mode("blacklist"), selected
+    )
+    assert should_include_blueprint(
+        "automation/allowed.yaml", get_validated_filter_mode("blacklist"), selected
+    )
+    assert should_include_blueprint(
+        "automation/blocked.yaml", get_validated_filter_mode("whitelist"), selected
+    )
+    assert not should_include_blueprint(
+        "automation/allowed.yaml", get_validated_filter_mode("whitelist"), selected
+    )
+    assert should_include_blueprint(
+        "automation/allowed.yaml", get_validated_filter_mode("all"), selected
+    )
+
+
+def test_normalize_domain_returns_functional_domain_enum(caplog):
+    """Verify normalize_domain returns FunctionalDomain enum members without spurious warnings."""
+    assert normalize_domain("automation") is FunctionalDomain.AUTOMATION
+    assert normalize_domain("script") is FunctionalDomain.SCRIPT
+    assert normalize_domain("template") is FunctionalDomain.TEMPLATE
+    assert normalize_domain("SCRIPT") is FunctionalDomain.SCRIPT
+    assert normalize_domain(FunctionalDomain.AUTOMATION) is FunctionalDomain.AUTOMATION
+    assert normalize_domain(FunctionalDomain.SCRIPT) is FunctionalDomain.SCRIPT
+    assert normalize_domain(FunctionalDomain.TEMPLATE) is FunctionalDomain.TEMPLATE
+
+    with caplog.at_level(logging.WARNING):
+        caplog.clear()
+        assert normalize_domain(FunctionalDomain.SCRIPT) is FunctionalDomain.SCRIPT
+        assert not caplog.records
+
+    assert normalize_domain("unknown_domain") is FunctionalDomain.AUTOMATION
+    assert normalize_domain(None) is FunctionalDomain.AUTOMATION
+    assert normalize_domain(123) is FunctionalDomain.AUTOMATION
+
+
+def test_get_blueprint_usage_entities(hass):
+    """Verify get_blueprint_usage_entities correctly delegates by domain and handles errors."""
+    with (
+        patch(
+            "custom_components.blueprints_updater.utils.automations_with_blueprint",
+            return_value=["automation.one", "automation.two"],
+        ),
+        patch(
+            "custom_components.blueprints_updater.utils.scripts_with_blueprint",
+            return_value=["script.one"],
+        ),
+        patch(
+            "custom_components.blueprints_updater.utils.templates_with_blueprint",
+            return_value=["sensor.one"],
+        ),
+    ):
+        # All domains when domain is None
+        all_entities = get_blueprint_usage_entities(hass, None, "test/blueprint.yaml")
+        assert all_entities == ["automation.one", "automation.two", "script.one", "sensor.one"]
+
+        # FunctionalDomain enum
+        script_entities = get_blueprint_usage_entities(
+            hass, FunctionalDomain.SCRIPT, "test/blueprint.yaml"
+        )
+        assert script_entities == ["script.one"]
+
+        # Domain string
+        template_entities = get_blueprint_usage_entities(hass, "template", "test/blueprint.yaml")
+        assert template_entities == ["sensor.one"]
+
+    # HomeAssistantError handling
+    with (
+        patch(
+            "custom_components.blueprints_updater.utils.automations_with_blueprint",
+            side_effect=HomeAssistantError("Service unavailable"),
+        ),
+        patch(
+            "custom_components.blueprints_updater.utils.scripts_with_blueprint",
+            return_value=["script.one"],
+        ),
+        patch(
+            "custom_components.blueprints_updater.utils.templates_with_blueprint",
+            return_value=["sensor.one"],
+        ),
+    ):
+        res = get_blueprint_usage_entities(hass, None, "test/blueprint.yaml")
+        assert res is None
+
+
+def test_get_validated_filter_mode_with_enum_instance():
+    """Verify get_validated_filter_mode returns existing FilterMode instances directly."""
+    assert get_validated_filter_mode(FilterMode.BLACKLIST) is FilterMode.BLACKLIST
+    assert get_validated_filter_mode(FilterMode.WHITELIST) is FilterMode.WHITELIST
+    assert get_validated_filter_mode(FilterMode.ALL) is FilterMode.ALL
 
 
 def test_redact_url_rejects_non_url_objects():

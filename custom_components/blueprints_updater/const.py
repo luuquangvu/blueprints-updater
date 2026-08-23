@@ -21,19 +21,29 @@ DEFAULT_MAX_BACKUPS = 3
 MIN_BACKUPS = 1
 MAX_BACKUPS = 10
 
-FILTER_MODE_ALL = "all"
-FILTER_MODE_WHITELIST = "whitelist"
-FILTER_MODE_BLACKLIST = "blacklist"
-DOMAIN_AUTOMATION = "automation"
-DOMAIN_SCRIPT = "script"
-DOMAIN_TEMPLATE = "template"
+
+class FilterMode(StrEnum):
+    """Filter modes for blueprint update tracking."""
+
+    ALL = "all"
+    WHITELIST = "whitelist"
+    BLACKLIST = "blacklist"
+
+
+class FunctionalDomain(StrEnum):
+    """Home Assistant functional domains supported by blueprints."""
+
+    AUTOMATION = "automation"
+    SCRIPT = "script"
+    TEMPLATE = "template"
+
 
 URL_BLUEPRINT_DASHBOARD = "/config/blueprint/dashboard"
 
 ALLOWED_RELOAD_DOMAINS = {
-    DOMAIN_AUTOMATION,
-    DOMAIN_SCRIPT,
-    DOMAIN_TEMPLATE,
+    FunctionalDomain.AUTOMATION,
+    FunctionalDomain.SCRIPT,
+    FunctionalDomain.TEMPLATE,
 }
 
 DEFAULT_UPDATE_INTERVAL_HOURS = 24
@@ -140,3 +150,34 @@ ALLOWED_YAML_MIME_TYPES = [
     "text/x-yaml",
     "text/yaml",
 ]
+
+
+class RepairIssueType(StrEnum):
+    """Types of repair issues raised by Blueprints Updater."""
+
+    WITHDRAWN_BLUEPRINT = "withdrawn_blueprint"
+
+
+class RepairAction(StrEnum):
+    """Actions available in the withdrawn blueprint repair menu."""
+
+    CHANGE_URL = "change_url"
+    STOP_TRACKING = "stop_tracking"
+    DELETE_BLUEPRINT = "delete_blueprint"
+
+
+class RepairRiskAction(StrEnum):
+    """Actions available when reviewing compatibility risks."""
+
+    PROCEED = "proceed"
+    DIFFERENT_URL = "different_url"
+    STOP_TRACKING = "stop_tracking"
+
+
+class RepairError(StrEnum):
+    """Validation and execution error keys for repair flows."""
+
+    MISSING_URL = "missing_url"
+    INVALID_URL = "invalid_url"
+    CONFIRMATION_REQUIRED = "confirmation_required"
+    USAGE_DISCOVERY_FAILED = "usage_discovery_failed"

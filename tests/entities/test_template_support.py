@@ -35,7 +35,7 @@ async def test_template_usage_warning(hass: HomeAssistant):
     )
 
     with patch(
-        "custom_components.blueprints_updater.update.templates_with_blueprint",
+        "custom_components.blueprints_updater.utils.templates_with_blueprint",
         return_value=["template.test_entity"],
     ) as mock_templates_with_blueprint:
         notes = await entity.async_generate_release_notes()

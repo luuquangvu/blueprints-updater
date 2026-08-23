@@ -2,6 +2,7 @@
 
 import socket
 from collections.abc import AsyncIterator
+from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import patch
 
@@ -115,7 +116,7 @@ async def test_import_blueprint_success_github(hass, setup_integration, respx_mo
 
     respx_mock.get(raw_url).mock(
         return_value=httpx.Response(
-            200,
+            HTTPStatus.OK,
             content=content,
             headers={
                 "Content-Type": "text/yaml",
@@ -150,7 +151,7 @@ async def test_import_blueprint_invalid_yaml(hass, setup_integration, respx_mock
 
     respx_mock.get(raw_url).mock(
         return_value=httpx.Response(
-            200,
+            HTTPStatus.OK,
             content=content,
             headers={
                 "Content-Type": "text/yaml",
@@ -176,7 +177,7 @@ async def test_import_blueprint_invalid_content_type(hass, setup_integration, re
 
     respx_mock.get(url).mock(
         return_value=httpx.Response(
-            200, content="<html></html>", headers={"Content-Type": "text/html"}
+            HTTPStatus.OK, content="<html></html>", headers={"Content-Type": "text/html"}
         )
     )
 
@@ -197,7 +198,7 @@ async def test_import_blueprint_success_generic(hass, setup_integration, respx_m
 
     respx_mock.get(url).mock(
         return_value=httpx.Response(
-            200,
+            HTTPStatus.OK,
             content=content,
             headers={
                 "Content-Type": "text/plain",
