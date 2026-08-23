@@ -90,6 +90,67 @@ async def test_merge_previous_data_edge_cases(coordinator):
     coordinator._merge_previous_data(results)
     assert results["path1"]["updatable"] is False
 
+    # Test startup URL change invalidates remote_hash and clears updatable
+    coordinator.data = {}
+    results_url_change = {
+        "path1": {
+            "source_url": "https://new.url",
+            "persisted_source_url": "https://old.url",
+            "local_hash": "local_abc",
+            "remote_hash": "remote_xyz",
+            "updatable": True,
+            "etag": "stale_etag",
+            "last_modified": "stale_date",
+        }
+    }
+    coordinator._persisted_metadata = {"path1": {"etag": "stale_etag", "remote_hash": "remote_xyz"}}
+    coordinator._merge_previous_data(results_url_change)
+    assert results_url_change["path1"].get("remote_hash") is None
+    assert results_url_change["path1"].get("updatable") is False
+    assert results_url_change["path1"].get("etag") is None
+
+    # Test startup URL change with matching hashes (no mismatch) still clears etag and last_modified
+    coordinator.data = {}
+    results_url_change_same_hash = {
+        "path1": {
+            "source_url": "https://new.url",
+            "persisted_source_url": "https://old.url",
+            "local_hash": "same_hash",
+            "remote_hash": "same_hash",
+            "updatable": False,
+            "etag": "stale_etag",
+            "last_modified": "stale_date",
+        }
+    }
+    coordinator._persisted_metadata = {"path1": {"etag": "stale_etag", "remote_hash": "same_hash"}}
+    coordinator._merge_previous_data(results_url_change_same_hash)
+    assert results_url_change_same_hash["path1"].get("remote_hash") is None
+    assert results_url_change_same_hash["path1"].get("updatable") is False
+    assert results_url_change_same_hash["path1"].get("etag") is None
+    assert results_url_change_same_hash["path1"].get("last_modified") is None
+
+    # Test startup URL change when remote_hash is None
+    coordinator.data = {}
+    results_url_change_no_remote_hash = {
+        "path1": {
+            "relative_path": "path1",
+            "source_url": "https://new.url",
+            "persisted_source_url": "https://old.url",
+            "local_hash": "local_abc",
+            "remote_hash": None,
+            "updatable": False,
+            "etag": "stale_etag",
+            "last_modified": "stale_date",
+        }
+    }
+    coordinator._persisted_metadata = {
+        "path1": {"etag": "stale_etag", "source_url": "https://old.url"}
+    }
+    coordinator._merge_previous_data(results_url_change_no_remote_hash)
+    assert results_url_change_no_remote_hash["path1"].get("remote_hash") is None
+    assert results_url_change_no_remote_hash["path1"].get("etag") is None
+    assert "path1" not in coordinator._persisted_metadata
+
     coordinator.data = {"path1": "not a dict"}
     results = {"path1": {"local_hash": "A", "remote_hash": "B", "updatable": True}}
     coordinator._merge_previous_data(results)

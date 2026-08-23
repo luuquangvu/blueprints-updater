@@ -738,14 +738,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         """
         if not self.data:
-            for info in results.values():
-                if remote_hash := info.get("remote_hash"):
-                    prev_url = info.get("persisted_source_url")
-                    is_url_change = prev_url and prev_url != info.get("source_url")
+            for path, info in results.items():
+                prev = self._handle_source_url_change(
+                    path, info, info, prev_url=info.get("persisted_source_url")
+                )
+                if prev is not info:
+                    info.update(prev)
+                elif remote_hash := info.get("remote_hash"):
                     is_mismatch = info["local_hash"] != remote_hash
-
                     info["updatable"] = is_mismatch
-                    if is_url_change or is_mismatch:
+                    if is_mismatch:
                         info["etag"] = None
                         info["last_modified"] = None
             return
@@ -844,7 +846,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         return content_hash == target_hash
 
     def _handle_source_url_change(
-        self, path: str, info: dict[str, object], prev: dict[str, object]
+        self,
+        path: str,
+        info: dict[str, object],
+        prev: dict[str, object] | None,
+        prev_url: object = None,
     ) -> dict[str, object]:
         """Handle detected change in blueprint source URL.
 
@@ -855,23 +861,29 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             path: Local path of the blueprint.
             info: Newly scanned blueprint info.
             prev: Previous metadata dictionary.
+            prev_url: Explicit previous source URL to compare against.
+                Defaults to prev["source_url"].
 
         Returns:
             Updated (possibly invalidated) metadata dictionary.
 
         """
-        prev_url = prev.get("source_url")
+        resolved_prev_url = (
+            prev_url
+            if isinstance(prev_url, str)
+            else (prev.get("source_url") if isinstance(prev, dict) else None)
+        )
         curr_url = info.get("source_url")
 
         if (
-            prev_url
-            and curr_url
-            and prev_url != curr_url
-            and isinstance(prev_url, str)
+            isinstance(resolved_prev_url, str)
             and isinstance(curr_url, str)
+            and resolved_prev_url != curr_url
         ):
-            return self._invalidate_blueprint_metadata(path, prev_url, curr_url, prev)
-        return prev
+            return self._invalidate_blueprint_metadata(
+                path, resolved_prev_url, curr_url, prev if isinstance(prev, dict) else info
+            )
+        return prev if isinstance(prev, dict) else info
 
     def _invalidate_blueprint_metadata(
         self, path: str, prev_url: str, curr_url: str, prev: dict[str, object]
@@ -913,7 +925,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             "last_modified": None,
             "updatable": False,
         }
-        self.data[path] = invalidated
+        if self.data is not None:
+            self.data[path] = invalidated
 
         self.hass.async_create_background_task(
             self._async_save_metadata(force=True), name=f"{DOMAIN}_url_change_save"

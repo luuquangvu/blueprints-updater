@@ -843,6 +843,24 @@ async def test_handle_source_url_change_clears_metadata(coordinator, mock_makedi
 
 
 @pytest.mark.asyncio
+async def test_handle_source_url_change_with_none_prev(coordinator, mock_makedirs):
+    """Test that handle_source_url_change handles prev being None safely."""
+    path = "automation/test.yaml"
+    info = {"source_url": "https://example.com/new.yaml", "local_hash": "h"}
+
+    # prev is None and no prev_url -> returns info safely
+    result = coordinator._handle_source_url_change(path, info, None)
+    assert result == info
+
+    # prev is None and prev_url differs -> invalidates and returns dict
+    result = coordinator._handle_source_url_change(
+        path, info, None, prev_url="https://example.com/old.yaml"
+    )
+    assert result.get("etag") is None
+    assert result.get("remote_hash") is None
+
+
+@pytest.mark.asyncio
 async def test_process_blueprint_content_yaml_error(coordinator, mock_makedirs):
     """Test handling of YAML syntax errors during content processing."""
     path = "automation/error.yaml"
