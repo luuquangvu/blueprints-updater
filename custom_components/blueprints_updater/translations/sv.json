@@ -121,8 +121,8 @@
             }
           },
           "confirm_risks": {
-            "title": "Granska kompatibilitetsrisker",
-            "description": "Potentiellt brytande ändringar upptäcktes för {name}:\n\n{risk_report}\n\nHur vill du gå vidare?",
+            "title": "Granska ändringar",
+            "description": "Granska ändringarna för {name}:\n\n{risk_report}\n\nHur vill du gå vidare?",
             "data": {
               "risk_action": "Åtgärd"
             }
@@ -215,6 +215,7 @@
     "update_available_short": "Uppdatering tillgänglig",
     "update_available": "Uppdatering tillgänglig från {source_url}",
     "update_safety_message": "Tips: Det rekommenderas att aktivera säkerhetskopieringsalternativet innan du installerar uppdateringar.",
+    "backup_automatic_notice": "Säkerhetsmeddelande: En lokal säkerhetskopia skapas automatiskt före uppdateringen så att du kan återställa vid behov.",
     "usage_warning": "Varning: Denna uppdatering kommer att påverka [{count} körande {domain}]({usage_url}).",
     "up_to_date": "Uppdaterad",
     "install_error": "Kan inte installera blueprint: {error}. Fjärrfilen har fel och kan inte appliceras säkert.",

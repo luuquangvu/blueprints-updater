@@ -121,8 +121,8 @@
             }
           },
           "confirm_risks": {
-            "title": "Revisar riesgos de compatibilidad",
-            "description": "Se detectaron posibles cambios importantes para {name}:\n\n{risk_report}\n\n¿Cómo desea proceder?",
+            "title": "Revisar cambios",
+            "description": "Revise los cambios para {name}:\n\n{risk_report}\n\n¿Cómo desea proceder?",
             "data": {
               "risk_action": "Acción"
             }
@@ -215,6 +215,7 @@
     "update_available_short": "Actualización disponible",
     "update_available": "Actualización disponible desde {source_url}",
     "update_safety_message": "Consejo: Se recomienda activar la opción de copia de seguridad antes de instalar actualizaciones.",
+    "backup_automatic_notice": "Nota de seguridad: Se creará automáticamente una copia de seguridad local antes de actualizar para garantizar que pueda revertir si es necesario.",
     "usage_warning": "Advertencia: esta actualización afectará a [{count} {domain} en ejecución]({usage_url}).",
     "up_to_date": "Actualizado",
     "install_error": "No se puede instalar el blueprint: {error}. El archivo remoto tiene errores y no se puede aplicar de forma segura.",

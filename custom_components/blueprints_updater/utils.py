@@ -12,6 +12,7 @@ import textwrap
 from collections.abc import Callable, Coroutine
 from functools import wraps
 from typing import ParamSpec, TypeVar
+from urllib.parse import quote
 
 import httpx
 from homeassistant.components.automation import automations_with_blueprint
@@ -33,6 +34,7 @@ from .const import (
     MIN_BACKUPS,
     MIN_UPDATE_INTERVAL,
     RE_URL_REDACTION,
+    URL_BLUEPRINT_DASHBOARD,
     FilterMode,
     FunctionalDomain,
 )
@@ -598,3 +600,43 @@ def is_ip_safe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 
     """
     return ip.is_global
+
+
+def format_diff_block(diff_text: str | None, diff_title: str) -> str:
+    """Format git diff with localized title, adaptive markdown fences, and collapsible details.
+
+    Args:
+        diff_text: Raw unified diff string, or None.
+        diff_title: Localized summary title.
+
+    Returns:
+        Formatted Markdown string with collapsible details, or empty string.
+
+    """
+    if not isinstance(diff_text, str) or not diff_text.strip():
+        return ""
+    diff_stripped = diff_text.strip()
+    fence = "```"
+    while fence in diff_stripped:
+        fence += "`"
+    return (
+        f"\n\n<details>\n<summary>{diff_title}</summary>\n\n"
+        f"{fence}diff\n{diff_stripped}\n{fence}\n</details>"
+    )
+
+
+def get_blueprint_dashboard_url(domain: FunctionalDomain, blueprint_id: str) -> str:
+    """Get the URL to the dashboard for the given domain and blueprint.
+
+    Args:
+        domain: Functional domain of the blueprint (automation, script, template).
+        blueprint_id: Identifier of the blueprint.
+
+    Returns:
+        The dashboard URL for inspecting dependent entities.
+
+    """
+    if domain == FunctionalDomain.TEMPLATE:
+        return URL_BLUEPRINT_DASHBOARD
+    encoded_id = quote(blueprint_id, safe="")
+    return f"/config/{domain.value}/dashboard?blueprint={encoded_id}"

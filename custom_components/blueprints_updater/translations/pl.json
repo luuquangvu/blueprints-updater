@@ -121,8 +121,8 @@
             }
           },
           "confirm_risks": {
-            "title": "Przejrzyj ryzyko zgodności",
-            "description": "Wykryto potencjalne zmiany powodujące niezgodność dla „{name}”:\n\n{risk_report}\n\nJak chcesz postąpić?",
+            "title": "Przejrzyj zmiany",
+            "description": "Przejrzyj zmiany dla {name}:\n\n{risk_report}\n\nJak chcesz postąpić?",
             "data": {
               "risk_action": "Działanie"
             }
@@ -215,6 +215,7 @@
     "update_available_short": "Dostępna aktualizacja",
     "update_available": "Aktualizacja dostępna pod adresem {source_url}",
     "update_safety_message": "Wskazówka: Zaleca się włączenie opcji kopii zapasowej przed instalacją aktualizacji.",
+    "backup_automatic_notice": "Uwaga dotycząca bezpieczeństwa: Przed aktualizacją zostanie automatycznie utworzona lokalna kopia zapasowa, aby umożliwić przywrócenie w razie potrzeby.",
     "usage_warning": "Ostrzeżenie: Ta aktualizacja wpłynie na [{count} uruchomionych {domain}(ów)]({usage_url}).",
     "up_to_date": "Aktualne",
     "install_error": "Nie można zainstalować Blueprint: {error}. Plik zdalny zawiera błędy i nie można go bezpiecznie zastosować.",

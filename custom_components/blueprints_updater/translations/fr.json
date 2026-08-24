@@ -121,8 +121,8 @@
             }
           },
           "confirm_risks": {
-            "title": "Examiner les risques de compatibilité",
-            "description": "Changements majeurs potentiels détectés pour « {name} » :\n\n{risk_report}\n\nComment souhaitez-vous procéder ?",
+            "title": "Vérifier les modifications",
+            "description": "Vérifiez les modifications pour « {name} » :\n\n{risk_report}\n\nComment souhaitez-vous procéder ?",
             "data": {
               "risk_action": "Action"
             }
@@ -215,6 +215,7 @@
     "update_available_short": "Mise à jour disponible",
     "update_available": "Mise à jour disponible depuis {source_url}",
     "update_safety_message": "Conseil : Il est recommandé d'activer l'option de sauvegarde avant d'installer des mises à jour.",
+    "backup_automatic_notice": "Note de sécurité : Une sauvegarde locale sera créée automatiquement avant la mise à jour pour vous permettre de restaurer si nécessaire.",
     "usage_warning": "Attention : Cette mise à jour affectera [{count} {domain} en cours d'exécution]({usage_url}).",
     "up_to_date": "À jour",
     "install_error": "Impossible d'installer le blueprint : {error}. Le fichier distant contient des erreurs et ne peut pas être appliqué en toute sécurité.",

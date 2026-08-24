@@ -121,8 +121,8 @@
             }
           },
           "confirm_risks": {
-            "title": "Review Compatibility Risks",
-            "description": "Potential breaking changes detected for {name}:\n\n{risk_report}\n\nHow would you like to proceed?",
+            "title": "Review Changes",
+            "description": "Review the changes for {name}:\n\n{risk_report}\n\nHow would you like to proceed?",
             "data": {
               "risk_action": "Action"
             }
@@ -215,6 +215,7 @@
     "update_available_short": "Update available",
     "update_available": "Update available from {source_url}",
     "update_safety_message": "Safety Tip: It is recommended to enable the backup option before installing updates to ensure you can revert if needed.",
+    "backup_automatic_notice": "Safety Note: A local backup will be created automatically before updating to ensure you can revert if needed.",
     "usage_warning": "Warning: This update will affect [{count} running {domain}(s)]({usage_url}).",
     "up_to_date": "Up to date",
     "install_error": "Cannot install blueprint: {error}. The remote file has errors and cannot be safely applied.",

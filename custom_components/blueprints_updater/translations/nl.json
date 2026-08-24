@@ -121,8 +121,8 @@
             }
           },
           "confirm_risks": {
-            "title": "Compatibiliteitsrisico's bekijken",
-            "description": "Mogelijke ingrijpende wijzigingen gedetecteerd voor {name}:\n\n{risk_report}\n\nHoe wilt u verdergaan?",
+            "title": "Wijzigingen controleren",
+            "description": "Controleer de wijzigingen voor {name}:\n\n{risk_report}\n\nHoe wilt u doorgaan?",
             "data": {
               "risk_action": "Actie"
             }
@@ -215,6 +215,7 @@
     "update_available_short": "Update beschikbaar",
     "update_available": "Update beschikbaar van {source_url}",
     "update_safety_message": "Tip: Het wordt aanbevolen om de back-upoptie in te schakelen voordat u updates installeert.",
+    "backup_automatic_notice": "Veiligheidsopmerking: Er wordt automatisch een lokale back-up gemaakt vóór het bijwerken, zodat u indien nodig kunt herstellen.",
     "usage_warning": "Waarschuwing: Deze update heeft invloed op [{count} actieve {domain}]({usage_url}).",
     "up_to_date": "Bijgewerkt",
     "install_error": "Kan blueprint niet installeren: {error}. Het externe bestand bevat fouten en kan niet veilig worden toegepast.",

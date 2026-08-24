@@ -121,8 +121,8 @@
             }
           },
           "confirm_risks": {
-            "title": "Xem xét Rủi ro Tương thích",
-            "description": "Phát hiện các thay đổi có thể gây lỗi cho {name}:\n\n{risk_report}\n\nBạn muốn tiếp tục như thế nào?",
+            "title": "Xem xét các thay đổi",
+            "description": "Xem xét các thay đổi cho {name}:\n\n{risk_report}\n\nBạn muốn tiếp tục như thế nào?",
             "data": {
               "risk_action": "Hành động"
             }
@@ -215,6 +215,7 @@
     "update_available_short": "Có bản cập nhật",
     "update_available": "Có bản cập nhật mới từ {source_url}",
     "update_safety_message": "Lưu ý: Khuyến nghị bạn nên bật tùy chọn sao lưu trước khi cài đặt để đảm bảo có thể khôi phục phiên bản cũ nếu cần thiết.",
+    "backup_automatic_notice": "Lưu ý an toàn: Bản sao lưu cục bộ sẽ được tạo tự động trước khi cập nhật để đảm bảo bạn có thể khôi phục nếu cần.",
     "usage_warning": "Cảnh báo: Bản cập nhật này sẽ ảnh hưởng đến [{count} {domain} đang chạy]({usage_url}).",
     "up_to_date": "Đã là bản mới nhất",
     "install_error": "Không thể cài đặt blueprint: {error}. Tệp từ xa có lỗi và không thể áp dụng an toàn.",

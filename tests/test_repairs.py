@@ -21,7 +21,9 @@ from custom_components.blueprints_updater.const import (
     RepairRiskAction,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
-from custom_components.blueprints_updater.file_store import BlueprintFileStore
+from custom_components.blueprints_updater.file_store import (
+    BlueprintFileStore,
+)
 from custom_components.blueprints_updater.repairs import (
     WithdrawnBlueprintRepairFlow,
     async_create_fix_flow,
@@ -246,7 +248,7 @@ async def test_change_url_validation_failures(mock_repair_flow):
 
 @pytest.mark.asyncio
 async def test_change_url_clean_success(mock_repair_flow, hass):
-    """Test change_url step with clean URL and no breaking risks."""
+    """Test change_url step with clean URL transitions to review step before install."""
     content = "blueprint:\n  name: New\n"
     canonical_url = "https://canonical.url/test.yaml"
     mock_repair_flow.coordinator.async_fetch_import_data = AsyncMock(
@@ -255,25 +257,43 @@ async def test_change_url_clean_success(mock_repair_flow, hass):
     mock_repair_flow.coordinator.async_detect_risks_for_update = AsyncMock(return_value=[])
     mock_repair_flow.coordinator.async_reconcile_reload_services = AsyncMock()
     mock_repair_flow.coordinator.async_request_refresh = AsyncMock()
+    mock_repair_flow.coordinator.data = {
+        mock_repair_flow.path: {"source_url": "https://old.url/test.yaml"}
+    }
 
+    # Step 1: change_url presents review form
+    result = await mock_repair_flow.async_step_change_url({"url": "https://valid.url/test.yaml"})
+    assert result.get("type") == data_entry_flow.FlowResultType.FORM
+    assert result.get("step_id") == "confirm_risks"
+    assert "description_placeholders" in result
+    risk_placeholders = result["description_placeholders"]
+    assert "risk_report" in risk_placeholders
+    assert isinstance(risk_placeholders["risk_report"], str)
+    assert risk_placeholders["risk_report"]
+
+    # Step 2: user reviews and proceeds
     with (
         patch.object(
             mock_repair_flow.coordinator, "async_install_blueprint", new_callable=AsyncMock
         ) as mock_install,
         patch("homeassistant.helpers.issue_registry.async_delete_issue") as mock_delete,
     ):
-        result = await mock_repair_flow.async_step_change_url(
-            {"url": "https://valid.url/test.yaml"}
+        result2 = await mock_repair_flow.async_step_confirm_risks(
+            {"risk_action": RepairRiskAction.PROCEED}
         )
-        assert result.get("type") == data_entry_flow.FlowResultType.CREATE_ENTRY
+        assert result2.get("type") == data_entry_flow.FlowResultType.CREATE_ENTRY
         mock_install.assert_awaited_once_with(
             mock_repair_flow.path,
             content,
             reload_services=False,
             backup=True,
             source_url=canonical_url,
+            file_precondition=mock_repair_flow._pending_precondition,
         )
         mock_delete.assert_called_once_with(hass, DOMAIN, "withdrawn_blueprint_12345")
+        assert (
+            mock_repair_flow.coordinator.data[mock_repair_flow.path]["source_url"] == canonical_url
+        )
 
 
 @pytest.mark.asyncio
@@ -315,6 +335,7 @@ async def test_change_url_with_risks_and_confirm(mock_repair_flow, hass):
             reload_services=False,
             backup=True,
             source_url=canonical_url,
+            file_precondition=mock_repair_flow._pending_precondition,
         )
         mock_delete.assert_called_once_with(hass, DOMAIN, "withdrawn_blueprint_12345")
 
@@ -983,3 +1004,306 @@ def test_coordinator_create_and_delete_issue_domain_normalization(coordinator, h
 
     assert created_issue_id is not None
     assert created_issue_id == deleted_issue_id
+
+
+@pytest.mark.asyncio
+async def test_change_url_with_git_diff_preview(mock_repair_flow):
+    """Test change_url generates git diff and includes formatted preview in confirm_risks."""
+    content = "blueprint:\n  name: Updated Blueprint\n"
+    canonical_url = "https://canonical.url/test.yaml"
+    mock_repair_flow.coordinator.async_fetch_import_data = AsyncMock(
+        return_value=(content, canonical_url, "author", "name", None)
+    )
+    mock_repair_flow.coordinator.async_detect_risks_for_update = AsyncMock(
+        return_value=[{"type": "new_mandatory", "args": {"input": "delay"}}]
+    )
+    mock_repair_flow.coordinator.async_summarize_risks = AsyncMock(
+        return_value="New mandatory input delay"
+    )
+    mock_repair_flow.coordinator.async_translate = AsyncMock(return_value="Code Changes (Git Diff)")
+
+    diff_content = "--- local\n+++ remote\n@@ -1,2 +1,2 @@\n-old\n+new\n"
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._read_and_diff",
+        return_value=diff_content,
+    ) as mock_diff:
+        result = await mock_repair_flow.async_step_change_url(
+            {"url": "https://valid.url/test.yaml"}
+        )
+
+        assert result.get("type") == data_entry_flow.FlowResultType.FORM
+        assert result.get("step_id") == "confirm_risks"
+        mock_diff.assert_called_once_with(mock_repair_flow.path, content, canonical_url)
+        assert mock_repair_flow._pending_diff == diff_content
+
+        placeholders = result.get("description_placeholders", {})
+        assert "risk_report" in placeholders
+        risk_report = placeholders["risk_report"]
+        assert "<details>" in risk_report
+        assert "<summary>Code Changes (Git Diff)</summary>" in risk_report
+        assert "```diff" in risk_report
+        assert "+new" in risk_report
+
+
+@pytest.mark.asyncio
+async def test_change_url_with_usage_warning_and_safety_in_preview(mock_repair_flow):
+    """Test change_url includes usage warning and safety messages in repair preview."""
+    content = "blueprint:\n  name: Updated Blueprint\n"
+    canonical_url = "https://canonical.url/test.yaml"
+    mock_repair_flow.coordinator.async_fetch_import_data = AsyncMock(
+        return_value=(content, canonical_url, "author", "name", None)
+    )
+    mock_repair_flow.coordinator.async_detect_risks_for_update = AsyncMock(
+        return_value=[{"type": "new_mandatory", "args": {"input": "delay"}}]
+    )
+    mock_repair_flow.coordinator.async_summarize_risks = AsyncMock(
+        return_value="New mandatory input delay"
+    )
+
+    async def _mock_translate(key: str, **kwargs: object) -> str:
+        """Mock translation handler for repair preview strings."""
+        if key == "usage_warning":
+            cnt = kwargs.get("count")
+            dom = kwargs.get("domain")
+            url = kwargs.get("usage_url")
+            return f"Warning: affects {cnt} {dom}(s) at {url}"
+        if key == "update_safety_message":
+            return "Safety Tip: enable backups"
+        if key == "backup_automatic_notice":
+            return "Safety Note: automatic backup will be created"
+        if key == "breaking_risks_title":
+            return "[WARNING] POTENTIAL BREAKING CHANGES"
+        return f"[{key}]"
+
+    mock_repair_flow.coordinator.async_translate = AsyncMock(side_effect=_mock_translate)
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_blueprint_usage_entities",
+            return_value=["automation.motion_sensor_light", "automation.hallway_light"],
+        ),
+        patch(
+            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._read_and_diff",
+            return_value="",
+        ),
+    ):
+        result = await mock_repair_flow.async_step_change_url(
+            {"url": "https://valid.url/test.yaml"}
+        )
+
+        assert result.get("type") == data_entry_flow.FlowResultType.FORM
+        assert result.get("step_id") == "confirm_risks"
+
+        placeholders = result.get("description_placeholders", {})
+        risk_report = placeholders.get("risk_report", "")
+        expected_url_warning = (
+            "Warning: affects 2 automation(s) at "
+            "/config/automation/dashboard?blueprint=test%2Fblueprint.yaml"
+        )
+        assert expected_url_warning in risk_report
+        assert "[WARNING] POTENTIAL BREAKING CHANGES" in risk_report
+        assert "New mandatory input delay" in risk_report
+        assert "Safety Tip: enable backups" not in risk_report
+        assert "Safety Note: automatic backup will be created" in risk_report
+
+
+@pytest.mark.asyncio
+async def test_change_url_git_diff_generation_error_handled(mock_repair_flow):
+    """Test change_url handles diff generation errors gracefully without breaking flow."""
+    content = "blueprint:\n  name: Updated Blueprint\n"
+    canonical_url = "https://canonical.url/test.yaml"
+    mock_repair_flow.coordinator.async_fetch_import_data = AsyncMock(
+        return_value=(content, canonical_url, "author", "name", None)
+    )
+    mock_repair_flow.coordinator.async_detect_risks_for_update = AsyncMock(
+        return_value=[{"type": "system_error"}]
+    )
+    mock_repair_flow.coordinator.async_summarize_risks = AsyncMock(return_value="System error")
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._read_and_diff",
+        side_effect=OSError("Disk read failure"),
+    ):
+        result = await mock_repair_flow.async_step_change_url(
+            {"url": "https://valid.url/test.yaml"}
+        )
+
+        assert result.get("type") == data_entry_flow.FlowResultType.FORM
+        assert result.get("step_id") == "confirm_risks"
+        placeholders = result.get("description_placeholders", {})
+        assert "risk_report" in placeholders
+
+
+@pytest.mark.asyncio
+async def test_format_diff_preview_formatting_and_fences(mock_repair_flow):
+    """Test async_format_diff_block handles various diff inputs and backtick fencing."""
+    mock_repair_flow.coordinator.async_translate = AsyncMock(return_value="Diff Title")
+
+    # None and empty strings return empty string
+    assert await mock_repair_flow.coordinator.async_format_diff_block(None) == ""
+    assert await mock_repair_flow.coordinator.async_format_diff_block("") == ""
+    assert await mock_repair_flow.coordinator.async_format_diff_block("   \n\t  ") == ""
+
+    # Standard diff
+    formatted = await mock_repair_flow.coordinator.async_format_diff_block("--- a\n+++ b\n")
+    assert "<summary>Diff Title</summary>" in formatted
+    assert "```diff\n--- a\n+++ b\n```" in formatted
+
+    # Diff containing backticks triggers adaptive fencing
+    diff_with_backticks = "--- a\n+++ b\n+```\n+code block\n+```\n"
+    formatted_fences = await mock_repair_flow.coordinator.async_format_diff_block(
+        diff_with_backticks
+    )
+    assert "````diff" in formatted_fences
+    assert "````\n</details>" in formatted_fences
+
+
+@pytest.mark.asyncio
+async def test_change_url_local_revision_changed_before_proceed_rejected(
+    mock_repair_flow, tmp_path
+):
+    """Test changing local file revision after preview causes PROCEED to reject stale content."""
+    bp_file = tmp_path / "blueprint.yaml"
+    initial_content = "blueprint:\n  name: Initial Version\n"
+    bp_file.write_text(initial_content, encoding="utf-8")
+
+    mock_repair_flow.path = str(bp_file)
+    original_source_url = "https://original.source/test.yaml"
+    mock_repair_flow.coordinator.data = {mock_repair_flow.path: {"source_url": original_source_url}}
+    remote_content = "blueprint:\n  name: Updated Remote Blueprint\n"
+    canonical_url = "https://canonical.url/test.yaml"
+
+    mock_repair_flow.coordinator.async_fetch_import_data = AsyncMock(
+        return_value=(remote_content, canonical_url, "author", "name", None)
+    )
+    mock_repair_flow.coordinator.async_detect_risks_for_update = AsyncMock(return_value=[])
+
+    # Step 1: change_url captures precondition of initial file
+    result = await mock_repair_flow.async_step_change_url({"url": "https://valid.url/test.yaml"})
+    assert result.get("type") == data_entry_flow.FlowResultType.FORM
+    assert result.get("step_id") == "confirm_risks"
+    assert mock_repair_flow._pending_precondition is not None
+    assert mock_repair_flow._pending_precondition.content_hash == BlueprintFileStore._hash_file(
+        str(bp_file)
+    )
+
+    # Concurrently modify the local blueprint file on disk before user proceeds
+    concurrent_content = "blueprint:\n  name: Concurrently Modified Local\n"
+    bp_file.write_text(concurrent_content, encoding="utf-8")
+
+    # Step 2: User proceeds, real coordinator rejects due to precondition mismatch
+    with (
+        patch("homeassistant.helpers.issue_registry.async_delete_issue") as mock_delete,
+        pytest.raises(HomeAssistantError, match="Local blueprint changed"),
+    ):
+        await mock_repair_flow.async_step_confirm_risks({"risk_action": RepairRiskAction.PROCEED})
+
+    # Issue was NOT deleted and file was NOT overwritten with remote content
+    mock_delete.assert_not_called()
+    assert bp_file.read_text(encoding="utf-8") == concurrent_content
+    assert (
+        mock_repair_flow.coordinator.data[mock_repair_flow.path]["source_url"]
+        == original_source_url
+    )
+
+
+@pytest.mark.asyncio
+async def test_change_url_file_modified_during_diff_rejected(mock_repair_flow, tmp_path):
+    """Test concurrent local file change during diff generation causes PROCEED rejection."""
+    bp_file = tmp_path / "blueprint.yaml"
+    initial_content = "blueprint:\n  name: Initial Version\n"
+    bp_file.write_text(initial_content, encoding="utf-8")
+
+    mock_repair_flow.path = str(bp_file)
+    initial_hash = BlueprintFileStore._hash_file(str(bp_file))
+    original_source_url = "https://original.source/test.yaml"
+    mock_repair_flow.coordinator.data = {mock_repair_flow.path: {"source_url": original_source_url}}
+    remote_content = "blueprint:\n  name: Updated Remote Blueprint\n"
+    canonical_url = "https://canonical.url/test.yaml"
+
+    mock_repair_flow.coordinator.async_fetch_import_data = AsyncMock(
+        return_value=(remote_content, canonical_url, "author", "name", None)
+    )
+    mock_repair_flow.coordinator.async_detect_risks_for_update = AsyncMock(return_value=[])
+
+    concurrent_content = "blueprint:\n  name: Concurrently Modified During Diff\n"
+    real_read_and_diff = BlueprintUpdateCoordinator._read_and_diff
+
+    def _read_and_diff_with_concurrent_mutation(
+        local_path: str, remote_text: str, source_url: str
+    ) -> str:
+        """Read diff and mutate file on disk concurrently."""
+        diff = real_read_and_diff(local_path, remote_text, source_url)
+        bp_file.write_text(concurrent_content, encoding="utf-8")
+        return diff
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._read_and_diff",
+        side_effect=_read_and_diff_with_concurrent_mutation,
+    ):
+        result = await mock_repair_flow.async_step_change_url(
+            {"url": "https://valid.url/test.yaml"}
+        )
+
+    assert result.get("type") == data_entry_flow.FlowResultType.FORM
+    assert result.get("step_id") == "confirm_risks"
+    assert mock_repair_flow._pending_precondition is not None
+    assert mock_repair_flow._pending_precondition.content_hash == initial_hash
+    assert mock_repair_flow._pending_precondition.content_hash != BlueprintFileStore._hash_file(
+        str(bp_file)
+    )
+
+    with (
+        patch("homeassistant.helpers.issue_registry.async_delete_issue") as mock_delete,
+        pytest.raises(HomeAssistantError, match="Local blueprint changed"),
+    ):
+        await mock_repair_flow.async_step_confirm_risks({"risk_action": RepairRiskAction.PROCEED})
+
+    mock_delete.assert_not_called()
+    assert bp_file.read_text(encoding="utf-8") == concurrent_content
+    assert (
+        mock_repair_flow.coordinator.data[mock_repair_flow.path]["source_url"]
+        == original_source_url
+    )
+
+
+@pytest.mark.asyncio
+async def test_change_url_capture_precondition_failure_aborts_flow(mock_repair_flow):
+    """Test capture_precondition failure during change_url sets invalid_url."""
+    content = "blueprint:\n  name: Updated Blueprint\n"
+    canonical_url = "https://canonical.url/test.yaml"
+    mock_repair_flow.coordinator.async_fetch_import_data = AsyncMock(
+        return_value=(content, canonical_url, "author", "name", None)
+    )
+
+    with patch(
+        "custom_components.blueprints_updater.file_store.BlueprintFileStore.capture_precondition",
+        side_effect=OSError("Symlink or unreadable file"),
+    ):
+        result = await mock_repair_flow.async_step_change_url(
+            {"url": "https://valid.url/test.yaml"}
+        )
+
+        assert result.get("type") == data_entry_flow.FlowResultType.FORM
+        assert result.get("step_id") == "change_url"
+        assert result.get("errors") == {"url": "invalid_url"}
+        assert mock_repair_flow._pending_precondition is None
+
+
+@pytest.mark.asyncio
+async def test_confirm_risks_proceed_without_precondition_rejected(mock_repair_flow):
+    """Test PROCEED without a valid captured precondition returns to change_url."""
+    mock_repair_flow._pending_content = "blueprint:\n  name: New\n"
+    mock_repair_flow._pending_canonical_url = "https://canonical.url/test.yaml"
+    mock_repair_flow._pending_precondition = None
+
+    with patch.object(mock_repair_flow.coordinator, "async_install_blueprint") as mock_install:
+        result = await mock_repair_flow.async_step_confirm_risks(
+            {"risk_action": RepairRiskAction.PROCEED}
+        )
+
+        assert result.get("type") == data_entry_flow.FlowResultType.FORM
+        assert result.get("step_id") == "change_url"
+        assert result.get("errors") == {"url": "invalid_url"}
+        mock_install.assert_not_called()

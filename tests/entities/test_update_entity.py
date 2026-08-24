@@ -197,6 +197,14 @@ def coordinator():
     comp.is_auto_update_enabled = BlueprintUpdateCoordinator.is_auto_update_enabled.__get__(
         comp, BlueprintUpdateCoordinator
     )
+    comp.async_format_blueprint_notes = (
+        BlueprintUpdateCoordinator.async_format_blueprint_notes.__get__(
+            comp, BlueprintUpdateCoordinator
+        )
+    )
+    comp.async_summarize_risks = BlueprintUpdateCoordinator.async_summarize_risks.__get__(
+        comp, BlueprintUpdateCoordinator
+    )
     comp._normalize_domain = normalize_domain
     return comp
 

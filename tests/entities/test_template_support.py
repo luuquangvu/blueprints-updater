@@ -27,6 +27,12 @@ async def test_template_usage_warning(hass: HomeAssistant):
     }
     coordinator.async_translate = AsyncMock(side_effect=lambda key, **kwargs: f"[{key}]")
     coordinator._normalize_domain = MagicMock(side_effect=lambda x: x)
+    coordinator.async_get_git_diff = AsyncMock(return_value=None)
+    coordinator.async_format_blueprint_notes = (
+        BlueprintUpdateCoordinator.async_format_blueprint_notes.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+    )
 
     entity = BlueprintUpdateEntity(
         coordinator,

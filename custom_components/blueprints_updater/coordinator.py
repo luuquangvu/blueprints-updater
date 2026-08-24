@@ -106,7 +106,9 @@ from .network import (
 )
 from .providers import registry
 from .utils import (
+    format_diff_block,
     format_error_message,
+    get_blueprint_dashboard_url,
     get_blueprint_relative_path,
     get_blueprint_usage_entities,
     get_config_bool,
@@ -516,7 +518,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                             self.hass, language, category, [DOMAIN]
                         )
                         self._translations[cache_key] = loaded or {}
-                    except (OSError, ValueError) as err:
+                    except (OSError, ValueError, KeyError, HomeAssistantError) as err:
                         _LOGGER.debug(
                             "Could not load translations for %s (%s) for language %s: %s",
                             DOMAIN,
@@ -3190,6 +3192,98 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         lines = await asyncio.gather(*[_translate_risk(r) for r in risks])
         return "\n".join(lines)
+
+    async def async_format_diff_block(self, diff_text: str | None) -> str:
+        """Format git diff with localized title, adaptive markdown fences, and collapsible details.
+
+        Args:
+            diff_text: Raw unified diff string, or None.
+
+        Returns:
+            A formatted Markdown string containing the collapsible details block,
+            or an empty string if diff_text is empty or whitespace-only.
+
+        """
+        if not isinstance(diff_text, str) or not diff_text.strip():
+            return ""
+        diff_title = await self.async_translate("git_diff_title")
+        return format_diff_block(diff_text, diff_title)
+
+    async def async_format_blueprint_notes(
+        self,
+        path: str,
+        domain: FunctionalDomain,
+        source_url: str | None = None,
+        relative_path: str | None = None,
+        breaking_risks: Iterable[Mapping[str, object]] | None = None,
+        diff_text: str | None = None,
+        is_semantic_sync: bool = False,
+        include_header: bool = True,
+        include_safety_message: bool = True,
+    ) -> str:
+        """Format comprehensive localized release notes / safety preview.
+
+        Args:
+            path: Local path to the blueprint.
+            domain: Functional domain (automation, script, template).
+            source_url: Upstream source URL.
+            relative_path: Relative blueprint path.
+            breaking_risks: Optional iterable of detected risks.
+            diff_text: Optional generated unified diff text.
+            is_semantic_sync: Whether changes are only semantic sync.
+            include_header: If True, prepend the 'update_available' source header.
+            include_safety_message: If True, include the backup recommendation message.
+
+        Returns:
+            Formatted localized Markdown notes string.
+
+        """
+        notes_parts: list[str] = []
+
+        if include_header:
+            notes_parts.append(
+                await self.async_translate("update_available", source_url=source_url or "<unknown>")
+            )
+
+        rel = (
+            relative_path
+            if relative_path is not None
+            else self.data.get(path, {}).get("relative_path")
+        )
+        bp_id = str(rel).split("/", 1)[-1] if (rel and "/" in str(rel)) else str(rel or "")
+
+        usage_entities = (
+            get_blueprint_usage_entities(self.hass, domain, bp_id) if bp_id else []
+        ) or []
+        total_usage = len(usage_entities)
+
+        if total_usage > 0 and bp_id:
+            usage_url = get_blueprint_dashboard_url(domain, bp_id)
+            usage_warning = await self.async_translate(
+                "usage_warning", count=total_usage, domain=domain.value, usage_url=usage_url
+            )
+            notes_parts.append(usage_warning)
+
+        risks_list = list(breaking_risks) if breaking_risks else []
+        if risks_list:
+            risks_title = await self.async_translate("breaking_risks_title")
+            risk_summary = await self.async_summarize_risks(risks_list)
+            notes_parts.append(f"{risks_title}\n{risk_summary}")
+
+        if include_safety_message:
+            notes_parts.append(await self.async_translate("update_safety_message"))
+        else:
+            notes_parts.append(await self.async_translate("backup_automatic_notice"))
+
+        if is_semantic_sync:
+            notes_parts.append(await self.async_translate("semantic_sync_notice"))
+
+        if diff_text and isinstance(diff_text, str):
+            diff_title = await self.async_translate("git_diff_title")
+            if diff_block := format_diff_block(diff_text, diff_title):
+                notes_parts.append(diff_block.lstrip("\n"))
+
+        return "\n\n".join(notes_parts)
 
     def set_cached_git_diff(
         self,

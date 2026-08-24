@@ -7,7 +7,6 @@ import logging
 from collections.abc import Mapping
 from functools import cached_property
 from typing import ClassVar
-from urllib.parse import quote
 
 from homeassistant.components.update import (
     UpdateDeviceClass,
@@ -23,13 +22,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DOMAIN,
-    URL_BLUEPRINT_DASHBOARD,
     FunctionalDomain,
 )
 from .coordinator import BlueprintUpdateCoordinator
 from .providers import registry
 from .utils import (
-    get_blueprint_usage_entities,
+    get_blueprint_dashboard_url,
     normalize_domain,
     redact_url,
     split_error_message,
@@ -221,7 +219,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         return provider.provider_type if provider else None
 
     @cached_property
-    def domain(self) -> str:
+    def domain(self) -> FunctionalDomain:
         """Return the domain of the blueprint (e.g. automation, script)."""
         info = self.coordinator.data.get(self._path, {})
         raw_domain = info.get("domain") or self.relative_path.split("/", 1)[0]
@@ -240,7 +238,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         return relative_path.split("/", 1)[-1] if "/" in relative_path else relative_path
 
     @staticmethod
-    def _get_usage_url(domain: str, blueprint_id: str) -> str:
+    def _get_usage_url(domain: FunctionalDomain, blueprint_id: str) -> str:
         """Get the URL to the dashboard for the given domain and blueprint.
 
         Args:
@@ -252,11 +250,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             have a dedicated dashboard, so the main blueprint list is used.
 
         """
-        if domain == FunctionalDomain.TEMPLATE:
-            return URL_BLUEPRINT_DASHBOARD
-
-        encoded_id = quote(blueprint_id, safe="")
-        return f"/config/{domain}/dashboard?blueprint={encoded_id}"
+        return get_blueprint_dashboard_url(domain, blueprint_id)
 
     @cached_property
     def installed_version(self) -> str | None:
@@ -288,29 +282,13 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         Returns:
             Formatted release notes string or None if not applicable.
         """
-        if self._path not in self.coordinator.data:
+        info = self.coordinator.data.get(self._path, {})
+        if not info.get("updatable"):
             return None
 
-        info = self.coordinator.data[self._path]
-        if not info["updatable"]:
-            return None
-
-        notes = await self.coordinator.async_translate(
-            "update_available", source_url=info.get("source_url", "<unknown>")
-        )
-        domain = self.domain
-        bp_id = self.blueprint_id
-        usage_entities = (
-            get_blueprint_usage_entities(self.coordinator.hass, domain, bp_id) if bp_id else []
-        ) or []
-        total_usage = len(usage_entities)
-
-        if total_usage > 0 and bp_id:
-            usage_url = self._get_usage_url(domain, bp_id)
-
-            notes += "\n\n" + await self.coordinator.async_translate(
-                "usage_warning", count=total_usage, domain=domain, usage_url=usage_url
-            )
+        diff_result = await self.coordinator.async_get_git_diff(self._path)
+        diff_text = diff_result.diff_text if diff_result else None
+        is_semantic_sync = diff_result.is_semantic_sync if diff_result else False
 
         risks_obj = info.get("breaking_risks")
         breaking_risks: list[Mapping[str, object]] = (
@@ -318,34 +296,21 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
             if isinstance(risks_obj, list)
             else []
         )
-        if breaking_risks:
-            risks_title = await self.coordinator.async_translate("breaking_risks_title")
-            risk_summary = await self.coordinator.async_summarize_risks(breaking_risks)
-            notes += f"\n\n{risks_title}\n{risk_summary}\n"
 
-        notes += "\n\n" + await self.coordinator.async_translate("update_safety_message")
+        source_url_raw = info.get("source_url")
+        source_url = str(source_url_raw) if isinstance(source_url_raw, str) else None
 
-        diff_result = await self.coordinator.async_get_git_diff(self._path)
-
-        if diff_result:
-            diff_text = diff_result.diff_text
-            is_semantic_sync = diff_result.is_semantic_sync
-
-            if is_semantic_sync:
-                notes += "\n\n" + await self.coordinator.async_translate("semantic_sync_notice")
-
-            if diff_text:
-                fence = "```"
-                while fence in diff_text:
-                    fence += "`"
-
-                diff_title = await self.coordinator.async_translate("git_diff_title")
-                notes += (
-                    f"\n\n<details>\n<summary>{diff_title}</summary>\n\n"
-                    f"{fence}diff\n{diff_text}\n{fence}\n</details>"
-                )
-
-        return notes
+        return await self.coordinator.async_format_blueprint_notes(
+            path=self._path,
+            domain=self.domain,
+            source_url=source_url,
+            relative_path=self.relative_path,
+            breaking_risks=breaking_risks,
+            diff_text=diff_text,
+            is_semantic_sync=is_semantic_sync,
+            include_header=True,
+            include_safety_message=True,
+        )
 
     @cached_property
     def latest_version(self) -> str | None:

@@ -463,3 +463,91 @@ def test_stabilize_yaml_structure_preserves_non_string_keys():
     assert res_dict["1"] == "str_val_norm"
     assert res_dict[2.5] == "float_val_norm"
     assert res_dict[3] == "new_int"
+
+
+@pytest.mark.asyncio
+async def test_async_format_diff_block(coordinator):
+    """Test async_format_diff_block handles empty and valid diff inputs with fencing."""
+    coordinator.async_translate = AsyncMock(return_value="Code Changes (Git Diff)")
+
+    # None and empty strings return empty string
+    assert await coordinator.async_format_diff_block(None) == ""
+    assert await coordinator.async_format_diff_block("") == ""
+    assert await coordinator.async_format_diff_block("   \n\t  ") == ""
+
+    # Normal diff
+    res = await coordinator.async_format_diff_block("--- a\n+++ b\n")
+    assert "<summary>Code Changes (Git Diff)</summary>" in res
+    assert "```diff\n--- a\n+++ b\n```" in res
+
+    # Diff containing backticks
+    res_fences = await coordinator.async_format_diff_block("--- a\n+++ b\n+```\n+code\n+```\n")
+    assert "````diff" in res_fences
+    assert "````\n</details>" in res_fences
+
+
+@pytest.mark.asyncio
+async def test_async_format_blueprint_notes_comprehensive(coordinator):
+    """Test async_format_blueprint_notes generates complete safety report."""
+
+    async def _mock_trans(key: str, **kwargs: object) -> str:
+        """Mock translation handler for blueprint release and safety notes."""
+        count = kwargs.get("count")
+        domain = kwargs.get("domain")
+        usage_url = kwargs.get("usage_url")
+        translations = {
+            "update_available": f"Update available from {kwargs.get('source_url')}",
+            "usage_warning": f"Warning: affects {count} {domain}(s) at {usage_url}",
+            "breaking_risks_title": "Breaking Risks:",
+            "update_safety_message": "Safety Message: Take Backup",
+            "backup_automatic_notice": "Safety Note: Automatic Backup",
+            "semantic_sync_notice": "Semantic Sync Notice",
+            "git_diff_title": "Git Diff Title",
+        }
+        return translations.get(key, f"[{key}]")
+
+    coordinator.async_translate = AsyncMock(side_effect=_mock_trans)
+    coordinator.async_summarize_risks = AsyncMock(return_value="- Input removed")
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.get_blueprint_usage_entities",
+        return_value=["automation.test1", "automation.test2"],
+    ):
+        # Full notes with header
+        notes = await coordinator.async_format_blueprint_notes(
+            path="/config/blueprints/automation/test.yaml",
+            domain=FunctionalDomain.AUTOMATION,
+            source_url="https://github.com/test/repo",
+            relative_path="automation/test.yaml",
+            breaking_risks=[{"type": "input_removed"}],
+            diff_text="--- a\n+++ b\n",
+            is_semantic_sync=True,
+            include_header=True,
+        )
+
+        assert "Update available from https://github.com/test/repo" in notes
+        assert "Warning: affects 2 automation(s)" in notes
+        assert "Breaking Risks:\n- Input removed" in notes
+        assert "Safety Message: Take Backup" in notes
+        assert "Semantic Sync Notice" in notes
+        assert "<details>\n<summary>Git Diff Title</summary>" in notes
+
+        # Repair flow notes (include_header=False, include_safety_message=False)
+        repair_notes = await coordinator.async_format_blueprint_notes(
+            path="/config/blueprints/automation/test.yaml",
+            domain=FunctionalDomain.AUTOMATION,
+            source_url="https://github.com/test/repo",
+            relative_path="automation/test.yaml",
+            breaking_risks=[{"type": "input_removed"}],
+            diff_text="--- a\n+++ b\n",
+            is_semantic_sync=False,
+            include_header=False,
+            include_safety_message=False,
+        )
+
+        assert "Update available" not in repair_notes
+        assert "Warning: affects 2 automation(s)" in repair_notes
+        assert "Breaking Risks:\n- Input removed" in repair_notes
+        assert "Safety Message: Take Backup" not in repair_notes
+        assert "Safety Note: Automatic Backup" in repair_notes
+        assert "<details>\n<summary>Git Diff Title</summary>" in repair_notes
