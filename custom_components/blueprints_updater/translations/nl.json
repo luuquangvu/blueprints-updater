@@ -129,7 +129,7 @@
           },
           "delete_blueprint": {
             "title": "Blueprint verwijderen",
-            "description": "Weet u zeker dat u {name} ({path}) wilt verwijderen?\n\nMomenteel gebruikt door {usage_count} entiteit(en): {entities}.",
+            "description": "Weet u zeker dat u {name} ({path}) wilt verwijderen?\n\nMomenteel gebruikt door {usage_count} entiteit(en): {entities}.{take_control_tip}",
             "data": {
               "confirm_delete_in_use": "Ik begrijp dat dit afhankelijke automatiseringen/scripts zal breken"
             }
@@ -245,6 +245,7 @@
     "risk_system_error": "Systeemfout: {error}",
     "breaking_risks_report": "Automatische update voor {name} is uit voorzorg geblokkeerd. Gedetecteerde risico's:\n{risks}\n\nControleer dit en installeer handmatig als het correct is.",
     "auto_update_blocked_by_system_error": "Automatische update voor {name} gepauzeerd door een onverwachte fout tijdens de compatibiliteitscontrole.",
-    "withdrawn_blueprint_error": "Blueprint-bron niet meer beschikbaar: {error}"
+    "withdrawn_blueprint_error": "Blueprint-bron niet meer beschikbaar: {error}",
+    "take_control_tip": "Tip: U kunt 'Beheer overnemen' (Take Control) gebruiken voor de automatiseringen, scripts of template-entiteiten die afhankelijk zijn van deze blueprint om ze lokaal te maken voordat u deze verwijdert."
   }
 }

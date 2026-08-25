@@ -338,6 +338,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
                     "path": self.relative_path,
                     "usage_count": "?",
                     "entities": "?",
+                    "take_control_tip": "",
                 },
             )
         usage_count = len(usage_entities)
@@ -353,6 +354,11 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
         if usage_count > 0:
             schema_dict[vol.Required("confirm_delete_in_use", default=False)] = cv.boolean
 
+        take_control_tip = ""
+        if usage_count > 0:
+            tip_msg = await self.coordinator.async_translate("take_control_tip")
+            take_control_tip = f"\n\n{tip_msg}"
+
         return self.async_show_form(
             step_id="delete_blueprint",
             data_schema=vol.Schema(schema_dict),
@@ -362,6 +368,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
                 "path": self.relative_path,
                 "usage_count": str(usage_count),
                 "entities": ", ".join(usage_entities) if usage_entities else "None",
+                "take_control_tip": take_control_tip,
             },
         )
 

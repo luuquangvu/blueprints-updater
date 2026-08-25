@@ -129,7 +129,7 @@
           },
           "delete_blueprint": {
             "title": "Eliminar blueprint",
-            "description": "Tem a certeza de que deseja eliminar {name} ({path})?\n\nAtualmente utilizado por {usage_count} entidade(s), incluindo automações, scripts e entidades de template: {entities}.",
+            "description": "Tem a certeza de que deseja eliminar {name} ({path})?\n\nAtualmente utilizado por {usage_count} entidade(s), incluindo automações, scripts e entidades de template: {entities}.{take_control_tip}",
             "data": {
               "confirm_delete_in_use": "Compreendo que isto irá quebrar automações, scripts e entidades de template dependentes"
             }
@@ -245,6 +245,7 @@
     "risk_system_error": "Erro do sistema: {error}",
     "breaking_risks_report": "A atualização automática para {name} foi bloqueada por precaução. Riscos detetados:\n{risks}\n\nPor favor, reveja e instale manualmente se estiver correto.",
     "auto_update_blocked_by_system_error": "Atualização automática de {name} suspensa devido a um erro inesperado na verificação de compatibilidade.",
-    "withdrawn_blueprint_error": "Origem do blueprint já não está disponível: {error}"
+    "withdrawn_blueprint_error": "Origem do blueprint já não está disponível: {error}",
+    "take_control_tip": "Dica: Pode utilizar 'Assumir o controlo' (Take Control) nas automações, scripts ou entidades de template que dependem deste blueprint para torná-los locais antes de o eliminar."
   }
 }

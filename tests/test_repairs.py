@@ -412,6 +412,19 @@ async def test_delete_blueprint_unused(mock_repair_flow):
             {FunctionalDomain.TEMPLATE}
         )
 
+    # When step is shown for unused blueprint, take_control_tip is empty string
+    with patch(
+        "custom_components.blueprints_updater.utils.automations_with_blueprint",
+        return_value=[],
+    ):
+        mock_repair_flow.domain = FunctionalDomain.AUTOMATION
+        res_unused = await mock_repair_flow.async_step_delete_blueprint(None)
+        assert res_unused.get("type") == data_entry_flow.FlowResultType.FORM
+        placeholders = res_unused.get("description_placeholders", {})
+        assert placeholders.get("usage_count") == "0"
+        assert placeholders.get("entities") == "None"
+        assert placeholders.get("take_control_tip") == ""
+
 
 @pytest.mark.asyncio
 async def test_delete_blueprint_domains_and_usage_error(coordinator, hass):
@@ -427,6 +440,7 @@ async def test_delete_blueprint_domains_and_usage_error(coordinator, hass):
         },
     )
     flow_script.hass = hass
+    flow_script.coordinator.async_translate = AsyncMock(return_value="Script Take Control Tip")
     with patch(
         "custom_components.blueprints_updater.utils.scripts_with_blueprint",
         return_value=["script.test_script"],
@@ -435,6 +449,8 @@ async def test_delete_blueprint_domains_and_usage_error(coordinator, hass):
         assert res.get("type") == data_entry_flow.FlowResultType.FORM
         assert (schema := res.get("data_schema")) is not None
         assert "confirm_delete_in_use" in schema.schema
+        assert isinstance(ph_script := res.get("description_placeholders"), dict)
+        assert ph_script.get("take_control_tip") == "\n\nScript Take Control Tip"
 
     # Test FunctionalDomain.TEMPLATE
     flow_tpl = WithdrawnBlueprintRepairFlow(
@@ -447,6 +463,7 @@ async def test_delete_blueprint_domains_and_usage_error(coordinator, hass):
         },
     )
     flow_tpl.hass = hass
+    flow_tpl.coordinator.async_translate = AsyncMock(return_value="Template Take Control Tip")
     with patch(
         "custom_components.blueprints_updater.utils.templates_with_blueprint",
         return_value=["template.test_sensor"],
@@ -455,6 +472,8 @@ async def test_delete_blueprint_domains_and_usage_error(coordinator, hass):
         assert res_tpl.get("type") == data_entry_flow.FlowResultType.FORM
         assert (schema_tpl := res_tpl.get("data_schema")) is not None
         assert "confirm_delete_in_use" in schema_tpl.schema
+        assert isinstance(ph_tpl := res_tpl.get("description_placeholders"), dict)
+        assert ph_tpl.get("take_control_tip") == "\n\nTemplate Take Control Tip"
 
     # Test usage calculation raising unexpected exception
     flow_err = WithdrawnBlueprintRepairFlow(
@@ -477,6 +496,8 @@ async def test_delete_blueprint_domains_and_usage_error(coordinator, hass):
         res_err = await flow_err.async_step_delete_blueprint({})
         assert res_err.get("type") == data_entry_flow.FlowResultType.FORM
         assert res_err.get("errors") == {"base": "usage_discovery_failed"}
+        assert isinstance(ph_err := res_err.get("description_placeholders"), dict)
+        assert ph_err.get("take_control_tip") == ""
 
 
 @pytest.mark.asyncio
@@ -510,7 +531,7 @@ async def test_delete_blueprint_removes_exact_backups(mock_repair_flow, tmp_path
 
 @pytest.mark.asyncio
 async def test_delete_blueprint_in_use_confirmation(mock_repair_flow, hass):
-    """Test deleting blueprint in use requires explicit confirmation."""
+    """Test deleting blueprint in use requires explicit confirmation and provides placeholders."""
     mock_repair_flow.coordinator.async_reconcile_reload_services = AsyncMock()
     mock_repair_flow.coordinator.async_request_refresh = AsyncMock()
 
@@ -518,6 +539,23 @@ async def test_delete_blueprint_in_use_confirmation(mock_repair_flow, hass):
         "custom_components.blueprints_updater.utils.automations_with_blueprint",
         return_value=["automation.living_room_light"],
     ):
+        # Initial form presentation without input
+        mock_repair_flow.coordinator.async_translate = AsyncMock(
+            return_value="Tip: You can 'Take Control' of dependent automations"
+        )
+        res_initial = await mock_repair_flow.async_step_delete_blueprint(None)
+        assert res_initial.get("type") == data_entry_flow.FlowResultType.FORM
+        assert res_initial.get("step_id") == "delete_blueprint"
+        assert isinstance(placeholders := res_initial.get("description_placeholders"), dict)
+        assert placeholders.get("usage_count") == "1"
+        assert placeholders.get("entities") == "automation.living_room_light"
+        assert placeholders.get("name") == "Test Blueprint"
+        assert placeholders.get("path") == "automation/test/blueprint.yaml"
+        assert (
+            placeholders.get("take_control_tip")
+            == "\n\nTip: You can 'Take Control' of dependent automations"
+        )
+
         # Without confirmation checkbox -> error
         result = await mock_repair_flow.async_step_delete_blueprint(
             {"confirm_delete_in_use": False}

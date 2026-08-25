@@ -129,7 +129,7 @@
           },
           "delete_blueprint": {
             "title": "删除蓝图",
-            "description": "确定要删除“{name}”（{path}）吗？\n\n当前正被 {usage_count} 个实体使用：{entities}。",
+            "description": "确定要删除“{name}”（{path}）吗？\n\n当前正被 {usage_count} 个实体使用：{entities}。{take_control_tip}",
             "data": {
               "confirm_delete_in_use": "我了解这将破坏依赖此蓝图的自动化/脚本"
             }
@@ -245,6 +245,7 @@
     "risk_system_error": "系统错误：{error}",
     "breaking_risks_report": "为了预防起见，{name} 的自动更新已阻止。检测到的风险：\n{risks}\n\n如果正确，请检查并手动安装。",
     "auto_update_blocked_by_system_error": "{name} 的自动更新已暂停，因为兼容性检查过程中出现意外错误。",
-    "withdrawn_blueprint_error": "蓝图源不再可用：{error}"
+    "withdrawn_blueprint_error": "蓝图源不再可用：{error}",
+    "take_control_tip": "提示：您可以在 Home Assistant 中对依赖此蓝图的自动化、脚本或模板实体使用“接管控制”（Take Control），将其转换为完全本地配置后再删除。"
   }
 }

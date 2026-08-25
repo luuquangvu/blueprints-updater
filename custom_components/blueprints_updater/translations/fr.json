@@ -129,7 +129,7 @@
           },
           "delete_blueprint": {
             "title": "Supprimer le blueprint",
-            "description": "Êtes-vous sûr de vouloir supprimer « {name} » ({path}) ?\n\nActuellement utilisé par {usage_count} entité(s) : {entities}.",
+            "description": "Êtes-vous sûr de vouloir supprimer « {name} » ({path}) ?\n\nActuellement utilisé par {usage_count} entité(s) : {entities}.{take_control_tip}",
             "data": {
               "confirm_delete_in_use": "Je comprends que cela cassera les automatisations/scripts dépendants"
             }
@@ -245,6 +245,7 @@
     "risk_system_error": "Erreur système : {error}",
     "breaking_risks_report": "La mise à jour automatique pour {name} a été bloquée par précaution. Risques détectés :\n{risks}\n\nVeuillez vérifier et installer manuellement si c'est correct.",
     "auto_update_blocked_by_system_error": "Mise à jour automatique pour {name} suspendue : erreur inattendue lors de la vérification de compatibilité.",
-    "withdrawn_blueprint_error": "Source du blueprint non disponible : {error}"
+    "withdrawn_blueprint_error": "Source du blueprint non disponible : {error}",
+    "take_control_tip": "Conseil : Vous pouvez utiliser « Prendre le contrôle » (Take Control) sur les automatisations, scripts ou entités de modèle qui dépendent de ce blueprint afin de les rendre locaux avant de le supprimer."
   }
 }
