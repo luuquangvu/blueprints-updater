@@ -36,16 +36,9 @@ repos:
         pass_filenames: false
         always_run: true
 
-      - id: taplo
-        name: Run Taplo
-        entry: uv run taplo format .
-        language: system
-        pass_filenames: false
-        always_run: true
-
       - id: prettier
         name: Run Prettier
-        entry: npx prettier --log-level warn --write .
+        entry: npx prettier --write .
         language: system
         pass_filenames: false
         always_run: true

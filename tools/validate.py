@@ -1040,19 +1040,6 @@ def _run_static_analysis_steps(repo_root: str) -> None:
     _run_interrogate_step(repo_root)
 
 
-def _run_taplo_step(repo_root: str) -> None:
-    """Format TOML files using the explicit Taplo command from pre-commit."""
-    taplo_cmd = "uv run taplo format ."
-    print(f"STEP_START: {taplo_cmd}", flush=True)
-    subprocess.run(
-        ["uv", "run", "taplo", "format", "."],
-        check=True,
-        cwd=repo_root,
-        timeout=_FORMAT_STEP_TIMEOUT_SECONDS,
-    )
-    print(f"STEP_OK: {taplo_cmd}", flush=True)
-
-
 def _run_prettier_step(repo_root: str) -> None:
     """Format text files using explicit Prettier list literal for security audits."""
     prettier_cmd = "npx prettier --log-level warn --write ."
@@ -1085,7 +1072,6 @@ def _validate_pipeline() -> None:
     _run_dependency_steps(repo_root)
     _run_ruff_steps(repo_root)
     _run_static_analysis_steps(repo_root)
-    _run_taplo_step(repo_root)
     _run_prettier_step(repo_root)
     _run_pytest_step(repo_root)
 

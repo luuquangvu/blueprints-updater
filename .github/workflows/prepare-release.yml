@@ -103,8 +103,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          npx prettier --write custom_components/blueprints_updater/manifest.json
-          uv run taplo format pyproject.toml
+          npx prettier --write custom_components/blueprints_updater/manifest.json pyproject.toml
 
       - name: Update uv.lock
         run: uv lock
