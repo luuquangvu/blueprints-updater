@@ -1356,11 +1356,16 @@ async def test_async_install_blueprint_state_sync_fix(coordinator, mock_makedirs
     ):
         await coordinator.async_install_blueprint(path, raw_remote)
 
+    # Both _hash_content and _ensure_source_url now normalize blob URLs to
+    # their raw.githubusercontent.com equivalent before canonicalizing, so the
+    # blob and raw URL forms produce the same hash.  The blob URL here is the
+    # value stored in coordinator.data["source_url"] and exercises that path.
     expected_hash = coordinator._hash_content(
         raw_remote, "https://github.com/user/repo/blob/main/test.yaml"
     )
     assert coordinator.data[path]["local_hash"] == expected_hash
     assert coordinator.data[path]["remote_hash"] == expected_hash
+    assert coordinator.data[path]["local_hash"] == coordinator.data[path]["remote_hash"]
     assert not coordinator.data[path]["updatable"]
     assert coordinator.data[path]["last_error"] is None
     assert coordinator.data[path]["invalid_remote_hash"] is None

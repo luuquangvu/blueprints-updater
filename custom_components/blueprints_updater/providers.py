@@ -7,7 +7,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import ParseResult, urlparse, urlunparse
 
 import orjson
 from homeassistant.exceptions import HomeAssistantError
@@ -39,9 +39,69 @@ def _normalize_hostname(hostname: str | None) -> str:
     return hostname[4:] if hostname.startswith("www.") else hostname
 
 
+def _without_fragment(url: str) -> str:
+    """Return a URL without its client-side fragment."""
+    return urlunparse(urlparse(url)._replace(fragment=""))
+
+
+# Default ports that are implicit for a given scheme and must be omitted from
+# canonical URLs so that urls with and without the explicit port compare equal.
+_SCHEME_DEFAULT_PORTS: dict[str, int] = {"https": 443, "http": 80}
+
+
+def _build_netloc(hostname: str | None, port: int | None) -> str:
+    """Build a normalized netloc string with proper IPv6 bracket handling.
+
+    urlparse strips brackets from IPv6 literal addresses, so naive
+    reconstruction (f"{host}:{port}") produces invalid netloc strings such as
+    '::1:8080'.  This helper re-brackets IPv6 addresses (detected by the
+    presence of ':' in the normalized host) before appending the port.
+    Credentials (userinfo) are stripped during canonicalization to prevent
+    sensitive information from entering hashes or metadata.
+    """
+    host = _normalize_hostname(hostname)
+    bracketed = f"[{host}]" if ":" in host else host
+    return f"{bracketed}:{port}" if port is not None else bracketed
+
+
+def _normalize_netloc(parsed: ParseResult) -> str:
+    """Build a normalized netloc from parsed URL, omitting default scheme ports.
+
+    Strips credentials, preserves non-default ports (such as 8443 or 0), and
+    preserves IPv6 bracketed hosts. Omits default ports (443 for HTTPS, 80 for HTTP).
+    Preserves raw netloc without credentials if the port or hostname is malformed or out of range.
+    """
+    try:
+        port = parsed.port
+        hostname = parsed.hostname
+    except ValueError:
+        raw_netloc = parsed.netloc
+        if "@" in raw_netloc:
+            _, _, raw_netloc = raw_netloc.rpartition("@")
+        return raw_netloc
+
+    if port is not None and _SCHEME_DEFAULT_PORTS.get(parsed.scheme.lower()) == port:
+        port = None
+
+    return _build_netloc(hostname, port)
+
+
 def _replace_path_segment(url: str, raw_marker: str, from_seg: str, to_seg: str) -> str:
-    """Helper to replace a specific path segment for raw URL normalization."""
-    parsed = urlparse(url)
+    """Helper to replace a specific path segment for raw URL normalization.
+
+    Scans path segments from position 2 onward (after owner/repo). At each
+    position the raw_marker is checked first; a match means the path is already
+    normalized. Then from_seg is checked and replaced with to_seg when found.
+    The returned URL has a normalized netloc (with default ports omitted and
+    non-default ports preserved) and no fragment.
+    The input URL scheme is preserved.
+
+    Callers must ensure raw_marker and from_seg are structurally disjoint at
+    any given position, otherwise a raw_marker match may shadow an unprocessed
+    from_seg that happens to appear later in the path.
+    """
+    parsed = urlparse(_without_fragment(url))
+    netloc = _normalize_netloc(parsed)
     path_parts = parsed.path.strip("/").split("/")
     raw_parts = [p.lower() for p in raw_marker.strip("/").split("/")]
     from_parts = [p.lower() for p in from_seg.strip("/").split("/")]
@@ -50,22 +110,29 @@ def _replace_path_segment(url: str, raw_marker: str, from_seg: str, to_seg: str)
     raw_len = len(raw_parts)
     from_len = len(from_parts)
 
+    scheme = parsed.scheme.lower()
     if not path_parts or path_parts == [""]:
-        return url
+        return urlunparse(parsed._replace(scheme=scheme, netloc=netloc))
 
     if len(path_parts) < 3:
-        return url
+        return urlunparse(parsed._replace(scheme=scheme, netloc=netloc))
 
     path_parts_lower = [p.lower() for p in path_parts]
 
     for i in range(2, len(path_parts)):
         if i + raw_len <= len(path_parts) and path_parts_lower[i : i + raw_len] == raw_parts:
-            return url
+            return urlunparse(parsed._replace(scheme=scheme, netloc=netloc))
         if i + from_len <= len(path_parts) and path_parts_lower[i : i + from_len] == from_parts:
             new_parts = path_parts[:i] + to_parts + path_parts[i + from_len :]
-            return urlunparse(parsed._replace(path="/" + "/".join(new_parts)))
+            return urlunparse(
+                parsed._replace(
+                    scheme=scheme,
+                    netloc=netloc,
+                    path="/" + "/".join(new_parts),
+                )
+            )
 
-    return url
+    return urlunparse(parsed._replace(scheme=scheme, netloc=netloc))
 
 
 def _strip_yaml_extension(filename: str) -> str:
@@ -116,6 +183,32 @@ class SourceProvider(ABC):
         """Parse the response content to extract the blueprint YAML."""
         return response_text
 
+    def canonicalize_url(self, url: str) -> str:
+        """Return a stable canonical representation of the URL.
+
+        Normalizes scheme (lowercase), hostname (lowercase, strips leading 'www.'),
+        omits default ports for the scheme (443 for HTTPS, 80 for HTTP) while
+        preserving non-default ports (such as 8443 or 0), strips credentials, and
+        removes trailing slashes from the path so that is_same_source comparisons
+        are not confused by case, port, or www-prefix variants.
+        """
+        parsed = urlparse(url.strip())
+        netloc = _normalize_netloc(parsed)
+        return urlunparse(
+            parsed._replace(
+                scheme=parsed.scheme.lower(),
+                netloc=netloc,
+                path=parsed.path.rstrip("/"),
+                fragment="",
+            )
+        )
+
+    def is_same_source(self, url1: str, url2: str) -> bool:
+        """Check if two URLs represent the exact same source resource."""
+        return self.canonicalize_url(self.normalize_url(url1)) == self.canonicalize_url(
+            self.normalize_url(url2)
+        )
+
 
 class GitHubProvider(SourceProvider):
     """Provider for GitHub hosted blueprints."""
@@ -127,44 +220,45 @@ class GitHubProvider(SourceProvider):
 
     def can_handle(self, url: str) -> bool:
         """Check if URL is a GitHub URL."""
-        parsed = urlparse(url)
+        parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
         return hostname in (DOMAIN_GITHUB, DOMAIN_GITHUB_RAW)
 
     def normalize_url(self, url: str) -> str:
         """Normalize GitHub URL to raw content endpoint."""
-        parsed = urlparse(url)
+        parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
+        scheme = parsed.scheme.lower()
         if hostname != DOMAIN_GITHUB:
-            return url
+            return urlunparse(parsed._replace(scheme=scheme, netloc=_normalize_netloc(parsed)))
 
         path_parts = parsed.path.strip("/").split("/")
         if len(path_parts) < 5:
-            return url
+            return urlunparse(parsed._replace(scheme=scheme, netloc=_normalize_netloc(parsed)))
 
         route_segment = path_parts[2].lower()
         if route_segment not in ("blob", "raw"):
-            return url
+            return urlunparse(parsed._replace(scheme=scheme, netloc=_normalize_netloc(parsed)))
 
         new_parts = [*path_parts[:2], *path_parts[3:]]
 
         return urlunparse(
             (
-                parsed.scheme,
+                scheme,
                 DOMAIN_GITHUB_RAW,
                 "/" + "/".join(new_parts),
                 parsed.params,
                 parsed.query,
-                parsed.fragment,
+                "",
             )
         )
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from GitHub URL following HA Core parity (author/name)."""
         parsed = urlparse(url)
-        path_parts = parsed.path.strip("/").split("/")
-        author = path_parts[0] if len(path_parts) > 0 else "unknown"
-        filename = path_parts[-1] if len(path_parts) > 0 else "blueprint.yaml"
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        author = path_parts[0] if path_parts else "unknown"
+        filename = path_parts[-1] if path_parts else "blueprint.yaml"
         name = _strip_yaml_extension(filename)
         return {"author": author, "name": name}
 
@@ -179,33 +273,34 @@ class GistProvider(SourceProvider):
 
     def can_handle(self, url: str) -> bool:
         """Check if URL is a Gist URL."""
-        parsed = urlparse(url)
+        parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
         return hostname == DOMAIN_GIST
 
     def normalize_url(self, url: str) -> str:
         """Normalize Gist URL to raw endpoint."""
-        parsed = urlparse(url)
+        parsed = urlparse(_without_fragment(url))
+        netloc = _normalize_netloc(parsed)
+        scheme = parsed.scheme.lower()
         if RE_GIST_RAW.search(parsed.path):
-            return url
-
+            return urlunparse(parsed._replace(scheme=scheme, netloc=netloc))
         return urlunparse(
             (
-                parsed.scheme,
-                parsed.netloc,
+                scheme,
+                netloc,
                 f"{parsed.path.rstrip('/')}/raw",
                 parsed.params,
                 parsed.query,
-                parsed.fragment,
+                "",
             )
         )
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from Gist URL following HA Core parity (author/name)."""
         parsed = urlparse(url)
-        path_parts = parsed.path.strip("/").split("/")
-        author = path_parts[0] if len(path_parts) > 0 else "unknown"
-        filename = path_parts[-1] if len(path_parts) > 0 else "blueprint.yaml"
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        author = path_parts[0] if path_parts else "unknown"
+        filename = path_parts[-1] if path_parts else "blueprint.yaml"
         if filename == "raw" and len(path_parts) > 1:
             filename = path_parts[-2]
         name = _strip_yaml_extension(filename)
@@ -245,29 +340,49 @@ class HAForumProvider(SourceProvider):
 
     def can_handle(self, url: str) -> bool:
         """Check if URL is an HA Forum URL."""
-        parsed = urlparse(url)
+        parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
         return hostname == DOMAIN_HA_FORUM
 
     def normalize_url(self, url: str) -> str:
         """Normalize Forum URL to topic JSON endpoint."""
-        parsed = urlparse(url)
+        parsed = urlparse(_without_fragment(url))
+        scheme = parsed.scheme.lower() or "https"
+        netloc = _normalize_netloc(parsed) or DOMAIN_HA_FORUM
 
         match = RE_FORUM_TOPIC_ID.search(parsed.path)
         if not match:
-            return url
+            return urlunparse(parsed._replace(scheme=scheme, netloc=netloc))
 
         topic_id = match.group(1)
         return urlunparse(
             (
-                parsed.scheme,
-                parsed.netloc,
+                scheme,
+                netloc,
                 f"/t/{topic_id}.json",
                 parsed.params,
                 "",
-                parsed.fragment,
+                "",
             )
         )
+
+    def canonicalize_url(self, url: str) -> str:
+        """Canonicalize Forum URL to stable topic format without slugs."""
+        parsed = urlparse(url.strip())
+        if match := RE_FORUM_TOPIC_ID.search(parsed.path):
+            topic_id = match.group(1)
+            netloc = _normalize_netloc(parsed) or DOMAIN_HA_FORUM
+            return urlunparse(
+                (
+                    (parsed.scheme or "https").lower(),
+                    netloc,
+                    f"/t/{topic_id}",
+                    "",
+                    "",
+                    "",
+                )
+            )
+        return super().canonicalize_url(url)
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from Forum URL, prioritizing username/slug from topic JSON."""
@@ -340,7 +455,7 @@ class GitLabProvider(SourceProvider):
 
     def can_handle(self, url: str) -> bool:
         """Check if URL is a GitLab URL."""
-        parsed = urlparse(url)
+        parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
         return hostname == DOMAIN_GITLAB
 
@@ -363,7 +478,7 @@ class CodebergProvider(SourceProvider):
 
     def can_handle(self, url: str) -> bool:
         """Check if URL is a Codeberg URL."""
-        parsed = urlparse(url)
+        parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
         return hostname == DOMAIN_CODEBERG
 
@@ -386,7 +501,7 @@ class BitbucketProvider(SourceProvider):
 
     def can_handle(self, url: str) -> bool:
         """Check if URL is a Bitbucket URL."""
-        parsed = urlparse(url)
+        parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
         return hostname == DOMAIN_BITBUCKET
 
@@ -413,14 +528,17 @@ class GenericProvider(SourceProvider):
         return bool(parsed.scheme and parsed.netloc)
 
     def normalize_url(self, url: str) -> str:
-        """No normalization for generic URLs."""
-        return url
+        """Return the generic URL without its client-side fragment."""
+        parsed = urlparse(_without_fragment(url))
+        return urlunparse(
+            parsed._replace(scheme=parsed.scheme.lower(), netloc=_normalize_netloc(parsed))
+        )
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from generic URL (HA Core Parity with Smart Fallback)."""
         parsed = urlparse(url)
         author = parsed.hostname.lower() if parsed.hostname else "imported"
-        path_parts = parsed.path.strip("/").split("/")
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
         last_part = path_parts[-1] if path_parts else ""
 
         if last_part.lower().endswith((".yaml", ".yml")):
@@ -439,7 +557,8 @@ class GenericProvider(SourceProvider):
             name = ""
 
         if not name:
-            short_sha = hashlib.sha256(url.encode()).hexdigest()[:7]
+            canonical_url = self.canonicalize_url(url)
+            short_sha = hashlib.sha256(canonical_url.encode()).hexdigest()[:7]
             name = f"blueprint_{short_sha}"
 
         return {"author": author, "name": name}
@@ -489,22 +608,75 @@ class ProviderRegistry:
 
     def get_provider(self, url: str) -> SourceProvider | None:
         """Get the appropriate provider for the given URL."""
-        hostname = _normalize_hostname(urlparse(url).hostname)
+        try:
+            hostname = _normalize_hostname(urlparse(url).hostname)
+        except ValueError:
+            return None
         if hostname and (provider := self._host_to_provider.get(hostname)):
             return provider
 
         for provider in self._providers:
-            if not isinstance(provider, GenericProvider) and provider.can_handle(url):
-                return provider
+            try:
+                if not isinstance(provider, GenericProvider) and provider.can_handle(url):
+                    return provider
+            except ValueError:
+                continue
 
         generic = next((p for p in self._providers if isinstance(p, GenericProvider)), None)
-        return generic if generic and generic.can_handle(url) else None
+        try:
+            return generic if generic and generic.can_handle(url) else None
+        except ValueError:
+            return None
 
     def normalize_url(self, url: str) -> str:
         """Find appropriate provider and normalize URL."""
-        if provider := self.get_provider(url):
-            return provider.normalize_url(url)
+        with contextlib.suppress(ValueError):
+            if provider := self.get_provider(url):
+                return provider.normalize_url(url)
         return url
+
+    def canonicalize_url(self, url: str) -> str:
+        """Find appropriate provider and canonicalize URL."""
+        try:
+            if provider := self.get_provider(url):
+                return provider.canonicalize_url(url)
+            # Fallback for URLs without a matching provider (no valid scheme/netloc).
+            # Apply the same hostname and scheme normalization as SourceProvider.canonicalize_url
+            # so callers always get a consistently normalized result.
+            parsed = urlparse(url.strip())
+            netloc = _normalize_netloc(parsed)
+            return urlunparse(
+                parsed._replace(
+                    scheme=parsed.scheme.lower(),
+                    netloc=netloc,
+                    path=parsed.path.rstrip("/"),
+                    fragment="",
+                )
+            )
+        except ValueError:
+            return url.strip()
+
+    def are_same_source(self, url1: str | None, url2: str | None) -> bool:
+        """Check if two URLs represent the exact same source.
+
+        Returns False if either URL is so malformed that it cannot be parsed
+        (e.g. an unclosed IPv6 bracket such as 'https://[::1/path'), rather than
+        propagating the ValueError to the caller.  A URL that cannot be parsed
+        has no meaningful canonical identity and must not match any other URL.
+        Exact identical non-None strings match via the equality fast path.
+        """
+        if url1 is None or url2 is None:
+            return url1 == url2
+        if url1 == url2:
+            return True
+        try:
+            provider1 = self.get_provider(url1)
+            provider2 = self.get_provider(url2)
+            if provider1 is not None and provider1 == provider2:
+                return provider1.is_same_source(url1, url2)
+            return self.canonicalize_url(url1) == self.canonicalize_url(url2)
+        except ValueError:
+            return False
 
 
 registry = ProviderRegistry()

@@ -882,7 +882,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if (
             isinstance(resolved_prev_url, str)
             and isinstance(curr_url, str)
-            and resolved_prev_url != curr_url
+            and not registry.are_same_source(resolved_prev_url, curr_url)
         ):
             return self._invalidate_blueprint_metadata(
                 path, resolved_prev_url, curr_url, prev if isinstance(prev, dict) else info
@@ -4493,7 +4493,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
     @staticmethod
     def _hash_content(
-        content: str, source_url: str | None = None, already_normalized: bool = False
+        content: str, source_url: object = None, already_normalized: bool = False
     ) -> str:
         """Calculate a deterministic SHA-256 hash of normalized content.
 
@@ -4517,12 +4517,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if already_normalized:
             return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-        if not source_url:
+        if not isinstance(source_url, str) or not source_url.strip():
             return hashlib.sha256(
                 BlueprintUpdateCoordinator._normalize_content(content).encode("utf-8")
             ).hexdigest()
 
-        normalized = BlueprintUpdateCoordinator._ensure_source_url(content, source_url)
+        canonical_source_url = BlueprintUpdateCoordinator._canonicalize_source_url(source_url)
+        normalized = BlueprintUpdateCoordinator._ensure_source_url_cached(
+            content, canonical_source_url
+        )
         return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     @staticmethod
@@ -4593,14 +4596,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
     @staticmethod
     def _ensure_source_url(content: object, source_url: object) -> str:
-        """Ensure the target source_url is present in the blueprint metadata.
+        """Ensure the target canonical source_url is present in the blueprint metadata.
 
         Always uses structured YAML parsing to guarantee data integrity and
         consistency with Home Assistant's core blueprint handling.
 
-        Note: This method intentionally overwrites any existing `source_url`
-        in the blueprint metadata with the provided `source_url` to ensure
-        the integration tracks the authoritative source.
+        Note: This method canonicalizes the source_url and overwrites any
+        existing `source_url` in the blueprint metadata to ensure the
+        integration tracks the authoritative canonical source.
 
         It also applies semantic normalization using Home Assistant's official
         schemas (AUTOMATION_BLUEPRINT_SCHEMA or BLUEPRINT_SCHEMA). This ensures
@@ -4610,22 +4613,38 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         Args:
             content: Raw YAML blueprint content.
-            source_url: Target URL to enforce in the content.
+            source_url: Target URL to canonicalize and enforce in the content.
 
         Returns:
-            The YAML content with the target source_url guaranteed to be
+            The YAML content with the canonicalized source_url guaranteed to be
             present in the blueprint block, in canonical normalized YAML form.
 
         """
         if not isinstance(content, str):
             _LOGGER.debug("Non-string content passed to _ensure_source_url: %s", type(content))
             return ""
-        if not isinstance(source_url, str):
+        if not isinstance(source_url, str) or not source_url.strip():
             _LOGGER.debug(
-                "Non-string source_url passed to _ensure_source_url: %s", type(source_url)
+                "Non-string or empty source_url passed to _ensure_source_url: %s", type(source_url)
             )
             return BlueprintUpdateCoordinator._normalize_content(content)
-        return BlueprintUpdateCoordinator._ensure_source_url_cached(content, source_url)
+
+        canonical_source_url = BlueprintUpdateCoordinator._canonicalize_source_url(source_url)
+        return BlueprintUpdateCoordinator._ensure_source_url_cached(content, canonical_source_url)
+
+    @staticmethod
+    def _canonicalize_source_url(source_url: str) -> str:
+        """Canonicalize non-empty string source_url to a stable canonical form.
+
+        Handles malformed URLs gracefully by falling back to the stripped string representation.
+        """
+        clean_url = source_url.strip()
+        if not clean_url:
+            return ""
+        try:
+            return registry.canonicalize_url(registry.normalize_url(clean_url))
+        except (ValueError, TypeError):
+            return clean_url
 
     @staticmethod
     def _stabilize_yaml_structure(orig_data: object, normalized_data: object) -> object:
@@ -4781,6 +4800,29 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             )
             return None
 
+        clean_source_url = source_url.strip()
+        try:
+            parsed_url = urlparse(clean_source_url)
+            _ = parsed_url.port
+            hostname = parsed_url.hostname
+            scheme = parsed_url.scheme.lower()
+            if scheme not in ("http", "https") or not hostname:
+                _LOGGER.warning(
+                    "Skipping blueprint at %s: unsupported or invalid 'source_url' scheme or host "
+                    "in blueprint metadata: %s",
+                    path,
+                    redact_url(clean_source_url),
+                )
+                return None
+        except ValueError as err:
+            _LOGGER.warning(
+                "Skipping blueprint at %s: malformed 'source_url' in blueprint metadata: %s",
+                path,
+                err,
+            )
+            return None
+
+        canonical_source_url = BlueprintUpdateCoordinator._canonicalize_source_url(clean_source_url)
         raw_name = bp_info.get("name")
         name = (
             raw_name.strip()
@@ -4797,8 +4839,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         return {
             "name": name,
             "domain": domain,
-            "source_url": source_url.strip(),
-            "local_hash": BlueprintUpdateCoordinator._hash_content(content, source_url),
+            "source_url": canonical_source_url,
+            "local_hash": BlueprintUpdateCoordinator._hash_content(content, canonical_source_url),
             "local_file_hash": (
                 file_hash
                 if file_hash is not None
@@ -4876,6 +4918,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             }
         except UnicodeDecodeError as err:
             _LOGGER.warning("Skipping non-UTF-8 blueprint at %s: %s", full_path, err)
+            return None
+        except ValueError as err:
+            _LOGGER.warning("Skipping invalid blueprint at %s: %s", full_path, err)
             return None
         except OSError:
             _LOGGER.exception("Error reading blueprint at %s", full_path)
