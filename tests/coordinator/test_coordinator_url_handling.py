@@ -71,7 +71,10 @@ action:
 
 
 def test_ensure_source_url_canonical_normalization() -> None:
-    """Test _ensure_source_url embeds the canonical URL into blueprint YAML."""
+    """Test _ensure_source_url embeds the original URL into blueprint YAML.
+
+    Hashing remains canonical and identity-aware.
+    """
     raw_content = """blueprint:
   name: Forum Blueprint
   domain: automation
@@ -81,8 +84,12 @@ def test_ensure_source_url_canonical_normalization() -> None:
     slug_url = "https://community.home-assistant.io/t/new-slug-v1-1/787779"
     ensured = BlueprintUpdateCoordinator._ensure_source_url(raw_content, slug_url)
 
-    expected_canonical = "https://community.home-assistant.io/t/787779"
-    assert f"source_url: {expected_canonical}" in ensured
+    assert f"source_url: {slug_url}" in ensured
+    hash_old = BlueprintUpdateCoordinator._hash_content(
+        raw_content, "https://community.home-assistant.io/t/old-slug/787779"
+    )
+    hash_new = BlueprintUpdateCoordinator._hash_content(raw_content, slug_url)
+    assert hash_old == hash_new
 
 
 @pytest.mark.asyncio
@@ -357,8 +364,8 @@ def test_parse_blueprint_data_rejects_malformed_port(malformed_source_url: str) 
     assert result is None
 
 
-def test_parse_blueprint_data_stores_canonical_source_url() -> None:
-    """_parse_blueprint_data must store the canonicalized source_url in blueprint metadata."""
+def test_parse_blueprint_data_stores_original_source_url() -> None:
+    """_parse_blueprint_data must store the clean original source_url in blueprint metadata."""
     content = """blueprint:
   name: Forum Blueprint
   domain: automation
@@ -367,7 +374,7 @@ def test_parse_blueprint_data_stores_canonical_source_url() -> None:
 """
     result = BlueprintUpdateCoordinator._parse_blueprint_data("automation/test.yaml", content)
     assert result is not None
-    assert result["source_url"] == "https://community.home-assistant.io/t/787779"
+    assert result["source_url"] == "HTTPS://community.home-assistant.io:443/t/some-slug/787779"
 
 
 @pytest.mark.parametrize(

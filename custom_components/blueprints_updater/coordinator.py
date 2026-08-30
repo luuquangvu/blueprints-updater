@@ -1819,7 +1819,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         await self.async_install_blueprint(
             full_path,
             content,
-            source_url=canonical_url,
+            source_url=url.strip(),
             etag=response.headers.get("ETag"),
             last_modified=response.headers.get("Last-Modified"),
             file_precondition=file_precondition,
@@ -2036,7 +2036,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             if final_source_url
             else self._normalize_content(remote_content)
         )
-        expected_hash = self._hash_content(content, already_normalized=True)
+        expected_hash = self._hash_content(content, final_source_url)
         if remote_hash is not None and remote_hash != expected_hash:
             raise HomeAssistantError("Remote hash does not match validated install content")
 
@@ -2130,15 +2130,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             if last_modified is not None
             else (current.get("last_modified") if current else None)
         )
+        semantic_hash = (
+            BlueprintUpdateCoordinator._hash_content(prepared.content, prepared.source_url)
+            if prepared.source_url
+            else file_result.content_hash
+        )
         return {
             "name": prepared.name,
             "domain": prepared.functional_domain,
             "source_url": prepared.source_url,
             "relative_path": prepared.relative_path,
             "updatable": False,
-            "local_hash": file_result.content_hash,
+            "local_hash": semantic_hash,
             "local_file_hash": file_result.content_hash,
-            "remote_hash": file_result.content_hash,
+            "remote_hash": semantic_hash,
             "last_error": None,
             "auto_update_last_error": None,
             "remote_content": None,
@@ -2207,7 +2212,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             relative_path=prepared.relative_path,
             source_url=prepared.source_url,
             previous_hash=previous_hash,
-            new_hash=file_result.content_hash,
+            new_hash=str(metadata["local_hash"]),
             is_auto_update=is_auto_update,
             had_breaking_risks=had_breaking_risks,
         )
@@ -4596,14 +4601,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
     @staticmethod
     def _ensure_source_url(content: object, source_url: object) -> str:
-        """Ensure the target canonical source_url is present in the blueprint metadata.
+        """Ensure the target source_url is present in the blueprint metadata.
 
         Always uses structured YAML parsing to guarantee data integrity and
         consistency with Home Assistant's core blueprint handling.
-
-        Note: This method canonicalizes the source_url and overwrites any
-        existing `source_url` in the blueprint metadata to ensure the
-        integration tracks the authoritative canonical source.
 
         It also applies semantic normalization using Home Assistant's official
         schemas (AUTOMATION_BLUEPRINT_SCHEMA or BLUEPRINT_SCHEMA). This ensures
@@ -4613,10 +4614,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         Args:
             content: Raw YAML blueprint content.
-            source_url: Target URL to canonicalize and enforce in the content.
+            source_url: Target URL to enforce in the content.
 
         Returns:
-            The YAML content with the canonicalized source_url guaranteed to be
+            The YAML content with the source_url guaranteed to be
             present in the blueprint block, in canonical normalized YAML form.
 
         """
@@ -4629,8 +4630,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             )
             return BlueprintUpdateCoordinator._normalize_content(content)
 
-        canonical_source_url = BlueprintUpdateCoordinator._canonicalize_source_url(source_url)
-        return BlueprintUpdateCoordinator._ensure_source_url_cached(content, canonical_source_url)
+        return BlueprintUpdateCoordinator._ensure_source_url_cached(content, source_url.strip())
 
     @staticmethod
     def _canonicalize_source_url(source_url: str) -> str:
@@ -4647,23 +4647,47 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             return clean_url
 
     @staticmethod
-    def _stabilize_yaml_structure(orig_data: object, normalized_data: object) -> object:
+    def _stabilize_yaml_structure(
+        orig_data: object,
+        normalized_data: object,
+        in_selector: bool = False,
+    ) -> object:
         """Recursively update normalized structures using original key ordering.
 
         Preserves existing dict/list identities when possible.
+        For selector configuration mappings, keys are deterministically sorted
+        so that option ordering or schema default additions do not trigger ghost diffs.
         """
         if isinstance(orig_data, dict) and isinstance(normalized_data, dict):
             orig_dict: dict[object, object] = dict(orig_data.items())
             norm_dict: dict[object, object] = dict(normalized_data.items())
+
+            if in_selector:
+                sorted_keys = sorted(norm_dict.keys(), key=str)
+                return {
+                    k: BlueprintUpdateCoordinator._stabilize_yaml_structure(
+                        orig_dict.get(k),
+                        norm_dict[k],
+                        in_selector=True,
+                    )
+                    for k in sorted_keys
+                }
+
             res: dict[object, object] = {
-                k: BlueprintUpdateCoordinator._stabilize_yaml_structure(orig_val, norm_dict[k])
+                k: BlueprintUpdateCoordinator._stabilize_yaml_structure(
+                    orig_val,
+                    norm_dict[k],
+                    in_selector=(k == "selector"),
+                )
                 for k, orig_val in orig_dict.items()
                 if k in norm_dict
             }
             new_keys = sorted([k for k in norm_dict if k not in res], key=str)
             for key in new_keys:
                 res[key] = BlueprintUpdateCoordinator._stabilize_yaml_structure(
-                    norm_dict[key], norm_dict[key]
+                    norm_dict[key],
+                    norm_dict[key],
+                    in_selector=(key == "selector"),
                 )
             return res
 
@@ -4674,7 +4698,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             for i, item in enumerate(normalized_data):
                 orig_item = orig_list[i] if i < len(orig_list) else None
                 res_list.append(
-                    BlueprintUpdateCoordinator._stabilize_yaml_structure(orig_item, item)
+                    BlueprintUpdateCoordinator._stabilize_yaml_structure(
+                        orig_item,
+                        item,
+                        in_selector=in_selector,
+                    )
                 )
             return res_list
 
@@ -4822,7 +4850,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             )
             return None
 
-        canonical_source_url = BlueprintUpdateCoordinator._canonicalize_source_url(clean_source_url)
         raw_name = bp_info.get("name")
         name = (
             raw_name.strip()
@@ -4839,8 +4866,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         return {
             "name": name,
             "domain": domain,
-            "source_url": canonical_source_url,
-            "local_hash": BlueprintUpdateCoordinator._hash_content(content, canonical_source_url),
+            "source_url": clean_source_url,
+            "local_hash": BlueprintUpdateCoordinator._hash_content(content, clean_source_url),
             "local_file_hash": (
                 file_hash
                 if file_hash is not None

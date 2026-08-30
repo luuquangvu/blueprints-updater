@@ -287,12 +287,13 @@ async def test_change_url_clean_success(mock_repair_flow, hass):
             content,
             reload_services=False,
             backup=True,
-            source_url=canonical_url,
+            source_url="https://valid.url/test.yaml",
             file_precondition=mock_repair_flow._pending_precondition,
         )
         mock_delete.assert_called_once_with(hass, DOMAIN, "withdrawn_blueprint_12345")
         assert (
-            mock_repair_flow.coordinator.data[mock_repair_flow.path]["source_url"] == canonical_url
+            mock_repair_flow.coordinator.data[mock_repair_flow.path]["source_url"]
+            == "https://valid.url/test.yaml"
         )
 
 
@@ -334,7 +335,7 @@ async def test_change_url_with_risks_and_confirm(mock_repair_flow, hass):
             content,
             reload_services=False,
             backup=True,
-            source_url=canonical_url,
+            source_url="https://valid.url/test.yaml",
             file_precondition=mock_repair_flow._pending_precondition,
         )
         mock_delete.assert_called_once_with(hass, DOMAIN, "withdrawn_blueprint_12345")
@@ -1072,7 +1073,9 @@ async def test_change_url_with_git_diff_preview(mock_repair_flow):
 
         assert result.get("type") == data_entry_flow.FlowResultType.FORM
         assert result.get("step_id") == "confirm_risks"
-        mock_diff.assert_called_once_with(mock_repair_flow.path, content, canonical_url)
+        mock_diff.assert_called_once_with(
+            mock_repair_flow.path, content, "https://valid.url/test.yaml"
+        )
         assert mock_repair_flow._pending_diff == diff_content
 
         placeholders = result.get("description_placeholders", {})

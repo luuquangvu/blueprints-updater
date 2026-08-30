@@ -1030,3 +1030,36 @@ def test_relative_path_none_normalization():
         "test_entry", str(rel_val) if rel_val is not None else ""
     )
     assert known_id == expected_unique_id
+
+
+@pytest.mark.asyncio
+async def test_release_notes_displays_original_source_url(coordinator):
+    """Test that release notes and update notification display original source_url.
+
+    Ensure normalize_url is not displayed to the user.
+    """
+    github_url = "https://github.com/user/repo/blob/main/blueprints/motion_light.yaml"
+    coordinator.data["/config/blueprints/automation/motion.yaml"] = {
+        "name": "Motion Light",
+        "domain": FunctionalDomain.AUTOMATION,
+        "relative_path": "automation/motion.yaml",
+        "source_url": github_url,
+        "local_hash": "local123",
+        "remote_hash": "remote123",
+        "updatable": True,
+    }
+
+    entity = BlueprintUpdateEntity(
+        coordinator,
+        "/config/blueprints/automation/motion.yaml",
+        coordinator.data["/config/blueprints/automation/motion.yaml"],
+    )
+    entity.hass = coordinator.hass
+    entity.entity_id = "update.motion_light"
+    with patch.object(entity, "async_write_ha_state"):
+        await entity._async_localize_strings()
+
+    assert entity.release_url == github_url
+    notes = await entity.async_release_notes()
+    assert f"Update available from {github_url}" in (notes or "")
+    assert "raw.githubusercontent.com" not in (notes or "")

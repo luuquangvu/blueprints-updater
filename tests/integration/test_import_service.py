@@ -137,7 +137,7 @@ async def test_import_blueprint_success_github(hass, setup_integration, respx_mo
     _assert_imported_blueprint(
         hass,
         "automation/user/test.yaml",
-        raw_url,
+        url,
         '"abc"',
     )
 

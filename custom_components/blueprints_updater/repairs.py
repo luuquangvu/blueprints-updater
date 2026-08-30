@@ -147,14 +147,14 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
                 try:
                     (
                         content,
-                        canonical_url,
+                        _fetch_url,
                         _author,
                         _name,
                         _resp,
                     ) = await self.coordinator.async_fetch_import_data(new_url)
                     self._pending_url = new_url
                     self._pending_content = content
-                    self._pending_canonical_url = canonical_url
+                    self._pending_canonical_url = new_url
 
                     self._pending_precondition = await self.hass.async_add_executor_job(
                         BlueprintFileStore.capture_precondition,
@@ -167,7 +167,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
                             BlueprintUpdateCoordinator._read_and_diff,
                             self.path,
                             content,
-                            canonical_url,
+                            new_url,
                         )
                     except (OSError, ValueError) as err:
                         _LOGGER.warning(
@@ -180,7 +180,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
                     local_hash = self.coordinator.data.get(self.path, {}).get("local_hash")
                     self._is_semantic_sync = (
                         self.coordinator._is_semantically_equal(
-                            content, str(local_hash or ""), canonical_url
+                            content, str(local_hash or ""), new_url
                         )
                         if local_hash
                         else False

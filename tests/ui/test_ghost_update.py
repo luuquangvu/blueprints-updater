@@ -101,3 +101,49 @@ blueprint:
     parsed = cast(dict[str, Any], yaml_util.parse_yaml(normalized))
     assert parsed["blueprint"]["source_url"] == source_url
     assert parsed["blueprint"]["domain"] == 123
+
+
+@pytest.mark.asyncio
+async def test_selector_option_order_invariance(hass: HomeAssistant) -> None:
+    """Test that selector options in different orders do not trigger ghost updates."""
+    local_yaml = """
+blueprint:
+  name: Smart Knob
+  domain: automation
+  input:
+    device:
+      name: Smart Knob Device
+      description: The smart knob device.
+      selector:
+        text:
+          multiple: false
+          multiline: false
+    light_entity:
+      name: Light Entity
+      description: The light to be controlled.
+"""
+    remote_yaml = """
+blueprint:
+  name: Smart Knob
+  domain: automation
+  input:
+    device:
+      name: Smart Knob Device
+      description: The smart knob device.
+      selector:
+        text:
+          multiline: false
+          multiple: false
+    light_entity:
+      name: Light Entity
+      description: The light to be controlled.
+"""
+    source_url = "https://github.com/user/repo/blob/main/smart_knob.yaml"
+
+    hash_local = BlueprintUpdateCoordinator._hash_content(local_yaml, source_url)
+    hash_remote = BlueprintUpdateCoordinator._hash_content(remote_yaml, source_url)
+    assert hash_local == hash_remote
+
+    norm_local = BlueprintUpdateCoordinator._ensure_source_url(local_yaml, source_url)
+    norm_remote = BlueprintUpdateCoordinator._ensure_source_url(remote_yaml, source_url)
+    assert norm_local == norm_remote

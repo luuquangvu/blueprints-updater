@@ -51,80 +51,72 @@ def test_normalize_url():
 
 def test_ensure_source_url(coordinator):
     """Test ensuring source_url is present."""
-    # _ensure_source_url normalizes blob URLs to their raw.githubusercontent.com
-    # equivalent before canonicalizing, so the embedded source_url is always
-    # the canonical raw form regardless of what URL form is passed in.
     source_url = "https://github.com/user/repo/blob/main/test.yaml"
     new_content = coordinator._ensure_source_url(
         "blueprint:\n  name: Test\n  domain: automation", source_url
     )
-    canonical_url = "https://raw.githubusercontent.com/user/repo/main/test.yaml"
-    assert f"source_url: {canonical_url}" in new_content
+    assert f"source_url: {source_url}" in new_content
 
     parsed = yaml.safe_load(new_content)
-    assert parsed["blueprint"]["source_url"] == canonical_url
+    assert parsed["blueprint"]["source_url"] == source_url
     assert parsed["blueprint"]["name"] == "Test"
     assert parsed["blueprint"]["input"] == {}
 
     content_with_url = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {source_url}"
     result = coordinator._ensure_source_url(content_with_url, source_url)
-    assert f"source_url: {canonical_url}" in result
+    assert f"source_url: {source_url}" in result
 
     content_with_quotes = (
         f"blueprint:\n  name: Test\n  domain: automation\n  source_url: '{source_url}'"
     )
     result_quotes = coordinator._ensure_source_url(content_with_quotes, source_url)
-    assert canonical_url in result_quotes
+    assert source_url in result_quotes
 
     different_url = "https://github.com/user/new-repo/blob/main/test.yaml"
     content_different = (
         f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {different_url}"
     )
     result = coordinator._ensure_source_url(content_different, source_url)
-    assert f"source_url: {canonical_url}" in result
+    assert f"source_url: {source_url}" in result
     assert different_url not in result
     assert result.count("source_url") == 1
 
-    result_outside = _assert_embedded_canonical_source_url(
+    result_outside = _assert_embedded_source_url(
         "blueprint:\n  name: Test\n  domain: automation\n"
         "action:\n  - service: rest.post\n    data:\n"
         "      source_url: https://api.example.com",
         coordinator,
         source_url,
-        canonical_url,
     )
     parsed_outside = yaml.safe_load(result_outside)
-    assert parsed_outside["blueprint"]["source_url"] == canonical_url
+    assert parsed_outside["blueprint"]["source_url"] == source_url
     assert parsed_outside["actions"][0]["data"]["source_url"] == "https://api.example.com"
 
-    result_nested = _assert_embedded_canonical_source_url(
+    result_nested = _assert_embedded_source_url(
         "blueprint:\n  name: Test\n  domain: automation\n"
         "  input:\n    source_url:\n      name: Enter URL\n"
         "trigger:\n  - platform: webhook",
         coordinator,
         source_url,
-        canonical_url,
     )
     assert result_nested.count("source_url") == 2
 
-    _assert_embedded_canonical_source_url(
+    _assert_embedded_source_url(
         "blueprint: # comment\n  name: Test\n  domain: automation",
         coordinator,
         source_url,
-        canonical_url,
     )
-    _assert_embedded_canonical_source_url(
+    _assert_embedded_source_url(
         "blueprint: { name: Test, domain: automation }",
         coordinator,
         source_url,
-        canonical_url,
     )
     content_invalid = "\ufeffblueprint: [unclosed\r\n"
     result_invalid = coordinator._ensure_source_url(content_invalid, source_url)
     assert "\ufeff" not in result_invalid
     assert "\r" not in result_invalid
 
-    result_multi = _assert_embedded_canonical_source_url(
+    result_multi = _assert_embedded_source_url(
         "# Some info: blueprint:\n"
         "blueprint:\n"
         "  name: Test\n"
@@ -132,12 +124,11 @@ def test_ensure_source_url(coordinator):
         "description: 'This is another blueprint: key in string'",
         coordinator,
         source_url,
-        canonical_url,
     )
     parsed_multi = yaml_util.parse_yaml(result_multi)
     assert isinstance(parsed_multi, dict)
     assert isinstance(parsed_multi["blueprint"], dict)
-    assert parsed_multi["blueprint"]["source_url"] == canonical_url
+    assert parsed_multi["blueprint"]["source_url"] == source_url
     assert parsed_multi["blueprint"]["input"] == {}
 
     content_none = "not_a_blueprint: true"
@@ -145,18 +136,17 @@ def test_ensure_source_url(coordinator):
     assert coordinator._ensure_source_url(content_none, source_url) == expected_none
 
 
-def _assert_embedded_canonical_source_url(
+def _assert_embedded_source_url(
     content: str,
     coordinator: BlueprintUpdateCoordinator,
     source_url: str,
-    canonical_url: str,
 ) -> str:
-    """Assert _ensure_source_url embeds the canonical URL for the given content."""
+    """Assert _ensure_source_url embeds the source URL for the given content."""
     result = coordinator._ensure_source_url(content, source_url)
     parsed = yaml_util.parse_yaml(result)
     assert isinstance(parsed, dict)
     assert isinstance(parsed.get("blueprint"), dict)
-    assert parsed["blueprint"].get("source_url") == canonical_url
+    assert parsed["blueprint"].get("source_url") == source_url
     return result
 
 
@@ -814,18 +804,14 @@ def test_set_cached_git_diff(coordinator):
 
 def test_ensure_source_url_script(coordinator):
     """Test ensuring source_url for a script blueprint."""
-    # _ensure_source_url normalizes blob URLs to their raw.githubusercontent.com
-    # equivalent before canonicalizing, so the embedded source_url is the canonical
-    # raw form regardless of what URL form is passed in.
     source_url = "https://github.com/user/repo/blob/main/script.yaml"
-    canonical_url = "https://raw.githubusercontent.com/user/repo/main/script.yaml"
     content = "blueprint:\n  name: Test Script\n  domain: script"
 
     new_content = coordinator._ensure_source_url(content, source_url)
-    assert f"source_url: {canonical_url}" in new_content
+    assert f"source_url: {source_url}" in new_content
 
     parsed = yaml.safe_load(new_content)
-    assert parsed["blueprint"]["source_url"] == canonical_url
+    assert parsed["blueprint"]["source_url"] == source_url
     assert parsed["blueprint"]["name"] == "Test Script"
     assert parsed["blueprint"]["domain"] == FunctionalDomain.SCRIPT
 
@@ -833,8 +819,8 @@ def test_ensure_source_url_script(coordinator):
 def test_deterministic_yaml_hashing(coordinator):
     """Test that YAML hashing is deterministic between Local and Remote versions.
 
-    Verify that a Local version (with injected defaults) and a Remote version
-    (without them) result in the same hash after semantic normalization.
+    Verify that a Local version (with injected defaults or reordered options)
+    and a Remote version result in the same hash after semantic normalization.
     """
     source_url = "https://github.com/user/test"
     content_v1 = (
@@ -846,14 +832,22 @@ def test_deterministic_yaml_hashing(coordinator):
         "blueprint:\n  name: T\n  domain: automation\n  input:\n    t:\n"
         "      name: T\n      selector:\n        text: {}"
     )
+    content_v3 = (
+        "blueprint:\n  name: T\n  domain: automation\n  input:\n    t:\n"
+        "      name: T\n      selector:\n        text:\n"
+        "          multiple: false\n          multiline: false"
+    )
 
     hash1 = coordinator._hash_content(content_v1, source_url)
     hash2 = coordinator._hash_content(content_v2, source_url)
+    hash3 = coordinator._hash_content(content_v3, source_url)
 
-    assert hash1 == hash2
+    assert hash1 == hash2 == hash3
 
-    norm = coordinator._ensure_source_url(content_v2, source_url)
-    assert "multiline: false\n          multiple: false" in norm
+    norm1 = coordinator._ensure_source_url(content_v1, source_url)
+    norm2 = coordinator._ensure_source_url(content_v2, source_url)
+    norm3 = coordinator._ensure_source_url(content_v3, source_url)
+    assert norm1 == norm2 == norm3
 
 
 def test_yaml_order_preservation(coordinator):
