@@ -54,13 +54,18 @@ STORAGE_VERSION = 1
 STORAGE_KEY_DATA = f"{DOMAIN}_data"
 METADATA_STORAGE_FIELDS = ("etag", "remote_hash", "source_url", "last_modified")
 
-DOMAIN_GITHUB = "github.com"
-DOMAIN_GITHUB_RAW = "raw.githubusercontent.com"
-DOMAIN_GIST = "gist.github.com"
-DOMAIN_HA_FORUM = "community.home-assistant.io"
-DOMAIN_GITLAB = "gitlab.com"
-DOMAIN_CODEBERG = "codeberg.org"
-DOMAIN_BITBUCKET = "bitbucket.org"
+
+class SourceDomain(StrEnum):
+    """Domains for blueprint source providers."""
+
+    GITHUB = "github.com"
+    GITHUB_RAW = "raw.githubusercontent.com"
+    GIST = "gist.github.com"
+    HA_FORUM = "community.home-assistant.io"
+    GITLAB = "gitlab.com"
+    CODEBERG = "codeberg.org"
+    BITBUCKET = "bitbucket.org"
+
 
 RE_FORUM_TOPIC_ID = re.compile(r"/t/(?:[^/]+/)?(\d+)")
 RE_FORUM_CODE_BLOCK = re.compile(r"<code[^>]*>(.*?)</code>", re.DOTALL)

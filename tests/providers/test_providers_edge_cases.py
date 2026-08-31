@@ -5,7 +5,10 @@ from urllib.parse import urlparse
 import orjson
 import pytest
 
-from custom_components.blueprints_updater.const import SourceProviderType
+from custom_components.blueprints_updater.const import (
+    SourceDomain,
+    SourceProviderType,
+)
 from custom_components.blueprints_updater.providers import (
     BitbucketProvider,
     CodebergProvider,
@@ -18,6 +21,17 @@ from custom_components.blueprints_updater.providers import (
     SourceProvider,
     registry,
 )
+
+
+def test_source_domain_enum() -> None:
+    """Verify that SourceDomain enum members have expected domain strings."""
+    assert SourceDomain.GITHUB == "github.com"
+    assert SourceDomain.GITHUB_RAW == "raw.githubusercontent.com"
+    assert SourceDomain.GIST == "gist.github.com"
+    assert SourceDomain.HA_FORUM == "community.home-assistant.io"
+    assert SourceDomain.GITLAB == "gitlab.com"
+    assert SourceDomain.CODEBERG == "codeberg.org"
+    assert SourceDomain.BITBUCKET == "bitbucket.org"
 
 
 def test_provider_identity():

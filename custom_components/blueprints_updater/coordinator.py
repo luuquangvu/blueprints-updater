@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import difflib
+import functools
 import hashlib
 import logging
 import os
@@ -13,7 +14,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from http import HTTPStatus
-from typing import Self, TypedDict
+from typing import ClassVar, Self, TypedDict
 from urllib.parse import urlparse
 
 import httpx
@@ -35,6 +36,7 @@ from homeassistant.components.template.config import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError, TemplateError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import async_get_platforms
 from homeassistant.helpers.selector import validate_selector
@@ -301,10 +303,342 @@ _LOCAL_REVISION_MISMATCH_ERROR = "Local blueprint changed; refresh and retry the
 _RESTORE_REVISION_MISMATCH = "revision_mismatch"
 
 
+def _fingerprint_schema_key(sk: object) -> tuple[str, str, tuple[object, ...] | None]:
+    """Deterministically fingerprint a schema key including marker metadata."""
+    if isinstance(sk, (vol.Optional, vol.Required, vol.Marker)):
+        marker_name = type(sk).__name__
+        default_val = getattr(sk, "default", vol.UNDEFINED)
+        default_fp = (
+            compute_selector_schema_fingerprint(default_val)
+            if default_val is not vol.UNDEFINED
+            else None
+        )
+        return (marker_name, str(sk.schema), default_fp)
+    return (type(sk).__name__, str(sk), None)
+
+
+def compute_selector_schema_fingerprint(schema_obj: object) -> tuple[object, ...]:
+    """Deterministically compute content-based fingerprint for a selector voluptuous schema."""
+    if isinstance(schema_obj, vol.Schema) and isinstance(schema_obj.schema, dict):
+        entries: list[tuple[tuple[str, str, tuple[object, ...] | None], tuple[object, ...]]] = []
+        for sk, sv in schema_obj.schema.items():
+            key_info = _fingerprint_schema_key(sk)
+            entries.append((key_info, compute_selector_schema_fingerprint(sv)))
+        return (
+            "vol.Schema",
+            len(schema_obj.schema),
+            tuple(sorted(entries, key=lambda x: str(x[0]))),
+        )
+    if isinstance(schema_obj, dict):
+        entries = []
+        for sk, sv in schema_obj.items():
+            key_info = _fingerprint_schema_key(sk)
+            entries.append((key_info, compute_selector_schema_fingerprint(sv)))
+        return (
+            "dict",
+            len(schema_obj),
+            tuple(sorted(entries, key=lambda x: str(x[0]))),
+        )
+    if isinstance(schema_obj, (vol.All, vol.Any)):
+        type_name = "vol.All" if isinstance(schema_obj, vol.All) else "vol.Any"
+        sub_fps = tuple(compute_selector_schema_fingerprint(v) for v in schema_obj.validators)
+        return (type_name, sub_fps)
+    if isinstance(schema_obj, (set, frozenset)):
+        type_name = type(schema_obj).__name__
+        sub_fps = tuple(
+            sorted(
+                (compute_selector_schema_fingerprint(v) for v in schema_obj),
+                key=str,
+            )
+        )
+        return (type_name, sub_fps)
+    if isinstance(schema_obj, (list, tuple)):
+        type_name = type(schema_obj).__name__
+        sub_fps = tuple(compute_selector_schema_fingerprint(v) for v in schema_obj)
+        return (type_name, sub_fps)
+    if isinstance(schema_obj, functools.partial):
+        return (
+            "partial",
+            compute_selector_schema_fingerprint(schema_obj.func),
+            tuple(compute_selector_schema_fingerprint(a) for a in schema_obj.args),
+            tuple(
+                sorted(
+                    (str(k), compute_selector_schema_fingerprint(v))
+                    for k, v in (schema_obj.keywords or {}).items()
+                )
+            ),
+        )
+    if isinstance(schema_obj, (vol.Coerce, vol.In, vol.Range, vol.Length)):
+        type_name = type(schema_obj).__name__
+        extra_attrs: list[tuple[str, tuple[object, ...]]] = []
+        extra_attrs.extend(
+            (
+                attr,
+                compute_selector_schema_fingerprint(getattr(schema_obj, attr)),
+            )
+            for attr in ("type", "container", "min", "max")
+            if hasattr(schema_obj, attr)
+        )
+        return ("vol_validator", type_name, tuple(extra_attrs))
+    if isinstance(schema_obj, (str, int, float, bool, type(None))):
+        return (type(schema_obj).__name__, schema_obj)
+    if isinstance(schema_obj, type):
+        qualname = getattr(schema_obj, "__qualname__", getattr(schema_obj, "__name__", ""))
+        module = getattr(schema_obj, "__module__", "")
+        return ("type", f"{module}.{qualname}")
+    if callable(schema_obj):
+        return _fingerprint_callable_state(schema_obj)
+    extra_state: list[tuple[str, tuple[object, ...]]] = []
+    if hasattr(schema_obj, "__dict__") and isinstance(schema_obj.__dict__, dict):
+        extra_state.extend(
+            (str(k), compute_selector_schema_fingerprint(v))
+            for k, v in sorted(schema_obj.__dict__.items(), key=lambda x: str(x[0]))
+            if not str(k).startswith("_")
+        )
+    qualname = getattr(type(schema_obj), "__qualname__", getattr(type(schema_obj), "__name__", ""))
+    module = getattr(type(schema_obj), "__module__", "")
+    return ("opaque_obj", f"{module}.{qualname}", tuple(extra_state))
+
+
+def _fingerprint_callable_state(schema_obj: object) -> tuple[str, str, tuple[object, ...]]:
+    """Deterministically fingerprint callable name, closure state, and instance variables."""
+    qualname = (
+        getattr(schema_obj, "__qualname__", getattr(schema_obj, "__name__", ""))
+        or type(schema_obj).__name__
+    )
+    module = getattr(schema_obj, "__module__", "")
+    extra_state: list[tuple[str, tuple[object, ...]]] = []
+    if defaults := getattr(schema_obj, "__defaults__", None):
+        extra_state.append(("defaults", compute_selector_schema_fingerprint(defaults)))
+    if kwdefaults := getattr(schema_obj, "__kwdefaults__", None):
+        extra_state.append(("kwdefaults", compute_selector_schema_fingerprint(kwdefaults)))
+    if closure := getattr(schema_obj, "__closure__", None):
+        cell_contents: list[tuple[object, ...]] = []
+        for cell in closure:
+            try:
+                cell_contents.append(compute_selector_schema_fingerprint(cell.cell_contents))
+            except Exception:
+                cell_contents.append(("unrepr_cell",))
+        extra_state.append(("closure", tuple(cell_contents)))
+    if hasattr(schema_obj, "__dict__") and isinstance(schema_obj.__dict__, dict):
+        extra_state.extend(
+            (str(k), compute_selector_schema_fingerprint(v))
+            for k, v in sorted(schema_obj.__dict__.items(), key=lambda x: str(x[0]))
+            if not str(k).startswith("_")
+        )
+    return ("callable", f"{module}.{qualname}", tuple(extra_state))
+
+
+def _is_dict_validator(val: object) -> bool:
+    """Check whether a schema validator matches a dictionary structure."""
+    if isinstance(val, vol.Schema) and isinstance(val.schema, dict):
+        return True
+    if isinstance(val, dict):
+        return True
+    if isinstance(val, (vol.All, vol.Any)):
+        return any(_is_dict_validator(v) for v in val.validators)
+    return False
+
+
+def _has_dict_list_expansion(val: object) -> bool:
+    """Detect whether a schema validator coerces single dictionary to list of dictionaries."""
+    if isinstance(val, vol.All):
+        has_ensure_list = any(
+            v is cv.ensure_list
+            or getattr(v, "__name__", "") == "ensure_list"
+            or (hasattr(v, "__qualname__") and "ensure_list" in v.__qualname__)
+            for v in val.validators
+        )
+        has_list_of_dicts = any(
+            isinstance(v, (list, tuple)) and len(v) == 1 and _is_dict_validator(v[0])
+            for v in val.validators
+        )
+        if has_ensure_list and has_list_of_dicts:
+            return True
+        return any(_has_dict_list_expansion(v) for v in val.validators)
+
+    if isinstance(val, vol.Any):
+        return any(_has_dict_list_expansion(v) for v in val.validators)
+
+    if isinstance(val, vol.Schema):
+        return _has_dict_list_expansion(val.schema)
+
+    return False
+
+
+def _extract_schema_dicts(config_schema: object) -> list[dict[object, object]]:
+    """Extract all underlying schema mappings from a voluptuous schema object."""
+    if isinstance(config_schema, vol.Schema) and isinstance(config_schema.schema, dict):
+        return [config_schema.schema]
+    if isinstance(config_schema, dict):
+        return [config_schema]
+    if isinstance(config_schema, (vol.All, vol.Any)):
+        dicts: list[dict[object, object]] = []
+        for v in config_schema.validators:
+            dicts.extend(_extract_schema_dicts(v))
+        return dicts
+    return []
+
+
+def _collect_selector_filter_paths(
+    current_prefix: tuple[str, ...],
+    schema_obj: object,
+    discovered: set[tuple[str, ...]],
+) -> None:
+    """Recursively collect filter path prefixes matching list expansion schemas."""
+    schema_dicts = _extract_schema_dicts(schema_obj)
+    if not schema_dicts:
+        return
+
+    for schema_dict in schema_dicts:
+        for key, val in schema_dict.items():
+            key_name = (
+                key.schema if isinstance(key, (vol.Optional, vol.Required, vol.Marker)) else key
+            )
+            if not isinstance(key_name, str):
+                continue
+
+            new_prefix = (*current_prefix, key_name)
+            if _has_dict_list_expansion(val):
+                discovered.add(new_prefix)
+
+            _collect_selector_filter_paths(new_prefix, val, discovered)
+
+
+def compute_selector_registry_fingerprint(
+    selectors_registry: object,
+) -> tuple[tuple[str, str, tuple[object, ...]], ...] | None:
+    """Compute a recursive content fingerprint of selector classes and schemas in the registry."""
+    if not isinstance(selectors_registry, Mapping):
+        return None
+    try:
+        registry_items = list(selectors_registry.items())
+    except Exception:
+        _LOGGER.debug("Could not iterate Home Assistant selector registry items", exc_info=True)
+        return None
+
+    items: list[tuple[str, str, tuple[object, ...]]] = []
+    for k, v in registry_items:
+        try:
+            config_schema = getattr(v, "CONFIG_SCHEMA", None)
+            schema_fp = (
+                compute_selector_schema_fingerprint(config_schema)
+                if config_schema is not None
+                else ()
+            )
+            cls_name = getattr(v, "__qualname__", getattr(v, "__name__", repr(v)))
+        except Exception:
+            cls_name = repr(v)
+            schema_fp = ()
+        items.append((str(k), cls_name, schema_fp))
+    return tuple(sorted(items, key=lambda item: item[0]))
+
+
+def derive_selector_filter_paths(
+    selectors_registry: object | None,
+    default_paths: frozenset[tuple[str, ...]],
+) -> frozenset[tuple[str, ...]]:
+    """Dynamically inspect registered Home Assistant selectors to discover filter paths."""
+    discovered: set[tuple[str, ...]] = set(default_paths)
+
+    if isinstance(selectors_registry, Mapping):
+        try:
+            registry_items = list(selectors_registry.items())
+        except Exception:
+            _LOGGER.debug(
+                "Could not iterate Home Assistant selector registry items",
+                exc_info=True,
+            )
+            registry_items = []
+
+        for selector_type, selector_cls in registry_items:
+            try:
+                config_schema = getattr(selector_cls, "CONFIG_SCHEMA", None)
+                if config_schema is None:
+                    continue
+
+                _collect_selector_filter_paths((str(selector_type),), config_schema, discovered)
+            except Exception:
+                _LOGGER.debug(
+                    "Failed to inspect selector schema for %s",
+                    selector_type,
+                    exc_info=True,
+                )
+
+    if not default_paths.issubset(discovered):
+        discovered.update(default_paths)
+
+    return frozenset(discovered)
+
+
 class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, object]]]):
     """Class to manage fetching blueprint updates."""
 
     _client_kwargs_cache: dict[str, tuple[str, ...] | None] | None = None
+    _DEFAULT_SELECTOR_FILTER_PATHS: ClassVar[frozenset[tuple[str, ...]]] = frozenset(
+        {
+            ("entity", "filter"),
+            ("device", "filter"),
+            ("device", "entity"),
+            ("target", "entity"),
+            ("target", "device"),
+            ("area", "entity"),
+            ("area", "device"),
+            ("floor", "entity"),
+            ("floor", "device"),
+            ("numeric_threshold", "entity"),
+        }
+    )
+    _selector_filter_paths: ClassVar[frozenset[tuple[str, ...]] | None] = None
+    _selector_registry_fingerprint: ClassVar[
+        tuple[tuple[str, str, tuple[object, ...]], ...] | None
+    ] = None
+
+    @classmethod
+    def _derive_selector_filter_paths(cls) -> frozenset[tuple[str, ...]]:
+        """Dynamically inspect registered Home Assistant selectors to discover filter paths."""
+        try:
+            from homeassistant.helpers import selector as ha_selector
+
+            selectors_registry = getattr(ha_selector, "SELECTORS", None)
+        except Exception:
+            _LOGGER.debug("Could not import Home Assistant selector registry", exc_info=True)
+            selectors_registry = None
+
+        return derive_selector_filter_paths(selectors_registry, cls._DEFAULT_SELECTOR_FILTER_PATHS)
+
+    @classmethod
+    def invalidate_selector_cache(cls) -> None:
+        """Invalidate the cached selector filter paths and registry fingerprints."""
+        cls._selector_filter_paths = None
+        cls._selector_registry_fingerprint = None
+
+    @classmethod
+    def get_selector_filter_paths(
+        cls, *, force_refresh: bool = False
+    ) -> frozenset[tuple[str, ...]]:
+        """Get the cached or dynamically derived set of selector filter paths."""
+        try:
+            from homeassistant.helpers import selector as ha_selector
+
+            selectors_registry = getattr(ha_selector, "SELECTORS", None)
+        except Exception:
+            _LOGGER.debug("Could not import Home Assistant selector registry", exc_info=True)
+            selectors_registry = None
+
+        current_fingerprint = compute_selector_registry_fingerprint(selectors_registry)
+
+        if (
+            force_refresh
+            or cls._selector_filter_paths is None
+            or current_fingerprint != cls._selector_registry_fingerprint
+        ):
+            cls._selector_filter_paths = derive_selector_filter_paths(
+                selectors_registry, cls._DEFAULT_SELECTOR_FILTER_PATHS
+            )
+            cls._selector_registry_fingerprint = current_fingerprint
+
+        return cls._selector_filter_paths
 
     @staticmethod
     def generate_unique_id(entry_id: str, relative_path: str) -> str:
@@ -4553,6 +4887,34 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         return BLUEPRINT_SCHEMA
 
     @staticmethod
+    def _coerce_empty_selectors(data: object) -> None:
+        """Coerce empty selector configurations with None values to empty dicts.
+
+        In older Home Assistant versions, validate_selector treats selector
+        mappings with None values (e.g. `text:`) by returning an empty dict
+        without invoking the selector's CONFIG_SCHEMA to populate default
+        fields. On subsequent passes, the input has `{}` instead of `None`,
+        which triggers CONFIG_SCHEMA and breaks idempotency across passes.
+        Coercing None selector values to `{}` beforehand ensures deterministic,
+        idempotent schema normalization across all Home Assistant versions.
+
+        Args:
+            data: Arbitrary structured blueprint data to traverse and mutate.
+
+        """
+        if isinstance(data, dict):
+            selector_data = data.get("selector")
+            if isinstance(selector_data, dict):
+                for sel_type, sel_val in list(selector_data.items()):
+                    if sel_val is None:
+                        selector_data[sel_type] = {}
+            for value in data.values():
+                BlueprintUpdateCoordinator._coerce_empty_selectors(value)
+        elif isinstance(data, list):
+            for item in data:
+                BlueprintUpdateCoordinator._coerce_empty_selectors(item)
+
+    @staticmethod
     def _ensure_source_url_cached(content: str, source_url: str) -> str:
         """Implementation of source URL normalization.
 
@@ -4578,6 +4940,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         try:
             domain = blueprint_info.get("domain", FunctionalDomain.AUTOMATION)
             schema = BlueprintUpdateCoordinator._get_blueprint_schema(domain)
+            BlueprintUpdateCoordinator._coerce_empty_selectors(parsed)
             normalized = schema(parsed)
             target_data = BlueprintUpdateCoordinator._stabilize_yaml_structure(parsed, normalized)
         except (vol.Invalid, KeyError, TypeError, ValueError) as err:
@@ -4646,11 +5009,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         except (ValueError, TypeError):
             return clean_url
 
-    @staticmethod
+    @classmethod
     def _stabilize_yaml_structure(
+        cls,
         orig_data: object,
         normalized_data: object,
-        in_selector: bool = False,
+        selector_path: tuple[str, ...] | None = None,
+        allow_singleton_list_coercion: bool = False,
+        filter_paths: frozenset[tuple[str, ...]] | None = None,
     ) -> object:
         """Recursively update normalized structures using original key ordering.
 
@@ -4658,50 +5024,78 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         For selector configuration mappings, keys are deterministically sorted
         so that option ordering or schema default additions do not trigger ghost diffs.
         """
-        if isinstance(orig_data, dict) and isinstance(normalized_data, dict):
-            orig_dict: dict[object, object] = dict(orig_data.items())
-            norm_dict: dict[object, object] = dict(normalized_data.items())
+        if filter_paths is None:
+            filter_paths = cls.get_selector_filter_paths()
 
+        if isinstance(normalized_data, dict):
+            norm_dict: dict[object, object] = dict(normalized_data.items())
+            orig_dict: dict[object, object] = (
+                dict(orig_data.items()) if isinstance(orig_data, dict) else {}
+            )
+
+            in_selector = selector_path is not None
             if in_selector:
                 sorted_keys = sorted(norm_dict.keys(), key=str)
                 return {
-                    k: BlueprintUpdateCoordinator._stabilize_yaml_structure(
+                    k: cls._stabilize_yaml_structure(
                         orig_dict.get(k),
                         norm_dict[k],
-                        in_selector=True,
+                        selector_path=(
+                            (*selector_path, str(k)) if selector_path is not None else (str(k),)
+                        ),
+                        allow_singleton_list_coercion=(
+                            selector_path is not None and (*selector_path, str(k)) in filter_paths
+                        ),
+                        filter_paths=filter_paths,
                     )
                     for k in sorted_keys
                 }
 
             res: dict[object, object] = {
-                k: BlueprintUpdateCoordinator._stabilize_yaml_structure(
+                k: cls._stabilize_yaml_structure(
                     orig_val,
                     norm_dict[k],
-                    in_selector=(k == "selector"),
+                    selector_path=() if k == "selector" else None,
+                    allow_singleton_list_coercion=False,
+                    filter_paths=filter_paths,
                 )
                 for k, orig_val in orig_dict.items()
                 if k in norm_dict
             }
             new_keys = sorted([k for k in norm_dict if k not in res], key=str)
             for key in new_keys:
-                res[key] = BlueprintUpdateCoordinator._stabilize_yaml_structure(
+                res[key] = cls._stabilize_yaml_structure(
                     norm_dict[key],
                     norm_dict[key],
-                    in_selector=(key == "selector"),
+                    selector_path=() if key == "selector" else None,
+                    allow_singleton_list_coercion=False,
+                    filter_paths=filter_paths,
                 )
             return res
 
         if isinstance(normalized_data, list):
-            orig_list = orig_data if isinstance(orig_data, list) else []
+            if isinstance(orig_data, list):
+                orig_list = orig_data
+            elif (
+                allow_singleton_list_coercion
+                and isinstance(orig_data, dict)
+                and len(normalized_data) == 1
+                and isinstance(normalized_data[0], dict)
+            ):
+                orig_list = [orig_data]
+            else:
+                orig_list = []
             res_list: list[object] = []
 
             for i, item in enumerate(normalized_data):
                 orig_item = orig_list[i] if i < len(orig_list) else None
                 res_list.append(
-                    BlueprintUpdateCoordinator._stabilize_yaml_structure(
+                    cls._stabilize_yaml_structure(
                         orig_item,
                         item,
-                        in_selector=in_selector,
+                        selector_path=selector_path,
+                        allow_singleton_list_coercion=False,
+                        filter_paths=filter_paths,
                     )
                 )
             return res_list

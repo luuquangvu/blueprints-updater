@@ -15,16 +15,10 @@ from homeassistant.util import slugify
 from homeassistant.util import yaml as yaml_util
 
 from .const import (
-    DOMAIN_BITBUCKET,
-    DOMAIN_CODEBERG,
-    DOMAIN_GIST,
-    DOMAIN_GITHUB,
-    DOMAIN_GITHUB_RAW,
-    DOMAIN_GITLAB,
-    DOMAIN_HA_FORUM,
     RE_FORUM_CODE_BLOCK,
     RE_FORUM_TOPIC_ID,
     RE_GIST_RAW,
+    SourceDomain,
     SourceProviderType,
 )
 
@@ -222,14 +216,14 @@ class GitHubProvider(SourceProvider):
         """Check if URL is a GitHub URL."""
         parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
-        return hostname in (DOMAIN_GITHUB, DOMAIN_GITHUB_RAW)
+        return hostname in (SourceDomain.GITHUB, SourceDomain.GITHUB_RAW)
 
     def normalize_url(self, url: str) -> str:
         """Normalize GitHub URL to raw content endpoint."""
         parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
         scheme = parsed.scheme.lower()
-        if hostname != DOMAIN_GITHUB:
+        if hostname != SourceDomain.GITHUB:
             return urlunparse(parsed._replace(scheme=scheme, netloc=_normalize_netloc(parsed)))
 
         path_parts = parsed.path.strip("/").split("/")
@@ -245,7 +239,7 @@ class GitHubProvider(SourceProvider):
         return urlunparse(
             (
                 scheme,
-                DOMAIN_GITHUB_RAW,
+                SourceDomain.GITHUB_RAW,
                 "/" + "/".join(new_parts),
                 parsed.params,
                 parsed.query,
@@ -275,7 +269,7 @@ class GistProvider(SourceProvider):
         """Check if URL is a Gist URL."""
         parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
-        return hostname == DOMAIN_GIST
+        return hostname == SourceDomain.GIST
 
     def normalize_url(self, url: str) -> str:
         """Normalize Gist URL to raw endpoint."""
@@ -342,13 +336,13 @@ class HAForumProvider(SourceProvider):
         """Check if URL is an HA Forum URL."""
         parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
-        return hostname == DOMAIN_HA_FORUM
+        return hostname == SourceDomain.HA_FORUM
 
     def normalize_url(self, url: str) -> str:
         """Normalize Forum URL to topic JSON endpoint."""
         parsed = urlparse(_without_fragment(url))
         scheme = parsed.scheme.lower() or "https"
-        netloc = _normalize_netloc(parsed) or DOMAIN_HA_FORUM
+        netloc = _normalize_netloc(parsed) or SourceDomain.HA_FORUM
 
         match = RE_FORUM_TOPIC_ID.search(parsed.path)
         if not match:
@@ -371,7 +365,7 @@ class HAForumProvider(SourceProvider):
         parsed = urlparse(url.strip())
         if match := RE_FORUM_TOPIC_ID.search(parsed.path):
             topic_id = match.group(1)
-            netloc = _normalize_netloc(parsed) or DOMAIN_HA_FORUM
+            netloc = _normalize_netloc(parsed) or SourceDomain.HA_FORUM
             return urlunparse(
                 (
                     (parsed.scheme or "https").lower(),
@@ -415,7 +409,7 @@ class HAForumProvider(SourceProvider):
                         ):
                             return {"author": username, "name": slug}
         parsed = urlparse(url)
-        hostname = parsed.hostname.lower() if parsed.hostname else DOMAIN_HA_FORUM
+        hostname = parsed.hostname.lower() if parsed.hostname else SourceDomain.HA_FORUM
         match = RE_FORUM_TOPIC_ID.search(parsed.path)
         topic_id = match.group(1) if match else "topic"
         return {"author": hostname, "name": topic_id}
@@ -457,7 +451,7 @@ class GitLabProvider(SourceProvider):
         """Check if URL is a GitLab URL."""
         parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
-        return hostname == DOMAIN_GITLAB
+        return hostname == SourceDomain.GITLAB
 
     def normalize_url(self, url: str) -> str:
         """Normalize GitLab URL to raw endpoint."""
@@ -480,7 +474,7 @@ class CodebergProvider(SourceProvider):
         """Check if URL is a Codeberg URL."""
         parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
-        return hostname == DOMAIN_CODEBERG
+        return hostname == SourceDomain.CODEBERG
 
     def normalize_url(self, url: str) -> str:
         """Normalize Codeberg URL to raw endpoint."""
@@ -503,7 +497,7 @@ class BitbucketProvider(SourceProvider):
         """Check if URL is a Bitbucket URL."""
         parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
-        return hostname == DOMAIN_BITBUCKET
+        return hostname == SourceDomain.BITBUCKET
 
     def normalize_url(self, url: str) -> str:
         """Normalize Bitbucket URL to raw endpoint."""
@@ -585,17 +579,17 @@ class ProviderRegistry:
         """Pre-compute hostname→provider O(1) index for known domains.
 
         Uses a direct constant-time mapping from canonical hostnames to
-        provider types, including DOMAIN_GITHUB_RAW for raw.githubusercontent.com
+        provider types, including SourceDomain.GITHUB_RAW for raw.githubusercontent.com
         URLs which are the most common URL type in practice.
         """
-        host_to_provider_type: dict[str, type[SourceProvider]] = {
-            DOMAIN_GITHUB: GitHubProvider,
-            DOMAIN_GITHUB_RAW: GitHubProvider,
-            DOMAIN_GIST: GistProvider,
-            DOMAIN_HA_FORUM: HAForumProvider,
-            DOMAIN_GITLAB: GitLabProvider,
-            DOMAIN_CODEBERG: CodebergProvider,
-            DOMAIN_BITBUCKET: BitbucketProvider,
+        host_to_provider_type: dict[SourceDomain, type[SourceProvider]] = {
+            SourceDomain.GITHUB: GitHubProvider,
+            SourceDomain.GITHUB_RAW: GitHubProvider,
+            SourceDomain.GIST: GistProvider,
+            SourceDomain.HA_FORUM: HAForumProvider,
+            SourceDomain.GITLAB: GitLabProvider,
+            SourceDomain.CODEBERG: CodebergProvider,
+            SourceDomain.BITBUCKET: BitbucketProvider,
         }
         provider_by_type = {type(p): p for p in self._providers}
         for host, ptype in host_to_provider_type.items():
