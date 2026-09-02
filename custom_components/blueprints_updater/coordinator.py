@@ -14,12 +14,20 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from http import HTTPStatus
-from typing import ClassVar, Self, TypedDict
+from typing import TYPE_CHECKING, ClassVar, Self, TypedDict
 from urllib.parse import urlparse
 
 import httpx
 import orjson
-import voluptuous as vol
+
+if TYPE_CHECKING:
+    import voluptuous as vol
+else:
+    try:
+        import probatio as vol
+    except ImportError:
+        import voluptuous as vol
+
 from homeassistant.components.automation.config import AUTOMATION_BLUEPRINT_SCHEMA
 from homeassistant.components.automation.config import (
     async_validate_config_item as async_validate_automation_config,

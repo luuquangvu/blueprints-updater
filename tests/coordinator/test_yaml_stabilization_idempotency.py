@@ -5,10 +5,19 @@ import inspect
 import os
 from collections.abc import ItemsView, Iterator, Mapping
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
-import voluptuous as vol
+
+if TYPE_CHECKING:
+    import voluptuous as vol
+else:
+    try:
+        import probatio as vol
+    except ImportError:
+        import voluptuous as vol
+
 import yaml
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
