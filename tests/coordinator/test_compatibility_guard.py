@@ -234,3 +234,46 @@ async def test_auto_update_guard_blocks_on_usage_lookup_failure(
     assert coordinator.data[blueprint_path]["update_blocking_reason"] == (
         BlueprintBlockingReason.SYSTEM_ERROR
     )
+
+
+@pytest.mark.asyncio
+async def test_auto_update_guard_blocks_when_compatibility_risk_present_even_without_consumers(
+    coordinator: BlueprintUpdateCoordinator,
+):
+    """Auto-update is blocked when compatibility risk is present.
+
+    Applies even if no entities currently use the blueprint.
+    """
+    blueprint_path = "automation/test_compat_no_consumers.yaml"
+    _prepare_blueprint_entry(coordinator, blueprint_path)
+
+    with (
+        patch.object(coordinator, "_get_entities_using_blueprint", return_value=[]),
+        patch.object(coordinator, "_async_send_auto_update_notification", return_value=None),
+        patch.object(coordinator, "async_translate", side_effect=lambda key, **kwargs: key),
+    ):
+        risks: list[StructuredRisk] = [
+            {
+                "type": BlueprintRiskType.COMPATIBILITY,
+                "args": {
+                    "entity": blueprint_path,
+                    "error": "Entity ID  is an invalid entity ID",
+                },
+            }
+        ]
+
+        result = await coordinator._handle_auto_update_step(
+            blueprint_path,
+            coordinator.data[blueprint_path],
+            "blueprint: name: New",
+            risks,
+            [],
+            set(),
+            remote_hash="new_hash",
+            new_etag="new_etag",
+        )
+
+    assert result is True
+    entry = coordinator.data[blueprint_path]
+    assert entry["updatable"] is True
+    assert entry["update_blocking_reason"] == BlueprintBlockingReason.BREAKING_CHANGE

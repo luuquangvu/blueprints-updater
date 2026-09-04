@@ -1704,6 +1704,54 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         return keys
 
     @staticmethod
+    def _extract_inputs_with_default(input_dict: object) -> set[str]:
+        """Recursively extract defined input keys that specify a default value.
+
+        Args:
+            input_dict: Parsed input mapping from blueprint metadata.
+
+        Returns:
+            A set of input key names that define a default value.
+
+        """
+        keys: set[str] = set()
+        if not isinstance(input_dict, Mapping):
+            return keys
+
+        for k, v in input_dict.items():
+            if isinstance(v, Mapping):
+                if "input" in v and isinstance(v["input"], Mapping):
+                    keys.update(BlueprintUpdateCoordinator._extract_inputs_with_default(v["input"]))
+                elif "default" in v and isinstance(k, str):
+                    keys.add(k)
+        return keys
+
+    @staticmethod
+    def _extract_mandatory_inputs(input_dict: object) -> set[str]:
+        """Recursively extract defined input keys that do not define a default value.
+
+        Args:
+            input_dict: Parsed input mapping from blueprint metadata.
+
+        Returns:
+            A set of mandatory input key names.
+
+        """
+        keys: set[str] = set()
+        if not isinstance(input_dict, Mapping):
+            return keys
+
+        for k, v in input_dict.items():
+            if isinstance(v, Mapping):
+                if "input" in v and isinstance(v["input"], Mapping):
+                    keys.update(BlueprintUpdateCoordinator._extract_mandatory_inputs(v["input"]))
+                elif "default" not in v and isinstance(k, str):
+                    keys.add(k)
+            elif isinstance(k, str):
+                keys.add(k)
+        return keys
+
+    @staticmethod
     def _extract_used_inputs(obj: object) -> list[str]:
         """Recursively find all !input references in the parsed structure.
 
@@ -3384,15 +3432,24 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         blueprint_content: str,
         configs: dict[str, dict[str, object]],
     ) -> list[StructuredRisk]:
-        """Validate all consumers of a blueprint against specific content.
+        """Validate blueprint consumers, default fallbacks, and proactive baseline candidates.
 
-        This uses Home Assistant's native input substitution and domain
-        validators without publishing candidate content to the shared hub.
+        This uses Home Assistant's native input substitution and domain validators
+        without publishing candidate content to the shared hub.
+
+        In addition to validating existing consumer configurations, this method evaluates:
+        - Proactive default-fallback simulation: For existing consumers that explicitly
+          configure inputs with blueprint defaults, omitting those inputs is simulated to
+          ensure that default fallback values pass domain schema validation.
+        - Proactive baseline candidate simulation: When no consumers exist and the
+          blueprint defines no mandatory inputs, a baseline candidate with empty inputs is
+          validated against Home Assistant Core if the blueprint provides a self-contained
+          executable structure.
 
         Args:
             relative_path: Relative path of the blueprint.
             blueprint_content: Raw YAML content for validation.
-            configs: Current configurations of all affected entities.
+            configs: Current configurations of all affected entities, or empty if none exist.
 
         Returns:
             A list of compatibility risks or system errors if validation fails.
@@ -3423,7 +3480,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                         },
                     }
                 ]
-            domain = parts[0]
+            domain = normalize_domain(parts[0])
             schema = BlueprintUpdateCoordinator._get_blueprint_schema(domain)
 
             blueprint_obj = Blueprint(
@@ -3446,34 +3503,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 }
             ]
 
+        blueprint_meta = blueprint_dict.get("blueprint")
+        input_meta = blueprint_meta.get("input") if isinstance(blueprint_meta, Mapping) else None
+        optional_keys = BlueprintUpdateCoordinator._extract_inputs_with_default(input_meta)
+        mandatory_keys = BlueprintUpdateCoordinator._extract_mandatory_inputs(input_meta)
+
         async with self._blueprint_validate_lock:
             for entity_id, config in configs.items():
                 try:
                     blueprint_inputs = BlueprintInputs(blueprint_obj, config)
                     blueprint_inputs.validate()
                     substituted_config = blueprint_inputs.async_substitute()
-                    if domain == FunctionalDomain.AUTOMATION:
-                        await async_validate_automation_config(
-                            self.hass,
-                            config_key=entity_id,
-                            config=substituted_config,
-                        )
-                    elif domain == FunctionalDomain.TEMPLATE:
-                        await async_validate_template_config(
-                            self.hass,
-                            config=substituted_config,
-                        )
-                    else:
-                        object_id = (
-                            entity_id.split(".", 1)[1]
-                            if entity_id.startswith("script.") and "." in entity_id
-                            else entity_id
-                        )
-                        await async_validate_script_config(
-                            self.hass,
-                            object_id=object_id,
-                            config=substituted_config,
-                        )
+                    await self._async_validate_substituted_domain_config(
+                        domain, entity_id, substituted_config
+                    )
                 except (HomeAssistantError, vol.Invalid) as err:
                     risks.append(
                         {
@@ -3484,8 +3527,135 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                             },
                         }
                     )
+                    continue
+
+                # Proactive default-fallback simulation: if the consumer explicitly configured
+                # inputs that have defaults in the blueprint, verify that omitting them still passes
+                # native HA Core domain schema validation.
+                use_bp = config.get("use_blueprint") if isinstance(config, Mapping) else None
+                if isinstance(use_bp, Mapping):
+                    configured_inputs = use_bp.get("input")
+                    if isinstance(configured_inputs, Mapping) and any(
+                        k in optional_keys for k in configured_inputs
+                    ):
+                        fallback_inputs = {
+                            k: v for k, v in configured_inputs.items() if k not in optional_keys
+                        }
+                        fallback_config = {
+                            **config,
+                            "use_blueprint": {
+                                **use_bp,
+                                "input": fallback_inputs,
+                            },
+                        }
+                        try:
+                            fallback_bp_inputs = BlueprintInputs(blueprint_obj, fallback_config)
+                            fallback_bp_inputs.validate()
+                            substituted_fallback = fallback_bp_inputs.async_substitute()
+                            await self._async_validate_substituted_domain_config(
+                                domain, entity_id, substituted_fallback
+                            )
+                        except (HomeAssistantError, vol.Invalid) as err:
+                            risks.append(
+                                {
+                                    "type": BlueprintRiskType.COMPATIBILITY,
+                                    "args": {
+                                        "entity": entity_id,
+                                        "error": sanitize_error_detail(str(err)),
+                                    },
+                                }
+                            )
+
+            # Proactive baseline candidate simulation: when no consumers exist,
+            # if the blueprint defines no mandatory inputs and provides self-contained
+            # executable structure, validate the baseline with empty inputs against HA Core.
+            if not configs and not mandatory_keys:
+                has_executable_structure = (
+                    (
+                        domain == FunctionalDomain.AUTOMATION
+                        and (
+                            ("trigger" in blueprint_dict or "triggers" in blueprint_dict)
+                            and (
+                                "action" in blueprint_dict
+                                or "actions" in blueprint_dict
+                                or "sequence" in blueprint_dict
+                            )
+                        )
+                    )
+                    or (domain == FunctionalDomain.SCRIPT and "sequence" in blueprint_dict)
+                    or (
+                        domain == FunctionalDomain.TEMPLATE
+                        and any(
+                            k in blueprint_dict for k in ("sensor", "binary_sensor", "template")
+                        )
+                    )
+                )
+                if has_executable_structure:
+                    baseline_config: dict[str, object] = {
+                        "use_blueprint": {
+                            "path": relative_path,
+                            "input": {},
+                        }
+                    }
+                    try:
+                        baseline_inputs = BlueprintInputs(blueprint_obj, baseline_config)
+                        baseline_inputs.validate()
+                        substituted_baseline = baseline_inputs.async_substitute()
+                        await self._async_validate_substituted_domain_config(
+                            domain, relative_path, substituted_baseline
+                        )
+                    except (HomeAssistantError, vol.Invalid) as err:
+                        risks.append(
+                            {
+                                "type": BlueprintRiskType.COMPATIBILITY,
+                                "args": {
+                                    "entity": relative_path,
+                                    "error": sanitize_error_detail(str(err)),
+                                },
+                            }
+                        )
 
         return risks
+
+    async def _async_validate_substituted_domain_config(
+        self,
+        domain: FunctionalDomain,
+        config_key: str,
+        substituted_config: dict[str, object],
+    ) -> None:
+        """Validate a fully substituted blueprint config against Home Assistant Core domain schemas.
+
+        Args:
+            domain: Functional domain (automation, script, template).
+            config_key: Entity ID or path label for error reporting.
+            substituted_config: Config dictionary after input substitution.
+
+        Raises:
+            HomeAssistantError: If configuration fails domain validation.
+            vol.Invalid: If configuration fails schema validation.
+
+        """
+        if domain == FunctionalDomain.AUTOMATION:
+            await async_validate_automation_config(
+                self.hass,
+                config_key=config_key,
+                config=substituted_config,
+            )
+        elif domain == FunctionalDomain.TEMPLATE:
+            await async_validate_template_config(
+                self.hass,
+                config=substituted_config,
+            )
+        elif domain == FunctionalDomain.SCRIPT:
+            if config_key.startswith("script."):
+                object_id = config_key.split(".", 1)[1]
+            else:
+                object_id = slugify(f"{domain}_{config_key}")
+            await async_validate_script_config(
+                self.hass,
+                object_id=object_id,
+                config=substituted_config,
+            )
 
     async def async_summarize_risks(self, risks: Iterable[Mapping[str, object]]) -> str:
         """Create a localized newline-separated string of risks.
@@ -4305,10 +4475,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         relative_path_obj = info.get("relative_path")
         relative_path = relative_path_obj if isinstance(relative_path_obj, str) else None
         in_use_entities = self._get_entities_using_blueprint(relative_path) if relative_path else []
+        has_compatibility_risk = any(
+            risk.get("type") == BlueprintRiskType.COMPATIBILITY for risk in risks
+        )
         guard_failed = in_use_entities is None or any(
             risk.get("type") == BlueprintRiskType.SYSTEM_ERROR for risk in risks
         )
-        is_breaking = bool(risks) and (guard_failed or bool(in_use_entities))
+        is_breaking = bool(risks) and (
+            guard_failed or bool(in_use_entities) or has_compatibility_risk
+        )
 
         if is_breaking:
             await self._async_handle_auto_update_blocked(

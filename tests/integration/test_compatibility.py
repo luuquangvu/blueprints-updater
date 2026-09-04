@@ -324,3 +324,262 @@ async def test_unmocked_template_blueprint_consumer_validation(
     )
 
     assert risks == []
+
+
+@pytest.mark.asyncio
+async def test_proactive_default_fallback_simulation_catches_unsafe_empty_default(
+    hass: HomeAssistant,
+) -> None:
+    """Active consumer with valid input fails when default fallback violates HA schema."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={"update_interval": 24},
+        entry_id="test_compat_fallback_val",
+    )
+    entry.add_to_hass(hass)
+    coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+
+    unsafe_blueprint = (
+        "blueprint:\n"
+        "  name: Unsafe Action Target Blueprint\n"
+        "  domain: automation\n"
+        "  input:\n"
+        "    trigger_bool:\n"
+        "      name: Trigger Boolean\n"
+        "      selector:\n"
+        "        entity:\n"
+        "          domain: input_boolean\n"
+        "    optional_helper:\n"
+        "      name: Optional Helper\n"
+        "      default: ''\n"
+        "      selector:\n"
+        "        entity:\n"
+        "          domain: input_boolean\n"
+        "trigger:\n"
+        "  - platform: state\n"
+        "    entity_id: !input trigger_bool\n"
+        "action:\n"
+        "  - service: input_boolean.turn_on\n"
+        "    target:\n"
+        "      entity_id: !input optional_helper\n"
+    )
+
+    # Consumer explicitly supplied optional_helper, so direct evaluation succeeds
+    consumer_config: dict[str, object] = {
+        "use_blueprint": {
+            "path": "automation/unsafe_bp.yaml",
+            "input": {
+                "trigger_bool": "input_boolean.trigger",
+                "optional_helper": "input_boolean.target",
+            },
+        }
+    }
+
+    risks = await coordinator._async_validate_blueprint_consumers(
+        relative_path="automation/unsafe_bp.yaml",
+        blueprint_content=unsafe_blueprint,
+        configs={"automation.test_instance": consumer_config},
+    )
+
+    # Default-fallback simulation catches that omitting optional_helper fails schema
+    assert len(risks) == 1
+    assert risks[0]["type"] == BlueprintRiskType.COMPATIBILITY
+    assert risks[0]["args"]["entity"] == "automation.test_instance"
+
+
+@pytest.mark.asyncio
+async def test_proactive_baseline_simulation_zero_consumers_catches_unsafe_empty_default(
+    hass: HomeAssistant,
+) -> None:
+    """Zero-consumer blueprint with unsafe default input fails proactive baseline simulation."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={"update_interval": 24},
+        entry_id="test_compat_zero_consumers",
+    )
+    entry.add_to_hass(hass)
+    coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+
+    unsafe_blueprint = (
+        "blueprint:\n"
+        "  name: Unsafe Zero Consumer Blueprint\n"
+        "  domain: automation\n"
+        "  input:\n"
+        "    optional_helper:\n"
+        "      name: Optional Helper\n"
+        "      default: ''\n"
+        "      selector:\n"
+        "        entity:\n"
+        "          domain: input_boolean\n"
+        "trigger:\n"
+        "  - platform: homeassistant\n"
+        "    event: start\n"
+        "action:\n"
+        "  - service: input_boolean.turn_on\n"
+        "    target:\n"
+        "      entity_id: !input optional_helper\n"
+    )
+
+    risks = await coordinator._async_validate_blueprint_consumers(
+        relative_path="automation/unsafe_zero.yaml",
+        blueprint_content=unsafe_blueprint,
+        configs={},
+    )
+
+    assert len(risks) == 1
+    assert risks[0]["type"] == BlueprintRiskType.COMPATIBILITY
+    assert risks[0]["args"]["entity"] == "automation/unsafe_zero.yaml"
+
+
+@pytest.mark.asyncio
+async def test_proactive_simulation_allows_standard_target_selector_default_dict(
+    hass: HomeAssistant,
+) -> None:
+    """Standard target selector with default: {} is valid in Home Assistant Core."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={"update_interval": 24},
+        entry_id="test_compat_target_dict",
+    )
+    entry.add_to_hass(hass)
+    coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+
+    valid_blueprint = (
+        "blueprint:\n"
+        "  name: Valid Target Dict Blueprint\n"
+        "  domain: automation\n"
+        "  input:\n"
+        "    target_dev:\n"
+        "      name: Target Device\n"
+        "      default: {}\n"
+        "      selector:\n"
+        "        target:\n"
+        "trigger:\n"
+        "  - platform: homeassistant\n"
+        "    event: start\n"
+        "action:\n"
+        "  - service: homeassistant.turn_on\n"
+        "    target: !input target_dev\n"
+    )
+
+    risks = await coordinator._async_validate_blueprint_consumers(
+        relative_path="automation/valid_target.yaml",
+        blueprint_content=valid_blueprint,
+        configs={},
+    )
+
+    assert risks == []
+
+
+@pytest.mark.asyncio
+async def test_proactive_baseline_simulation_zero_consumers_valid_script(
+    hass: HomeAssistant,
+) -> None:
+    """Zero-consumer script blueprint validates successfully in proactive baseline simulation."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={"update_interval": 24},
+        entry_id="test_compat_zero_script",
+    )
+    entry.add_to_hass(hass)
+    coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+
+    valid_script_bp = (
+        "blueprint:\n"
+        "  name: Valid Zero Consumer Script Blueprint\n"
+        "  domain: script\n"
+        "  input:\n"
+        "    delay_seconds:\n"
+        "      name: Delay\n"
+        "      default: 5\n"
+        "      selector:\n"
+        "        number:\n"
+        "          min: 1\n"
+        "          max: 60\n"
+        "sequence:\n"
+        "  - delay:\n"
+        "      seconds: !input delay_seconds\n"
+    )
+
+    risks = await coordinator._async_validate_blueprint_consumers(
+        relative_path="script/valid_zero_script.yaml",
+        blueprint_content=valid_script_bp,
+        configs={},
+    )
+
+    assert risks == []
+
+
+@pytest.mark.asyncio
+async def test_proactive_baseline_simulation_zero_consumers_catches_invalid_script(
+    hass: HomeAssistant,
+) -> None:
+    """Zero-consumer script blueprint with invalid action fails baseline simulation."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={"update_interval": 24},
+        entry_id="test_compat_zero_script_invalid",
+    )
+    entry.add_to_hass(hass)
+    coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+
+    invalid_script_bp = (
+        "blueprint:\n"
+        "  name: Invalid Zero Consumer Script\n"
+        "  domain: script\n"
+        "sequence:\n"
+        "  - service: ''\n"
+    )
+
+    risks = await coordinator._async_validate_blueprint_consumers(
+        relative_path="script/invalid_zero.yaml",
+        blueprint_content=invalid_script_bp,
+        configs={},
+    )
+
+    assert len(risks) == 1
+    assert risks[0]["type"] == BlueprintRiskType.COMPATIBILITY
+    assert risks[0]["args"]["entity"] == "script/invalid_zero.yaml"
+
+
+@pytest.mark.asyncio
+async def test_proactive_baseline_simulation_zero_consumers_valid_template(
+    hass: HomeAssistant,
+) -> None:
+    """Zero-consumer template blueprint validates successfully in proactive baseline simulation."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={},
+        options={"update_interval": 24},
+        entry_id="test_compat_zero_template",
+    )
+    entry.add_to_hass(hass)
+    coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+
+    valid_template_bp = (
+        "blueprint:\n"
+        "  name: Valid Zero Consumer Template\n"
+        "  domain: template\n"
+        "  input:\n"
+        "    sensor_name:\n"
+        "      name: Sensor Name\n"
+        "      default: My Template Sensor\n"
+        "      selector:\n"
+        "        text:\n"
+        "sensor:\n"
+        "  - name: !input sensor_name\n"
+        '    state: "OK"\n'
+    )
+
+    risks = await coordinator._async_validate_blueprint_consumers(
+        relative_path="template/valid_zero.yaml",
+        blueprint_content=valid_template_bp,
+        configs={},
+    )
+
+    assert risks == []
