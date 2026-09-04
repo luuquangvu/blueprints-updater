@@ -1,6 +1,6 @@
 [project]
 name = "blueprints-updater"
-version = "2.14.4"
+version = "2.14.5"
 description = "Automatically update Home Assistant blueprints via native update entities."
 requires-python = ">=3.14.2"
 dependencies = ["httpx[http2]"]
