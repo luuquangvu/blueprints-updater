@@ -411,7 +411,7 @@ def _run_uv_sync_check(repo_root: str) -> subprocess.CompletedProcess[str]:
 def _repair_uv_sync(repo_root: str) -> None:
     """Synchronize uv dependencies."""
     subprocess.run(
-        ["uv", "sync", "--all-groups"],
+        ["uv", "sync", "--locked", "--all-groups"],
         check=True,
         cwd=repo_root,
         timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
@@ -433,7 +433,7 @@ def _run_npm_sync_check(repo_root: str) -> subprocess.CompletedProcess[str]:
 def _repair_npm_sync(repo_root: str) -> None:
     """Synchronize npm dependencies."""
     subprocess.run(
-        ["npm", "ci"],
+        ["npm", "ci", "--ignore-scripts", "--allow-git=none"],
         check=True,
         cwd=repo_root,
         timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
@@ -867,7 +867,7 @@ def _sync_constraint_drift(
         timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
     )
     subprocess.run(
-        ["uv", "sync", "--all-groups"],
+        ["uv", "sync", "--locked", "--all-groups"],
         check=True,
         cwd=repo_root,
         timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
@@ -912,7 +912,6 @@ def _check_and_sync_ha_constraints(repo_root: str) -> None:
         raise
     except (
         OSError,
-        orjson.JSONDecodeError,
         md.PackageNotFoundError,
         KeyError,
         ValueError,
@@ -932,7 +931,7 @@ def _run_dependency_steps(repo_root: str) -> None:
         repo_root,
         command_label="uv sync --check --all-groups",
         check_output_label="uv sync --check",
-        repair_message="Environment is out of sync. Running 'uv sync --all-groups'",
+        repair_message=("Environment is out of sync. Running 'uv sync --locked --all-groups'"),
         synchronized_message="Environment is already synchronized.",
         run_check=_run_uv_sync_check,
         run_repair=_repair_uv_sync,
@@ -943,7 +942,9 @@ def _run_dependency_steps(repo_root: str) -> None:
         repo_root,
         command_label="npm ls",
         check_output_label="npm ls",
-        repair_message="NPM packages are out of sync. Running 'npm ci'",
+        repair_message=(
+            "NPM packages are out of sync. Running 'npm ci --ignore-scripts --allow-git=none'"
+        ),
         synchronized_message="NPM packages are already synchronized.",
         run_check=_run_npm_sync_check,
         run_repair=_repair_npm_sync,
@@ -964,10 +965,10 @@ def _run_dependency_steps(repo_root: str) -> None:
 
 def _run_ruff_format_step(repo_root: str) -> None:
     """Format Python code with explicit list literal for security audits."""
-    format_cmd = "uv run ruff format"
+    format_cmd = "uv run --locked ruff format"
     print(f"STEP_START: {format_cmd}", flush=True)
     subprocess.run(
-        ["uv", "run", "ruff", "format"],
+        ["uv", "run", "--locked", "ruff", "format"],
         check=True,
         cwd=repo_root,
         timeout=_FORMAT_STEP_TIMEOUT_SECONDS,
@@ -977,10 +978,10 @@ def _run_ruff_format_step(repo_root: str) -> None:
 
 def _run_ruff_check_step(repo_root: str) -> None:
     """Lint Python code with explicit list literal for security audits."""
-    check_cmd = "uv run ruff check --fix"
+    check_cmd = "uv run --locked ruff check --fix"
     print(f"STEP_START: {check_cmd}", flush=True)
     subprocess.run(
-        ["uv", "run", "ruff", "check", "--fix"],
+        ["uv", "run", "--locked", "ruff", "check", "--fix"],
         check=True,
         cwd=repo_root,
         timeout=_FORMAT_STEP_TIMEOUT_SECONDS,
@@ -996,10 +997,10 @@ def _run_ruff_steps(repo_root: str) -> None:
 
 def _run_ty_step(repo_root: str) -> None:
     """Run Ty type check with explicit list literal for security audits."""
-    ty_cmd = "uv run ty check"
+    ty_cmd = "uv run --locked ty check"
     print(f"STEP_START: {ty_cmd}", flush=True)
     subprocess.run(
-        ["uv", "run", "ty", "check"],
+        ["uv", "run", "--locked", "ty", "check"],
         check=True,
         cwd=repo_root,
         timeout=_STATIC_ANALYSIS_STEP_TIMEOUT_SECONDS,
@@ -1009,10 +1010,10 @@ def _run_ty_step(repo_root: str) -> None:
 
 def _run_pyright_step(repo_root: str) -> None:
     """Run Pyright type check with explicit list literal for security audits."""
-    pyright_cmd = "uv run pyright"
+    pyright_cmd = "uv run --locked pyright"
     print(f"STEP_START: {pyright_cmd}", flush=True)
     subprocess.run(
-        ["uv", "run", "pyright"],
+        ["uv", "run", "--locked", "pyright"],
         check=True,
         cwd=repo_root,
         timeout=_STATIC_ANALYSIS_STEP_TIMEOUT_SECONDS,
@@ -1022,10 +1023,10 @@ def _run_pyright_step(repo_root: str) -> None:
 
 def _run_interrogate_step(repo_root: str) -> None:
     """Run Interrogate docstring audit with explicit list literal for security audits."""
-    interrogate_cmd = "uv run interrogate"
+    interrogate_cmd = "uv run --locked interrogate"
     print(f"STEP_START: {interrogate_cmd}", flush=True)
     subprocess.run(
-        ["uv", "run", "interrogate"],
+        ["uv", "run", "--locked", "interrogate"],
         check=True,
         cwd=repo_root,
         timeout=_STATIC_ANALYSIS_STEP_TIMEOUT_SECONDS,
@@ -1042,10 +1043,10 @@ def _run_static_analysis_steps(repo_root: str) -> None:
 
 def _run_prettier_step(repo_root: str) -> None:
     """Format text files using explicit Prettier list literal for security audits."""
-    prettier_cmd = "npx prettier --log-level warn --write ."
+    prettier_cmd = "npx --no-install prettier --log-level warn --write ."
     print(f"STEP_START: {prettier_cmd}", flush=True)
     subprocess.run(
-        ["npx", "prettier", "--log-level", "warn", "--write", "."],
+        ["npx", "--no-install", "prettier", "--log-level", "warn", "--write", "."],
         check=True,
         cwd=repo_root,
         timeout=_PRETTIER_STEP_TIMEOUT_SECONDS,
@@ -1055,10 +1056,10 @@ def _run_prettier_step(repo_root: str) -> None:
 
 def _run_pytest_step(repo_root: str) -> None:
     """Run test suite using explicit Pytest list literal for security audits."""
-    pytest_cmd = "uv run pytest"
+    pytest_cmd = "uv run --locked pytest"
     print(f"STEP_START: {pytest_cmd}", flush=True)
     subprocess.run(
-        ["uv", "run", "pytest"],
+        ["uv", "run", "--locked", "pytest"],
         check=True,
         cwd=repo_root,
         timeout=_PYTEST_STEP_TIMEOUT_SECONDS,

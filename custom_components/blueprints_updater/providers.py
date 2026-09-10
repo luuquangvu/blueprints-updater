@@ -22,6 +22,9 @@ from .const import (
     SourceProviderType,
 )
 
+_DEFAULT_BLUEPRINT_FILENAME = "blueprint.yaml"
+
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -146,7 +149,7 @@ def _default_url_metadata(url: str) -> dict[str, str]:
     parsed = urlparse(url)
     author = parsed.hostname.lower() if parsed.hostname else "imported"
     path_parts = [p for p in parsed.path.strip("/").split("/") if p]
-    filename = path_parts[-1] if path_parts else "blueprint.yaml"
+    filename = path_parts[-1] if path_parts else _DEFAULT_BLUEPRINT_FILENAME
     name = _strip_yaml_extension(filename)
     return {"author": author, "name": name}
 
@@ -252,7 +255,7 @@ class GitHubProvider(SourceProvider):
         parsed = urlparse(url)
         path_parts = [p for p in parsed.path.strip("/").split("/") if p]
         author = path_parts[0] if path_parts else "unknown"
-        filename = path_parts[-1] if path_parts else "blueprint.yaml"
+        filename = path_parts[-1] if path_parts else _DEFAULT_BLUEPRINT_FILENAME
         name = _strip_yaml_extension(filename)
         return {"author": author, "name": name}
 
@@ -294,7 +297,7 @@ class GistProvider(SourceProvider):
         parsed = urlparse(url)
         path_parts = [p for p in parsed.path.strip("/").split("/") if p]
         author = path_parts[0] if path_parts else "unknown"
-        filename = path_parts[-1] if path_parts else "blueprint.yaml"
+        filename = path_parts[-1] if path_parts else _DEFAULT_BLUEPRINT_FILENAME
         if filename == "raw" and len(path_parts) > 1:
             filename = path_parts[-2]
         name = _strip_yaml_extension(filename)

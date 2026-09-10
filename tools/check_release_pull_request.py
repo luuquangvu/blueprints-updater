@@ -9,7 +9,9 @@ from pathlib import Path
 
 import orjson
 
-VERSION_PATTERN = r"(([0-9]+\.[0-9]+\.[0-9]+)(?:-rc\.[0-9]+)?)"
+VERSION_CORE_PATTERN = r"\d+\.\d+\.\d+"
+VERSION_PRERELEASE_PATTERN = r"-rc\.\d+"
+VERSION_PATTERN = rf"({VERSION_CORE_PATTERN}(?:{VERSION_PRERELEASE_PATTERN})?)"
 
 
 @dataclass(frozen=True)
@@ -74,7 +76,7 @@ def _evaluate_release_gate(
             message=message,
             version=manifest_version,
             tag=manifest_version,
-            prerelease="rc" in manifest_version,
+            prerelease=bool(re.search(VERSION_PRERELEASE_PATTERN, manifest_version)),
         )
 
     message = (

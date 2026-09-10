@@ -51,7 +51,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts --allow-git=none
 
       - name: Calculate release version
         id: release
@@ -69,7 +69,7 @@ jobs:
           ALL_TAGS="$(git tag --list)"
           export ALL_TAGS
 
-          CALCULATED_VERSION="$(uv run tools/calculate_version.py)"
+          CALCULATED_VERSION="$(uv run --locked tools/calculate_version.py)"
           VERSION="${CALCULATED_VERSION}"
 
           if [[ ! "$VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?)$ ]]; then
@@ -96,14 +96,14 @@ jobs:
           echo "NEW_VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Update versions
-        run: uv run tools/update_project_metadata.py
+        run: uv run --locked tools/update_project_metadata.py
 
       - name: Format release metadata
         shell: bash
         run: |
           set -euo pipefail
 
-          npx prettier --write custom_components/blueprints_updater/manifest.json pyproject.toml
+          npx --no-install prettier --write custom_components/blueprints_updater/manifest.json pyproject.toml
 
       - name: Update uv.lock
         run: uv lock

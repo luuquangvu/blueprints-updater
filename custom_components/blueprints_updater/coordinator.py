@@ -350,7 +350,7 @@ def compute_selector_schema_fingerprint(schema_obj: object) -> tuple[object, ...
     if isinstance(schema_obj, (vol.All, vol.Any)):
         type_name = "vol.All" if isinstance(schema_obj, vol.All) else "vol.Any"
         sub_fps = tuple(compute_selector_schema_fingerprint(v) for v in schema_obj.validators)
-        return (type_name, sub_fps)
+        return (type_name, len(sub_fps), sub_fps)
     if isinstance(schema_obj, (set, frozenset)):
         type_name = type(schema_obj).__name__
         sub_fps = tuple(
@@ -359,21 +359,23 @@ def compute_selector_schema_fingerprint(schema_obj: object) -> tuple[object, ...
                 key=str,
             )
         )
-        return (type_name, sub_fps)
+        return (type_name, len(sub_fps), sub_fps)
     if isinstance(schema_obj, (list, tuple)):
         type_name = type(schema_obj).__name__
         sub_fps = tuple(compute_selector_schema_fingerprint(v) for v in schema_obj)
-        return (type_name, sub_fps)
+        return (type_name, len(sub_fps), sub_fps)
     if isinstance(schema_obj, functools.partial):
         return (
             "partial",
             compute_selector_schema_fingerprint(schema_obj.func),
-            tuple(compute_selector_schema_fingerprint(a) for a in schema_obj.args),
-            tuple(
-                sorted(
-                    (str(k), compute_selector_schema_fingerprint(v))
-                    for k, v in (schema_obj.keywords or {}).items()
-                )
+            (
+                tuple(compute_selector_schema_fingerprint(a) for a in schema_obj.args),
+                tuple(
+                    sorted(
+                        (str(k), compute_selector_schema_fingerprint(v))
+                        for k, v in (schema_obj.keywords or {}).items()
+                    )
+                ),
             ),
         )
     if isinstance(schema_obj, (vol.Coerce, vol.In, vol.Range, vol.Length)):
@@ -389,11 +391,11 @@ def compute_selector_schema_fingerprint(schema_obj: object) -> tuple[object, ...
         )
         return ("vol_validator", type_name, tuple(extra_attrs))
     if isinstance(schema_obj, (str, int, float, bool, type(None))):
-        return (type(schema_obj).__name__, schema_obj)
+        return ("literal", type(schema_obj).__name__, schema_obj)
     if isinstance(schema_obj, type):
         qualname = getattr(schema_obj, "__qualname__", getattr(schema_obj, "__name__", ""))
         module = getattr(schema_obj, "__module__", "")
-        return ("type", f"{module}.{qualname}")
+        return ("type", f"{module}.{qualname}", ())
     if callable(schema_obj):
         return _fingerprint_callable_state(schema_obj)
     extra_state: list[tuple[str, tuple[object, ...]]] = []
@@ -2513,12 +2515,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         last_modified: str | None,
     ) -> dict[str, object]:
         """Build the synchronized coordinator state for an installation."""
-        current = prepared.current
-        final_etag = etag if etag is not None else (current.get("etag") if current else None)
+        current = prepared.current or {}
+        final_etag = etag if etag is not None else current.get("etag")
         final_last_modified = (
-            last_modified
-            if last_modified is not None
-            else (current.get("last_modified") if current else None)
+            last_modified if last_modified is not None else current.get("last_modified")
         )
         semantic_hash = (
             BlueprintUpdateCoordinator._hash_content(prepared.content, prepared.source_url)
@@ -4222,7 +4222,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 refresh_work=refresh_work,
             )
         except Exception as err:
-            _LOGGER.error(
+            _LOGGER.exception(
                 "Error processing blueprint from %s: %s",
                 redact_url(source_url),
                 sanitize_error_detail(str(err)),
@@ -5088,7 +5088,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if isinstance(data, dict):
             selector_data = data.get("selector")
             if isinstance(selector_data, dict):
-                for sel_type, sel_val in list(selector_data.items()):
+                for sel_type, sel_val in selector_data.items():
                     if sel_val is None:
                         selector_data[sel_type] = {}
             for value in data.values():
