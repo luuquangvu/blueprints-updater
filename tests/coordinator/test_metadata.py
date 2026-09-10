@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, mock_open, patch
 
 import pytest
 import yaml
+from homeassistant.components.blueprint import models
 from homeassistant.util import yaml as yaml_util
 from homeassistant.util.yaml.objects import Input
 
@@ -290,6 +291,187 @@ def test_ensure_source_url_stability(coordinator):
     assert "source_url: https://url.com" in injected
     re_injected = coordinator._ensure_source_url(injected, source_url)
     assert injected == re_injected
+
+
+def test_ensure_source_url_forum_blueprint_ordering(
+    coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Test that forum blueprints without input or source_url match HA Core imported order."""
+    forum_content = """blueprint:
+  name: Reload automations on file change
+  description: >
+    When you modify a blueprint, automations need to be reloaded to pick up the latest changes.
+  domain: automation
+
+trigger:
+  - platform: event
+    event_type: 'folder_watcher'
+
+condition:
+  - condition: template
+    value_template: "{{ 'blueprints' in  trigger.event.data.folder }}"
+
+action:
+  - service: automation.reload
+"""
+    source_url = (
+        "https://community.home-assistant.io/t/"
+        "reload-automations-automatically-when-a-blueprint-is-changed/253977"
+    )
+
+    remote_normalized = coordinator._ensure_source_url(forum_content, source_url)
+
+    input_idx = remote_normalized.find("input: {}")
+    source_url_idx = remote_normalized.find(f"source_url: {source_url}")
+    assert input_idx != -1
+    assert source_url_idx != -1
+    assert input_idx < source_url_idx
+
+    # Simulate Home Assistant Core import workflow for this forum blueprint
+    ha_data = yaml_util.parse_yaml(forum_content)
+    assert isinstance(ha_data, dict)
+    schema = coordinator._get_blueprint_schema("automation")
+    bp = models.Blueprint(ha_data, schema=schema)
+    bp.update_metadata(source_url=source_url)
+    local_imported = bp.yaml()
+
+    local_normalized = coordinator._ensure_source_url(local_imported, source_url)
+    assert remote_normalized == local_normalized
+
+    remote_hash = coordinator._hash_content(forum_content, source_url)
+    local_hash = coordinator._hash_content(local_imported, source_url)
+    assert remote_hash == local_hash
+
+
+@pytest.mark.parametrize(
+    ("scenario", "yaml_str"),
+    [
+        (
+            "with_author",
+            "blueprint:\n  name: Test\n  domain: automation\n  author: Alice\n",
+        ),
+        (
+            "with_description",
+            "blueprint:\n  name: Test\n  domain: automation\n  description: Desc\n",
+        ),
+        (
+            "with_ha_min",
+            (
+                "blueprint:\n"
+                "  name: Test\n"
+                "  domain: automation\n"
+                "  homeassistant:\n"
+                "    min_version: 2024.1.0\n"
+            ),
+        ),
+        (
+            "with_section",
+            (
+                "blueprint:\n"
+                "  name: Test\n"
+                "  domain: automation\n"
+                "  input:\n"
+                "    sec:\n"
+                "      name: Section\n"
+                "      input:\n"
+                "        ent:\n"
+                "          selector:\n"
+                "            boolean: {}\n"
+            ),
+        ),
+        ("minimal_automation", "blueprint:\n  name: Test\n  domain: automation\n"),
+        ("minimal_script", "blueprint:\n  name: Test\n  domain: script\n"),
+        ("minimal_template", "blueprint:\n  name: Test\n  domain: template\n"),
+    ],
+)
+def test_ensure_source_url_all_optional_keys_parity(
+    coordinator: BlueprintUpdateCoordinator,
+    scenario: str,
+    yaml_str: str,
+) -> None:
+    """Test that HA Core import and _ensure_source_url match across all optional blueprint keys."""
+    url = "https://example.com/bp.yaml"
+    remote = coordinator._ensure_source_url(yaml_str, url)
+
+    # Simulate Home Assistant Core import workflow
+    data = yaml_util.parse_yaml(yaml_str)
+    assert isinstance(data, dict)
+    domain = data.get("blueprint", {}).get("domain", "automation")
+    schema = coordinator._get_blueprint_schema(domain)
+    bp = models.Blueprint(data, schema=schema)
+    bp.update_metadata(source_url=url)
+    local_imported = bp.yaml()
+
+    local = coordinator._ensure_source_url(local_imported, url)
+    rem_hash = coordinator._hash_content(yaml_str, url)
+    loc_hash = coordinator._hash_content(local_imported, url)
+
+    assert remote == local
+    assert rem_hash == loc_hash
+
+
+@pytest.mark.parametrize(
+    ("domain", "payload"),
+    [
+        (
+            "automation",
+            """blueprint:
+  name: Test Automation
+  domain: automation
+trigger:
+  - platform: homeassistant
+    event: start
+action:
+  - service: test.service
+""",
+        ),
+        (
+            "script",
+            """blueprint:
+  name: Test Script
+  domain: script
+sequence:
+  - service: test.service
+""",
+        ),
+        (
+            "template",
+            """blueprint:
+  name: Test Template
+  domain: template
+trigger:
+  - platform: time_pattern
+    minutes: "/5"
+sensor:
+  - name: Test Sensor
+    state: "{{ now() }}"
+""",
+        ),
+    ],
+)
+def test_ensure_source_url_all_domains_schema_parity(
+    coordinator: BlueprintUpdateCoordinator,
+    domain: str,
+    payload: str,
+) -> None:
+    """Test full schema validation and import parity across automation, script, and template."""
+    url = f"https://community.home-assistant.io/t/{domain}-test/99999"
+    remote = coordinator._ensure_source_url(payload, url)
+
+    # Simulate HA Core domain-specific import
+    data = yaml_util.parse_yaml(payload)
+    assert isinstance(data, dict)
+    schema = coordinator._get_blueprint_schema(domain)
+    bp = models.Blueprint(data, schema=schema)
+    bp.update_metadata(source_url=url)
+    local_imported = bp.yaml()
+
+    local = coordinator._ensure_source_url(local_imported, url)
+    rem_hash = coordinator._hash_content(payload, url)
+    loc_hash = coordinator._hash_content(local_imported, url)
+
+    assert remote == local
+    assert rem_hash == loc_hash
 
 
 def test_validate_blueprint_valid(coordinator):
