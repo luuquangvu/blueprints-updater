@@ -5117,7 +5117,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if not isinstance(blueprint_info, dict):
             return BlueprintUpdateCoordinator._normalize_content(content)
 
-        blueprint_info["source_url"] = source_url
+        had_source_url = "source_url" in blueprint_info
+        if had_source_url:
+            blueprint_info["source_url"] = source_url
 
         target_data = parsed
         try:
@@ -5132,6 +5134,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 redact_url(source_url),
                 err,
             )
+
+        if isinstance(target_data, dict) and isinstance(target_data.get("blueprint"), dict):
+            target_data["blueprint"]["source_url"] = source_url
 
         if isinstance(target_data, (dict, list)):
             try:
