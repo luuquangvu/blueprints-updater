@@ -49,6 +49,10 @@ class PackageConstraintNotFoundError(ValueError):
     """Raised when a package is genuinely not found in Home Assistant package constraints."""
 
 
+class PythonVersionIncompatibilityError(ValueError):
+    """Raised when an interpreter fails a confirmed requires-python constraint."""
+
+
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 
 _VENVS_ROOT = os.path.join(_REPO_ROOT, ".venvs")
@@ -337,12 +341,12 @@ def _resolve_test_dependency_versions(
     harness_ver: str,
 ) -> dict[str, str]:
     """Return Home Assistant test dependency versions."""
-    del ha_ver
     return {
+        _AIODNS_PACKAGE: _get_required_package_version(ha_ver, _AIODNS_PACKAGE),
         _TEST_HARNESS_PACKAGE: _validate_version_label(
             "harness_ver",
             harness_ver,
-        )
+        ),
     }
 
 
@@ -822,6 +826,8 @@ def _ensure_venv(venv_path: Path, py_ver: str) -> bool:
         print(f"STEP_INFO: Re-creating incomplete virtual environment at {venv_path}", flush=True)
         _remove_venv_dir(venv_path)
     print(f"STEP_START: uv venv {venv_path} (Python {py_ver})", flush=True)
+    env = os.environ.copy()
+    env["UV_MANAGED_PYTHON"] = "1"
     subprocess.run(
         [
             "uv",
@@ -833,6 +839,7 @@ def _ensure_venv(venv_path: Path, py_ver: str) -> bool:
             venv_path,
             "--quiet",
         ],
+        env=env,
         check=True,
         capture_output=True,
         text=True,
@@ -862,6 +869,8 @@ def _run_uv_pip_install(
 ) -> None:
     """Run uv pip install with prereleases enabled for HA dependency pins."""
     print(f"STEP_START: uv pip install {step_label}", flush=True)
+    env = os.environ.copy()
+    env["UV_MANAGED_PYTHON"] = "1"
     subprocess.run(
         [
             "uv",
@@ -875,6 +884,7 @@ def _run_uv_pip_install(
             python_bin,
             *package_args,
         ],
+        env=env,
         check=True,
         capture_output=True,
         text=True,
@@ -1042,40 +1052,43 @@ def _permitted_python_target_roots() -> tuple[str, ...]:
 
     SECURITY:
     Virtual environments typically symlink their Python executable to an underlying
-    toolchain binary. To prevent sandbox escapes via malicious symlinks to arbitrary
-    untrusted directories, the resolved symlink target must reside within the workspace
-    or authorized Python toolchain directories (e.g. sys.base_prefix, uv toolchains,
-    or standard system prefixes like /usr and /opt).
+    toolchain binary. To enforce least privilege, the resolved symlink target must reside
+    exclusively within the workspace or authorized Python toolchain directories (the active
+    interpreter prefix, uv-managed toolchain roots, or the runner toolcache when set).
     """
     roots: list[str] = [
         os.path.realpath(_REPO_ROOT),
         os.path.realpath(sys.base_prefix),
         os.path.realpath(sys.prefix),
         os.path.realpath(os.path.expanduser("~/.local/share/uv/python")),
-        "/usr",
-        "/usr/local",
-        "/opt",
     ]
     if uv_install_dir := os.environ.get("UV_PYTHON_INSTALL_DIR"):
         roots.append(os.path.realpath(os.path.expanduser(uv_install_dir)))
     if xdg_data := os.environ.get("XDG_DATA_HOME"):
         roots.append(os.path.realpath(os.path.expanduser(os.path.join(xdg_data, "uv", "python"))))
+    if runner_tool_cache := os.environ.get("RUNNER_TOOL_CACHE"):
+        roots.append(os.path.realpath(os.path.expanduser(runner_tool_cache)))
     return tuple(dict.fromkeys(roots))
 
 
-def _validate_python_bin(python_bin: object) -> Path:
-    """Validate and sanitize a Python binary path to prevent sandbox escape and command injection.
+def _sanitize_python_bin_path(python_bin: object) -> Path:
+    """Sanitize Python binary argument syntax, allowed characters, and binary name.
 
     SECURITY NOTE:
-    - Verifies that untrusted CLI arguments cannot escape the repository sandbox
-      or inject command flags into subprocess calls.
     - DO NOT simplify the character reconstruction loop (e.g., via comprehension).
       Mapping via integer index to the static `_ALLOWED_PYTHON_BIN_CHARS` is required
       to completely sever the static analysis data-flow taint chain.
-    - Enforces containment within the repository root prior to symlink resolution.
-    - Validates that the file exists, is executable, and has an authorized Python executable name.
-    - Constrains the resolved symlink target to authorized toolchain roots
-      (workspace root, base python runtime, uv python directory, or system prefixes).
+    - Rejects non-string/Path inputs, empty paths, flags, traversal components,
+      and invalid Python executable names.
+
+    Args:
+        python_bin: Candidate Python binary path or string.
+
+    Returns:
+        Sanitized Path object.
+
+    Raises:
+        ValueError: If python_bin is invalid, malformed, or has an invalid name.
     """
     if not isinstance(python_bin, (str, Path)):
         raise ValueError(f"Invalid python binary {python_bin!r}; expected a Path or str.")
@@ -1110,6 +1123,23 @@ def _validate_python_bin(python_bin: object) -> Path:
             "(e.g., 'python', 'python3', 'python3.x')."
         )
 
+    return path_obj
+
+
+def _validate_python_bin(python_bin: object) -> Path:
+    """Validate and sanitize a Python binary path to prevent sandbox escape and command injection.
+
+    SECURITY NOTE:
+    - Verifies that untrusted CLI arguments cannot escape the repository sandbox
+      or inject command flags into subprocess calls.
+    - Enforces containment within the repository root prior to symlink resolution.
+    - Validates that the file exists, is executable, and has an authorized Python executable name.
+    - Constrains the resolved symlink target to authorized toolchain roots
+      (workspace root, base python runtime, uv python directory, or system prefixes).
+    """
+    path_obj = _sanitize_python_bin_path(python_bin)
+    safe_path_str = str(path_obj)
+
     if os.path.isabs(safe_path_str):
         normalized_path = os.path.normpath(safe_path_str)
     else:
@@ -1117,7 +1147,7 @@ def _validate_python_bin(python_bin: object) -> Path:
 
     if normalized_path != _REPO_ROOT and not normalized_path.startswith(_REPO_ROOT + os.sep):
         raise ValueError(
-            f"Python executable {raw_path!r} escapes allowed repository root {_REPO_ROOT!r}."
+            f"Python executable {safe_path_str!r} escapes allowed repository root {_REPO_ROOT!r}."
         )
 
     if not os.path.isfile(normalized_path):
@@ -1137,6 +1167,11 @@ def _validate_python_bin(python_bin: object) -> Path:
     if not _PYTHON_BIN_NAME_PATTERN.fullmatch(resolved_name):
         raise ValueError(
             f"Resolved Python binary name {resolved_name!r} must be a python executable."
+        )
+
+    if os.path.basename(os.path.dirname(resolved_target)) != "bin":
+        raise ValueError(
+            f"Resolved Python binary {resolved_target!r} must reside in a 'bin' directory."
         )
 
     target_roots = _permitted_python_target_roots()
@@ -1246,6 +1281,7 @@ def _run_pytest(python_bin: Path, ha_ver_display: str, pytest_args: Sequence[str
     env = os.environ.copy()
     env["PYTHONPATH"] = _REPO_ROOT
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["UV_MANAGED_PYTHON"] = "1"
 
     print(f"STEP_START: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
     subprocess.run(
@@ -1337,16 +1373,84 @@ def _verify_python_version_compatibility(python_bin: Path, ha_ver_to_install: st
         actual_py_ver = _get_python_interpreter_version(python_bin)
         spec = SpecifierSet(requires_python)
         if Version(actual_py_ver) not in spec:
-            raise ValueError(
+            raise PythonVersionIncompatibilityError(
                 f"Python interpreter {actual_py_ver} at {python_bin} does not satisfy "
                 f"Home Assistant {ha_ver_to_install} constraint '{requires_python}'"
             )
+    except PythonVersionIncompatibilityError:
+        raise
     except ValueError:
         raise
     except Exception as err:
         raise ValueError(
             f"Failed to fetch or verify PyPI requires-python for HA {ha_ver_to_install}: {err}"
         ) from err
+
+
+def _handle_stale_venv_warning(
+    venv_path: Path,
+    installed_ha: str,
+    ha_ver_to_install: str,
+    ha_ver: str,
+    marker_requires_reinstall: bool,
+) -> None:
+    """Emit warning for stale virtual environment with drift reasons."""
+    stale_reasons: list[str] = []
+    if installed_ha != ha_ver_to_install:
+        stale_reasons.append(
+            f"Home Assistant version mismatch (installed {installed_ha}, "
+            f"expected {ha_ver_to_install})"
+        )
+    if ha_ver == "latest":
+        stale_reasons.append("tracking latest Home Assistant release")
+    if marker_requires_reinstall:
+        stale_reasons.append("test dependency marker mismatch")
+
+    if stale_reasons:
+        reasons_str = "; ".join(stale_reasons)
+        print(
+            f"STEP_WARNING: Virtual environment at {venv_path} is stale ({reasons_str}); "
+            "automatically reinstalling dependencies to resolve drift. "
+            "(Run with --reinstall to force re-creation if issues persist)",
+            flush=True,
+        )
+
+
+def _ensure_python_compatibility_with_retry(
+    venv_path: Path,
+    python_bin: Path,
+    ha_ver_to_install: str,
+    py_ver: str,
+    created_venv: bool,
+) -> tuple[bool, bool, bool]:
+    """Verify Python compatibility, resetting existing venv if required.
+
+    Returns:
+        tuple[bool, bool, bool]: (success, created_venv, extra_reinstall)
+    """
+    try:
+        _verify_python_version_compatibility(python_bin, ha_ver_to_install)
+        return True, created_venv, False
+    except PythonVersionIncompatibilityError as err:
+        if not created_venv:
+            print(
+                "STEP_WARNING: Python verification failed for existing virtual environment "
+                f"at {venv_path} ({err}); automatically resetting environment. "
+                "(Run with --reinstall to force re-creation if issues persist)",
+                flush=True,
+            )
+            _reset_venv(venv_path, py_ver)
+            try:
+                _verify_python_version_compatibility(python_bin, ha_ver_to_install)
+                return True, True, True
+            except ValueError as retry_err:
+                print(f"VALIDATION_ERROR: {retry_err}", flush=True)
+                return False, True, True
+        print(f"VALIDATION_ERROR: {err}", flush=True)
+        return False, created_venv, False
+    except ValueError as err:
+        print(f"VALIDATION_ERROR: {err}", flush=True)
+        return False, created_venv, False
 
 
 def _prepare_venv_and_install(
@@ -1369,12 +1473,6 @@ def _prepare_venv_and_install(
         print(f"VALIDATION_ERROR: python not found at {python_bin}", flush=True)
         return False
 
-    try:
-        _verify_python_version_compatibility(python_bin, ha_ver_to_install)
-    except ValueError as err:
-        print(f"VALIDATION_ERROR: {err}", flush=True)
-        return False
-
     installed_ha = _get_installed_ha_version(python_bin)
     marker_requires_reinstall = _dependency_marker_requires_reinstall(
         created_venv,
@@ -1387,6 +1485,30 @@ def _prepare_venv_and_install(
         or ha_ver == "latest"
         or marker_requires_reinstall
     )
+
+    if not created_venv and needs_reinstall and not reinstall:
+        _handle_stale_venv_warning(
+            venv_path,
+            installed_ha,
+            ha_ver_to_install,
+            ha_ver,
+            marker_requires_reinstall,
+        )
+
+    (
+        compat_ok,
+        created_venv,
+        extra_reinstall,
+    ) = _ensure_python_compatibility_with_retry(
+        venv_path,
+        python_bin,
+        ha_ver_to_install,
+        py_ver,
+        created_venv,
+    )
+    if not compat_ok:
+        return False
+    needs_reinstall = needs_reinstall or extra_reinstall
 
     needs_install, refresh_deps = _determine_dependency_actions(
         needs_reinstall,
@@ -1405,6 +1527,7 @@ def _prepare_venv_and_install(
         py_ver=py_ver,
         reset_before_install=needs_reinstall and not created_venv,
     )
+
     return True
 
 
@@ -1517,6 +1640,7 @@ def _run_tests_for_version(
 def main() -> None:
     """Main entry point for the multi-version test script."""
     os.environ["NO_COLOR"] = "1"
+    os.environ["UV_MANAGED_PYTHON"] = "1"
     results: list[tuple[int, str, str, str, str, str]] = []
 
     if os.name != "posix":

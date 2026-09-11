@@ -930,7 +930,7 @@ def _run_dependency_steps(repo_root: str) -> None:
     _run_sync_repair_step(
         repo_root,
         command_label="uv sync --check --all-groups",
-        check_output_label="uv sync --check",
+        check_output_label="uv sync --check --all-groups",
         repair_message=("Environment is out of sync. Running 'uv sync --locked --all-groups'"),
         synchronized_message="Environment is already synchronized.",
         run_check=_run_uv_sync_check,
@@ -951,7 +951,7 @@ def _run_dependency_steps(repo_root: str) -> None:
     )
     _run_dependency_update_notice_step(
         repo_root,
-        command_label="uv sync --all-groups --upgrade --dry-run --output-format json",
+        command_label="uv sync --upgrade --all-groups --dry-run --output-format json",
         run_check=_run_uv_dependency_update_check,
         print_notice=_print_uv_dependency_update_notice,
     )

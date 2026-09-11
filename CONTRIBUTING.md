@@ -4,7 +4,7 @@ Thanks for contributing to Blueprints Updater, a Home Assistant custom integrati
 
 ## Development setup
 
-Use a POSIX environment; Linux, or WSL are recommended. The project requires Python 3.14.2 or newer, [uv](https://docs.astral.sh/uv/), and Node.js/npm.
+Use a POSIX environment; Linux, or WSL are recommended. The project requires Python 3.14.2 or newer, [uv](https://docs.astral.sh/uv/), and Node.js 24 LTS.
 
 ```bash
 git clone https://github.com/luuquangvu/blueprints-updater.git
