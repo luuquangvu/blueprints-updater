@@ -3,49 +3,49 @@ repos:
     hooks:
       - id: ruff-check
         name: Run Ruff Check
-        entry: uv run ruff check --fix
+        entry: uv run --locked ruff check --fix
         language: system
         pass_filenames: false
         always_run: true
 
       - id: ruff-format
         name: Run Ruff Format
-        entry: uv run ruff format
+        entry: uv run --locked ruff format
         language: system
         pass_filenames: false
         always_run: true
 
       - id: ty-check
         name: Run Ty Check
-        entry: uv run ty check
+        entry: uv run --locked ty check
         language: system
         pass_filenames: false
         always_run: true
 
       - id: pyright
         name: Run Pyright
-        entry: uv run pyright
+        entry: uv run --locked pyright
         language: system
         pass_filenames: false
         always_run: true
 
       - id: interrogate
         name: Run Interrogate
-        entry: uv run interrogate
+        entry: uv run --locked interrogate
         language: system
         pass_filenames: false
         always_run: true
 
       - id: prettier
         name: Run Prettier
-        entry: npx prettier --write .
+        entry: npx --no-install prettier --write .
         language: system
         pass_filenames: false
         always_run: true
 
       - id: pytest
         name: Run Pytest
-        entry: uv run pytest
+        entry: uv run --locked pytest
         language: system
         pass_filenames: false
         always_run: true
@@ -53,7 +53,7 @@ repos:
 
       - id: compatibility
         name: Run Compatibility Check
-        entry: uv run tools/validate_compatibility.py
+        entry: uv run --locked tools/validate_compatibility.py
         language: system
         pass_filenames: false
         always_run: true

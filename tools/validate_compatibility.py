@@ -81,11 +81,13 @@ _COMPATIBILITY_PYTEST_TIMEOUT_SECONDS = 300
 _ALNUM_CHARS = ascii_letters + digits
 _ALLOWED_VERSION_CHARS = f"{_ALNUM_CHARS}."
 _ALLOWED_PACKAGE_CHARS = f"{_ALNUM_CHARS}._-"
+_ALLOWED_PYTHON_BIN_CHARS = f"{_ALNUM_CHARS}._-+/@"
 
 _VERSION_PATTERN = re.compile(rf"^[{_ALNUM_CHARS}]+(?:\.[{_ALNUM_CHARS}]+)*$")
 _PACKAGE_NAME_PATTERN = re.compile(
     rf"^(?:[{_ALNUM_CHARS}]|[{_ALNUM_CHARS}][{_ALNUM_CHARS}._-]*[{_ALNUM_CHARS}])$"
 )
+_PYTHON_BIN_NAME_PATTERN = re.compile(r"^python(?:\d+(?:\.\d+)*)?(?:t)?$")
 
 _MATRIX_FILE = os.path.join(_REPO_ROOT, "tools", "compatibility_matrix.json")
 _HACS_FILE = os.path.join(_REPO_ROOT, "hacs.json")
@@ -165,12 +167,12 @@ def _required_test_deps(test_dependency_versions: dict[str, str]) -> list[str]:
 
 def _transitive_compatibility_specs(
     test_dependency_versions: dict[str, str],
-) -> tuple[str, ...]:
+) -> list[str]:
     """Constrain transitive packages whose later majors broke historical HA pins."""
     aiodns_version = test_dependency_versions.get(_AIODNS_PACKAGE)
     if aiodns_version is not None and Version(aiodns_version).release[0] < 4:
-        return ("pycares<5",)
-    return ()
+        return ["pycares<5"]
+    return []
 
 
 def _validate_package_version(label_name: str, label_value: str) -> str:
@@ -283,7 +285,7 @@ def _parse_requirements_dependency_version(
 def _fetch_remote_text(url: str) -> str:
     """Fetch and decode remote text from a URL.
 
-    Raises urllib.error.URLError, OSError, or UnicodeDecodeError on failure.
+    Raises OSError or ValueError on failure.
     """
     with urllib.request.urlopen(url, timeout=20) as response:
         return response.read().decode("utf-8")
@@ -299,7 +301,7 @@ def _fetch_home_assistant_package_constraints(ha_ver: str) -> str:
     for url in (cdn_url, github_url):
         try:
             return _fetch_remote_text(url)
-        except (urllib.error.URLError, OSError, UnicodeDecodeError) as err:
+        except (OSError, ValueError) as err:
             last_err = err
 
     raise RuntimeError(
@@ -732,9 +734,7 @@ def _get_latest_matched_pair() -> LatestMatchedPair:
                 f"Test harness {harness_version} targets unpublished Home Assistant {matched_ha}"
             )
     except (
-        urllib.error.URLError,
         OSError,
-        orjson.JSONDecodeError,
         KeyError,
         TypeError,
         ValueError,
@@ -1037,8 +1037,124 @@ def _get_installed_ha_version(python_bin: Path) -> str:
     return actual_ver
 
 
+def _permitted_python_target_roots() -> tuple[str, ...]:
+    """Return canonical root directories permitted to host real Python interpreter binaries.
+
+    SECURITY:
+    Virtual environments typically symlink their Python executable to an underlying
+    toolchain binary. To prevent sandbox escapes via malicious symlinks to arbitrary
+    untrusted directories, the resolved symlink target must reside within the workspace
+    or authorized Python toolchain directories (e.g. sys.base_prefix, uv toolchains,
+    or standard system prefixes like /usr and /opt).
+    """
+    roots: list[str] = [
+        os.path.realpath(_REPO_ROOT),
+        os.path.realpath(sys.base_prefix),
+        os.path.realpath(sys.prefix),
+        os.path.realpath(os.path.expanduser("~/.local/share/uv/python")),
+        "/usr",
+        "/usr/local",
+        "/opt",
+    ]
+    if uv_install_dir := os.environ.get("UV_PYTHON_INSTALL_DIR"):
+        roots.append(os.path.realpath(os.path.expanduser(uv_install_dir)))
+    if xdg_data := os.environ.get("XDG_DATA_HOME"):
+        roots.append(os.path.realpath(os.path.expanduser(os.path.join(xdg_data, "uv", "python"))))
+    return tuple(dict.fromkeys(roots))
+
+
+def _validate_python_bin(python_bin: object) -> Path:
+    """Validate and sanitize a Python binary path to prevent sandbox escape and command injection.
+
+    SECURITY NOTE:
+    - Verifies that untrusted CLI arguments cannot escape the repository sandbox
+      or inject command flags into subprocess calls.
+    - DO NOT simplify the character reconstruction loop (e.g., via comprehension).
+      Mapping via integer index to the static `_ALLOWED_PYTHON_BIN_CHARS` is required
+      to completely sever the static analysis data-flow taint chain.
+    - Enforces containment within the repository root prior to symlink resolution.
+    - Validates that the file exists, is executable, and has an authorized Python executable name.
+    - Constrains the resolved symlink target to authorized toolchain roots
+      (workspace root, base python runtime, uv python directory, or system prefixes).
+    """
+    if not isinstance(python_bin, (str, Path)):
+        raise ValueError(f"Invalid python binary {python_bin!r}; expected a Path or str.")
+
+    raw_path = str(python_bin).strip()
+    if not raw_path:
+        raise ValueError("Invalid python binary; path cannot be empty.")
+
+    if raw_path.startswith("-"):
+        raise ValueError(f"Invalid python binary path {raw_path!r}; cannot start with '-'.")
+
+    safe_chars: list[str] = []
+    for char in raw_path:
+        idx = _ALLOWED_PYTHON_BIN_CHARS.find(char)
+        if idx == -1:
+            raise ValueError(
+                f"Invalid python binary path {raw_path!r}; character {char!r} is not allowed."
+            )
+        safe_chars.append(_ALLOWED_PYTHON_BIN_CHARS[idx])
+
+    safe_path_str = "".join(safe_chars)
+    path_obj = Path(safe_path_str)
+
+    if ".." in path_obj.parts:
+        raise ValueError(
+            f"Invalid python binary path {raw_path!r}; directory traversal ('..') is not allowed."
+        )
+
+    if not _PYTHON_BIN_NAME_PATTERN.fullmatch(path_obj.name):
+        raise ValueError(
+            f"Invalid python binary name {path_obj.name!r}; must be a python executable "
+            "(e.g., 'python', 'python3', 'python3.x')."
+        )
+
+    if os.path.isabs(safe_path_str):
+        normalized_path = os.path.normpath(safe_path_str)
+    else:
+        normalized_path = os.path.normpath(os.path.join(_REPO_ROOT, safe_path_str))
+
+    if normalized_path != _REPO_ROOT and not normalized_path.startswith(_REPO_ROOT + os.sep):
+        raise ValueError(
+            f"Python executable {raw_path!r} escapes allowed repository root {_REPO_ROOT!r}."
+        )
+
+    if not os.path.isfile(normalized_path):
+        raise ValueError(f"Python executable not found at {path_obj}")
+
+    if not os.access(normalized_path, os.X_OK):
+        raise ValueError(f"Python binary at {path_obj} is not executable")
+
+    resolved_target = os.path.realpath(normalized_path)
+    if not os.path.isfile(resolved_target):
+        raise ValueError(f"Resolved Python executable not found for {path_obj}")
+
+    if not os.access(resolved_target, os.X_OK):
+        raise ValueError(f"Resolved Python binary for {path_obj} is not executable")
+
+    resolved_name = os.path.basename(resolved_target)
+    if not _PYTHON_BIN_NAME_PATTERN.fullmatch(resolved_name):
+        raise ValueError(
+            f"Resolved Python binary name {resolved_name!r} must be a python executable."
+        )
+
+    target_roots = _permitted_python_target_roots()
+    if not any(
+        resolved_target == root or resolved_target.startswith(root + os.sep)
+        for root in target_roots
+    ):
+        raise ValueError(
+            f"Resolved Python executable {resolved_target!r} is outside permitted toolchain "
+            "directories."
+        )
+
+    return path_obj
+
+
 def _get_installed_harness_pair(python_bin: Path) -> tuple[str, str]:
     """Return installed harness version and its exact Home Assistant requirement."""
+    safe_python_bin = _validate_python_bin(python_bin)
     code = (
         "import importlib.metadata as md, json\n"
         f"package = {_TEST_HARNESS_PACKAGE!r}\n"
@@ -1055,7 +1171,7 @@ def _get_installed_harness_pair(python_bin: Path) -> tuple[str, str]:
                 "run",
                 "--no-project",
                 "--python",
-                str(python_bin),
+                str(safe_python_bin),
                 "python",
                 "-c",
                 code,
@@ -1090,7 +1206,6 @@ def _get_installed_harness_pair(python_bin: Path) -> tuple[str, str]:
         ) from err
     except (
         subprocess.TimeoutExpired,
-        orjson.JSONDecodeError,
         OSError,
         ValueError,
     ) as err:
@@ -1512,8 +1627,12 @@ def main() -> None:
     if args.verify_pair_python is not None:
         if args.expected_ha is None or args.expected_harness is None:
             parser.error("--verify-pair-python requires --expected-ha and --expected-harness")
+        try:
+            validated_python_bin = _validate_python_bin(args.verify_pair_python)
+        except ValueError as err:
+            parser.error(f"Invalid --verify-pair-python: {err}")
         if not _verify_harness_pair(
-            args.verify_pair_python,
+            validated_python_bin,
             _validate_version_label("expected_ha", args.expected_ha),
             _validate_version_label("expected_harness", args.expected_harness),
         ):

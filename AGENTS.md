@@ -16,7 +16,7 @@ If the environment is not POSIX-compatible: Stop and report the environment mism
 
 ### Python Execution
 
-Execute all Python commands using `uv run <command>`.
+Execute all Python commands using `uv run --locked <command>`.
 
 ### Dependencies
 
@@ -193,7 +193,7 @@ Run the repository validation entry point.
 
 Default validation command:
 
-`uv run tools/validate.py > scratch/validate.txt 2>&1`
+`uv run --locked tools/validate.py > scratch/validate.txt 2>&1`
 
 ### Success Condition
 

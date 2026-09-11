@@ -40,22 +40,22 @@ jobs:
         run: uv sync --locked --all-groups
 
       - name: Run Ruff
-        run: uv run ruff check
+        run: uv run --locked ruff check
 
       - name: Run Ruff Format
-        run: uv run ruff format --check
+        run: uv run --locked ruff format --check
 
       - name: Run Ty Check
-        run: uv run ty check
+        run: uv run --locked ty check
 
       - name: Run Pyright
-        run: uv run pyright
+        run: uv run --locked pyright
 
       - name: Run Interrogate
-        run: uv run interrogate
+        run: uv run --locked interrogate
 
       - name: Run Pytest
-        run: uv run pytest
+        run: uv run --locked pytest
 
   setup-matrix:
     runs-on: ubuntu-latest
@@ -84,11 +84,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          LATEST_PAIR_JSON=$(uv run tools/validate_compatibility.py --resolve-latest-json)
+          LATEST_PAIR_JSON=$(uv run --locked tools/validate_compatibility.py --resolve-latest-json)
           MATCHED_LATEST_HA=$(jq -r .ha_ver <<< "$LATEST_PAIR_JSON")
           MATCHED_LATEST_HARNESS=$(jq -r .harness_ver <<< "$LATEST_PAIR_JSON")
           ABSOLUTE_LATEST_HA=$(jq -r .absolute_latest_ha_ver <<< "$LATEST_PAIR_JSON")
-          TEST_DEPENDENCY_METADATA_JSON=$(uv run tools/validate_compatibility.py \
+          TEST_DEPENDENCY_METADATA_JSON=$(uv run --locked tools/validate_compatibility.py \
             --required-test-dependency-metadata-json)
 
           if [[ "$MATCHED_LATEST_HA" = "null" || "$MATCHED_LATEST_HARNESS" = "null" || "$ABSOLUTE_LATEST_HA" = "null" ]]; then
@@ -132,7 +132,7 @@ jobs:
             ))
           ' tools/compatibility_matrix.json >/dev/null
 
-          uv run tools/validate_compatibility.py --validate-matrix
+          uv run --locked tools/validate_compatibility.py --validate-matrix
 
           MATRIX_JSON=$(jq -c \
             --arg latest_ha "$MATCHED_LATEST_HA" \
@@ -254,7 +254,7 @@ jobs:
               if [[ -z "$package" ]]; then
                 continue
               fi
-              if ! package_spec=$(uv run tools/validate_compatibility.py \
+              if ! package_spec=$(uv run --locked tools/validate_compatibility.py \
                 --parse-constraint-spec "$package" <<< "$HA_CONSTRAINTS"); then
                 echo "::error::Failed to resolve $package from package_constraints.txt (tried CDN and GitHub)"
                 exit 1
@@ -279,7 +279,7 @@ jobs:
             exit 1
           fi
           AIODNS_VERSION="${AIODNS_SPEC#aiodns==}"
-          TRANSITIVE_COMPATIBILITY_SPECS_JSON=$(uv run tools/validate_compatibility.py \
+          TRANSITIVE_COMPATIBILITY_SPECS_JSON=$(uv run --locked tools/validate_compatibility.py \
             --transitive-compatibility-specs-json \
             --aiodns-version "$AIODNS_VERSION")
           if ! jq -e 'type == "array" and all(.[]; type == "string" and length > 0)' \
@@ -298,10 +298,10 @@ jobs:
           MATRIX_HA_REAL_VERSION: ${{ matrix.ha_real_version }}
           MATRIX_HARNESS_REAL_VERSION: ${{ matrix.harness_real_version }}
         run: >-
-          uv run tools/validate_compatibility.py
+          uv run --locked tools/validate_compatibility.py
           --verify-pair-python .venv/bin/python
           --expected-ha "$MATRIX_HA_REAL_VERSION"
           --expected-harness "$MATRIX_HARNESS_REAL_VERSION"
 
       - name: Run Pytest
-        run: uv run --no-project --python .venv/bin/python pytest --no-cov
+        run: uv --no-config run --no-project --python .venv/bin/python pytest --no-cov

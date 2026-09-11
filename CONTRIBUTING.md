@@ -9,11 +9,11 @@ Use a POSIX environment; Linux, or WSL are recommended. The project requires Pyt
 ```bash
 git clone https://github.com/luuquangvu/blueprints-updater.git
 cd blueprints-updater
-uv sync --all-groups
-npm ci
+uv sync --locked --all-groups
+npm ci --ignore-scripts --allow-git=none
 ```
 
-Use `uv run` for Python commands. Keep `uv.lock` synchronized with `pyproject.toml`, and keep `package-lock.json` synchronized with `package.json`.
+Use `uv run --locked` for Python commands. Keep `uv.lock` synchronized with `pyproject.toml`, and keep `package-lock.json` synchronized with `package.json`.
 
 Manage Python dependencies exclusively with uv; do not edit `uv.lock` manually.
 
@@ -31,13 +31,13 @@ Manage Python dependencies exclusively with uv; do not edit `uv.lock` manually.
 Run a focused test while developing, for example:
 
 ```bash
-uv run pytest tests/coordinator/test_compatibility_guard.py
+uv run --locked pytest tests/coordinator/test_compatibility_guard.py
 ```
 
 Run the full local gate before submitting:
 
 ```bash
-uv run tools/validate.py
+uv run --locked tools/validate.py
 ```
 
 Validation checks dependency alignment, Ruff, Ty, Pyright, Interrogate, Prettier, and the full pytest suite. It passes only when the output contains `VALIDATION_SUCCESS`; Ruff and Prettier may modify files, so review the diff afterward.
@@ -45,7 +45,7 @@ Validation checks dependency alignment, Ruff, Ty, Pyright, Interrogate, Prettier
 Run the compatibility matrix when changing Home Assistant API usage, compatibility code, dependencies, or `tools/compatibility_matrix.json`:
 
 ```bash
-uv run tools/validate_compatibility.py
+uv run --locked tools/validate_compatibility.py
 ```
 
 For user-facing changes, keep `strings.json` and the translation files aligned. Translation tests enforce their structure and key order.

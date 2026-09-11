@@ -210,7 +210,6 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
                 except (
                     httpx.HTTPError,
                     HomeAssistantError,
-                    TimeoutError,
                     ValueError,
                     OSError,
                 ) as err:
