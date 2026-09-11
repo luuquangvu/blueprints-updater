@@ -10,6 +10,7 @@ from packaging.version import Version
 
 from tools import validate_compatibility
 from tools.validate_compatibility import (
+    PythonVersionIncompatibilityError,
     _parse_requirements_dependency_version,
     _test_matrix,
     _validate_python_bin,
@@ -178,8 +179,9 @@ def test_validate_python_bin_rejects_symlink_to_untrusted_target(
 ) -> None:
     """Reject virtualenv symlinks pointing to unauthorized target directories."""
     untrusted_dir = tmp_path / "untrusted"
-    untrusted_dir.mkdir()
-    untrusted_python = untrusted_dir / "python"
+    untrusted_bin = untrusted_dir / "bin"
+    untrusted_bin.mkdir(parents=True)
+    untrusted_python = untrusted_bin / "python"
     untrusted_python.write_text("#!/bin/sh\nexit 0\n")
     untrusted_python.chmod(0o755)
 
@@ -313,6 +315,27 @@ def test_validate_python_bin_rejects_symlink_to_non_python_basename(
         _validate_python_bin(Path(".venv/bin/python"))
 
 
+def test_validate_python_bin_rejects_target_outside_bin_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject symlinks whose resolved target does not reside in a bin directory."""
+    repo_dir = tmp_path / "repo"
+    repo_bin = repo_dir / ".venv" / "bin"
+    repo_bin.mkdir(parents=True)
+    target_py = repo_dir / "scripts" / "python"
+    target_py.parent.mkdir(parents=True)
+    target_py.write_text("#!/bin/sh\nexit 0\n")
+    target_py.chmod(0o755)
+
+    symlink_python = repo_bin / "python"
+    symlink_python.symlink_to(target_py)
+
+    monkeypatch.setattr(validate_compatibility, "_REPO_ROOT", str(repo_dir))
+    with pytest.raises(ValueError, match="must reside in a 'bin' directory"):
+        _validate_python_bin(Path(".venv/bin/python"))
+
+
 def test_validate_python_bin_rejects_non_executable_resolved_target(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -369,3 +392,201 @@ def test_validate_python_bin_rejects_unresolved_target_file(
     monkeypatch.setattr(validate_compatibility.os.path, "isfile", fake_isfile)
     with pytest.raises(ValueError, match="Resolved Python executable not found for"):
         _validate_python_bin(Path(".venv/bin/python"))
+
+
+@pytest.fixture
+def fake_venv_env(tmp_path: Path) -> tuple[Path, Path]:
+    """Provide a temporary virtual environment path and mock python binary."""
+    venv_path = tmp_path / ".venv-test"
+    python_bin = venv_path / "bin" / "python"
+    python_bin.parent.mkdir(parents=True, exist_ok=True)
+    python_bin.write_text("#!/bin/sh\nexit 0\n")
+    return venv_path, python_bin
+
+
+def _run_prepare_venv(
+    venv_path: Path,
+    python_bin: Path,
+    *,
+    test_deps: dict[str, str] | None = None,
+) -> bool:
+    """Run _prepare_venv_and_install with standard matrix parameters."""
+    return validate_compatibility._prepare_venv_and_install(
+        venv_path=venv_path,
+        python_bin=python_bin,
+        ha_ver="2026.2.3",
+        ha_ver_to_install="2026.2.3",
+        py_ver="3.13",
+        reinstall=False,
+        test_dependency_versions={"aiodns": "3.5.0"} if test_deps is None else test_deps,
+    )
+
+
+def test_prepare_venv_and_install_resets_stale_venv_before_compatibility_verification(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_venv_env: tuple[Path, Path],
+) -> None:
+    """Ensure stale environments verify Python compatibility before installation."""
+    venv_path, python_bin = fake_venv_env
+    call_order: list[str] = []
+
+    def fake_install(*args: object, **kwargs: object) -> None:
+        call_order.append("install")
+        assert kwargs.get("reset_before_install") is True
+
+    monkeypatch.setattr(validate_compatibility, "_ensure_venv", lambda *_: False)
+    monkeypatch.setattr(validate_compatibility, "_get_installed_ha_version", lambda *_: "2026.2.2")
+    monkeypatch.setattr(
+        validate_compatibility,
+        "_dependency_marker_requires_reinstall",
+        lambda *_: True,
+    )
+    monkeypatch.setattr(
+        validate_compatibility,
+        "_determine_dependency_actions",
+        lambda *_: (True, ()),
+    )
+    monkeypatch.setattr(validate_compatibility, "_install_dependencies", fake_install)
+    monkeypatch.setattr(
+        validate_compatibility,
+        "_verify_python_version_compatibility",
+        lambda *_: call_order.append("verify"),
+    )
+
+    success = _run_prepare_venv(venv_path, python_bin)
+
+    assert success is True
+    assert call_order == ["verify", "install"]
+
+
+def test_prepare_venv_and_install_retries_and_recovers_on_python_incompatibility(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_venv_env: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reset and retry when existing virtual environment fails Python compatibility."""
+    venv_path, python_bin = fake_venv_env
+    call_order: list[str] = []
+    verify_attempts = 0
+
+    def fake_reset(path: Path, py: str) -> bool:
+        call_order.append("reset")
+        return True
+
+    def fake_verify(py_bin: Path, ha_ver: str) -> None:
+        nonlocal verify_attempts
+        verify_attempts += 1
+        call_order.append("verify")
+        if verify_attempts == 1:
+            raise PythonVersionIncompatibilityError("Incompatible interpreter")
+
+    def fake_install(*args: object, **kwargs: object) -> None:
+        call_order.append("install")
+        assert kwargs.get("reset_before_install") is False
+
+    monkeypatch.setattr(validate_compatibility, "_reset_venv", fake_reset)
+    monkeypatch.setattr(validate_compatibility, "_ensure_venv", lambda *_: False)
+    monkeypatch.setattr(validate_compatibility, "_get_installed_ha_version", lambda *_: "2026.2.3")
+    monkeypatch.setattr(
+        validate_compatibility,
+        "_dependency_marker_requires_reinstall",
+        lambda *_: False,
+    )
+    monkeypatch.setattr(
+        validate_compatibility,
+        "_determine_dependency_actions",
+        lambda *_: (True, ()),
+    )
+    monkeypatch.setattr(validate_compatibility, "_install_dependencies", fake_install)
+    monkeypatch.setattr(validate_compatibility, "_verify_python_version_compatibility", fake_verify)
+
+    success = _run_prepare_venv(venv_path, python_bin)
+
+    assert success is True
+    assert call_order == ["verify", "reset", "verify", "install"]
+    captured = capsys.readouterr()
+    assert "automatically resetting environment" in captured.out
+
+
+@pytest.mark.parametrize(
+    ("created_venv", "exc", "expect_reset_warning"),
+    [
+        (
+            False,
+            PythonVersionIncompatibilityError("Incompatible Python interpreter for HA 2026.2.3"),
+            True,
+        ),
+        (
+            False,
+            ValueError("Incompatible Python interpreter for HA 2026.2.3"),
+            False,
+        ),
+        (
+            True,
+            PythonVersionIncompatibilityError("Incompatible Python interpreter for HA 2026.2.3"),
+            False,
+        ),
+    ],
+)
+def test_prepare_venv_and_install_reports_error_when_compatibility_verification_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_venv_env: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+    created_venv: bool,
+    exc: Exception,
+    expect_reset_warning: bool,
+) -> None:
+    """Report error and return False when Python version compatibility check fails."""
+    venv_path, python_bin = fake_venv_env
+    reset_called = False
+
+    def fake_reset(*args: object, **kwargs: object) -> bool:
+        nonlocal reset_called
+        reset_called = True
+        return True
+
+    def failing_verify(py_bin: Path, ha_ver: str) -> None:
+        raise exc
+
+    monkeypatch.setattr(validate_compatibility, "_reset_venv", fake_reset)
+    monkeypatch.setattr(validate_compatibility, "_ensure_venv", lambda *_: created_venv)
+    monkeypatch.setattr(validate_compatibility, "_get_installed_ha_version", lambda *_: "2026.2.3")
+    monkeypatch.setattr(
+        validate_compatibility,
+        "_dependency_marker_requires_reinstall",
+        lambda *_: False,
+    )
+    monkeypatch.setattr(
+        validate_compatibility,
+        "_verify_python_version_compatibility",
+        failing_verify,
+    )
+
+    success = _run_prepare_venv(venv_path, python_bin)
+
+    assert success is False
+    assert reset_called is expect_reset_warning
+    captured = capsys.readouterr()
+    if expect_reset_warning:
+        assert "automatically resetting environment" in captured.out
+    else:
+        assert "automatically resetting environment" not in captured.out
+    assert "VALIDATION_ERROR: Incompatible Python interpreter for HA 2026.2.3" in captured.out
+
+
+def test_prepare_venv_and_install_returns_false_when_python_bin_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report error and return False when python binary does not exist."""
+    venv_path = tmp_path / ".venv-test"
+    python_bin = venv_path / "bin" / "python"
+
+    monkeypatch.setattr(validate_compatibility, "_ensure_venv", lambda *_: False)
+
+    success = _run_prepare_venv(venv_path, python_bin, test_deps={})
+
+    assert success is False
+    captured = capsys.readouterr()
+    assert f"VALIDATION_ERROR: python not found at {python_bin}" in captured.out
