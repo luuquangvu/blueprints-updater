@@ -433,7 +433,7 @@ def _run_npm_sync_check(repo_root: str) -> subprocess.CompletedProcess[str]:
 def _repair_npm_sync(repo_root: str) -> None:
     """Synchronize npm dependencies."""
     subprocess.run(
-        ["npm", "ci", "--ignore-scripts", "--allow-git=none"],
+        ["npm", "ci"],
         check=True,
         cwd=repo_root,
         timeout=_DEPENDENCY_SYNC_TIMEOUT_SECONDS,
@@ -942,9 +942,7 @@ def _run_dependency_steps(repo_root: str) -> None:
         repo_root,
         command_label="npm ls",
         check_output_label="npm ls",
-        repair_message=(
-            "NPM packages are out of sync. Running 'npm ci --ignore-scripts --allow-git=none'"
-        ),
+        repair_message=("NPM packages are out of sync. Running 'npm ci'"),
         synchronized_message="NPM packages are already synchronized.",
         run_check=_run_npm_sync_check,
         run_repair=_repair_npm_sync,
