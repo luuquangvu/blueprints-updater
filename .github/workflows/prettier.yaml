@@ -36,7 +36,7 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm ci --ignore-scripts --allow-git=none
+        run: npm ci
 
       - name: Run Prettier
         run: npx --no-install prettier --check .

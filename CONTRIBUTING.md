@@ -10,7 +10,7 @@ Use a POSIX environment; Linux, or WSL are recommended. The project requires Pyt
 git clone https://github.com/luuquangvu/blueprints-updater.git
 cd blueprints-updater
 uv sync --locked --all-groups
-npm ci --ignore-scripts --allow-git=none
+npm ci
 ```
 
 Use `uv run --locked` for Python commands. Keep `uv.lock` synchronized with `pyproject.toml`, and keep `package-lock.json` synchronized with `package.json`.
