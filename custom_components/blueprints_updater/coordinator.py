@@ -2,8 +2,6 @@
 
 import asyncio
 import contextlib
-import difflib
-import functools
 import hashlib
 import logging
 import os
@@ -28,13 +26,12 @@ else:
     except ImportError:
         import voluptuous as vol
 
-from homeassistant.components.automation.config import AUTOMATION_BLUEPRINT_SCHEMA
 from homeassistant.components.automation.config import (
     async_validate_config_item as async_validate_automation_config,
 )
+from homeassistant.components.blueprint.const import CONF_INPUT
 from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
-from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.components.script.config import (
     async_validate_config_item as async_validate_script_config,
 )
@@ -42,19 +39,21 @@ from homeassistant.components.template.config import (
     async_validate_config_section as async_validate_template_config,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import (
+    CONF_DEFAULT,
+    CONF_SEQUENCE,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError, TemplateError
-from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import async_get_platforms
 from homeassistant.helpers.selector import validate_selector
 from homeassistant.helpers.storage import Store
-from homeassistant.helpers.template import Template, is_template_string
+from homeassistant.helpers.template import Template, TemplateEnvironment, is_template_string
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import slugify
 from homeassistant.util import yaml as yaml_util
-from homeassistant.util.yaml.objects import Input
 
 try:
     from homeassistant.components.template.config import (
@@ -68,6 +67,34 @@ try:
 except ImportError:
     SSL_ALPN_HTTP11_HTTP2 = None
 
+from .blueprint_validation import (
+    DEFAULT_SELECTOR_FILTER_PATHS,
+    StructuredRisk,
+    build_template_path,
+    check_ha_template_ast_compatibility,
+    dedupe_risks,
+    derive_dummy_input_value,
+    derive_selector_filter_paths,
+    detect_missing_inputs,
+    detect_new_mandatory_inputs,
+    ensure_source_url,
+    extract_blueprint_text,
+    extract_input_configs,
+    extract_inputs_with_default,
+    generate_dummy_input_value,
+    get_affected_entities,
+    get_blueprint_block,
+    get_blueprint_schema,
+    get_cached_selector_registry_fingerprint,
+    get_selector_filter_paths,
+    hash_content,
+    invalidate_selector_filter_paths_cache,
+    is_invalid_for_input_default,
+    normalize_content,
+    read_and_diff,
+    validate_input_references,
+    validate_safe_input_usages,
+)
 from .const import (
     ALLOWED_RELOAD_DOMAINS,
     ALLOWED_YAML_MIME_TYPES,
@@ -141,18 +168,6 @@ _LOGGER = logging.getLogger(__name__)
 JSONDict = Mapping[str, "JSONValue"]
 JSONList = Sequence["JSONValue"]
 JSONValue = None | bool | int | float | str | JSONDict | JSONList
-
-
-class StructuredRisk(TypedDict):
-    """Structured breaking change risk.
-
-    The ``args`` field must be JSON-serializable, as it is used for
-    deduplication and logging. Typical shapes include e.g.
-    ``{"input": "<string>"}`` or ``{"entity": "<entity_id>", "error": "<string>"}``.
-    """
-
-    type: BlueprintRiskType
-    args: JSONDict
 
 
 class BlueprintUpdateEventPayload(TypedDict):
@@ -310,294 +325,17 @@ TOP_LEVEL_SELECTOR_PRESENTATION_KEYS = frozenset({"name", "description", "label"
 _LOCAL_REVISION_MISMATCH_ERROR = "Local blueprint changed; refresh and retry the update"
 _RESTORE_REVISION_MISMATCH = "revision_mismatch"
 
-
-def _fingerprint_schema_key(sk: object) -> tuple[str, str, tuple[object, ...] | None]:
-    """Deterministically fingerprint a schema key including marker metadata."""
-    if isinstance(sk, (vol.Optional, vol.Required, vol.Marker)):
-        marker_name = type(sk).__name__
-        default_val = getattr(sk, "default", vol.UNDEFINED)
-        default_fp = (
-            compute_selector_schema_fingerprint(default_val)
-            if default_val is not vol.UNDEFINED
-            else None
-        )
-        return (marker_name, str(sk.schema), default_fp)
-    return (type(sk).__name__, str(sk), None)
-
-
-def compute_selector_schema_fingerprint(schema_obj: object) -> tuple[object, ...]:
-    """Deterministically compute content-based fingerprint for a selector voluptuous schema."""
-    if isinstance(schema_obj, vol.Schema) and isinstance(schema_obj.schema, dict):
-        entries: list[tuple[tuple[str, str, tuple[object, ...] | None], tuple[object, ...]]] = []
-        for sk, sv in schema_obj.schema.items():
-            key_info = _fingerprint_schema_key(sk)
-            entries.append((key_info, compute_selector_schema_fingerprint(sv)))
-        return (
-            "vol.Schema",
-            len(schema_obj.schema),
-            tuple(sorted(entries, key=lambda x: str(x[0]))),
-        )
-    if isinstance(schema_obj, dict):
-        entries = []
-        for sk, sv in schema_obj.items():
-            key_info = _fingerprint_schema_key(sk)
-            entries.append((key_info, compute_selector_schema_fingerprint(sv)))
-        return (
-            "dict",
-            len(schema_obj),
-            tuple(sorted(entries, key=lambda x: str(x[0]))),
-        )
-    if isinstance(schema_obj, (vol.All, vol.Any)):
-        type_name = "vol.All" if isinstance(schema_obj, vol.All) else "vol.Any"
-        sub_fps = tuple(compute_selector_schema_fingerprint(v) for v in schema_obj.validators)
-        return (type_name, len(sub_fps), sub_fps)
-    if isinstance(schema_obj, (set, frozenset)):
-        type_name = type(schema_obj).__name__
-        sub_fps = tuple(
-            sorted(
-                (compute_selector_schema_fingerprint(v) for v in schema_obj),
-                key=str,
-            )
-        )
-        return (type_name, len(sub_fps), sub_fps)
-    if isinstance(schema_obj, (list, tuple)):
-        type_name = type(schema_obj).__name__
-        sub_fps = tuple(compute_selector_schema_fingerprint(v) for v in schema_obj)
-        return (type_name, len(sub_fps), sub_fps)
-    if isinstance(schema_obj, functools.partial):
-        return (
-            "partial",
-            compute_selector_schema_fingerprint(schema_obj.func),
-            (
-                tuple(compute_selector_schema_fingerprint(a) for a in schema_obj.args),
-                tuple(
-                    sorted(
-                        (str(k), compute_selector_schema_fingerprint(v))
-                        for k, v in (schema_obj.keywords or {}).items()
-                    )
-                ),
-            ),
-        )
-    if isinstance(schema_obj, (vol.Coerce, vol.In, vol.Range, vol.Length)):
-        type_name = type(schema_obj).__name__
-        extra_attrs: list[tuple[str, tuple[object, ...]]] = []
-        extra_attrs.extend(
-            (
-                attr,
-                compute_selector_schema_fingerprint(getattr(schema_obj, attr)),
-            )
-            for attr in ("type", "container", "min", "max")
-            if hasattr(schema_obj, attr)
-        )
-        return ("vol_validator", type_name, tuple(extra_attrs))
-    if isinstance(schema_obj, (str, int, float, bool, type(None))):
-        return ("literal", type(schema_obj).__name__, schema_obj)
-    if isinstance(schema_obj, type):
-        qualname = getattr(schema_obj, "__qualname__", getattr(schema_obj, "__name__", ""))
-        module = getattr(schema_obj, "__module__", "")
-        return ("type", f"{module}.{qualname}", ())
-    if callable(schema_obj):
-        return _fingerprint_callable_state(schema_obj)
-    extra_state: list[tuple[str, tuple[object, ...]]] = []
-    if hasattr(schema_obj, "__dict__") and isinstance(schema_obj.__dict__, dict):
-        extra_state.extend(
-            (str(k), compute_selector_schema_fingerprint(v))
-            for k, v in sorted(schema_obj.__dict__.items(), key=lambda x: str(x[0]))
-            if not str(k).startswith("_")
-        )
-    qualname = getattr(type(schema_obj), "__qualname__", getattr(type(schema_obj), "__name__", ""))
-    module = getattr(type(schema_obj), "__module__", "")
-    return ("opaque_obj", f"{module}.{qualname}", tuple(extra_state))
-
-
-def _fingerprint_callable_state(schema_obj: object) -> tuple[str, str, tuple[object, ...]]:
-    """Deterministically fingerprint callable name, closure state, and instance variables."""
-    qualname = (
-        getattr(schema_obj, "__qualname__", getattr(schema_obj, "__name__", ""))
-        or type(schema_obj).__name__
-    )
-    module = getattr(schema_obj, "__module__", "")
-    extra_state: list[tuple[str, tuple[object, ...]]] = []
-    if defaults := getattr(schema_obj, "__defaults__", None):
-        extra_state.append(("defaults", compute_selector_schema_fingerprint(defaults)))
-    if kwdefaults := getattr(schema_obj, "__kwdefaults__", None):
-        extra_state.append(("kwdefaults", compute_selector_schema_fingerprint(kwdefaults)))
-    if closure := getattr(schema_obj, "__closure__", None):
-        cell_contents: list[tuple[object, ...]] = []
-        for cell in closure:
-            try:
-                cell_contents.append(compute_selector_schema_fingerprint(cell.cell_contents))
-            except Exception:
-                cell_contents.append(("unrepr_cell",))
-        extra_state.append(("closure", tuple(cell_contents)))
-    if hasattr(schema_obj, "__dict__") and isinstance(schema_obj.__dict__, dict):
-        extra_state.extend(
-            (str(k), compute_selector_schema_fingerprint(v))
-            for k, v in sorted(schema_obj.__dict__.items(), key=lambda x: str(x[0]))
-            if not str(k).startswith("_")
-        )
-    return ("callable", f"{module}.{qualname}", tuple(extra_state))
-
-
-def _is_dict_validator(val: object) -> bool:
-    """Check whether a schema validator matches a dictionary structure."""
-    if isinstance(val, vol.Schema) and isinstance(val.schema, dict):
-        return True
-    if isinstance(val, dict):
-        return True
-    if isinstance(val, (vol.All, vol.Any)):
-        return any(_is_dict_validator(v) for v in val.validators)
-    return False
-
-
-def _has_dict_list_expansion(val: object) -> bool:
-    """Detect whether a schema validator coerces single dictionary to list of dictionaries."""
-    if isinstance(val, vol.All):
-        has_ensure_list = any(
-            v is cv.ensure_list
-            or getattr(v, "__name__", "") == "ensure_list"
-            or (hasattr(v, "__qualname__") and "ensure_list" in v.__qualname__)
-            for v in val.validators
-        )
-        has_list_of_dicts = any(
-            isinstance(v, (list, tuple)) and len(v) == 1 and _is_dict_validator(v[0])
-            for v in val.validators
-        )
-        if has_ensure_list and has_list_of_dicts:
-            return True
-        return any(_has_dict_list_expansion(v) for v in val.validators)
-
-    if isinstance(val, vol.Any):
-        return any(_has_dict_list_expansion(v) for v in val.validators)
-
-    if isinstance(val, vol.Schema):
-        return _has_dict_list_expansion(val.schema)
-
-    return False
-
-
-def _extract_schema_dicts(config_schema: object) -> list[dict[object, object]]:
-    """Extract all underlying schema mappings from a voluptuous schema object."""
-    if isinstance(config_schema, vol.Schema) and isinstance(config_schema.schema, dict):
-        return [config_schema.schema]
-    if isinstance(config_schema, dict):
-        return [config_schema]
-    if isinstance(config_schema, (vol.All, vol.Any)):
-        dicts: list[dict[object, object]] = []
-        for v in config_schema.validators:
-            dicts.extend(_extract_schema_dicts(v))
-        return dicts
-    return []
-
-
-def _collect_selector_filter_paths(
-    current_prefix: tuple[str, ...],
-    schema_obj: object,
-    discovered: set[tuple[str, ...]],
-) -> None:
-    """Recursively collect filter path prefixes matching list expansion schemas."""
-    schema_dicts = _extract_schema_dicts(schema_obj)
-    if not schema_dicts:
-        return
-
-    for schema_dict in schema_dicts:
-        for key, val in schema_dict.items():
-            key_name = (
-                key.schema if isinstance(key, (vol.Optional, vol.Required, vol.Marker)) else key
-            )
-            if not isinstance(key_name, str):
-                continue
-
-            new_prefix = (*current_prefix, key_name)
-            if _has_dict_list_expansion(val):
-                discovered.add(new_prefix)
-
-            _collect_selector_filter_paths(new_prefix, val, discovered)
-
-
-def compute_selector_registry_fingerprint(
-    selectors_registry: object,
-) -> tuple[tuple[str, str, tuple[object, ...]], ...] | None:
-    """Compute a recursive content fingerprint of selector classes and schemas in the registry."""
-    if not isinstance(selectors_registry, Mapping):
-        return None
-    try:
-        registry_items = list(selectors_registry.items())
-    except Exception:
-        _LOGGER.debug("Could not iterate Home Assistant selector registry items", exc_info=True)
-        return None
-
-    items: list[tuple[str, str, tuple[object, ...]]] = []
-    for k, v in registry_items:
-        try:
-            config_schema = getattr(v, "CONFIG_SCHEMA", None)
-            schema_fp = (
-                compute_selector_schema_fingerprint(config_schema)
-                if config_schema is not None
-                else ()
-            )
-            cls_name = getattr(v, "__qualname__", getattr(v, "__name__", repr(v)))
-        except Exception:
-            cls_name = repr(v)
-            schema_fp = ()
-        items.append((str(k), cls_name, schema_fp))
-    return tuple(sorted(items, key=lambda item: item[0]))
-
-
-def derive_selector_filter_paths(
-    selectors_registry: object | None,
-    default_paths: frozenset[tuple[str, ...]],
-) -> frozenset[tuple[str, ...]]:
-    """Dynamically inspect registered Home Assistant selectors to discover filter paths."""
-    discovered: set[tuple[str, ...]] = set(default_paths)
-
-    if isinstance(selectors_registry, Mapping):
-        try:
-            registry_items = list(selectors_registry.items())
-        except Exception:
-            _LOGGER.debug(
-                "Could not iterate Home Assistant selector registry items",
-                exc_info=True,
-            )
-            registry_items = []
-
-        for selector_type, selector_cls in registry_items:
-            try:
-                config_schema = getattr(selector_cls, "CONFIG_SCHEMA", None)
-                if config_schema is None:
-                    continue
-
-                _collect_selector_filter_paths((str(selector_type),), config_schema, discovered)
-            except Exception:
-                _LOGGER.debug(
-                    "Failed to inspect selector schema for %s",
-                    selector_type,
-                    exc_info=True,
-                )
-
-    if not default_paths.issubset(discovered):
-        discovered.update(default_paths)
-
-    return frozenset(discovered)
+_generate_dummy_input_value = generate_dummy_input_value
+_is_invalid_for_input_default = is_invalid_for_input_default
+_check_ha_template_ast_compatibility = check_ha_template_ast_compatibility
 
 
 class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, object]]]):
     """Class to manage fetching blueprint updates."""
 
     _client_kwargs_cache: dict[str, tuple[str, ...] | None] | None = None
-    _DEFAULT_SELECTOR_FILTER_PATHS: ClassVar[frozenset[tuple[str, ...]]] = frozenset(
-        {
-            ("entity", "filter"),
-            ("device", "filter"),
-            ("device", "entity"),
-            ("target", "entity"),
-            ("target", "device"),
-            ("area", "entity"),
-            ("area", "device"),
-            ("floor", "entity"),
-            ("floor", "device"),
-            ("numeric_threshold", "entity"),
-        }
+    _DEFAULT_SELECTOR_FILTER_PATHS: ClassVar[frozenset[tuple[str, ...]]] = (
+        DEFAULT_SELECTOR_FILTER_PATHS
     )
     _selector_filter_paths: ClassVar[frozenset[tuple[str, ...]] | None] = None
     _selector_registry_fingerprint: ClassVar[
@@ -622,33 +360,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         """Invalidate the cached selector filter paths and registry fingerprints."""
         cls._selector_filter_paths = None
         cls._selector_registry_fingerprint = None
+        invalidate_selector_filter_paths_cache()
 
     @classmethod
     def get_selector_filter_paths(
         cls, *, force_refresh: bool = False
     ) -> frozenset[tuple[str, ...]]:
         """Get the cached or dynamically derived set of selector filter paths."""
-        try:
-            from homeassistant.helpers import selector as ha_selector
-
-            selectors_registry = getattr(ha_selector, "SELECTORS", None)
-        except Exception:
-            _LOGGER.debug("Could not import Home Assistant selector registry", exc_info=True)
-            selectors_registry = None
-
-        current_fingerprint = compute_selector_registry_fingerprint(selectors_registry)
-
-        if (
-            force_refresh
-            or cls._selector_filter_paths is None
-            or current_fingerprint != cls._selector_registry_fingerprint
-        ):
-            cls._selector_filter_paths = derive_selector_filter_paths(
-                selectors_registry, cls._DEFAULT_SELECTOR_FILTER_PATHS
-            )
-            cls._selector_registry_fingerprint = current_fingerprint
-
-        return cls._selector_filter_paths
+        paths = get_selector_filter_paths(force_refresh=force_refresh)
+        cls._selector_filter_paths = paths
+        cls._selector_registry_fingerprint = get_cached_selector_registry_fingerprint()
+        return paths
 
     @staticmethod
     def generate_unique_id(entry_id: str, relative_path: str) -> str:
@@ -1186,7 +908,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             return False
 
         try:
-            content_hash = self._hash_content(content, source_url)
+            content_hash = hash_content(content, source_url)
         except (ValueError, TypeError, HomeAssistantError) as err:
             _LOGGER.debug("Semantic comparison failed: %s", err)
             return False
@@ -1684,126 +1406,29 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             _LOGGER.exception("Failed to send auto-update notification")
 
     @staticmethod
-    def _extract_defined_inputs(input_dict: object) -> set[str]:
-        """Extract all input keys defined in blueprint.input (including nested sections).
+    def _format_validation_failure(
+        error_key: str,
+        log_message: str,
+        source_url: str,
+        detail: object,
+    ) -> str:
+        """Log a validation failure and return a formatted error message.
 
         Args:
-            input_dict: The raw input mapping from the blueprint block.
+            error_key: Key identifying the error type.
+            log_message: Log message format string expecting URL and error string.
+            source_url: Source URL of the blueprint.
+            detail: Error details or sequence of error strings.
 
         Returns:
-            A set of all defined input key names.
+            Formatted structured error message.
 
         """
-        keys: set[str] = set()
-        if not isinstance(input_dict, Mapping):
-            return keys
-
-        for k, v in input_dict.items():
-            if isinstance(v, Mapping) and "input" in v and isinstance(v["input"], Mapping):
-                keys.update(BlueprintUpdateCoordinator._extract_defined_inputs(v["input"]))
-            elif isinstance(k, str):
-                keys.add(k)
-        return keys
-
-    @staticmethod
-    def _extract_inputs_with_default(input_dict: object) -> set[str]:
-        """Recursively extract defined input keys that specify a default value.
-
-        Args:
-            input_dict: Parsed input mapping from blueprint metadata.
-
-        Returns:
-            A set of input key names that define a default value.
-
-        """
-        keys: set[str] = set()
-        if not isinstance(input_dict, Mapping):
-            return keys
-
-        for k, v in input_dict.items():
-            if isinstance(v, Mapping):
-                if "input" in v and isinstance(v["input"], Mapping):
-                    keys.update(BlueprintUpdateCoordinator._extract_inputs_with_default(v["input"]))
-                elif "default" in v and isinstance(k, str):
-                    keys.add(k)
-        return keys
-
-    @staticmethod
-    def _extract_mandatory_inputs(input_dict: object) -> set[str]:
-        """Recursively extract defined input keys that do not define a default value.
-
-        Args:
-            input_dict: Parsed input mapping from blueprint metadata.
-
-        Returns:
-            A set of mandatory input key names.
-
-        """
-        keys: set[str] = set()
-        if not isinstance(input_dict, Mapping):
-            return keys
-
-        for k, v in input_dict.items():
-            if isinstance(v, Mapping):
-                if "input" in v and isinstance(v["input"], Mapping):
-                    keys.update(BlueprintUpdateCoordinator._extract_mandatory_inputs(v["input"]))
-                elif "default" not in v and isinstance(k, str):
-                    keys.add(k)
-            elif isinstance(k, str):
-                keys.add(k)
-        return keys
-
-    @staticmethod
-    def _extract_used_inputs(obj: object) -> list[str]:
-        """Recursively find all !input references in the parsed structure.
-
-        Args:
-            obj: Parsed blueprint YAML data or nested object.
-
-        Returns:
-            A list of input names referenced via !input tags.
-
-        """
-        used: list[str] = []
-        if isinstance(obj, Input):
-            used.append(obj.name)
-        elif isinstance(obj, Mapping):
-            for k, v in obj.items():
-                if isinstance(k, Input):
-                    used.append(k.name)
-                elif not isinstance(k, (str, bytes, bytearray)):
-                    used.extend(BlueprintUpdateCoordinator._extract_used_inputs(k))
-                used.extend(BlueprintUpdateCoordinator._extract_used_inputs(v))
-        elif isinstance(obj, Sequence) and not isinstance(obj, (str, bytes, bytearray)):
-            for item in obj:
-                used.extend(BlueprintUpdateCoordinator._extract_used_inputs(item))
-        return used
-
-    @staticmethod
-    def _validate_input_references(data: dict[str, object]) -> str | None:
-        """Verify that all !input tags reference defined blueprint inputs.
-
-        Args:
-            data: Parsed YAML dictionary of the blueprint.
-
-        Returns:
-            An error message if undefined inputs are referenced, or None if valid.
-
-        """
-        blueprint_meta = data.get("blueprint")
-        if not isinstance(blueprint_meta, Mapping):
-            return None
-
-        defined = BlueprintUpdateCoordinator._extract_defined_inputs(blueprint_meta.get("input"))
-        used = BlueprintUpdateCoordinator._extract_used_inputs(data)
-
-        if undefined := sorted({name for name in used if name not in defined}):
-            if len(undefined) == 1:
-                return f"Undefined input referenced: '!input {undefined[0]}'"
-            formatted = ", ".join(f"'!input {name}'" for name in undefined)
-            return f"Undefined inputs referenced: {formatted}"
-
-        return None
+        error_str = (
+            "; ".join(str(e) for e in detail) if isinstance(detail, (list, tuple)) else str(detail)
+        )
+        _LOGGER.warning(log_message, redact_url(source_url), error_str)
+        return format_error_message(error_key, error_str)
 
     def _validate_blueprint(
         self,
@@ -1836,43 +1461,59 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             )
             return "invalid_blueprint"
 
-        if input_error := BlueprintUpdateCoordinator._validate_input_references(data):
-            _LOGGER.warning(
+        if input_error := validate_input_references(data):
+            return self._format_validation_failure(
+                "blueprint_validation_error",
                 "Blueprint input validation failed for %s: %s",
-                redact_url(source_url),
+                source_url,
                 input_error,
             )
-            return format_error_message("blueprint_validation_error", input_error)
 
-        schema = BlueprintUpdateCoordinator._get_blueprint_schema(expected_domain)
+        blueprint_meta = data.get("blueprint")
+        input_dict = blueprint_meta.get(CONF_INPUT) if isinstance(blueprint_meta, Mapping) else None
+        input_configs = extract_input_configs(input_dict)
+        empty_default_inputs: dict[str, object] = {
+            k: v[CONF_DEFAULT]
+            for k, v in input_configs.items()
+            if CONF_DEFAULT in v and _is_invalid_for_input_default(v[CONF_DEFAULT], v)
+        }
+        if empty_default_inputs and (
+            usage_errors := validate_safe_input_usages(data, empty_default_inputs)
+        ):
+            return self._format_validation_failure(
+                "blueprint_validation_error",
+                "Blueprint unsafe input usage in %s: %s",
+                source_url,
+                usage_errors,
+            )
+
+        schema = get_blueprint_schema(expected_domain)
 
         try:
             bp = Blueprint(data, expected_domain=expected_domain, schema=schema)
             if errors := bp.validate():
-                error_msg = "; ".join(errors)
-                _LOGGER.warning(
+                return self._format_validation_failure(
+                    "incompatible",
                     "Blueprint from %s is incompatible: %s",
-                    redact_url(source_url),
-                    error_msg,
+                    source_url,
+                    errors,
                 )
-                return format_error_message("incompatible", error_msg)
         except InvalidBlueprint as err:
-            _LOGGER.warning(
+            return self._format_validation_failure(
+                "blueprint_validation_error",
                 "Blueprint validation failed for %s: %s",
-                redact_url(source_url),
+                source_url,
                 err,
             )
-            return format_error_message("blueprint_validation_error", err)
 
         if template_error := self._validate_template_value(data, "", skip_blueprint_metadata=True):
             path, error = template_error
-            error_msg = sanitize_error_detail(f"Invalid template at {path}: {error}")
-            _LOGGER.warning(
+            return self._format_validation_failure(
+                "blueprint_validation_error",
                 "Blueprint template validation failed for %s: %s",
-                redact_url(source_url),
-                error_msg,
+                source_url,
+                sanitize_error_detail(f"Invalid template at {path}: {error}"),
             )
-            return format_error_message("blueprint_validation_error", error_msg)
 
         return None
 
@@ -1883,21 +1524,50 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         *,
         skip_blueprint_metadata: bool = False,
     ) -> tuple[str, str] | None:
-        """Validate one value and recursively inspect nested YAML structures."""
+        """Validate one value and recursively inspect nested YAML structures.
+
+        Args:
+            value: The object or YAML structure to validate.
+            path: Dot-notation or indexed YAML path for reporting.
+            skip_blueprint_metadata: Whether to skip inspecting the 'blueprint' metadata mapping.
+
+        Returns:
+            A tuple of (path, error_message) if invalid, or None if valid.
+
+        """
         if isinstance(value, str):
             if not is_template_string(value):
                 return None
             try:
-                Template(value, self.hass).ensure_valid()
+                tmpl = Template(value, self.hass)
+                tmpl.ensure_valid()
             except TemplateError as err:
                 return path, str(err)
+
+            try:
+                env = getattr(tmpl, "_env", None)
+                if env is None or not isinstance(env, TemplateEnvironment):
+                    env = TemplateEnvironment(self.hass)
+                ast = env.parse(value)
+                if ast_errors := _check_ha_template_ast_compatibility(ast, env):
+                    return path, "; ".join(ast_errors)
+            except TemplateError as err:
+                return path, str(err)
+            except Exception as err:
+                _LOGGER.debug(
+                    "Skipping template AST compatibility inspection for '%s' at %s: %s",
+                    value,
+                    path,
+                    err,
+                )
+
             return None
 
         if isinstance(value, Mapping):
             for key, child in value.items():
                 if skip_blueprint_metadata and key == "blueprint":
                     continue
-                child_path = self._template_path(path, key)
+                child_path = build_template_path(path, key)
                 if isinstance(key, str) and (
                     template_error := self._validate_template_value(key, child_path)
                 ):
@@ -1912,15 +1582,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     return template_error
 
         return None
-
-    @staticmethod
-    def _template_path(path: str, key: object) -> str:
-        """Build a concrete YAML-style path for a mapping entry."""
-        if not path:
-            return str(key)
-        if isinstance(key, str) and key.isidentifier():
-            return f"{path}.{key}"
-        return f"{path}[{key!r}]"
 
     def _get_functional_domain(
         self,
@@ -1957,7 +1618,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             if domain in ALLOWED_RELOAD_DOMAINS:
                 return domain
 
-        bp_block = self._get_blueprint_block(path, content, parsed_data=parsed_data)
+        bp_block = get_blueprint_block(path, content, parsed_data=parsed_data)
         if bp_block:
             return normalize_domain(bp_block.get("domain"))
 
@@ -2208,6 +1869,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 translation_placeholders={"error": error_detail},
             )
 
+        func_domain = normalize_domain(domain)
+        if func_domain is not None and isinstance(parsed, dict):
+            try:
+                schema = get_blueprint_schema(domain)
+                bp = Blueprint(parsed, expected_domain=domain, schema=schema)
+                await self._async_validate_baseline_candidate(parsed, bp, rel_path, func_domain)
+            except (HomeAssistantError, vol.Invalid) as err:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="blueprint_validation_error",
+                    translation_placeholders={"error": sanitize_error_detail(str(err))},
+                ) from err
+
         await self.async_install_blueprint(
             full_path,
             content,
@@ -2412,7 +2086,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             content=remote_content if parsed else None,
             parsed_data=parsed,
         )
-        blueprint_block = self._get_blueprint_block(path, parsed_data=parsed) if parsed else None
+        blueprint_block = get_blueprint_block(path, parsed_data=parsed) if parsed else None
         metadata = self._resolve_blueprint_metadata(
             path,
             blueprint_block,
@@ -2423,12 +2097,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         final_source_url = (
             str(final_source_url_val) if isinstance(final_source_url_val, str) else None
         )
+        filter_paths = self.get_selector_filter_paths()
         content = (
-            self._ensure_source_url(remote_content, final_source_url)
+            ensure_source_url(remote_content, final_source_url, filter_paths=filter_paths)
             if final_source_url
-            else self._normalize_content(remote_content)
+            else normalize_content(remote_content)
         )
-        expected_hash = self._hash_content(content, final_source_url)
+        expected_hash = hash_content(content, final_source_url, filter_paths=filter_paths)
         if remote_hash is not None and remote_hash != expected_hash:
             raise HomeAssistantError("Remote hash does not match validated install content")
 
@@ -2521,7 +2196,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             last_modified if last_modified is not None else current.get("last_modified")
         )
         semantic_hash = (
-            BlueprintUpdateCoordinator._hash_content(prepared.content, prepared.source_url)
+            hash_content(prepared.content, prepared.source_url)
             if prepared.source_url
             else file_result.content_hash
         )
@@ -2924,7 +2599,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             else None
         )
         bp_block = (
-            self._get_blueprint_block(
+            get_blueprint_block(
                 real_path,
                 parsed_data=parsed_dict,
             )
@@ -2953,6 +2628,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 "blueprint_validation_error",
                 error=(error_parts[1] if error_parts else validation_error.replace("_", " ")),
             )
+
+        func_domain = normalize_domain(domain)
+        if func_domain is not None and isinstance(bp_dict, dict):
+            try:
+                schema = get_blueprint_schema(domain)
+                bp = Blueprint(bp_dict, expected_domain=domain, schema=schema)
+                await self._async_validate_baseline_candidate(bp_dict, bp, real_path, func_domain)
+            except (HomeAssistantError, vol.Invalid) as err:
+                raise BlueprintRestoreValidationError(
+                    "blueprint_validation_error",
+                    error=sanitize_error_detail(str(err)),
+                ) from err
+
         return PreparedBlueprintRestore(
             real_path=real_path,
             content=backup_content,
@@ -2989,7 +2677,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         data_path = path if path in self.data else prepared.real_path
         if data_path in self.data:
-            restored_hash = self._hash_content(
+            restored_hash = hash_content(
                 prepared.content,
                 (
                     prepared.tracked_source_url
@@ -3052,7 +2740,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             A dictionary mapping input names to their properties (mandatory, selector).
         """
         try:
-            content_to_parse = BlueprintUpdateCoordinator._extract_blueprint_text(content)
+            content_to_parse = extract_blueprint_text(content)
             try:
                 data = yaml_util.parse_yaml(content_to_parse)
             except HomeAssistantError:
@@ -3225,56 +2913,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 configs[entity_id] = candidate
                 return
 
-    @staticmethod
-    def _get_affected_entities(configs: Mapping[str, Mapping[str, object]], key: str) -> list[str]:
-        """Find entities using a specific input key."""
-        return [eid for eid, inputs in configs.items() if key in inputs]
-
-    @staticmethod
-    def _is_input_mandatory(props: object) -> bool:
-        """Check if an input schema property dictionary represents a mandatory input."""
-        if not isinstance(props, dict):
-            return True
-        if "mandatory" in props:
-            return bool(props.get("mandatory"))
-        return "default" not in props
-
-    @staticmethod
-    def _detect_new_mandatory_inputs(
-        old_schema: Mapping[str, object], new_schema: Mapping[str, object]
-    ) -> list[StructuredRisk]:
-        """Detect new mandatory inputs in the schema."""
-        risks: list[StructuredRisk] = []
-        for key, props in new_schema.items():
-            if BlueprintUpdateCoordinator._is_input_mandatory(props):
-                old_props = old_schema.get(key)
-                old_mandatory = (
-                    BlueprintUpdateCoordinator._is_input_mandatory(old_props)
-                    if old_props is not None
-                    else False
-                )
-                if not old_mandatory:
-                    risks.append({"type": BlueprintRiskType.NEW_MANDATORY, "args": {"input": key}})
-        return risks
-
-    @staticmethod
-    def _detect_missing_inputs(
-        new_schema: Mapping[str, Mapping[str, object]],
-        configs: Mapping[str, Mapping[str, object]],
-    ) -> list[StructuredRisk]:
-        """Detect missing mandatory inputs for existing entities."""
-        risks: list[StructuredRisk] = []
-        for entity_id, inputs in configs.items():
-            risks.extend(
-                {
-                    "type": BlueprintRiskType.MISSING_INPUT,
-                    "args": {"entity": entity_id, "input": key},
-                }
-                for key, props in new_schema.items()
-                if isinstance(props, dict) and props.get("mandatory") and key not in inputs
-            )
-        return risks
-
     def _detect_selector_mismatches(
         self,
         old_schema: Mapping[str, Mapping[str, object]],
@@ -3294,7 +2932,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 old_config = old_props.get("selector_config")
                 new_config = new_props.get("selector_config")
                 if (old_selector != new_selector or old_config != new_config) and (
-                    affected := self._get_affected_entities(configs, key)
+                    affected := get_affected_entities(configs, key)
                 ):
                     if old_selector != new_selector:
                         risks.append(
@@ -3330,7 +2968,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         """Detect inputs that were removed but are still used."""
         risks: list[StructuredRisk] = []
         for key in old_schema:
-            if key not in new_schema and (affected := self._get_affected_entities(configs, key)):
+            if key not in new_schema and (affected := get_affected_entities(configs, key)):
                 risks.append(
                     {
                         "type": BlueprintRiskType.REMOVED_INPUT,
@@ -3338,36 +2976,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     }
                 )
         return risks
-
-    @staticmethod
-    def _dedupe_risks(risks: Iterable[StructuredRisk]) -> list[StructuredRisk]:
-        """De-duplicate risks by type and arguments.
-
-        This ensures that identical risks (by type and arguments) are only
-        reported once, even if they originate from different detection passes.
-
-        Args:
-            risks: An iterable of structured risks.
-
-        Returns:
-            A list of unique structured risks.
-
-        """
-        seen: set[tuple[BlueprintRiskType, bytes]] = set()
-        unique_risks: list[StructuredRisk] = []
-        for risk in risks:
-            if not isinstance(risk, dict) or "type" not in risk or "args" not in risk:
-                _LOGGER.debug("Skipping malformed risk: %s", risk)
-                continue
-
-            key = (
-                risk["type"],
-                orjson.dumps(risk["args"], option=orjson.OPT_SORT_KEYS),
-            )
-            if key not in seen:
-                seen.add(key)
-                unique_risks.append(risk)
-        return unique_risks
 
     def _detect_breaking_changes(
         self,
@@ -3404,12 +3012,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             ]
 
         risks = []
-        risks.extend(self._detect_new_mandatory_inputs(old_schema, new_schema))
-        risks.extend(self._detect_missing_inputs(new_schema, configs))
+        risks.extend(detect_new_mandatory_inputs(old_schema, new_schema))
+        risks.extend(detect_missing_inputs(new_schema, configs))
         risks.extend(self._detect_selector_mismatches(old_schema, new_schema, configs))
         risks.extend(self._detect_removed_inputs(old_schema, new_schema, configs))
 
-        return self._dedupe_risks(risks)
+        return dedupe_risks(risks)
 
     def _get_blueprint_consumers(self, relative_path: str) -> list[str] | None:
         """Return unique entity IDs referencing this blueprint.
@@ -3481,7 +3089,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     }
                 ]
             domain = normalize_domain(parts[0])
-            schema = BlueprintUpdateCoordinator._get_blueprint_schema(domain)
+            schema = get_blueprint_schema(domain)
 
             blueprint_obj = Blueprint(
                 blueprint_dict, expected_domain=domain, path=relative_path, schema=schema
@@ -3505,8 +3113,23 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         blueprint_meta = blueprint_dict.get("blueprint")
         input_meta = blueprint_meta.get("input") if isinstance(blueprint_meta, Mapping) else None
-        optional_keys = BlueprintUpdateCoordinator._extract_inputs_with_default(input_meta)
-        mandatory_keys = BlueprintUpdateCoordinator._extract_mandatory_inputs(input_meta)
+        optional_keys = extract_inputs_with_default(input_meta)
+
+        if template_error := self._validate_template_value(
+            blueprint_dict, "", skip_blueprint_metadata=True
+        ):
+            path_err, err_msg = template_error
+            return [
+                {
+                    "type": BlueprintRiskType.COMPATIBILITY,
+                    "args": {
+                        "entity": relative_path,
+                        "error": sanitize_error_detail(
+                            f"Invalid template at {path_err}: {err_msg}"
+                        ),
+                    },
+                }
+            ]
 
         async with self._blueprint_validate_lock:
             for entity_id, config in configs.items():
@@ -3567,55 +3190,90 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                             )
 
             # Proactive baseline candidate simulation: when no consumers exist,
-            # if the blueprint defines no mandatory inputs and provides self-contained
-            # executable structure, validate the baseline with empty inputs against HA Core.
-            if not configs and not mandatory_keys:
-                has_executable_structure = (
-                    (
-                        domain == FunctionalDomain.AUTOMATION
-                        and (
-                            ("trigger" in blueprint_dict or "triggers" in blueprint_dict)
-                            and (
-                                "action" in blueprint_dict
-                                or "actions" in blueprint_dict
-                                or "sequence" in blueprint_dict
-                            )
-                        )
+            # if the blueprint provides self-contained executable structure,
+            # validate the baseline against HA Core using minimal valid inputs.
+            if not configs:
+                try:
+                    await self._async_validate_baseline_candidate(
+                        blueprint_dict, blueprint_obj, relative_path, domain
                     )
-                    or (domain == FunctionalDomain.SCRIPT and "sequence" in blueprint_dict)
-                    or (
-                        domain == FunctionalDomain.TEMPLATE
-                        and any(
-                            k in blueprint_dict for k in ("sensor", "binary_sensor", "template")
-                        )
-                    )
-                )
-                if has_executable_structure:
-                    baseline_config: dict[str, object] = {
-                        "use_blueprint": {
-                            "path": relative_path,
-                            "input": {},
+                except (HomeAssistantError, vol.Invalid) as err:
+                    risks.append(
+                        {
+                            "type": BlueprintRiskType.COMPATIBILITY,
+                            "args": {
+                                "entity": relative_path,
+                                "error": sanitize_error_detail(str(err)),
+                            },
                         }
-                    }
-                    try:
-                        baseline_inputs = BlueprintInputs(blueprint_obj, baseline_config)
-                        baseline_inputs.validate()
-                        substituted_baseline = baseline_inputs.async_substitute()
-                        await self._async_validate_substituted_domain_config(
-                            domain, relative_path, substituted_baseline
-                        )
-                    except (HomeAssistantError, vol.Invalid) as err:
-                        risks.append(
-                            {
-                                "type": BlueprintRiskType.COMPATIBILITY,
-                                "args": {
-                                    "entity": relative_path,
-                                    "error": sanitize_error_detail(str(err)),
-                                },
-                            }
-                        )
+                    )
 
         return risks
+
+    async def _async_validate_baseline_candidate(
+        self,
+        blueprint_dict: dict[str, object],
+        blueprint_obj: Blueprint,
+        relative_path: str,
+        domain: FunctionalDomain,
+    ) -> None:
+        """Validate blueprint baseline against Home Assistant Core using dummy inputs.
+
+        Args:
+            blueprint_dict: Parsed blueprint dictionary.
+            blueprint_obj: Instantiated Blueprint object.
+            relative_path: Relative path of the blueprint.
+            domain: Functional domain of the blueprint.
+
+        Raises:
+            HomeAssistantError: If substituted configuration fails Core validation.
+            vol.Invalid: If substituted configuration fails voluptuous schema validation.
+
+        """
+        has_executable_structure = (
+            (
+                domain == FunctionalDomain.AUTOMATION
+                and (
+                    ("trigger" in blueprint_dict or "triggers" in blueprint_dict)
+                    and (
+                        "action" in blueprint_dict
+                        or "actions" in blueprint_dict
+                        or "sequence" in blueprint_dict
+                    )
+                )
+            )
+            or (domain == FunctionalDomain.SCRIPT and CONF_SEQUENCE in blueprint_dict)
+            or (
+                domain == FunctionalDomain.TEMPLATE
+                and any(k in blueprint_dict for k in ("sensor", "binary_sensor", "template"))
+            )
+        )
+        if not has_executable_structure:
+            return
+
+        bp_meta = blueprint_dict.get("blueprint")
+        input_meta = bp_meta.get(CONF_INPUT) if isinstance(bp_meta, Mapping) else None
+        input_configs = extract_input_configs(input_meta)
+        dummy_inputs: dict[str, object] = {}
+        for input_name, input_cfg in input_configs.items():
+            if CONF_DEFAULT in input_cfg:
+                continue
+            dummy_val = derive_dummy_input_value(input_name, input_cfg, blueprint_dict)
+            if dummy_val is None:
+                return
+            dummy_inputs[input_name] = dummy_val
+        baseline_config: dict[str, object] = {
+            "use_blueprint": {
+                "path": relative_path,
+                "input": dummy_inputs,
+            }
+        }
+        baseline_inputs = BlueprintInputs(blueprint_obj, baseline_config)
+        baseline_inputs.validate()
+        substituted_baseline = baseline_inputs.async_substitute()
+        await self._async_validate_substituted_domain_config(
+            domain, relative_path, substituted_baseline
+        )
 
     async def _async_validate_substituted_domain_config(
         self,
@@ -3865,7 +3523,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if not remote_content:
             return None
 
-        remote_content_with_url = self._ensure_source_url(remote_content, source_url)
+        filter_paths = self.get_selector_filter_paths()
+        remote_content_with_url = ensure_source_url(
+            remote_content, source_url, filter_paths=filter_paths
+        )
         try:
             remote_parsed = yaml_util.parse_yaml(remote_content_with_url)
             blueprint_dict: dict[str, object] = (
@@ -3940,7 +3601,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         try:
             diff_text = await self.hass.async_add_executor_job(
-                BlueprintUpdateCoordinator._read_and_diff,
+                read_and_diff,
                 path,
                 remote_content,
                 source_url_str,
@@ -4295,9 +3956,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             return
         real_path = os.path.realpath(path)
         source_url_str = source_url if isinstance(source_url, str) else ""
+        filter_paths = self.get_selector_filter_paths()
         remote_content_with_url = remote_content
         try:
-            remote_content_with_url = self._ensure_source_url(remote_content, source_url_str)
+            remote_content_with_url = ensure_source_url(
+                remote_content, source_url_str, filter_paths=filter_paths
+            )
             remote_parsed = yaml_util.parse_yaml(remote_content_with_url)
             expected_domain = self._get_functional_domain(real_path)
             blueprint_dict: dict[str, object] = (
@@ -4312,7 +3976,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 remote_hash = None
                 last_error = validation_error
             else:
-                remote_hash = self._hash_content(remote_content, source_url_str)
+                remote_hash = hash_content(
+                    remote_content, source_url_str, filter_paths=filter_paths
+                )
                 local_hash = info.get("local_hash")
                 updatable = bool(remote_hash and remote_hash != local_hash)
                 last_error = None
@@ -4447,7 +4113,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                         },
                     }
                 )
-        return self._dedupe_risks(risks)
+        return dedupe_risks(risks)
 
     async def _handle_auto_update_step(
         self,
@@ -4982,407 +4648,6 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         return content
 
     @staticmethod
-    def _normalize_content(content: str) -> str:
-        r"""Normalize blueprint content for consistent hashing.
-
-        This method performs transport-level normalization to ensure that
-        identical files produce consistent hashes across different operating
-        systems (Windows vs Linux) and transport layers. It avoids modifying
-        content inside the file (such as stripping trailing spaces) to
-        preserve the integrity of YAML block scalars.
-
-        It performs the following transformations:
-        1. Strips UTF-8 Byte Order Mark (BOM).
-        2. Normalizes all line endings to Unix style (\n).
-
-        A fast-path is used when the content is already normalized,
-        avoiding unnecessary string operations.
-
-        Args:
-            content: Raw YAML content string.
-
-        Returns:
-            Normalized YAML content.
-
-        """
-        if "\r" not in content and not content.startswith("\ufeff"):
-            return content
-
-        if content.startswith("\ufeff"):
-            content = content[1:]
-
-        return content.replace("\r\n", "\n").replace("\r", "\n")
-
-    @staticmethod
-    def _hash_content(
-        content: str, source_url: object = None, already_normalized: bool = False
-    ) -> str:
-        """Calculate a deterministic SHA-256 hash of normalized content.
-
-        This method supports both plain normalization (content only) and
-        semantic normalization (content + source location tracking).
-
-        If a source_url is provided, it is injected into the blueprint's
-        metadata before hashing. This ensures the identity (logic + source)
-        is preserved. If source_url is None or empty, only plain YAML
-        normalization is performed.
-
-        Args:
-            content: The raw YAML string to hash.
-            source_url: Optional source URL to trigger identity-aware hashing.
-            already_normalized: If True, bypass normalization steps and hash raw content.
-
-        Returns:
-            The SHA-256 hex digest of the normalized content.
-
-        """
-        if already_normalized:
-            return hashlib.sha256(content.encode("utf-8")).hexdigest()
-
-        if not isinstance(source_url, str) or not source_url.strip():
-            return hashlib.sha256(
-                BlueprintUpdateCoordinator._normalize_content(content).encode("utf-8")
-            ).hexdigest()
-
-        canonical_source_url = BlueprintUpdateCoordinator._canonicalize_source_url(source_url)
-        normalized = BlueprintUpdateCoordinator._ensure_source_url_cached(
-            content, canonical_source_url
-        )
-        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def _get_blueprint_schema(domain: str) -> vol.Schema | vol.All:
-        """Return the appropriate Home Assistant blueprint schema for a given domain.
-
-        Args:
-            domain: The blueprint domain (automation, script, or template).
-
-        Returns:
-            The corresponding voluptuous Schema.
-
-        """
-        if domain == FunctionalDomain.AUTOMATION:
-            return AUTOMATION_BLUEPRINT_SCHEMA
-        if domain == FunctionalDomain.TEMPLATE:
-            if isinstance(TEMPLATE_BLUEPRINT_SCHEMA, vol.Schema):
-                return TEMPLATE_BLUEPRINT_SCHEMA
-            return BLUEPRINT_SCHEMA
-        return BLUEPRINT_SCHEMA
-
-    @staticmethod
-    def _coerce_empty_selectors(data: object) -> None:
-        """Coerce empty selector configurations with None values to empty dicts.
-
-        In older Home Assistant versions, validate_selector treats selector
-        mappings with None values (e.g. `text:`) by returning an empty dict
-        without invoking the selector's CONFIG_SCHEMA to populate default
-        fields. On subsequent passes, the input has `{}` instead of `None`,
-        which triggers CONFIG_SCHEMA and breaks idempotency across passes.
-        Coercing None selector values to `{}` beforehand ensures deterministic,
-        idempotent schema normalization across all Home Assistant versions.
-
-        Args:
-            data: Arbitrary structured blueprint data to traverse and mutate.
-
-        """
-        if isinstance(data, dict):
-            selector_data = data.get("selector")
-            if isinstance(selector_data, dict):
-                for sel_type, sel_val in selector_data.items():
-                    if sel_val is None:
-                        selector_data[sel_type] = {}
-            for value in data.values():
-                BlueprintUpdateCoordinator._coerce_empty_selectors(value)
-        elif isinstance(data, list):
-            for item in data:
-                BlueprintUpdateCoordinator._coerce_empty_selectors(item)
-
-    @staticmethod
-    def _ensure_source_url_cached(content: str, source_url: str) -> str:
-        """Implementation of source URL normalization.
-
-        Assumes content and source_url are both strings.
-        """
-        source_url = source_url.strip()
-
-        try:
-            parsed = yaml_util.parse_yaml(content)
-        except HomeAssistantError:
-            parsed = None
-
-        if not isinstance(parsed, dict) or "blueprint" not in parsed:
-            return BlueprintUpdateCoordinator._normalize_content(content)
-
-        blueprint_info = parsed["blueprint"]
-        if not isinstance(blueprint_info, dict):
-            return BlueprintUpdateCoordinator._normalize_content(content)
-
-        had_source_url = "source_url" in blueprint_info
-        if had_source_url:
-            blueprint_info["source_url"] = source_url
-
-        target_data = parsed
-        try:
-            domain = blueprint_info.get("domain", FunctionalDomain.AUTOMATION)
-            schema = BlueprintUpdateCoordinator._get_blueprint_schema(domain)
-            BlueprintUpdateCoordinator._coerce_empty_selectors(parsed)
-            normalized = schema(parsed)
-            target_data = BlueprintUpdateCoordinator._stabilize_yaml_structure(parsed, normalized)
-        except (vol.Invalid, KeyError, TypeError, ValueError) as err:
-            _LOGGER.debug(
-                "Semantic normalization skipped for %s (falling back to canonical YAML): %s",
-                redact_url(source_url),
-                err,
-            )
-
-        if isinstance(target_data, dict) and isinstance(target_data.get("blueprint"), dict):
-            target_data["blueprint"]["source_url"] = source_url
-
-        if isinstance(target_data, (dict, list)):
-            try:
-                return yaml_util.dump(target_data)
-            except Exception as err:
-                _LOGGER.warning(
-                    "YAML canonicalization failed for %s: %s",
-                    redact_url(source_url),
-                    err,
-                )
-                return BlueprintUpdateCoordinator._normalize_content(content)
-        return ""
-
-    @staticmethod
-    def _ensure_source_url(content: object, source_url: object) -> str:
-        """Ensure the target source_url is present in the blueprint metadata.
-
-        Always uses structured YAML parsing to guarantee data integrity and
-        consistency with Home Assistant's core blueprint handling.
-
-        It also applies semantic normalization using Home Assistant's official
-        schemas (AUTOMATION_BLUEPRINT_SCHEMA or BLUEPRINT_SCHEMA). This ensures
-        that default values for selectors and structural expansions (like list
-        normalization) are applied consistently, matching how Home Assistant
-        Core saves blueprints to disk.
-
-        Args:
-            content: Raw YAML blueprint content.
-            source_url: Target URL to enforce in the content.
-
-        Returns:
-            The YAML content with the source_url guaranteed to be
-            present in the blueprint block, in canonical normalized YAML form.
-
-        """
-        if not isinstance(content, str):
-            _LOGGER.debug("Non-string content passed to _ensure_source_url: %s", type(content))
-            return ""
-        if not isinstance(source_url, str) or not source_url.strip():
-            _LOGGER.debug(
-                "Non-string or empty source_url passed to _ensure_source_url: %s", type(source_url)
-            )
-            return BlueprintUpdateCoordinator._normalize_content(content)
-
-        return BlueprintUpdateCoordinator._ensure_source_url_cached(content, source_url.strip())
-
-    @staticmethod
-    def _canonicalize_source_url(source_url: str) -> str:
-        """Canonicalize non-empty string source_url to a stable canonical form.
-
-        Handles malformed URLs gracefully by falling back to the stripped string representation.
-        """
-        clean_url = source_url.strip()
-        if not clean_url:
-            return ""
-        try:
-            return registry.canonicalize_url(registry.normalize_url(clean_url))
-        except (ValueError, TypeError):
-            return clean_url
-
-    @classmethod
-    def _stabilize_yaml_structure(
-        cls,
-        orig_data: object,
-        normalized_data: object,
-        selector_path: tuple[str, ...] | None = None,
-        allow_singleton_list_coercion: bool = False,
-        filter_paths: frozenset[tuple[str, ...]] | None = None,
-    ) -> object:
-        """Recursively update normalized structures using original key ordering.
-
-        Preserves existing dict/list identities when possible.
-        For selector configuration mappings, keys are deterministically sorted
-        so that option ordering or schema default additions do not trigger ghost diffs.
-        """
-        if filter_paths is None:
-            filter_paths = cls.get_selector_filter_paths()
-
-        if isinstance(normalized_data, dict):
-            norm_dict: dict[object, object] = dict(normalized_data.items())
-            orig_dict: dict[object, object] = (
-                dict(orig_data.items()) if isinstance(orig_data, dict) else {}
-            )
-
-            in_selector = selector_path is not None
-            if in_selector:
-                sorted_keys = sorted(norm_dict.keys(), key=str)
-                return {
-                    k: cls._stabilize_yaml_structure(
-                        orig_dict.get(k),
-                        norm_dict[k],
-                        selector_path=(
-                            (*selector_path, str(k)) if selector_path is not None else (str(k),)
-                        ),
-                        allow_singleton_list_coercion=(
-                            selector_path is not None and (*selector_path, str(k)) in filter_paths
-                        ),
-                        filter_paths=filter_paths,
-                    )
-                    for k in sorted_keys
-                }
-
-            res: dict[object, object] = {
-                k: cls._stabilize_yaml_structure(
-                    orig_val,
-                    norm_dict[k],
-                    selector_path=() if k == "selector" else None,
-                    allow_singleton_list_coercion=False,
-                    filter_paths=filter_paths,
-                )
-                for k, orig_val in orig_dict.items()
-                if k in norm_dict
-            }
-            new_keys = sorted([k for k in norm_dict if k not in res], key=str)
-            for key in new_keys:
-                res[key] = cls._stabilize_yaml_structure(
-                    norm_dict[key],
-                    norm_dict[key],
-                    selector_path=() if key == "selector" else None,
-                    allow_singleton_list_coercion=False,
-                    filter_paths=filter_paths,
-                )
-            return res
-
-        if isinstance(normalized_data, list):
-            if isinstance(orig_data, list):
-                orig_list = orig_data
-            elif (
-                allow_singleton_list_coercion
-                and isinstance(orig_data, dict)
-                and len(normalized_data) == 1
-                and isinstance(normalized_data[0], dict)
-            ):
-                orig_list = [orig_data]
-            else:
-                orig_list = []
-            res_list: list[object] = []
-
-            for i, item in enumerate(normalized_data):
-                orig_item = orig_list[i] if i < len(orig_list) else None
-                res_list.append(
-                    cls._stabilize_yaml_structure(
-                        orig_item,
-                        item,
-                        selector_path=selector_path,
-                        allow_singleton_list_coercion=False,
-                        filter_paths=filter_paths,
-                    )
-                )
-            return res_list
-
-        return normalized_data
-
-    @staticmethod
-    def _read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
-        """Read and diff local vs remote content with normalization.
-
-        Args:
-            local_path: Path to the local blueprint file.
-            remote_text: Raw remote content fetched from Git.
-            source_url: The source URL to ensure is present in the remote.
-
-        Returns:
-            A unified diff string.
-
-        """
-        with open(local_path, encoding="utf-8") as f:
-            local_text = f.read()
-
-        local_text = BlueprintUpdateCoordinator._ensure_source_url(local_text, source_url)
-        remote_text = BlueprintUpdateCoordinator._ensure_source_url(remote_text, source_url)
-
-        local_lines = local_text.splitlines(keepends=True)
-        remote_lines = remote_text.splitlines(keepends=True)
-        return "".join(
-            difflib.unified_diff(
-                local_lines,
-                remote_lines,
-                fromfile="local",
-                tofile="remote",
-            )
-        )
-
-    @staticmethod
-    def _extract_blueprint_text(content: str) -> str:
-        """Extract only the blueprint block text to avoid parsing huge YAMLs."""
-        lines = content.splitlines(keepends=True)
-        blueprint_lines: list[str] = []
-        in_blueprint = False
-        for line in lines:
-            if line.startswith("blueprint:"):
-                in_blueprint = True
-                blueprint_lines.append(line)
-            elif in_blueprint:
-                if line.strip() and line[0] not in (" ", "\t", "#"):
-                    break
-                blueprint_lines.append(line)
-        return "".join(blueprint_lines) if in_blueprint else content
-
-    @staticmethod
-    def _get_blueprint_block(
-        path: str,
-        content: str | None = None,
-        parsed_data: dict[str, object] | None = None,
-    ) -> dict[str, object] | None:
-        """Extract the blueprint block from YAML content or pre-parsed data."""
-        parsed = parsed_data
-        if not parsed and content:
-            content_to_parse = BlueprintUpdateCoordinator._extract_blueprint_text(content)
-            try:
-                parsed = yaml_util.parse_yaml(content_to_parse)
-            except HomeAssistantError:
-                try:
-                    parsed = yaml_util.parse_yaml(content)
-                except HomeAssistantError as err:
-                    _LOGGER.warning("Failed to parse blueprint at %s", path)
-                    _LOGGER.debug("Blueprint parse error at %s: %s", path, err)
-                    return None
-
-        if not isinstance(parsed, dict):
-            _LOGGER.debug(
-                "Skipping blueprint at %s: parsed YAML is not a mapping (got %s)",
-                path,
-                type(parsed).__name__,
-            )
-            return None
-
-        if "blueprint" not in parsed:
-            _LOGGER.debug(
-                "Skipping blueprint at %s: missing top-level 'blueprint' key",
-                path,
-            )
-            return None
-
-        bp_info = parsed["blueprint"]
-        if not isinstance(bp_info, dict):
-            _LOGGER.debug(
-                "Skipping blueprint at %s: 'blueprint' key is not a mapping (got %s)",
-                path,
-                type(bp_info).__name__,
-            )
-            return None
-
-        return {str(k): v for k, v in bp_info.items()} if isinstance(bp_info, dict) else None
-
-    @staticmethod
     def _parse_blueprint_data(
         path: str,
         content: str,
@@ -5398,7 +4663,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         refresh logic.
 
         """
-        bp_info = BlueprintUpdateCoordinator._get_blueprint_block(path, content)
+        bp_info = get_blueprint_block(path, content)
         if bp_info is None:
             return None
 
@@ -5449,7 +4714,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             "name": name,
             "domain": domain,
             "source_url": clean_source_url,
-            "local_hash": BlueprintUpdateCoordinator._hash_content(content, clean_source_url),
+            "local_hash": hash_content(content, clean_source_url),
             "local_file_hash": (
                 file_hash
                 if file_hash is not None

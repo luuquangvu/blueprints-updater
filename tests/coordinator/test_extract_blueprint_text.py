@@ -1,6 +1,9 @@
-"""Tests for blueprint text extraction logic."""
+"""Tests for extracting blueprint text and blocks."""
 
-from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.blueprint_validation import (
+    extract_blueprint_text,
+    get_blueprint_block,
+)
 
 
 def test_extract_blueprint_text_standard():
@@ -20,7 +23,7 @@ trigger:
 action:
   - service: light.turn_on
 """
-    extracted = BlueprintUpdateCoordinator._extract_blueprint_text(content)
+    extracted = extract_blueprint_text(content)
     assert "trigger:" not in extracted
     assert "action:" not in extracted
     assert "blueprint:" in extracted
@@ -41,7 +44,7 @@ blueprint:
 trigger:
   - platform: time
 """
-    extracted = BlueprintUpdateCoordinator._extract_blueprint_text(content)
+    extracted = extract_blueprint_text(content)
     assert "trigger:" not in extracted
     assert "# Comment before trigger" in extracted
     assert "input: {}" in extracted
@@ -56,7 +59,7 @@ automation:
     trigger: []
     action: []
 """
-    extracted = BlueprintUpdateCoordinator._extract_blueprint_text(content)
+    extracted = extract_blueprint_text(content)
     # Should fallback to returning the entire content
     assert extracted == content
 
@@ -66,7 +69,7 @@ def test_extract_blueprint_text_blueprint_at_end():
     content = """blueprint:
   name: test
   domain: automation"""
-    extracted = BlueprintUpdateCoordinator._extract_blueprint_text(content)
+    extracted = extract_blueprint_text(content)
     assert extracted == content
 
 
@@ -83,7 +86,7 @@ def test_extract_blueprint_text_multiline_string():
 action:
   - service: test
 """
-    extracted = BlueprintUpdateCoordinator._extract_blueprint_text(content)
+    extracted = extract_blueprint_text(content)
     assert "action:" not in extracted
     assert "multi-line description" in extracted
 
@@ -95,7 +98,7 @@ def test_extract_blueprint_text_weird_spacing():
 action:
   - service: test
 """
-    extracted = BlueprintUpdateCoordinator._extract_blueprint_text(content)
+    extracted = extract_blueprint_text(content)
     # Because it starts with 'blueprint :', it won't match line.startswith("blueprint:")
     # It should fallback to full content
     assert extracted == content
@@ -114,12 +117,12 @@ blueprint:
 action: []
 """
     # The text extractor will cut out the anchors
-    extracted = BlueprintUpdateCoordinator._extract_blueprint_text(content)
+    extracted = extract_blueprint_text(content)
     assert "*my_anchor" in extracted
     assert "&my_anchor" not in extracted
 
     # We test that _get_blueprint_block handles this by falling back to full parse
-    bp = BlueprintUpdateCoordinator._get_blueprint_block("test_path", content)
+    bp = get_blueprint_block("test_path", content)
     assert bp is not None
     assert bp.get("name") == "test"
     assert bp.get("custom_value") == 123

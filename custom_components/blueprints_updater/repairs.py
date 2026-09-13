@@ -32,6 +32,7 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
+from .blueprint_validation import read_and_diff
 from .const import (
     CONF_FILTER_MODE,
     CONF_SELECTED_BLUEPRINTS,
@@ -173,7 +174,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
                     # Generate git diff between existing local blueprint and new remote content
                     try:
                         self._pending_diff = await self.hass.async_add_executor_job(
-                            BlueprintUpdateCoordinator._read_and_diff,
+                            read_and_diff,
                             self.path,
                             content,
                             new_url,

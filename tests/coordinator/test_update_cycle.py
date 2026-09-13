@@ -13,6 +13,10 @@ import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.blueprints_updater.blueprint_validation import (
+    ensure_source_url,
+    hash_content,
+)
 from custom_components.blueprints_updater.const import (
     ALLOWED_RELOAD_DOMAINS,
     ERROR_SEPARATOR,
@@ -352,7 +356,7 @@ async def test_async_update_data_auto_update(mock_translate, coordinator, mock_m
         await coordinator._async_update_data()
         await coordinator._async_background_refresh(coordinator.data)
 
-    expected_content = coordinator._ensure_source_url(content, url)
+    expected_content = ensure_source_url(content, url)
     coordinator.async_install_blueprint.assert_awaited_once_with(
         path,
         expected_content,
@@ -754,10 +758,10 @@ async def test_ghost_update_prevention(coordinator, mock_makedirs):
     content = (
         f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n  input: {{}}\n"
     )
-    normalized_content = coordinator._ensure_source_url(content, url)
-    local_hash = coordinator._hash_content(normalized_content, url)
+    normalized_content = ensure_source_url(content, url)
+    local_hash = hash_content(normalized_content, url)
 
-    raw_hash = coordinator._hash_content(content, url)
+    raw_hash = hash_content(content, url)
     assert raw_hash == local_hash
 
     coordinator.data[path] = {
@@ -795,8 +799,8 @@ async def test_yaml_normalization_ignores_comments(coordinator, mock_makedirs):
     path = "/config/blueprints/automation/test.yaml"
     url = "https://github.com/user/repo/blob/main/test.yaml"
     content = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {url}\n"
-    normalized_content = coordinator._ensure_source_url(content, url)
-    local_hash = coordinator._hash_content(normalized_content, url)
+    normalized_content = ensure_source_url(content, url)
+    local_hash = hash_content(normalized_content, url)
 
     coordinator.data[path] = {
         "local_hash": local_hash,
@@ -885,7 +889,10 @@ async def test_process_blueprint_content_unhandled_error(coordinator, mock_maked
     info = {"relative_path": "automation/error.yaml", "name": "Error", "local_hash": "h"}
     coordinator.data[path] = info
 
-    with patch.object(coordinator, "_ensure_source_url", side_effect=RuntimeError("Boom")):
+    with patch(
+        "custom_components.blueprints_updater.coordinator.ensure_source_url",
+        side_effect=RuntimeError("Boom"),
+    ):
         await coordinator._process_blueprint_content(
             path,
             info,
@@ -1042,8 +1049,8 @@ async def test_committed_install_records_and_retries_pending_reload(hass, coordi
         "relative_path": "automation/test.yaml",
         "domain": FunctionalDomain.AUTOMATION,
         "source_url": None,
-        "local_hash": coordinator._hash_content(original),
-        "local_file_hash": coordinator._hash_content(original),
+        "local_hash": hash_content(original),
+        "local_file_hash": hash_content(original),
     }
     hass.services.has_service = MagicMock(return_value=True)
     hass.services.async_call = AsyncMock(side_effect=HomeAssistantError("reload failed"))
@@ -1360,9 +1367,7 @@ async def test_async_install_blueprint_state_sync_fix(coordinator, mock_makedirs
     # their raw.githubusercontent.com equivalent before canonicalizing, so the
     # blob and raw URL forms produce the same hash.  The blob URL here is the
     # value stored in coordinator.data["source_url"] and exercises that path.
-    expected_hash = coordinator._hash_content(
-        raw_remote, "https://github.com/user/repo/blob/main/test.yaml"
-    )
+    expected_hash = hash_content(raw_remote, "https://github.com/user/repo/blob/main/test.yaml")
     assert coordinator.data[path]["local_hash"] == expected_hash
     assert coordinator.data[path]["remote_hash"] == expected_hash
     assert coordinator.data[path]["local_hash"] == coordinator.data[path]["remote_hash"]
@@ -1386,7 +1391,7 @@ async def test_async_install_blueprint_state_synchronization(coordinator, mock_m
     path = "/config/blueprints/automation/test.yaml"
     url = "https://url"
     remote_content = f"blueprint:\n  name: New Version\n  source_url: {url}\n"
-    new_hash = coordinator._hash_content(remote_content, url)
+    new_hash = hash_content(remote_content, url)
 
     coordinator.data = {
         path: {

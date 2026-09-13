@@ -6,6 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from custom_components.blueprints_updater.blueprint_validation import (
+    ensure_source_url,
+    hash_content,
+)
 from custom_components.blueprints_updater.const import FilterMode
 from custom_components.blueprints_updater.coordinator import (
     BlueprintScanContext,
@@ -36,9 +40,9 @@ action:
     url_slug_b = "https://community.home-assistant.io/t/updated-title-slug-v1-1/787779"
     url_short = "https://community.home-assistant.io/t/787779"
 
-    hash_a = BlueprintUpdateCoordinator._hash_content(content, url_slug_a)
-    hash_b = BlueprintUpdateCoordinator._hash_content(content, url_slug_b)
-    hash_short = BlueprintUpdateCoordinator._hash_content(content, url_short)
+    hash_a = hash_content(content, url_slug_a)
+    hash_b = hash_content(content, url_slug_b)
+    hash_short = hash_content(content, url_short)
 
     assert hash_a == hash_b
     assert hash_a == hash_short
@@ -64,8 +68,8 @@ action:
     blob_url = "https://github.com/owner/repo/blob/main/blueprints/test.yaml"
     raw_url = "https://raw.githubusercontent.com/owner/repo/main/blueprints/test.yaml"
 
-    hash_blob = BlueprintUpdateCoordinator._hash_content(content, blob_url)
-    hash_raw = BlueprintUpdateCoordinator._hash_content(content, raw_url)
+    hash_blob = hash_content(content, blob_url)
+    hash_raw = hash_content(content, raw_url)
 
     assert hash_blob == hash_raw
 
@@ -82,13 +86,11 @@ def test_ensure_source_url_canonical_normalization() -> None:
   input: {}
 """
     slug_url = "https://community.home-assistant.io/t/new-slug-v1-1/787779"
-    ensured = BlueprintUpdateCoordinator._ensure_source_url(raw_content, slug_url)
+    ensured = ensure_source_url(raw_content, slug_url)
 
     assert f"source_url: {slug_url}" in ensured
-    hash_old = BlueprintUpdateCoordinator._hash_content(
-        raw_content, "https://community.home-assistant.io/t/old-slug/787779"
-    )
-    hash_new = BlueprintUpdateCoordinator._hash_content(raw_content, slug_url)
+    hash_old = hash_content(raw_content, "https://community.home-assistant.io/t/old-slug/787779")
+    hash_new = hash_content(raw_content, slug_url)
     assert hash_old == hash_new
 
 
@@ -393,7 +395,7 @@ def test_hash_content_handles_malformed_port_gracefully(malformed_source_url: st
   domain: automation
   input: {}
 """
-    result = BlueprintUpdateCoordinator._hash_content(content, malformed_source_url)
+    result = hash_content(content, malformed_source_url)
     assert isinstance(result, str)
     assert len(result) == 64
 
@@ -420,16 +422,14 @@ def test_hash_content_and_ensure_source_url_handle_source_url_variants(
   domain: automation
   input: {}
 """
-    hash_result = BlueprintUpdateCoordinator._hash_content(
+    hash_result = hash_content(
         content,
         invalid_or_non_string_source_url,
     )
     assert isinstance(hash_result, str)
     assert len(hash_result) == 64
 
-    ensure_result = BlueprintUpdateCoordinator._ensure_source_url(
-        content, invalid_or_non_string_source_url
-    )
+    ensure_result = ensure_source_url(content, invalid_or_non_string_source_url)
     assert isinstance(ensure_result, str)
 
 

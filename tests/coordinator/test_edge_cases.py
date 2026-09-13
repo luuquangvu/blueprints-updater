@@ -13,6 +13,7 @@ import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.blueprints_updater.blueprint_validation import stabilize_yaml_structure
 from custom_components.blueprints_updater.const import (
     DOMAIN,
     ERROR_SEPARATOR,
@@ -452,7 +453,7 @@ def test_stabilize_yaml_structure_preserves_non_string_keys():
     orig = {1: "int_val", "1": "str_val", 2.5: "float_val"}
     norm = {1: "int_val_norm", "1": "str_val_norm", 2.5: "float_val_norm", 3: "new_int"}
 
-    res = BlueprintUpdateCoordinator._stabilize_yaml_structure(orig, norm)
+    res = stabilize_yaml_structure(orig, norm)
 
     assert isinstance(res, dict)
     res_dict: dict[object, object] = dict(res.items())
