@@ -10,6 +10,7 @@ import pytest
 from homeassistant import data_entry_flow
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.blueprints_updater.blueprint_validation import read_and_diff
 from custom_components.blueprints_updater.const import (
     CONF_FILTER_MODE,
     CONF_SELECTED_BLUEPRINTS,
@@ -1064,7 +1065,7 @@ async def test_change_url_with_git_diff_preview(mock_repair_flow):
     diff_content = "--- local\n+++ remote\n@@ -1,2 +1,2 @@\n-old\n+new\n"
 
     with patch(
-        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._read_and_diff",
+        "custom_components.blueprints_updater.repairs.read_and_diff",
         return_value=diff_content,
     ) as mock_diff:
         result = await mock_repair_flow.async_step_change_url(
@@ -1125,7 +1126,7 @@ async def test_change_url_with_usage_warning_and_safety_in_preview(mock_repair_f
             return_value=["automation.motion_sensor_light", "automation.hallway_light"],
         ),
         patch(
-            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._read_and_diff",
+            "custom_components.blueprints_updater.repairs.read_and_diff",
             return_value="",
         ),
     ):
@@ -1163,7 +1164,7 @@ async def test_change_url_git_diff_generation_error_handled(mock_repair_flow):
     mock_repair_flow.coordinator.async_summarize_risks = AsyncMock(return_value="System error")
 
     with patch(
-        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._read_and_diff",
+        "custom_components.blueprints_updater.repairs.read_and_diff",
         side_effect=OSError("Disk read failure"),
     ):
         result = await mock_repair_flow.async_step_change_url(
@@ -1269,7 +1270,7 @@ async def test_change_url_file_modified_during_diff_rejected(mock_repair_flow, t
     mock_repair_flow.coordinator.async_detect_risks_for_update = AsyncMock(return_value=[])
 
     concurrent_content = "blueprint:\n  name: Concurrently Modified During Diff\n"
-    real_read_and_diff = BlueprintUpdateCoordinator._read_and_diff
+    real_read_and_diff = read_and_diff
 
     def _read_and_diff_with_concurrent_mutation(
         local_path: str, remote_text: str, source_url: str
@@ -1280,7 +1281,7 @@ async def test_change_url_file_modified_during_diff_rejected(mock_repair_flow, t
         return diff
 
     with patch(
-        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._read_and_diff",
+        "custom_components.blueprints_updater.repairs.read_and_diff",
         side_effect=_read_and_diff_with_concurrent_mutation,
     ):
         result = await mock_repair_flow.async_step_change_url(

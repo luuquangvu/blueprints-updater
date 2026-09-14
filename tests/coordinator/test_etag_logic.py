@@ -8,6 +8,7 @@ import httpx
 import pytest
 from homeassistant.core import HomeAssistant
 
+from custom_components.blueprints_updater.blueprint_validation import hash_content
 from custom_components.blueprints_updater.const import (
     FunctionalDomain,
 )
@@ -62,8 +63,8 @@ async def test_304_response_preserves_updatable_status(
     remote_content = "blueprint:\n  name: New"
 
     url = "https://github.com/user/repo/test.yaml"
-    local_hash = coordinator._hash_content(local_content, url)
-    remote_hash = coordinator._hash_content(remote_content, url)
+    local_hash = hash_content(local_content, url)
+    remote_hash = hash_content(remote_content, url)
 
     info = {
         "name": "Test",
@@ -161,7 +162,7 @@ async def test_etag_migration_forces_download(
         "source_url": "https://github.com/user/repo/bp.yaml",
         "local_hash": "stale_hash",
     }
-    remote_hash = coordinator._hash_content(remote_content, info["source_url"])
+    remote_hash = hash_content(remote_content, info["source_url"])
 
     coordinator.data = {
         path: {

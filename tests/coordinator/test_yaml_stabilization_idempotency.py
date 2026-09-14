@@ -24,6 +24,15 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector
 from homeassistant.util import yaml as yaml_util
 
+from custom_components.blueprints_updater.blueprint_validation import (
+    canonicalize_source_url,
+    ensure_source_url,
+    ensure_source_url_cached,
+    hash_content,
+    normalize_content,
+    set_cached_selector_filter_paths,
+    stabilize_yaml_structure,
+)
 from custom_components.blueprints_updater.coordinator import (
     BlueprintUpdateCoordinator,
 )
@@ -388,26 +397,26 @@ def test_yaml_stabilization_idempotent_across_passes(
     3. Hashing raw content with source URL canonicalization must match hashing stabilized content.
     """
     if source_url:
-        canonical_source_url = BlueprintUpdateCoordinator._canonicalize_source_url(source_url)
-        pass1 = BlueprintUpdateCoordinator._ensure_source_url_cached(raw_yaml, canonical_source_url)
-        pass2 = BlueprintUpdateCoordinator._ensure_source_url_cached(pass1, canonical_source_url)
-        pass3 = BlueprintUpdateCoordinator._ensure_source_url_cached(pass2, canonical_source_url)
+        canonical_source_url = canonicalize_source_url(source_url)
+        pass1 = ensure_source_url_cached(raw_yaml, canonical_source_url)
+        pass2 = ensure_source_url_cached(pass1, canonical_source_url)
+        pass3 = ensure_source_url_cached(pass2, canonical_source_url)
     else:
-        pass1 = BlueprintUpdateCoordinator._normalize_content(raw_yaml)
-        pass2 = BlueprintUpdateCoordinator._normalize_content(pass1)
-        pass3 = BlueprintUpdateCoordinator._normalize_content(pass2)
+        pass1 = normalize_content(raw_yaml)
+        pass2 = normalize_content(pass1)
+        pass3 = normalize_content(pass2)
 
     assert pass1 == pass2, f"Failed stabilization idempotency pass 1 vs 2 for {name}"
     assert pass2 == pass3, f"Failed stabilization idempotency pass 2 vs 3 for {name}"
 
-    hash_pass1 = BlueprintUpdateCoordinator._hash_content(pass1, source_url)
-    hash_pass2 = BlueprintUpdateCoordinator._hash_content(pass2, source_url)
-    hash_pass3 = BlueprintUpdateCoordinator._hash_content(pass3, source_url)
+    hash_pass1 = hash_content(pass1, source_url)
+    hash_pass2 = hash_content(pass2, source_url)
+    hash_pass3 = hash_content(pass3, source_url)
 
     assert hash_pass1 == hash_pass2 == hash_pass3, f"Hash instability across passes for {name}"
 
     # Semantic hash calculated directly from raw YAML matches hash from stabilized passes
-    hash_from_raw = BlueprintUpdateCoordinator._hash_content(raw_yaml, source_url)
+    hash_from_raw = hash_content(raw_yaml, source_url)
     assert hash_from_raw == hash_pass1, f"Hash mismatch between raw and stabilized for {name}"
 
     # Verify that the stabilized output safely parses as valid YAML with core metadata preserved
@@ -434,15 +443,13 @@ def test_transport_normalization_line_endings_and_bom() -> None:
     bom_content = "\ufeffblueprint:\n  name: Test\n  domain: automation\n"
     canonical_content = "blueprint:\n  name: Test\n  domain: automation\n"
 
-    assert BlueprintUpdateCoordinator._normalize_content(crlf_content) == canonical_content
-    assert BlueprintUpdateCoordinator._normalize_content(bom_content) == canonical_content
-    assert BlueprintUpdateCoordinator._normalize_content(canonical_content) == canonical_content
+    assert normalize_content(crlf_content) == canonical_content
+    assert normalize_content(bom_content) == canonical_content
+    assert normalize_content(canonical_content) == canonical_content
 
     # Hash invariance under transport variations
     assert (
-        BlueprintUpdateCoordinator._hash_content(crlf_content)
-        == BlueprintUpdateCoordinator._hash_content(bom_content)
-        == BlueprintUpdateCoordinator._hash_content(canonical_content)
+        hash_content(crlf_content) == hash_content(bom_content) == hash_content(canonical_content)
     )
 
 
@@ -450,40 +457,34 @@ def test_source_url_injection_and_removal_idempotency() -> None:
     """Test source URL insertion idempotency independently from raw content normalization."""
     raw_content = "blueprint:\n  name: Test\n  domain: automation\n"
     url = "https://github.com/user/repo/blob/main/blueprint.yaml"
-    canonical_url = BlueprintUpdateCoordinator._canonicalize_source_url(url)
+    canonical_url = canonicalize_source_url(url)
 
-    injected_1 = BlueprintUpdateCoordinator._ensure_source_url_cached(raw_content, canonical_url)
-    injected_2 = BlueprintUpdateCoordinator._ensure_source_url_cached(injected_1, canonical_url)
+    injected_1 = ensure_source_url_cached(raw_content, canonical_url)
+    injected_2 = ensure_source_url_cached(injected_1, canonical_url)
     assert injected_1 == injected_2
     assert "source_url:" in injected_1
 
     # Injected content hash matches hash_content with source_url
-    assert BlueprintUpdateCoordinator._hash_content(
-        injected_1
-    ) == BlueprintUpdateCoordinator._hash_content(raw_content, source_url=url)
+    assert hash_content(injected_1) == hash_content(raw_content, source_url=url)
 
 
 def test_tuya_smart_knob_forum_pattern_stabilization() -> None:
     """Test YAML stabilization and semantic hashing for Tuya Smart Knob HA forum blueprint."""
     source_url = TUYA_SMART_KNOB_FORUM_URL
-    canonical_url = BlueprintUpdateCoordinator._canonicalize_source_url(source_url)
+    canonical_url = canonicalize_source_url(source_url)
     assert canonical_url == "https://community.home-assistant.io/t/787779"
 
-    stabilized_pass1 = BlueprintUpdateCoordinator._ensure_source_url_cached(
-        TUYA_SMART_KNOB_PATTERN, canonical_url
-    )
-    stabilized_pass2 = BlueprintUpdateCoordinator._ensure_source_url_cached(
-        stabilized_pass1, canonical_url
-    )
+    stabilized_pass1 = ensure_source_url_cached(TUYA_SMART_KNOB_PATTERN, canonical_url)
+    stabilized_pass2 = ensure_source_url_cached(stabilized_pass1, canonical_url)
     assert stabilized_pass1 == stabilized_pass2
 
     # Canonical forum source_url replaces embedded raw GitHub URL
     assert f"source_url: {canonical_url}" in stabilized_pass1
 
     # Semantic hashing is stable across raw and stabilized passes
-    hash_raw = BlueprintUpdateCoordinator._hash_content(TUYA_SMART_KNOB_PATTERN, source_url)
-    hash_pass1 = BlueprintUpdateCoordinator._hash_content(stabilized_pass1, source_url)
-    hash_pass2 = BlueprintUpdateCoordinator._hash_content(stabilized_pass2, source_url)
+    hash_raw = hash_content(TUYA_SMART_KNOB_PATTERN, source_url)
+    hash_pass1 = hash_content(stabilized_pass1, source_url)
+    hash_pass2 = hash_content(stabilized_pass2, source_url)
     assert hash_raw == hash_pass1 == hash_pass2
 
     # Ensure metadata integrity under yaml_util parsing
@@ -507,9 +508,7 @@ def test_non_selector_mapping_to_list_not_coerced() -> None:
     }
     norm_action = [{"service": "light.turn_on", "target": {"entity_id": "light.living_room"}}]
 
-    stabilized = BlueprintUpdateCoordinator._stabilize_yaml_structure(
-        orig_action, norm_action, selector_path=None
-    )
+    stabilized = stabilize_yaml_structure(orig_action, norm_action, selector_path=None)
     assert stabilized == norm_action
 
     # 2. Non-selector dict with filter-like keys matching a selector filter path
@@ -517,7 +516,7 @@ def test_non_selector_mapping_to_list_not_coerced() -> None:
     orig_custom_filter = {"domain": "sensor", "device_class": "motion"}
     norm_custom_filter = [{"domain": ["sensor"], "device_class": ["motion"]}]
 
-    stabilized_non_selector = BlueprintUpdateCoordinator._stabilize_yaml_structure(
+    stabilized_non_selector = stabilize_yaml_structure(
         orig_custom_filter,
         norm_custom_filter,
         selector_path=None,
@@ -533,7 +532,7 @@ def test_selector_mapping_to_list_coerced_and_sorted() -> None:
     orig_filter = {"domain": "sensor", "device_class": "illuminance"}
     norm_filter = [{"domain": ["sensor"], "device_class": ["illuminance"]}]
 
-    stabilized = BlueprintUpdateCoordinator._stabilize_yaml_structure(
+    stabilized = stabilize_yaml_structure(
         orig_filter,
         norm_filter,
         selector_path=("entity", "filter"),
@@ -565,9 +564,7 @@ def test_selector_mapping_to_list_coerced_and_sorted() -> None:
             }
         }
     }
-    stabilized_nested = BlueprintUpdateCoordinator._stabilize_yaml_structure(
-        orig_nested, norm_nested, selector_path=None
-    )
+    stabilized_nested = stabilize_yaml_structure(orig_nested, norm_nested, selector_path=None)
     assert stabilized_nested == {
         "selector": {
             "entity": {
@@ -606,9 +603,7 @@ def test_selector_mapping_to_list_coerced_and_sorted() -> None:
             }
         },
     }
-    stabilized_doc = BlueprintUpdateCoordinator._stabilize_yaml_structure(
-        orig_doc, norm_doc, selector_path=None
-    )
+    stabilized_doc = stabilize_yaml_structure(orig_doc, norm_doc, selector_path=None)
     assert stabilized_doc == {
         "blueprint": {"name": "Test", "domain": "automation"},
         "input": {
@@ -657,7 +652,7 @@ def test_selector_mapping_to_list_coerced_and_sorted() -> None:
             }
         },
     }
-    stabilized_multi_list = BlueprintUpdateCoordinator._stabilize_yaml_structure(
+    stabilized_multi_list = stabilize_yaml_structure(
         orig_multi_list_doc, norm_multi_list_doc, selector_path=None
     )
     assert stabilized_multi_list == {
@@ -701,9 +696,7 @@ def test_select_selector_options_stabilization() -> None:
             "sort": False,
         }
     }
-    stabilized = BlueprintUpdateCoordinator._stabilize_yaml_structure(
-        raw_select, norm_select, selector_path=()
-    )
+    stabilized = stabilize_yaml_structure(raw_select, norm_select, selector_path=())
     assert stabilized == {
         "select": {
             "custom_value": False,
@@ -741,7 +734,7 @@ def test_default_selector_filter_paths_contract() -> None:
 
 def test_compute_selector_registry_fingerprint_invariance_and_sensitivity() -> None:
     """Test selector registry fingerprinting is deterministic, order-invariant, and sensitive."""
-    from custom_components.blueprints_updater.coordinator import (
+    from custom_components.blueprints_updater.blueprint_validation import (
         compute_selector_registry_fingerprint,
     )
 
@@ -798,6 +791,7 @@ def reset_selector_cache() -> Iterator[None]:
     finally:
         BlueprintUpdateCoordinator._selector_filter_paths = orig_cache
         BlueprintUpdateCoordinator._selector_registry_fingerprint = orig_fingerprint
+        set_cached_selector_filter_paths(orig_cache, orig_fingerprint)
 
 
 def test_dynamic_selector_discovery_and_caching(reset_selector_cache: None) -> None:
@@ -1296,9 +1290,7 @@ def _assert_dynamic_discovery_coercion(
     raw_doc: dict[str, object], norm_doc: dict[str, object]
 ) -> None:
     """Verify coercion of expandable selectors and preservation of non-expandable structures."""
-    stabilized = BlueprintUpdateCoordinator._stabilize_yaml_structure(
-        raw_doc, norm_doc, selector_path=None
-    )
+    stabilized = stabilize_yaml_structure(raw_doc, norm_doc, selector_path=None)
     assert isinstance(stabilized, dict)
 
     # 1. Discovered custom_expand MUST be coerced from mapping to 1-item list with sorted keys
@@ -1321,7 +1313,7 @@ def _assert_dynamic_discovery_coercion(
 
 def _assert_runtime_custom_selector_coerced(raw_yaml: str, source_url: str) -> None:
     """Verify custom selector expands to 1-item list inside selector and not in variables."""
-    normalized = BlueprintUpdateCoordinator._ensure_source_url(raw_yaml, source_url)
+    normalized = ensure_source_url(raw_yaml, source_url)
 
     # Selector custom_filter MUST be coerced to 1-item list with sorted keys
     selector_val = _extract_selector_filter_from_yaml(
@@ -1343,7 +1335,7 @@ def _assert_runtime_custom_selector_coerced(raw_yaml: str, source_url: str) -> N
 
 def _assert_runtime_custom_selector_uncoerced(raw_yaml: str, source_url: str) -> None:
     """Verify removed runtime custom selector preserves raw mapping representation."""
-    normalized_removed = BlueprintUpdateCoordinator._ensure_source_url(raw_yaml, source_url)
+    normalized_removed = ensure_source_url(raw_yaml, source_url)
     selector_val_removed = _extract_selector_filter_from_yaml(
         normalized_removed, "test_input", "custom_runtime", "custom_filter"
     )
@@ -1431,9 +1423,7 @@ def test_coercion_path_scoped_in_single_traversal() -> None:
         "action": [{"service": "light.turn_on", "target": {"entity_id": "light.hallway"}}],
     }
 
-    stabilized = BlueprintUpdateCoordinator._stabilize_yaml_structure(
-        raw_doc, norm_doc, selector_path=None
-    )
+    stabilized = stabilize_yaml_structure(raw_doc, norm_doc, selector_path=None)
 
     assert isinstance(stabilized, dict)
     assert stabilized == {
@@ -1493,9 +1483,7 @@ def test_all_selector_filter_paths_coerced_and_sorted(path_tuple: tuple[str, ...
             },
         }
     }
-    stabilized = BlueprintUpdateCoordinator._stabilize_yaml_structure(
-        raw_doc, norm_doc, selector_path=None
-    )
+    stabilized = stabilize_yaml_structure(raw_doc, norm_doc, selector_path=None)
     assert isinstance(stabilized, dict)
     assert stabilized["blueprint"]["input"]["test_input"]["selector"][selector_type][
         field_name
@@ -1588,7 +1576,7 @@ def test_selector_list_coercion_boundaries(
     orig_data: object, norm_data: object, allow_coercion: bool, expected: object
 ) -> None:
     """Test boundary conditions to ensure only genuine singleton selector mappings are coerced."""
-    stabilized = BlueprintUpdateCoordinator._stabilize_yaml_structure(
+    stabilized = stabilize_yaml_structure(
         orig_data,
         norm_data,
         selector_path=("entity", "filter") if allow_coercion else ("entity",),
@@ -1636,8 +1624,8 @@ def test_selector_list_coercion_boundaries(
 def test_hash_content_source_url_equivalence(url1: str, url2: str, should_match: bool) -> None:
     """Test that equivalent URLs match hashes, and distinct URLs produce different hashes."""
     content = SENSOR_LIGHT_PATTERN
-    hash1 = BlueprintUpdateCoordinator._hash_content(content, url1)
-    hash2 = BlueprintUpdateCoordinator._hash_content(content, url2)
+    hash1 = hash_content(content, url1)
+    hash2 = hash_content(content, url2)
     if should_match:
         assert hash1 == hash2
     else:
@@ -1645,7 +1633,7 @@ def test_hash_content_source_url_equivalence(url1: str, url2: str, should_match:
 
     # Verify that changing YAML content produces a different hash for the identical URL
     content_alt = LOW_BATTERY_PATTERN
-    hash_alt = BlueprintUpdateCoordinator._hash_content(content_alt, url1)
+    hash_alt = hash_content(content_alt, url1)
     assert hash1 != hash_alt
 
 
@@ -1659,8 +1647,8 @@ async def test_prepare_blueprint_install_hash_validation(
     raw_content = SENSOR_LIGHT_PATTERN
 
     # 1. Simulate remote fetch: computes remote_hash and ensures source_url
-    remote_hash = coordinator._hash_content(raw_content, source_url)
-    remote_content_with_url = coordinator._ensure_source_url(raw_content, source_url)
+    remote_hash = hash_content(raw_content, source_url)
+    remote_content_with_url = ensure_source_url(raw_content, source_url)
 
     # 2. Simulate install preparation
     with patch("os.path.realpath", return_value=path):
@@ -1680,7 +1668,7 @@ async def test_prepare_blueprint_install_hash_validation(
         assert "reorder: false" in prepared.content
     assert "multiple: false" in prepared.content
 
-    expected_hash = coordinator._hash_content(prepared.content, source_url)
+    expected_hash = hash_content(prepared.content, source_url)
     assert remote_hash == expected_hash
 
 
@@ -1690,7 +1678,7 @@ def test_local_scan_matches_remote_hash_after_install() -> None:
     raw_remote = LOW_BATTERY_PATTERN
 
     # Content installed to disk
-    installed_content = BlueprintUpdateCoordinator._ensure_source_url(raw_remote, source_url)
+    installed_content = ensure_source_url(raw_remote, source_url)
 
     # Scanned locally from disk
     parsed_local = BlueprintUpdateCoordinator._parse_blueprint_data(
@@ -1700,7 +1688,7 @@ def test_local_scan_matches_remote_hash_after_install() -> None:
     local_hash = parsed_local["local_hash"]
 
     # Remote hash computed from upstream raw content
-    remote_hash = BlueprintUpdateCoordinator._hash_content(raw_remote, source_url)
+    remote_hash = hash_content(raw_remote, source_url)
 
     assert local_hash == remote_hash
 
@@ -1750,17 +1738,17 @@ async def test_coordinator_fetch_install_unit_argument_delegation(
 ) -> None:
     """Test unit-level coordinator install argument construction and delegation."""
     # Phase 1: Local file exists before update check (imported by HA with injected source_url)
-    imported_local = coordinator._ensure_source_url(raw_remote, source_url)
+    imported_local = ensure_source_url(raw_remote, source_url)
     parsed = coordinator._parse_blueprint_data(path, imported_local)
     assert parsed is not None
     initial_local_hash = parsed["local_hash"]
 
     # Phase 2: Remote content fetched and processed
-    remote_hash = coordinator._hash_content(raw_remote, source_url)
+    remote_hash = hash_content(raw_remote, source_url)
     assert initial_local_hash == remote_hash
 
     # Phase 3: Install blueprint via public coordinator method
-    remote_content_with_url = coordinator._ensure_source_url(raw_remote, source_url)
+    remote_content_with_url = ensure_source_url(raw_remote, source_url)
     install_result = FileTransactionResult(
         content_hash=hashlib.sha256(remote_content_with_url.encode("utf-8")).hexdigest(),
         backups_count=0,
@@ -1864,7 +1852,7 @@ async def test_coordinator_fetch_install_and_restart_integration_lifecycle(
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
     # 1. Initial import simulation (write initial file to disk with source_url)
-    initial_content = coordinator._ensure_source_url(raw_remote, source_url)
+    initial_content = ensure_source_url(raw_remote, source_url)
     with open(target_path, "w", encoding="utf-8") as f:
         f.write(initial_content)
 
@@ -1873,11 +1861,11 @@ async def test_coordinator_fetch_install_and_restart_integration_lifecycle(
     assert parsed is not None
     initial_local_hash = parsed["local_hash"]
 
-    remote_hash = coordinator._hash_content(raw_remote, source_url)
+    remote_hash = hash_content(raw_remote, source_url)
     assert initial_local_hash == remote_hash
 
     # 3. Perform real disk installation via coordinator (using real FileStore write)
-    remote_content_with_url = coordinator._ensure_source_url(raw_remote, source_url)
+    remote_content_with_url = ensure_source_url(raw_remote, source_url)
     with patch.object(coordinator, "_is_safe_path", return_value=True):
         await coordinator.async_install_blueprint(
             target_path,
@@ -1925,8 +1913,8 @@ async def test_coordinator_install_failure_propagation(
     path = "/config/blueprints/automation/Blackshome/sensor-light.yaml"
     source_url = "https://gist.github.com/Blackshome/6edfec0ff6a25c5da0d07b88dc908238"
     raw_remote = SENSOR_LIGHT_PATTERN
-    remote_hash = coordinator._hash_content(raw_remote, source_url)
-    remote_content = coordinator._ensure_source_url(raw_remote, source_url)
+    remote_hash = hash_content(raw_remote, source_url)
+    remote_content = ensure_source_url(raw_remote, source_url)
 
     # 1. When path is not present in coordinator.data, failure does not add it
     coordinator.data = {}

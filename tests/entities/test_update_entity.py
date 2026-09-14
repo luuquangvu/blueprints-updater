@@ -53,7 +53,6 @@ def bind_coordinator_fetch_methods(coordinator: MagicMock) -> None:
             coordinator, BlueprintUpdateCoordinator
         )
     )
-    coordinator._ensure_source_url = BlueprintUpdateCoordinator._ensure_source_url
     coordinator._normalize_url = normalize_url
     coordinator._update_error_state = BlueprintUpdateCoordinator._update_error_state.__get__(
         coordinator, BlueprintUpdateCoordinator

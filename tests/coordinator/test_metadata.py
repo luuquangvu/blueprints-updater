@@ -9,13 +9,20 @@ from homeassistant.components.blueprint import models
 from homeassistant.util import yaml as yaml_util
 from homeassistant.util.yaml.objects import Input
 
-import custom_components.blueprints_updater.coordinator as coord_mod
+import custom_components.blueprints_updater.blueprint_validation as bp_val
+from custom_components.blueprints_updater.blueprint_validation import (
+    ensure_source_url,
+    extract_defined_inputs,
+    extract_used_inputs,
+    get_blueprint_schema,
+    hash_content,
+    normalize_content,
+)
 from custom_components.blueprints_updater.const import (
     ERROR_SEPARATOR,
     FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import (
-    BlueprintUpdateCoordinator,
     GitDiffResult,
 )
 from custom_components.blueprints_updater.utils import (
@@ -50,12 +57,10 @@ def test_normalize_url():
     )
 
 
-def test_ensure_source_url(coordinator):
+def test_ensure_source_url():
     """Test ensuring source_url is present."""
     source_url = "https://github.com/user/repo/blob/main/test.yaml"
-    new_content = coordinator._ensure_source_url(
-        "blueprint:\n  name: Test\n  domain: automation", source_url
-    )
+    new_content = ensure_source_url("blueprint:\n  name: Test\n  domain: automation", source_url)
     assert f"source_url: {source_url}" in new_content
 
     parsed = yaml.safe_load(new_content)
@@ -64,20 +69,20 @@ def test_ensure_source_url(coordinator):
     assert parsed["blueprint"]["input"] == {}
 
     content_with_url = f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {source_url}"
-    result = coordinator._ensure_source_url(content_with_url, source_url)
+    result = ensure_source_url(content_with_url, source_url)
     assert f"source_url: {source_url}" in result
 
     content_with_quotes = (
         f"blueprint:\n  name: Test\n  domain: automation\n  source_url: '{source_url}'"
     )
-    result_quotes = coordinator._ensure_source_url(content_with_quotes, source_url)
+    result_quotes = ensure_source_url(content_with_quotes, source_url)
     assert source_url in result_quotes
 
     different_url = "https://github.com/user/new-repo/blob/main/test.yaml"
     content_different = (
         f"blueprint:\n  name: Test\n  domain: automation\n  source_url: {different_url}"
     )
-    result = coordinator._ensure_source_url(content_different, source_url)
+    result = ensure_source_url(content_different, source_url)
     assert f"source_url: {source_url}" in result
     assert different_url not in result
     assert result.count("source_url") == 1
@@ -86,7 +91,6 @@ def test_ensure_source_url(coordinator):
         "blueprint:\n  name: Test\n  domain: automation\n"
         "action:\n  - service: rest.post\n    data:\n"
         "      source_url: https://api.example.com",
-        coordinator,
         source_url,
     )
     parsed_outside = yaml.safe_load(result_outside)
@@ -97,23 +101,20 @@ def test_ensure_source_url(coordinator):
         "blueprint:\n  name: Test\n  domain: automation\n"
         "  input:\n    source_url:\n      name: Enter URL\n"
         "trigger:\n  - platform: webhook",
-        coordinator,
         source_url,
     )
     assert result_nested.count("source_url") == 2
 
     _assert_embedded_source_url(
         "blueprint: # comment\n  name: Test\n  domain: automation",
-        coordinator,
         source_url,
     )
     _assert_embedded_source_url(
         "blueprint: { name: Test, domain: automation }",
-        coordinator,
         source_url,
     )
     content_invalid = "\ufeffblueprint: [unclosed\r\n"
-    result_invalid = coordinator._ensure_source_url(content_invalid, source_url)
+    result_invalid = ensure_source_url(content_invalid, source_url)
     assert "\ufeff" not in result_invalid
     assert "\r" not in result_invalid
 
@@ -123,7 +124,6 @@ def test_ensure_source_url(coordinator):
         "  name: Test\n"
         "  domain: automation\n"
         "description: 'This is another blueprint: key in string'",
-        coordinator,
         source_url,
     )
     parsed_multi = yaml_util.parse_yaml(result_multi)
@@ -133,17 +133,16 @@ def test_ensure_source_url(coordinator):
     assert parsed_multi["blueprint"]["input"] == {}
 
     content_none = "not_a_blueprint: true"
-    expected_none = coordinator._normalize_content(content_none)
-    assert coordinator._ensure_source_url(content_none, source_url) == expected_none
+    expected_none = normalize_content(content_none)
+    assert ensure_source_url(content_none, source_url) == expected_none
 
 
 def _assert_embedded_source_url(
     content: str,
-    coordinator: BlueprintUpdateCoordinator,
     source_url: str,
 ) -> str:
-    """Assert _ensure_source_url embeds the source URL for the given content."""
-    result = coordinator._ensure_source_url(content, source_url)
+    """Assert ensure_source_url embeds the source URL for the given content."""
+    result = ensure_source_url(content, source_url)
     parsed = yaml_util.parse_yaml(result)
     assert isinstance(parsed, dict)
     assert isinstance(parsed.get("blueprint"), dict)
@@ -158,32 +157,32 @@ def _assert_embedded_source_url(
         "blueprint: just a string\nname: Test",
     ],
 )
-def test_ensure_source_url_malformed_blueprint_key(coordinator, malformed_content):
+def test_ensure_source_url_malformed_blueprint_key(malformed_content):
     """Test ensuring source_url returns normalized original if blueprint key is malformed.
 
     (Case where blueprint key is not a dict).
     """
     source_url = "https://example.com/test.yaml"
-    result = coordinator._ensure_source_url(malformed_content, source_url)
+    result = ensure_source_url(malformed_content, source_url)
     assert "source_url" not in result
-    assert result == coordinator._normalize_content(malformed_content)
+    assert result == normalize_content(malformed_content)
 
 
-def test_ensure_source_url_non_string_content_logs_and_returns_empty(coordinator, caplog):
+def test_ensure_source_url_non_string_content_logs_and_returns_empty(caplog):
     """Non-string content should be logged and result in an empty string."""
     content = {"blueprint": {"name": "Test"}}
 
     with caplog.at_level("DEBUG"):
-        result = coordinator._ensure_source_url(content, "https://example.com/blueprint.yaml")
+        result = ensure_source_url(content, "https://example.com/blueprint.yaml")
 
     assert result == ""
     assert any(record.levelname == "DEBUG" for record in caplog.records)
 
 
 def test_ensure_source_url_non_string_source_url_falls_back_to_normalize_content(
-    coordinator, monkeypatch, caplog
+    monkeypatch, caplog
 ):
-    """Non-string source_url should log and fall back to _normalize_content(content)."""
+    """Non-string source_url should log and fall back to normalize_content(content)."""
     original_content = "blueprint:\n  name: Test"
     sentinel_result = "normalized-content"
 
@@ -193,20 +192,18 @@ def test_ensure_source_url_non_string_source_url_falls_back_to_normalize_content
         normalize_calls["called_with"] = content
         return sentinel_result
 
-    monkeypatch.setattr(BlueprintUpdateCoordinator, "_normalize_content", _fake_normalize_content)
+    monkeypatch.setattr(bp_val, "normalize_content", _fake_normalize_content)
 
     with caplog.at_level("DEBUG"):
-        result = coordinator._ensure_source_url(original_content, source_url=12345)
+        result = ensure_source_url(original_content, source_url=12345)
 
     assert result == sentinel_result
     assert normalize_calls["called_with"] == original_content
     assert any(record.levelname == "DEBUG" for record in caplog.records)
 
 
-def test_ensure_source_url_yaml_dump_failure_falls_back_to_normalize_content(
-    coordinator, monkeypatch, caplog
-):
-    """If yaml_util.dump raises, we should log and fall back to _normalize_content(content)."""
+def test_ensure_source_url_yaml_dump_failure_falls_back_to_normalize_content(monkeypatch, caplog):
+    """If yaml_util.dump raises, we should log and fall back to normalize_content(content)."""
     original_content = "blueprint:\n  name: Test"
     sentinel_result = "normalized-after-dump-failure"
 
@@ -219,35 +216,31 @@ def test_ensure_source_url_yaml_dump_failure_falls_back_to_normalize_content(
     def _failing_dump(*args, **kwargs):
         raise yaml.YAMLError("simulated dump failure")
 
-    monkeypatch.setattr(coord_mod.yaml_util, "dump", _failing_dump)
-    monkeypatch.setattr(BlueprintUpdateCoordinator, "_normalize_content", _fake_normalize_content)
+    monkeypatch.setattr(bp_val.yaml_util, "dump", _failing_dump)
+    monkeypatch.setattr(bp_val, "normalize_content", _fake_normalize_content)
 
     with caplog.at_level("WARNING"):
-        result = coordinator._ensure_source_url(
-            original_content, "https://example.com/blueprint.yaml"
-        )
+        result = ensure_source_url(original_content, "https://example.com/blueprint.yaml")
 
     assert result == sentinel_result
     assert normalize_calls["called_with"] == original_content
     assert any(record.levelname == "WARNING" for record in caplog.records)
 
 
-def test_ensure_source_url_prioritizes_local(coordinator):
+def test_ensure_source_url_prioritizes_local():
     """Test that local source_url overwrites a different one in remote content."""
     local_url = "https://github.com/local/link"
     remote_url = "https://github.com/remote/link"
     content = f"blueprint:\n  name: Test\n  source_url: {remote_url}\n  author: Me"
 
-    result = coordinator._ensure_source_url(content, local_url)
+    result = ensure_source_url(content, local_url)
 
     assert local_url in result
     assert remote_url not in result
     assert "name: Test" in result
     assert "author: Me" in result
 
-    assert coordinator._ensure_source_url(result, local_url) == coordinator._normalize_content(
-        result
-    )
+    assert ensure_source_url(result, local_url) == normalize_content(result)
 
 
 @pytest.mark.parametrize(
@@ -261,41 +254,37 @@ def test_ensure_source_url_prioritizes_local(coordinator):
         ("Extra lines", "\n\nblueprint:\n  name: Test\n", "\n\nblueprint:\n  name: Test\n"),
     ],
 )
-def test_normalization_comprehensive(coordinator, variant, input_content, expected_output):
+def test_normalization_comprehensive(variant, input_content, expected_output):
     """Test that normalization handles various encodings and formats consistently."""
-    normalized = coordinator._normalize_content(input_content)
+    normalized = normalize_content(input_content)
     assert normalized == expected_output, f"Failed for variant: {variant}"
 
-    hash1 = coordinator._hash_content(input_content, "https://example.com")
-    hash2 = coordinator._hash_content(normalized, "https://example.com")
+    hash1 = hash_content(input_content, "https://example.com")
+    hash2 = hash_content(normalized, "https://example.com")
     assert hash1 == hash2, f"Hash mismatch for variant: {variant}"
 
 
-def test_normalization_idempotency(coordinator):
+def test_normalization_idempotency():
     """Test that normalization is idempotent: normalize(normalize(x)) == normalize(x)."""
     content = "blueprint:\n  name: Test   \r\n  source_url: https://url\n\n"
-    first = coordinator._normalize_content(content)
-    second = coordinator._normalize_content(first)
+    first = normalize_content(content)
+    second = normalize_content(first)
     assert first == second
-    assert coordinator._hash_content(first, "https://example.com") == coordinator._hash_content(
-        second, "https://example.com"
-    )
+    assert hash_content(first, "https://example.com") == hash_content(second, "https://example.com")
 
 
-def test_ensure_source_url_stability(coordinator):
+def test_ensure_source_url_stability():
     """Test that injection is stable."""
     source_url = "https://url.com"
     content = "blueprint: # comment  \n  name: Test"
 
-    injected = coordinator._ensure_source_url(content, source_url)
+    injected = ensure_source_url(content, source_url)
     assert "source_url: https://url.com" in injected
-    re_injected = coordinator._ensure_source_url(injected, source_url)
+    re_injected = ensure_source_url(injected, source_url)
     assert injected == re_injected
 
 
-def test_ensure_source_url_forum_blueprint_ordering(
-    coordinator: BlueprintUpdateCoordinator,
-) -> None:
+def test_ensure_source_url_forum_blueprint_ordering() -> None:
     """Test that forum blueprints without input or source_url match HA Core imported order."""
     forum_content = """blueprint:
   name: Reload automations on file change
@@ -319,7 +308,7 @@ action:
         "reload-automations-automatically-when-a-blueprint-is-changed/253977"
     )
 
-    remote_normalized = coordinator._ensure_source_url(forum_content, source_url)
+    remote_normalized = ensure_source_url(forum_content, source_url)
 
     input_idx = remote_normalized.find("input: {}")
     source_url_idx = remote_normalized.find(f"source_url: {source_url}")
@@ -330,16 +319,16 @@ action:
     # Simulate Home Assistant Core import workflow for this forum blueprint
     ha_data = yaml_util.parse_yaml(forum_content)
     assert isinstance(ha_data, dict)
-    schema = coordinator._get_blueprint_schema("automation")
+    schema = get_blueprint_schema("automation")
     bp = models.Blueprint(ha_data, schema=schema)
     bp.update_metadata(source_url=source_url)
     local_imported = bp.yaml()
 
-    local_normalized = coordinator._ensure_source_url(local_imported, source_url)
+    local_normalized = ensure_source_url(local_imported, source_url)
     assert remote_normalized == local_normalized
 
-    remote_hash = coordinator._hash_content(forum_content, source_url)
-    local_hash = coordinator._hash_content(local_imported, source_url)
+    remote_hash = hash_content(forum_content, source_url)
+    local_hash = hash_content(local_imported, source_url)
     assert remote_hash == local_hash
 
 
@@ -385,26 +374,25 @@ action:
     ],
 )
 def test_ensure_source_url_all_optional_keys_parity(
-    coordinator: BlueprintUpdateCoordinator,
     scenario: str,
     yaml_str: str,
 ) -> None:
     """Test that HA Core import and _ensure_source_url match across all optional blueprint keys."""
     url = "https://example.com/bp.yaml"
-    remote = coordinator._ensure_source_url(yaml_str, url)
+    remote = ensure_source_url(yaml_str, url)
 
     # Simulate Home Assistant Core import workflow
     data = yaml_util.parse_yaml(yaml_str)
     assert isinstance(data, dict)
     domain = data.get("blueprint", {}).get("domain", "automation")
-    schema = coordinator._get_blueprint_schema(domain)
+    schema = get_blueprint_schema(domain)
     bp = models.Blueprint(data, schema=schema)
     bp.update_metadata(source_url=url)
     local_imported = bp.yaml()
 
-    local = coordinator._ensure_source_url(local_imported, url)
-    rem_hash = coordinator._hash_content(yaml_str, url)
-    loc_hash = coordinator._hash_content(local_imported, url)
+    local = ensure_source_url(local_imported, url)
+    rem_hash = hash_content(yaml_str, url)
+    loc_hash = hash_content(local_imported, url)
 
     assert remote == local
     assert rem_hash == loc_hash
@@ -450,25 +438,24 @@ sensor:
     ],
 )
 def test_ensure_source_url_all_domains_schema_parity(
-    coordinator: BlueprintUpdateCoordinator,
     domain: str,
     payload: str,
 ) -> None:
     """Test full schema validation and import parity across automation, script, and template."""
     url = f"https://community.home-assistant.io/t/{domain}-test/99999"
-    remote = coordinator._ensure_source_url(payload, url)
+    remote = ensure_source_url(payload, url)
 
     # Simulate HA Core domain-specific import
     data = yaml_util.parse_yaml(payload)
     assert isinstance(data, dict)
-    schema = coordinator._get_blueprint_schema(domain)
+    schema = get_blueprint_schema(domain)
     bp = models.Blueprint(data, schema=schema)
     bp.update_metadata(source_url=url)
     local_imported = bp.yaml()
 
-    local = coordinator._ensure_source_url(local_imported, url)
-    rem_hash = coordinator._hash_content(payload, url)
-    loc_hash = coordinator._hash_content(local_imported, url)
+    local = ensure_source_url(local_imported, url)
+    rem_hash = hash_content(payload, url)
+    loc_hash = hash_content(local_imported, url)
 
     assert remote == local
     assert rem_hash == loc_hash
@@ -763,11 +750,11 @@ def test_validate_blueprint_accepts_nested_section_inputs(coordinator):
     assert result is None
 
 
-def test_extract_defined_inputs_helper(coordinator):
-    """Test _extract_defined_inputs helper handles non-mappings and nested structures."""
-    assert coordinator._extract_defined_inputs(None) == set()
-    assert coordinator._extract_defined_inputs([]) == set()
-    assert coordinator._extract_defined_inputs("string") == set()
+def test_extract_defined_inputs_helper():
+    """Test extract_defined_inputs helper handles non-mappings and nested structures."""
+    assert extract_defined_inputs(None) == set()
+    assert extract_defined_inputs([]) == set()
+    assert extract_defined_inputs("string") == set()
 
     inputs_data = {
         "top_level": {"name": "Top"},
@@ -785,25 +772,25 @@ def test_extract_defined_inputs_helper(coordinator):
             },
         },
     }
-    extracted = coordinator._extract_defined_inputs(inputs_data)
+    extracted = extract_defined_inputs(inputs_data)
     assert extracted == {"top_level", "sub_level", "deep_level"}
 
 
-def test_extract_used_inputs_helper(coordinator):
-    """Test _extract_used_inputs helper handles various object structures."""
-    assert coordinator._extract_used_inputs(None) == []
-    assert coordinator._extract_used_inputs("string") == []
-    assert coordinator._extract_used_inputs(123) == []
+def test_extract_used_inputs_helper():
+    """Test extract_used_inputs helper handles various object structures."""
+    assert extract_used_inputs(None) == []
+    assert extract_used_inputs("string") == []
+    assert extract_used_inputs(123) == []
 
     parsed = yaml_util.parse_yaml(
         "list_inputs:\n  - !input first\n  - item:\n      key: !input second\n"
     )
-    assert coordinator._extract_used_inputs(parsed) == ["first", "second"]
+    assert extract_used_inputs(parsed) == ["first", "second"]
 
     mapping_with_input_key = yaml_util.parse_yaml(
         "mapping_inputs:\n  ? !input key_input\n  : some_value\n"
     )
-    assert coordinator._extract_used_inputs(mapping_with_input_key) == ["key_input"]
+    assert extract_used_inputs(mapping_with_input_key) == ["key_input"]
 
     nested_key_input = Input("nested_key")
     inner_input = Input("inner_input")
@@ -823,7 +810,7 @@ def test_extract_used_inputs_helper(coordinator):
         },
     }
 
-    assert coordinator._extract_used_inputs(complex_structure) == [
+    assert extract_used_inputs(complex_structure) == [
         "direct_key",
         "nested_key",
         "inner_input",
@@ -831,12 +818,12 @@ def test_extract_used_inputs_helper(coordinator):
     ]
 
 
-def test_ensure_source_url_structured_modification(coordinator):
+def test_ensure_source_url_structured_modification():
     """Test that _ensure_source_url prefers structured YAML modification."""
     content = "blueprint:\n  name: Test\n"
     source_url = "https://example.com/bp.yaml"
 
-    result = coordinator._ensure_source_url(content, source_url)
+    result = ensure_source_url(content, source_url)
     assert "source_url: https://example.com/bp.yaml" in result
 
     parsed = yaml_util.parse_yaml(result)
@@ -846,13 +833,13 @@ def test_ensure_source_url_structured_modification(coordinator):
     assert parsed["blueprint"]["name"] == "Test"
 
 
-def test_hash_content_determinism(coordinator):
+def test_hash_content_determinism():
     """Test that hashing is deterministic."""
     content = "\ufeffblueprint:\r\n  name: Test\n"
-    hash1 = coordinator._hash_content(content, "https://example.com")
+    hash1 = hash_content(content, "https://example.com")
 
-    normalized = coordinator._normalize_content(content)
-    hash2 = coordinator._hash_content(normalized, "https://example.com")
+    normalized = normalize_content(content)
+    hash2 = hash_content(normalized, "https://example.com")
 
     assert hash1 == hash2
     assert "\ufeff" not in normalized
@@ -984,12 +971,12 @@ def test_set_cached_git_diff(coordinator):
     }
 
 
-def test_ensure_source_url_script(coordinator):
+def test_ensure_source_url_script():
     """Test ensuring source_url for a script blueprint."""
     source_url = "https://github.com/user/repo/blob/main/script.yaml"
     content = "blueprint:\n  name: Test Script\n  domain: script"
 
-    new_content = coordinator._ensure_source_url(content, source_url)
+    new_content = ensure_source_url(content, source_url)
     assert f"source_url: {source_url}" in new_content
 
     parsed = yaml.safe_load(new_content)
@@ -998,7 +985,7 @@ def test_ensure_source_url_script(coordinator):
     assert parsed["blueprint"]["domain"] == FunctionalDomain.SCRIPT
 
 
-def test_deterministic_yaml_hashing(coordinator):
+def test_deterministic_yaml_hashing():
     """Test that YAML hashing is deterministic between Local and Remote versions.
 
     Verify that a Local version (with injected defaults or reordered options)
@@ -1020,19 +1007,19 @@ def test_deterministic_yaml_hashing(coordinator):
         "          multiple: false\n          multiline: false"
     )
 
-    hash1 = coordinator._hash_content(content_v1, source_url)
-    hash2 = coordinator._hash_content(content_v2, source_url)
-    hash3 = coordinator._hash_content(content_v3, source_url)
+    hash1 = hash_content(content_v1, source_url)
+    hash2 = hash_content(content_v2, source_url)
+    hash3 = hash_content(content_v3, source_url)
 
     assert hash1 == hash2 == hash3
 
-    norm1 = coordinator._ensure_source_url(content_v1, source_url)
-    norm2 = coordinator._ensure_source_url(content_v2, source_url)
-    norm3 = coordinator._ensure_source_url(content_v3, source_url)
+    norm1 = ensure_source_url(content_v1, source_url)
+    norm2 = ensure_source_url(content_v2, source_url)
+    norm3 = ensure_source_url(content_v3, source_url)
     assert norm1 == norm2 == norm3
 
 
-def test_yaml_order_preservation(coordinator):
+def test_yaml_order_preservation():
     """Test that original key order is preserved for non-schema keys.
 
     Verify that an original order like input_z before input_a is maintained
@@ -1049,7 +1036,7 @@ blueprint:
     input_a:
       name: A
 """
-    normalized = coordinator._ensure_source_url(content, source_url)
+    normalized = ensure_source_url(content, source_url)
 
     z_pos = normalized.find("input_z")
     a_pos = normalized.find("input_a")
@@ -1058,10 +1045,10 @@ blueprint:
     assert "input_a" in normalized
 
 
-def test_hash_content_no_semantic(coordinator):
+def test_hash_content_no_semantic():
     """Test that hash_content returns a consistent-length SHA-256 hex digest."""
     content = "blueprint:\n  name: Test"
-    hash1 = coordinator._hash_content(content, "https://example.com")
+    hash1 = hash_content(content, "https://example.com")
     assert len(hash1) == 64
 
 

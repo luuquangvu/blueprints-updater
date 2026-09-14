@@ -6,7 +6,10 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.util import yaml as yaml_util
 
-from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.blueprint_validation import (
+    ensure_source_url,
+    hash_content,
+)
 
 RAW_REMOTE_YAML = """
 blueprint:
@@ -49,10 +52,8 @@ async def test_semantic_normalization_parity(hass: HomeAssistant) -> None:
     """Test that raw and enriched YAMLs are semantically normalized to the same form."""
     source_url = "https://github.com/user/repo/blob/main/test.yaml"
 
-    normalized_remote = BlueprintUpdateCoordinator._ensure_source_url(RAW_REMOTE_YAML, source_url)
-    normalized_local = BlueprintUpdateCoordinator._ensure_source_url(
-        ENRICHED_LOCAL_YAML, source_url
-    )
+    normalized_remote = ensure_source_url(RAW_REMOTE_YAML, source_url)
+    normalized_local = ensure_source_url(ENRICHED_LOCAL_YAML, source_url)
 
     remote_dict = cast(dict[str, Any], yaml_util.parse_yaml(normalized_remote))
     local_dict = cast(dict[str, Any], yaml_util.parse_yaml(normalized_local))
@@ -79,7 +80,7 @@ blueprint:
           domain: light
 """
     source_url = "https://example.com/test.yaml"
-    normalized = BlueprintUpdateCoordinator._ensure_source_url(raw_yaml, source_url)
+    normalized = ensure_source_url(raw_yaml, source_url)
     parsed = cast(dict[str, Any], yaml_util.parse_yaml(normalized))
 
     domain = parsed["blueprint"]["input"]["my_entity"]["selector"]["entity"]["domain"]
@@ -96,7 +97,7 @@ blueprint:
 """
     source_url = "https://example.com/invalid.yaml"
 
-    normalized = BlueprintUpdateCoordinator._ensure_source_url(invalid_yaml, source_url)
+    normalized = ensure_source_url(invalid_yaml, source_url)
 
     parsed = cast(dict[str, Any], yaml_util.parse_yaml(normalized))
     assert parsed["blueprint"]["source_url"] == source_url
@@ -140,10 +141,10 @@ blueprint:
 """
     source_url = "https://github.com/user/repo/blob/main/smart_knob.yaml"
 
-    hash_local = BlueprintUpdateCoordinator._hash_content(local_yaml, source_url)
-    hash_remote = BlueprintUpdateCoordinator._hash_content(remote_yaml, source_url)
+    hash_local = hash_content(local_yaml, source_url)
+    hash_remote = hash_content(remote_yaml, source_url)
     assert hash_local == hash_remote
 
-    norm_local = BlueprintUpdateCoordinator._ensure_source_url(local_yaml, source_url)
-    norm_remote = BlueprintUpdateCoordinator._ensure_source_url(remote_yaml, source_url)
+    norm_local = ensure_source_url(local_yaml, source_url)
+    norm_remote = ensure_source_url(remote_yaml, source_url)
     assert norm_local == norm_remote
