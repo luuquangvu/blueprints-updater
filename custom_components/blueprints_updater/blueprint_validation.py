@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Final, NamedTuple, TypedDict
 
 import homeassistant.components.template.config as template_config
 import orjson
+import yaml
 
 if TYPE_CHECKING:
     import voluptuous as vol
@@ -124,6 +125,7 @@ class SelectorType(StrEnum):
     SELECT = "select"
     SERIAL_PORT = "serial_port"
     STATE = "state"
+    STATE_CLASS = "state_class"
     STATISTIC = "statistic"
     TARGET = "target"
     TEMPLATE = "template"
@@ -411,6 +413,8 @@ def _has_dict_list_expansion(val: object) -> bool:
             v is cv.ensure_list
             or getattr(v, "__name__", "") == "ensure_list"
             or (hasattr(v, "__qualname__") and "ensure_list" in v.__qualname__)
+            or type(v).__name__.lower() in ("ensurelist", "ensure_list")
+            or (hasattr(type(v), "__qualname__") and "ensurelist" in type(v).__qualname__.lower())
             for v in val.validators
         )
         has_list_of_dicts = any(
@@ -824,6 +828,32 @@ def _dummy_device_class_value(sub_cfg: object) -> object:
     return _multi_or_single(sub_cfg, dummy)
 
 
+def _dummy_state_class_value(sub_cfg: object) -> list[str] | str:
+    """Derive dummy value for a state_class selector honoring state_classes and multiple flag.
+
+    Args:
+        sub_cfg: State class selector configuration mapping.
+
+    Returns:
+        Sensor state class string or list of strings satisfying schema constraints.
+
+    """
+    dummy = "measurement"
+    if isinstance(sub_cfg, Mapping):
+        state_classes = sub_cfg.get("state_classes")
+        if (
+            isinstance(state_classes, Sequence)
+            and not isinstance(state_classes, (str, bytes, bytearray))
+            and state_classes
+        ):
+            first = state_classes[0]
+            if isinstance(first, str) and first:
+                dummy = first
+        elif isinstance(state_classes, str) and state_classes:
+            dummy = state_classes
+    return _multi_or_single(sub_cfg, dummy)
+
+
 def _dummy_object_value(sub_cfg: object) -> object:
     """Derive dummy value for an object selector honoring configured fields and multiple flag.
 
@@ -1127,6 +1157,8 @@ def generate_dummy_input_value(sel_cfg: object) -> object:
             return _dummy_choose_value(sub_cfg)
         if sel_type == SelectorType.DEVICE_CLASS:
             return _dummy_device_class_value(sub_cfg)
+        if sel_type == SelectorType.STATE_CLASS:
+            return _dummy_state_class_value(sub_cfg)
         if sel_type == SelectorType.OBJECT:
             return _dummy_object_value(sub_cfg)
 
@@ -1225,6 +1257,17 @@ _TRIGGER_PATH_SEGMENTS: Final[frozenset[str]] = frozenset(
 )
 _CONDITION_PATH_SEGMENTS: Final[frozenset[str]] = frozenset(
     {CONF_CONDITION, CONF_CONDITIONS, CONF_IF, CONF_WHILE, CONF_UNTIL}
+)
+_ACTION_PATH_SEGMENTS: Final[frozenset[str]] = frozenset(
+    {CONF_ACTION, "actions", "sequence", "then", "else", CONF_DEFAULT}
+)
+ACTION_PATH_SEGMENTS: Final[frozenset[str]] = _ACTION_PATH_SEGMENTS
+TRIGGER_PATH_SEGMENTS: Final[frozenset[str]] = _TRIGGER_PATH_SEGMENTS
+_PAYLOAD_ANCESTOR_KEYS: Final[frozenset[str]] = frozenset(
+    {"data", "event_data", CONF_VARIABLES, CONF_TARGET}
+)
+_FIXED_MODERNIZATION_KEYS: Final[frozenset[str]] = frozenset(
+    {CONF_SERVICE, "service_template", "data_template", "platform"}
 )
 
 
@@ -1362,34 +1405,418 @@ def validate_safe_input_usages(
     return errors
 
 
-_TARGET_PATH_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\.)(?:target|data\.target)$")
-_ENTITY_ID_PATH_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\.)entity_id(?:\[\d+\])?$")
-_DEVICE_ID_PATH_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\.)device_id(?:\[\d+\])?$")
-_AREA_ID_PATH_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\.)area_id(?:\[\d+\])?$")
-_FLOOR_ID_PATH_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\.)floor_id(?:\[\d+\])?$")
-_LABEL_ID_PATH_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\.)label_id(?:\[\d+\])?$")
-_ACTION_ITEM_PATH_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?:^|\.)(?:action|actions|sequence|then|else|default)\[\d+\]$"
+_DEFAULT_MATH_GLOBALS: Final[frozenset[str]] = frozenset(
+    {"acos", "asin", "atan", "atan2", "cos", "e", "log", "pi", "sin", "sqrt", "tan", "tau"}
 )
-_ACTION_BLOCK_PATH_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?:^|\.)(?:action|actions|sequence|then|else|default)$"
+_DEFAULT_MATH_FILTER_METHODS: Final[frozenset[str]] = frozenset({"floor", "ceil"})
+
+
+def _discover_ha_math_capabilities() -> tuple[frozenset[str], frozenset[str]]:
+    """Dynamically discover supported math globals and filter methods from HA Core.
+
+    Returns:
+        Tuple of (ha_math_globals, ha_math_round_methods).
+
+    """
+    ha_globals: set[str] = set()
+    ha_round_methods: set[str] = set()
+
+    try:
+        from homeassistant.helpers.template import TemplateEnvironment
+        from homeassistant.helpers.template.extensions.math import MathExtension
+
+        round_func = getattr(MathExtension, "forgiving_round", None)
+        if round_func is not None and hasattr(round_func, "__code__"):
+            for const in round_func.__code__.co_consts:
+                if isinstance(const, str) and hasattr(math, const):
+                    attr = getattr(math, const, None)
+                    if callable(attr):
+                        ha_round_methods.add(const)
+
+        env = TemplateEnvironment(None)
+        all_math_names = {k for k in dir(math) if not k.startswith("_")}
+        ha_globals = (all_math_names.intersection(env.globals.keys())) - ha_round_methods
+    except Exception as err:
+        _LOGGER.debug("Dynamic HA template math discovery failed, using baseline: %s", err)
+
+    return (
+        frozenset(ha_globals) if ha_globals else _DEFAULT_MATH_GLOBALS,
+        frozenset(ha_round_methods) if ha_round_methods else _DEFAULT_MATH_FILTER_METHODS,
+    )
+
+
+_ALL_MATH_IDENTIFIERS, _HA_MATH_ROUND_METHODS = _discover_ha_math_capabilities()
+_RE_MATH_CALL: Final[re.Pattern[str]] = re.compile(r"\bmath\.([a-zA-Z_][a-zA-Z0-9_]*)\b")
+_re_math_round_pattern = (
+    "|".join(re.escape(m) for m in sorted(_HA_MATH_ROUND_METHODS))
+    if _HA_MATH_ROUND_METHODS
+    else r"$^"
 )
-_TRIGGER_ITEM_PATH_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\.)(?:trigger|triggers)\[\d+\]$")
-_TRIGGER_BLOCK_PATH_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\.)(?:trigger|triggers)$")
-_CONDITION_ITEM_PATH_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?:^|\.)(?:condition|conditions)\[\d+\]$"
+_RE_MATH_ROUND_FILTER: Final[re.Pattern[str]] = (
+    re.compile(rf"\bmath\.({_re_math_round_pattern})\b")
+    if _HA_MATH_ROUND_METHODS
+    else re.compile(r"$^")
 )
-_CONDITION_BLOCK_PATH_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\.)(?:condition|conditions)$")
-_VARIABLES_BLOCK_PATH_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?:^|\.)(?:variables|trigger_variables)$"
-)
-_VARIABLE_CHILD_PATH_RE: Final[re.Pattern[str]] = re.compile(
-    r"(?:^|\.)(?:variables|trigger_variables)\."
-)
+_RE_MATH_FLOOR_CEIL: Final[re.Pattern[str]] = _RE_MATH_ROUND_FILTER
+_RE_NUMBER_FILTER: Final[re.Pattern[str]] = re.compile(r"\|\s*(float|int)(?!\s*[\(\w])")
+_RE_JINJA_TAG: Final[re.Pattern[str]] = re.compile(r"(\{\{.*?\}\}|\{%.*?%\})", re.DOTALL)
+
+
+def _find_matching_paren(s: str, start_idx: int) -> int:
+    """Find the index of the matching closing parenthesis.
+
+    Args:
+        s: Input string.
+        start_idx: Index of opening parenthesis.
+
+    Returns:
+        Index of matching closing parenthesis, or -1 if unbalanced.
+
+    """
+    depth = 0
+    in_quote: str | None = None
+    escape = False
+    for i in range(start_idx, len(s)):
+        c = s[i]
+        if escape:
+            escape = False
+            continue
+        if c == "\\" and in_quote:
+            escape = True
+            continue
+        if in_quote:
+            if c == in_quote:
+                in_quote = None
+            continue
+        if c in ("'", '"'):
+            in_quote = c
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _has_top_level_comma(s: str) -> bool:
+    """Check if expression contains top-level comma outside parens and quotes.
+
+    Args:
+        s: Expression string.
+
+    Returns:
+        True if expression has a top-level comma.
+
+    """
+    depth = 0
+    in_quote: str | None = None
+    escape = False
+    for c in s:
+        if escape:
+            escape = False
+            continue
+        if c == "\\" and in_quote:
+            escape = True
+            continue
+        if in_quote:
+            if c == in_quote:
+                in_quote = None
+            continue
+        if c in ("'", '"'):
+            in_quote = c
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif c == "," and depth == 0:
+            return True
+    return False
+
+
+def _rewrite_floor_ceil_in_expr(text: str, quote: str = '"') -> str:
+    """Rewrite math rounding calls into round(0, ...) filter forms.
+
+    Args:
+        text: Jinja expression string.
+        quote: Quote character to use around the rounding method ('"' or "'").
+
+    Returns:
+        Rewritten expression string.
+
+    Raises:
+        ValueError: If safe conversion is not possible.
+
+    """
+    if not _HA_MATH_ROUND_METHODS:
+        return text
+
+    while True:
+        m = _RE_MATH_FLOOR_CEIL.search(text)
+        if not m:
+            break
+        func = m.group(1)
+        start = m.start()
+        after_name = m.end()
+        idx = after_name
+        while idx < len(text) and text[idx] in " \t":
+            idx += 1
+        if idx >= len(text) or text[idx] != "(":
+            raise ValueError(f"math.{func} must be called with parentheses")
+        close_idx = _find_matching_paren(text, idx)
+        if close_idx == -1:
+            raise ValueError(f"Unmatched parenthesis in math.{func} call")
+        raw_arg = text[idx + 1 : close_idx].strip()
+        if not raw_arg:
+            raise ValueError(f"math.{func} called with no arguments")
+        if _has_top_level_comma(raw_arg):
+            raise ValueError(f"math.{func} called with multiple arguments")
+
+        inner = _rewrite_floor_ceil_in_expr(raw_arg, quote=quote)
+        if (
+            inner.startswith("(")
+            and inner.endswith(")")
+            and _find_matching_paren(inner, 0) == len(inner) - 1
+        ):
+            replacement = f"({inner} | round(0, {quote}{func}{quote}))"
+        else:
+            replacement = f"(({inner}) | round(0, {quote}{func}{quote}))"
+
+        text = text[:start] + replacement + text[close_idx + 1 :]
+    return text
+
+
+def _flush_target_chunk(
+    current_chunk: list[str],
+    current_key: str | None,
+    target_keys: frozenset[str],
+    target_chunks: list[list[str]],
+    other_chunks: list[list[str]],
+) -> None:
+    """Flush accumulated lines into target or non-target chunk collections.
+
+    Args:
+        current_chunk: Accumulated property lines.
+        current_key: Property key name.
+        target_keys: Set of recognized target field names from HA Core.
+        target_chunks: Collected target-related property chunks.
+        other_chunks: Collected non-target property chunks.
+
+    """
+    if not current_chunk:
+        return
+    if current_key in target_keys:
+        target_chunks.append(current_chunk)
+    else:
+        other_chunks.append(current_chunk)
+
+
+def _wrap_action_target_blocks(
+    lines: list[str],
+    target_keys: frozenset[str],
+    skipped_line_indices: frozenset[int] | set[int] | None = None,
+) -> list[str]:
+    """Wrap legacy top-level target fields under 'target:' without multiline regexes.
+
+    Args:
+        lines: Lines of the YAML document.
+        target_keys: Set of recognized target field names from HA Core.
+        skipped_line_indices: Optional set of 0-based line indices to preserve unchanged.
+
+    Returns:
+        List of modified lines with target fields properly wrapped.
+
+    """
+    result: list[str] = []
+    i = 0
+    n = len(lines)
+    current_root_section: str | None = None
+    ancestor_indents: list[tuple[int, str]] = []
+
+    while i < n:
+        line = lines[i]
+
+        if skipped_line_indices is not None and i in skipped_line_indices:
+            result.append(line)
+            i += 1
+            continue
+
+        raw_l = line.lstrip()
+        if not raw_l or raw_l.startswith("#"):
+            result.append(line)
+            i += 1
+            continue
+
+        indent = len(line) - len(raw_l)
+        if indent == 0 and ":" in line:
+            root_raw = line.split(":", 1)[0].strip().strip("'\"")
+            if root_raw.isidentifier():
+                current_root_section = root_raw
+                ancestor_indents.clear()
+
+        if current_root_section not in _ACTION_PATH_SEGMENTS:
+            result.append(line)
+            i += 1
+            continue
+
+        has_dash = raw_l.startswith("- ")
+        after_dash = raw_l[2:].lstrip() if has_dash else raw_l
+        key, sep, val = after_dash.partition(":")
+        clean_key = key.strip().strip("'\"")
+        key_indent = len(line) - len(after_dash)
+        while ancestor_indents and key_indent <= ancestor_indents[-1][0]:
+            ancestor_indents.pop()
+        in_payload = any(k in _PAYLOAD_ANCESTOR_KEYS for _, k in ancestor_indents)
+        if sep and not val.split("#", 1)[0].strip():
+            ancestor_indents.append((key_indent, clean_key))
+
+        action_call = ""
+        if sep and clean_key == CONF_ACTION and (tokens := val.strip().split("#", 1)[0].split()):
+            action_call = tokens[0]
+
+        is_service_action = bool(action_call) and (
+            "." in action_call or action_call.startswith(("{", "{{", "{%"))
+        )
+
+        if not is_service_action or in_payload:
+            result.append(line)
+            i += 1
+            continue
+
+        action_indent = len(line) - len(raw_l)
+        j = i + 1
+        child_lines: list[str] = []
+        base_child_indent: int | None = None
+
+        while j < n:
+            next_line = lines[j]
+            next_stripped = next_line.strip()
+            if not next_stripped or next_stripped.startswith("#"):
+                child_lines.append(next_line)
+                j += 1
+                continue
+
+            next_indent = len(next_line) - len(next_line.lstrip())
+            if next_indent < action_indent or (next_indent == action_indent and not has_dash):
+                break
+            if next_indent == action_indent and has_dash and next_line.lstrip().startswith("- "):
+                break
+
+            if base_child_indent is None:
+                base_child_indent = next_indent
+
+            if next_indent < base_child_indent:
+                break
+
+            child_lines.append(next_line)
+            j += 1
+
+        if base_child_indent is None:
+            result.append(line)
+            i += 1
+            continue
+
+        has_target = False
+        target_chunks: list[list[str]] = []
+        other_chunks: list[list[str]] = []
+        current_chunk: list[str] = []
+        current_key: str | None = None
+
+        for blk_offset, blk_line in enumerate(child_lines):
+            line_idx = i + 1 + blk_offset
+            blk_stripped = blk_line.strip()
+            if (
+                not blk_stripped
+                or blk_stripped.startswith("#")
+                or (skipped_line_indices is not None and line_idx in skipped_line_indices)
+            ):
+                if current_chunk:
+                    current_chunk.append(blk_line)
+                else:
+                    other_chunks.append([blk_line])
+                continue
+
+            line_ind = len(blk_line) - len(blk_line.lstrip())
+            if line_ind == base_child_indent:
+                _flush_target_chunk(
+                    current_chunk, current_key, target_keys, target_chunks, other_chunks
+                )
+                current_chunk = []
+                current_key = None
+                k = blk_stripped.split(":", 1)[0].strip().strip("'\"")
+                if k == CONF_TARGET:
+                    has_target = True
+                current_key = k
+            current_chunk.append(blk_line)
+        _flush_target_chunk(current_chunk, current_key, target_keys, target_chunks, other_chunks)
+
+        if has_target or not target_chunks:
+            result.append(line)
+            result.extend(child_lines)
+            i = j
+            continue
+
+        indent_str = " " * base_child_indent
+        extra_indent = "  "
+        target_lines_flattened: list[str] = []
+        for chunk in target_chunks:
+            target_lines_flattened.extend(f"{extra_indent}{item}" for item in chunk)
+        new_target_block = [f"{indent_str}{CONF_TARGET}:\n", *target_lines_flattened]
+        other_lines_flattened = [item for chunk in other_chunks for item in chunk]
+
+        result.append(line)
+        result.extend(other_lines_flattened)
+        result.extend(new_target_block)
+        i = j
+
+    return result
+
+
+def _modernize_jinja_expressions(text: str) -> str:
+    """Modernize math and conversion functions exclusively inside Jinja template expressions.
+
+    Args:
+        text: YAML or template string content.
+
+    Returns:
+        String with Jinja template tags modernized.
+
+    Raises:
+        ValueError: If safe conversion is not possible.
+
+    """
+    if "{{" not in text and "{%" not in text:
+        return text
+
+    def _sub_math(m: re.Match[str]) -> str:
+        ident = m.group(1)
+        return ident if ident in _ALL_MATH_IDENTIFIERS else m.group(0)
+
+    def _sub_jinja(m: re.Match[str]) -> str:
+        s = m.group(0)
+        start_pos = m.start()
+        before_tag = text[:start_pos]
+        line_start = before_tag.rfind("\n") + 1
+        prefix_on_line = before_tag[line_start:]
+        quote = "'" if prefix_on_line.count('"') % 2 == 1 else '"'
+        if _HA_MATH_ROUND_METHODS and _RE_MATH_ROUND_FILTER.search(s):
+            s = _rewrite_floor_ceil_in_expr(s, quote=quote)
+        if "math." in s:
+            s = _RE_MATH_CALL.sub(_sub_math, s)
+            if "math." in s:
+                raise ValueError("Unresolved math identifier in Jinja template")
+        return s
+
+    return _RE_JINJA_TAG.sub(_sub_jinja, text)
 
 
 def _derive_value_for_path(path: str) -> object | None:
     """Derive compatible dummy value for a single observed blueprint usage path.
+
+    Analyzes dot-notation or bracket-notation structural paths using Home Assistant
+    Core constants and schema segments instead of brittle regular expressions.
 
     Args:
         path: Dot-notation or bracket-notation structural path.
@@ -1398,36 +1825,81 @@ def _derive_value_for_path(path: str) -> object | None:
         Derived dummy value, or None if the path shape cannot be determined.
 
     """
-    if _TARGET_PATH_RE.search(path):
+    segments = [seg for seg in path.split(".") if seg]
+    if not segments:
+        return None
+
+    last_seg = segments[-1]
+    last_base = last_seg.split("[")[0]
+    is_indexed = "[" in last_seg
+
+    # Target dictionary matching (e.g. "target", "data.target")
+    if last_seg == CONF_TARGET:
         return {ATTR_ENTITY_ID: _DEFAULT_DUMMY_VALUE}
-    if _ENTITY_ID_PATH_RE.search(path):
+
+    # Entity/Device/Area/Floor/Label field matching using HA Core constants
+    if last_base == ATTR_ENTITY_ID:
         return _DEFAULT_DUMMY_VALUE
-    if _DEVICE_ID_PATH_RE.search(path):
+    if last_base == ATTR_DEVICE_ID:
         return f"dummy_{ATTR_DEVICE_ID}"
-    if _AREA_ID_PATH_RE.search(path):
+    if last_base == ATTR_AREA_ID:
         return f"dummy_{ATTR_AREA_ID}"
-    if _FLOOR_ID_PATH_RE.search(path):
+    if last_base == ATTR_FLOOR_ID:
         return f"dummy_{ATTR_FLOOR_ID}"
-    if _LABEL_ID_PATH_RE.search(path):
+    if last_base == ATTR_LABEL_ID:
         return f"dummy_{ATTR_LABEL_ID}"
-    if _ACTION_ITEM_PATH_RE.search(path):
-        return {
-            CONF_ACTION: "homeassistant.update_entity",
-            CONF_TARGET: {ATTR_ENTITY_ID: _DEFAULT_DUMMY_VALUE},
-        }
-    if _ACTION_BLOCK_PATH_RE.search(path):
+
+    parent_seg = segments[-2] if len(segments) > 1 else None
+    parent_base = parent_seg.split("[")[0] if parent_seg else None
+    parent_is_indexed = "[" in parent_seg if parent_seg else False
+
+    # Action items vs action sequence blocks
+    if last_base in _ACTION_PATH_SEGMENTS or (
+        parent_is_indexed and parent_base in _ACTION_PATH_SEGMENTS and last_base == CONF_SERVICE
+    ):
+        if (
+            parent_is_indexed
+            and parent_base in _ACTION_PATH_SEGMENTS
+            and last_base in _HA_SERVICE_ACTION_KEYS
+        ):
+            return "homeassistant.update_entity"
+        if is_indexed:
+            return {
+                CONF_ACTION: "homeassistant.update_entity",
+                CONF_TARGET: {ATTR_ENTITY_ID: _DEFAULT_DUMMY_VALUE},
+            }
         return []
-    if _TRIGGER_ITEM_PATH_RE.search(path):
-        return {CONF_TRIGGER: "state", ATTR_ENTITY_ID: _DEFAULT_DUMMY_VALUE}
-    if _TRIGGER_BLOCK_PATH_RE.search(path):
+
+    # Trigger items vs trigger blocks
+    if last_base in _TRIGGER_PATH_SEGMENTS or (
+        parent_is_indexed and parent_base in _TRIGGER_PATH_SEGMENTS and last_base == "platform"
+    ):
+        if (
+            parent_is_indexed
+            and parent_base in _TRIGGER_PATH_SEGMENTS
+            and last_base in (CONF_TRIGGER, "platform")
+        ):
+            return "state"
+        if is_indexed:
+            return {CONF_TRIGGER: "state", ATTR_ENTITY_ID: _DEFAULT_DUMMY_VALUE}
         return [{CONF_TRIGGER: "state", ATTR_ENTITY_ID: _DEFAULT_DUMMY_VALUE}]
-    if _CONDITION_ITEM_PATH_RE.search(path):
-        return {CONF_CONDITION: "state", ATTR_ENTITY_ID: _DEFAULT_DUMMY_VALUE, "state": "on"}
-    if _CONDITION_BLOCK_PATH_RE.search(path):
+
+    # Condition items vs condition blocks
+    if last_base in _CONDITION_PATH_SEGMENTS:
+        if (
+            parent_is_indexed
+            and parent_base in _CONDITION_PATH_SEGMENTS
+            and last_base == CONF_CONDITION
+        ):
+            return "state"
+        if is_indexed:
+            return {CONF_CONDITION: "state", ATTR_ENTITY_ID: _DEFAULT_DUMMY_VALUE, "state": "on"}
         return [{CONF_CONDITION: "state", ATTR_ENTITY_ID: _DEFAULT_DUMMY_VALUE, "state": "on"}]
-    if _VARIABLES_BLOCK_PATH_RE.search(path):
-        return {}
-    return _DEFAULT_DUMMY_VALUE if _VARIABLE_CHILD_PATH_RE.search(path) else None
+
+    # Variables blocks vs variable child
+    if any(seg.split("[")[0] in _HA_VARIABLE_BLOCK_KEYS for seg in segments[:-1]):
+        return _DEFAULT_DUMMY_VALUE
+    return {} if last_base in _HA_VARIABLE_BLOCK_KEYS else None
 
 
 def _is_dummy_value_valid_for_selector(sel_cfg: Mapping[str, object], dummy: object) -> bool:
@@ -1513,7 +1985,7 @@ def derive_dummy_input_value(
     for path in usages:
         val = _derive_value_for_path(path)
         if val is None:
-            return None
+            val = _DEFAULT_DUMMY_VALUE
         derived_values.append(val)
 
     first = derived_values[0]
@@ -2800,3 +3272,349 @@ def dedupe_risks(risks: Iterable[StructuredRisk]) -> list[StructuredRisk]:
             seen.add(key)
             unique_risks.append(risk)
     return unique_risks
+
+
+def inspect_blueprint_yaml_ast(content: str) -> tuple[str | None, set[int]]:
+    """Inspect blueprint YAML event stream for unsupported constructs and block scalars.
+
+    Performs a single-pass scan of the PyYAML event stream to:
+    1. Reject constructs that cannot be safely restructured via line-oriented preservation
+       (anchors '&', aliases '*', and flow-style mappings in action/trigger blocks).
+    2. Identify line indices inside literal ('|') and folded ('>') multiline block scalars
+       to prevent restructuring within scalar string bodies.
+
+    Args:
+        content: Raw YAML blueprint content string.
+
+    Returns:
+        Tuple of (unsupported_reason, block_scalar_lines).
+        unsupported_reason is None if supported, or a descriptive string if not.
+        block_scalar_lines is a set of 0-indexed line numbers inside block scalars.
+
+    """
+    try:
+        events = list(yaml.parse(content))
+    except yaml.error.YAMLError as err:
+        return f"Invalid YAML syntax: {err}", set()
+    except Exception as err:
+        return f"YAML parsing failed: {err}", set()
+
+    current_root_section: str | None = None
+    depth = 0
+    in_action_or_trigger = False
+    unsupported_reason: str | None = None
+    scalar_lines: set[int] = set()
+
+    for ev in events:
+        if isinstance(ev, yaml.ScalarEvent) and getattr(ev, "style", None) in ("|", ">"):
+            end_line = ev.end_mark.line + (1 if ev.end_mark.column > 0 else 0)
+            for line_num in range(ev.start_mark.line + 1, end_line):
+                scalar_lines.add(line_num)
+
+        if unsupported_reason is not None:
+            continue
+
+        if isinstance(ev, yaml.AliasEvent):
+            unsupported_reason = (
+                "Blueprint contains YAML aliases (*), which cannot be safely modernized "
+                "automatically"
+            )
+            continue
+
+        if getattr(ev, "anchor", None) is not None:
+            unsupported_reason = (
+                "Blueprint contains YAML anchors (&), which cannot be safely modernized "
+                "automatically"
+            )
+            continue
+
+        if isinstance(ev, (yaml.MappingStartEvent, yaml.SequenceStartEvent)):
+            depth += 1
+        elif isinstance(ev, (yaml.MappingEndEvent, yaml.SequenceEndEvent)):
+            depth -= 1
+            if depth <= 1:
+                current_root_section = None
+                in_action_or_trigger = False
+
+        if isinstance(ev, yaml.ScalarEvent) and depth == 1:
+            current_root_section = ev.value
+            in_action_or_trigger = current_root_section in (
+                CONF_ACTION,
+                "actions",
+                "sequence",
+                CONF_TRIGGER,
+                CONF_TRIGGERS,
+            )
+
+        if (
+            in_action_or_trigger
+            and getattr(ev, "flow_style", None) is True
+            and isinstance(ev, yaml.MappingStartEvent)
+        ):
+            unsupported_reason = (
+                f"Blueprint contains flow-style mapping in '{current_root_section}' "
+                "section, which cannot be safely modernized automatically"
+            )
+
+    return unsupported_reason, scalar_lines
+
+
+def detect_unsupported_yaml_constructs(content: str) -> str | None:
+    """Detect YAML constructs unsupported for safe automated modernization.
+
+    Inspects the PyYAML event stream to reject constructs that cannot be safely
+    restructured via line-oriented preservation, including anchors, aliases,
+    and flow-style mappings in executable action/trigger blocks.
+
+    Args:
+        content: Raw YAML blueprint content string.
+
+    Returns:
+        Human-readable reason string if an unsupported construct is detected,
+        or None if the YAML structure is supported.
+
+    """
+    reason, _ = inspect_blueprint_yaml_ast(content)
+    return reason
+
+
+def get_ast_block_scalar_lines(content: str) -> set[int]:
+    """Identify line indices strictly contained inside YAML multiline block scalars.
+
+    Extracts start and end markers from PyYAML ScalarEvents with literal ('|')
+    or folded ('>') block styles to prevent accidental restructuring of multiline
+    string bodies.
+
+    Args:
+        content: Raw YAML blueprint content string.
+
+    Returns:
+        Set of 0-indexed line numbers falling inside block scalar bodies.
+
+    """
+    _, lines = inspect_blueprint_yaml_ast(content)
+    return lines
+
+
+def modernize_legacy_blueprint_yaml(
+    content: str,
+    domain: FunctionalDomain | str | None = None,
+    dynamic_replacements: Mapping[str, str] | None = None,
+) -> str:
+    """Modernize legacy blueprint YAML syntax to current Home Assistant standards.
+
+    Applies deterministic structural and AST-safe transformations:
+    - Rejects unsupported constructs (anchors, aliases, flow mappings) upfront
+    - Constrains key rewrites strictly to parsed action and trigger node contexts
+    - Preserves variables, trigger_variables, blueprint metadata, and multiline scalars
+    - Handles quoted keys ('service':, "platform":, etc.) consistently
+    - Renames legacy 'service_template:' and 'service:' to 'action:'
+    - Renames legacy 'data_template:' to 'data:'
+    - Replaces deprecated trigger 'platform:' keywords with 'trigger:' dynamically
+    - Replaces disallowed Jinja2 math module calls with supported filters/functions
+    - Adds missing default arguments to '| float' and '| int' filters
+    - Wraps top-level action target parameters under 'target:'
+    - Applies dynamic key replacements discovered from structural schema diffs
+
+    Args:
+        content: Raw YAML blueprint content string.
+        domain: Functional domain (automation, script, template).
+        dynamic_replacements: Optional map of old key names to new replacement keys.
+
+    Returns:
+        Modernized YAML string.
+
+    """
+    unsupported_reason, ast_scalar_lines = inspect_blueprint_yaml_ast(content)
+    if unsupported_reason:
+        _LOGGER.debug("Safe blueprint YAML modernization skipped: %s", unsupported_reason)
+        return content
+
+    try:
+        yaml_util.parse_yaml(content)
+    except Exception as err:
+        _LOGGER.debug("Blueprint YAML parsing failed prior to modernization: %s", err)
+        return content
+
+    lines = content.splitlines(keepends=True)
+    res_lines: list[str] = []
+
+    trigger_indents: list[int] = []
+    ancestor_indents: list[tuple[int, str]] = []
+    current_root_section: str | None = None
+
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            res_lines.append(line)
+            continue
+
+        if idx in ast_scalar_lines:
+            res_lines.append(line)
+            continue
+
+        indent = len(line) - len(line.lstrip())
+
+        # Track root-level section transitions
+        if indent == 0 and ":" in line:
+            root_raw = line.split(":", 1)[0].strip().strip("'\"")
+            if root_raw.isidentifier():
+                current_root_section = root_raw
+
+        in_action_section = current_root_section in _ACTION_PATH_SEGMENTS
+        in_trigger_section = current_root_section in _TRIGGER_PATH_SEGMENTS
+
+        # Pop trigger indentation levels that have been exited
+        while trigger_indents and indent <= trigger_indents[-1]:
+            trigger_indents.pop()
+
+        raw_l = line.lstrip()
+        has_dash = raw_l.startswith("- ")
+        after_dash = raw_l[2:].lstrip() if has_dash else raw_l
+        key_indent = len(line) - len(after_dash)
+        key_token, sep, after_sep = after_dash.partition(":")
+
+        # Pop ancestor indentation levels that have been exited
+        while ancestor_indents and key_indent <= ancestor_indents[-1][0]:
+            ancestor_indents.pop()
+
+        ancestor_keys = {k for _, k in ancestor_indents}
+        is_payload_context = bool(ancestor_keys.intersection(_PAYLOAD_ANCESTOR_KEYS))
+
+        val_clean = after_sep.split("#", 1)[0].strip()
+        clean_key = key_token.strip().strip("'\"")
+
+        is_single_quoted = key_token.strip().startswith("'") and key_token.strip().endswith("'")
+        is_double_quoted = key_token.strip().startswith('"') and key_token.strip().endswith('"')
+        quote_char = "'" if is_single_quoted else ('"' if is_double_quoted else "")
+
+        # Check if line initiates a trigger block (trigger:, triggers:, wait_for_trigger:)
+        if sep and val_clean == "" and clean_key in _TRIGGER_PATH_SEGMENTS:
+            trigger_indents.append(indent)
+
+        is_trigger_context = bool(
+            (in_trigger_section and indent > 0)
+            or (trigger_indents and indent > trigger_indents[-1])
+        )
+        is_action_context = bool(in_action_section and indent > 0 and not is_trigger_context)
+
+        # Dynamic schema migrations
+        if (
+            dynamic_replacements
+            and (is_action_context or is_trigger_context)
+            and not is_payload_context
+            and sep
+            and clean_key in dynamic_replacements
+            and clean_key not in _FIXED_MODERNIZATION_KEYS
+        ):
+            new_key = dynamic_replacements[clean_key]
+            prefix = line[: len(line) - len(raw_l)]
+            dash_prefix = "- " if has_dash else ""
+            line = f"{prefix}{dash_prefix}{quote_char}{new_key}{quote_char}:{after_sep}"
+            raw_l = line.lstrip()
+            has_dash = raw_l.startswith("- ")
+            after_dash = raw_l[2:].lstrip() if has_dash else raw_l
+            key_token, sep, after_sep = after_dash.partition(":")
+            clean_key = key_token.strip().strip("'\"")
+            is_single_quoted = key_token.strip().startswith("'") and key_token.strip().endswith("'")
+            is_double_quoted = key_token.strip().startswith('"') and key_token.strip().endswith('"')
+            quote_char = "'" if is_single_quoted else ('"' if is_double_quoted else "")
+
+        # Service / data template modernization (strictly in action context)
+        if is_action_context and not is_payload_context and sep:
+            if clean_key in ("service_template", CONF_SERVICE):
+                prefix = line[: len(line) - len(raw_l)]
+                dash_prefix = "- " if has_dash else ""
+                line = f"{prefix}{dash_prefix}{quote_char}{CONF_ACTION}{quote_char}:{after_sep}"
+                raw_l = line.lstrip()
+                has_dash = raw_l.startswith("- ")
+                after_dash = raw_l[2:].lstrip() if has_dash else raw_l
+                key_token, sep, after_sep = after_dash.partition(":")
+                clean_key = key_token.strip().strip("'\"")
+                is_single_quoted = key_token.strip().startswith("'") and key_token.strip().endswith(
+                    "'"
+                )
+                is_double_quoted = key_token.strip().startswith('"') and key_token.strip().endswith(
+                    '"'
+                )
+                quote_char = "'" if is_single_quoted else ('"' if is_double_quoted else "")
+            elif clean_key == "data_template":
+                prefix = line[: len(line) - len(raw_l)]
+                dash_prefix = "- " if has_dash else ""
+                line = f"{prefix}{dash_prefix}{quote_char}data{quote_char}:{after_sep}"
+                raw_l = line.lstrip()
+                has_dash = raw_l.startswith("- ")
+                after_dash = raw_l[2:].lstrip() if has_dash else raw_l
+                key_token, sep, after_sep = after_dash.partition(":")
+                clean_key = key_token.strip().strip("'\"")
+                is_single_quoted = key_token.strip().startswith("'") and key_token.strip().endswith(
+                    "'"
+                )
+                is_double_quoted = key_token.strip().startswith('"') and key_token.strip().endswith(
+                    '"'
+                )
+                quote_char = "'" if is_single_quoted else ('"' if is_double_quoted else "")
+
+        # Trigger platform modernization (strictly in trigger context)
+        if is_trigger_context and not is_payload_context and sep and clean_key == "platform":
+            prefix = line[: len(line) - len(raw_l)]
+            dash_prefix = "- " if has_dash else ""
+            line = f"{prefix}{dash_prefix}{quote_char}{CONF_TRIGGER}{quote_char}:{after_sep}"
+            raw_l = line.lstrip()
+            has_dash = raw_l.startswith("- ")
+            after_dash = raw_l[2:].lstrip() if has_dash else raw_l
+            key_token, sep, after_sep = after_dash.partition(":")
+            clean_key = key_token.strip().strip("'\"")
+
+        # Record ancestor for child lines
+        if sep and val_clean == "" and clean_key:
+            ancestor_indents.append((key_indent, clean_key))
+
+        res_lines.append(line)
+
+    target_keys = _get_ha_target_field_keys()
+    wrapped_lines = _wrap_action_target_blocks(
+        res_lines, target_keys, skipped_line_indices=ast_scalar_lines
+    )
+    # Restrict Jinja modernization strictly to action and trigger sections
+    blocks: list[tuple[str | None, list[str]]] = []
+    curr_section: str | None = None
+    curr_lines: list[str] = []
+
+    for blk_l in wrapped_lines:
+        ind = len(blk_l) - len(blk_l.lstrip())
+        if ind == 0 and ":" in blk_l:
+            root_candidate = blk_l.split(":", 1)[0].strip().strip("'\"")
+            if root_candidate.isidentifier():
+                if curr_lines:
+                    blocks.append((curr_section, curr_lines))
+                    curr_lines = []
+                curr_section = root_candidate
+        curr_lines.append(blk_l)
+    if curr_lines:
+        blocks.append((curr_section, curr_lines))
+
+    modernized_blocks: list[str] = []
+    for sec, blk_lines in blocks:
+        blk_text = "".join(blk_lines)
+        if sec in _ACTION_PATH_SEGMENTS or sec in _TRIGGER_PATH_SEGMENTS:
+            try:
+                blk_text = _modernize_jinja_expressions(blk_text)
+            except ValueError:
+                _LOGGER.debug(
+                    "Safe Jinja expression modernization not possible, reverting to original"
+                )
+                return content
+        modernized_blocks.append(blk_text)
+
+    output = "".join(modernized_blocks)
+
+    # Round-trip syntax validation: ensure modernized YAML is syntactically valid
+    if output != content:
+        try:
+            yaml_util.parse_yaml(output)
+        except Exception:
+            _LOGGER.debug("Modernized YAML candidate failed parsing, reverting to original")
+            return content
+
+    return output

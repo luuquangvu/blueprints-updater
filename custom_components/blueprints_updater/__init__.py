@@ -15,8 +15,11 @@ else:
         import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_CORE_CONFIG_UPDATE, Platform
-from homeassistant.core import Event, HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.const import (
+    EVENT_CORE_CONFIG_UPDATE,
+    Platform,
+)
+from homeassistant.core import Event, HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
@@ -28,6 +31,7 @@ from homeassistant.helpers.selector import (
     NumberSelectorMode,
 )
 from homeassistant.helpers.service import async_register_admin_service
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, IntegrationService
@@ -126,6 +130,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.async_on_unload(entry.add_update_listener(async_update_options))
         blueprint_coordinator.setup_complete = True
         blueprint_coordinator.async_set_updated_data(blueprint_coordinator.data)
+
+        @callback
+        def _on_ha_started(_: HomeAssistant) -> None:
+            """Trigger post-update compatibility check on Home Assistant startup.
+
+            Args:
+                _: HomeAssistant instance passed by async_at_started.
+
+            """
+            if hasattr(blueprint_coordinator, "async_schedule_post_update_compatibility_guard"):
+                blueprint_coordinator.async_schedule_post_update_compatibility_guard()
+            elif getattr(blueprint_coordinator, "verify_on_ha_update", False) and hasattr(
+                blueprint_coordinator, "async_run_post_update_compatibility_guard"
+            ):
+                coro = blueprint_coordinator.async_run_post_update_compatibility_guard()
+                if inspect.isawaitable(coro):
+                    blueprint_coordinator._post_ha_update_task = hass.async_create_background_task(
+                        coro,
+                        name=f"{DOMAIN}_post_ha_update_check",
+                    )
+
+        entry.async_on_unload(async_at_started(hass, _on_ha_started))
     except asyncio.CancelledError:
         await _async_rollback_setup()
         raise

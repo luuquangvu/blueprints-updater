@@ -467,6 +467,16 @@ def test_generate_dummy_input_value_all_types():
     )
     assert generate_dummy_input_value({"color_temp": {"min": 400, "max": 500}}) == 400
 
+    # State class
+    assert generate_dummy_input_value({"state_class": None}) == "measurement"
+    assert generate_dummy_input_value({"state_class": {}}) == "measurement"
+    assert generate_dummy_input_value({"state_class": {"multiple": True}}) == ["measurement"]
+    assert generate_dummy_input_value({"state_class": {"state_classes": ["total"]}}) == "total"
+    assert generate_dummy_input_value(
+        {"state_class": {"state_classes": "total_increasing", "multiple": True}}
+    ) == ["total_increasing"]
+    assert generate_dummy_input_value({"state_class": {"state_classes": []}}) == "measurement"
+
 
 @pytest.mark.parametrize(
     ("sel_cfg", "expected"),
@@ -612,14 +622,14 @@ def test_derive_dummy_input_value():
     # Unused input
     assert derive_dummy_input_value("unused_inp", {}, bp_dict) == "test.dummy"
 
-    # Underivable usage
+    # Unrecognized usage paths fall back to default dummy value
     bp_underivable: dict[str, object] = {
         "blueprint": {"name": "Test", "domain": "automation"},
         "action": [{"delay": Input("delay_inp")}],
         "data": {"weird_unknown": Input("weird_inp")},
     }
-    assert derive_dummy_input_value("delay_inp", {}, bp_underivable) is None
-    assert derive_dummy_input_value("weird_inp", {}, bp_underivable) is None
+    assert derive_dummy_input_value("delay_inp", {}, bp_underivable) == "test.dummy"
+    assert derive_dummy_input_value("weird_inp", {}, bp_underivable) == "test.dummy"
 
     # Conflicting multiple usages
     bp_conflict: dict[str, object] = {

@@ -6,6 +6,7 @@
         "description": "Do you want to setup Blueprints Updater? It will scan your local blueprints and look for updates.",
         "data": {
           "auto_update": "Enable Auto-Update",
+          "verify_on_ha_update": "Verify Compatibility on Home Assistant Update",
           "update_interval": "Update Interval (hours)",
           "filter_mode": "Filter Mode",
           "selected_blueprints": "Blueprints (optional)",
@@ -24,6 +25,7 @@
         "description": "Configure the behavior and settings for Blueprints Updater.",
         "data": {
           "auto_update": "Enable Auto-Update",
+          "verify_on_ha_update": "Verify Compatibility on Home Assistant Update",
           "update_interval": "Update Interval (hours)",
           "filter_mode": "Filter Mode",
           "selected_blueprints": "Selected Blueprints",
@@ -45,6 +47,21 @@
         "proceed": "Proceed with update (create backup)",
         "different_url": "Enter a different URL",
         "stop_tracking": "Cancel and stop tracking"
+      }
+    },
+    "repair_incompatible_action": {
+      "options": {
+        "auto_fix": "Review and apply modernization patch (Auto Fix)",
+        "acknowledge": "Acknowledge and dismiss warning",
+        "change_url": "Switch tracking to community fork",
+        "unpin": "Unpin blueprint and resume upstream tracking"
+      }
+    },
+    "repair_fork_action": {
+      "options": {
+        "proceed": "Proceed with update from fork",
+        "auto_fix": "Apply local Auto Fix instead",
+        "different_url": "Enter a different URL"
       }
     }
   },
@@ -145,6 +162,73 @@
           "missing_issue_data": "Missing required blueprint issue data."
         }
       }
+    },
+    "incompatible_blueprint": {
+      "title": "Blueprint incompatible with Home Assistant: {name}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Resolve Incompatible Blueprint",
+            "description": "The blueprint **{name}** (`{path}`) is not fully compatible with Home Assistant {ha_version}.\n\n**Issue Details:**\n{error_summary}\n\n**Affected Entities:**\n{affected_entities}\n\n**Resources:**\n{resource_links}\n\n**Diagnostic Report:**\n```markdown\n{diagnostic_snippet}\n```\n\nHow would you like to proceed?",
+            "menu_options": {
+              "auto_fix": "Review and apply modernization patch (Auto Fix)",
+              "acknowledge": "Acknowledge and dismiss warning",
+              "change_url": "Switch tracking to community fork",
+              "unpin": "Unpin blueprint and resume upstream tracking"
+            }
+          },
+          "auto_fix": {
+            "title": "Preview Modernization Patch",
+            "description": "Review the proposed modernized changes for **{name}** (`{path}`).\n\n{patch_notice}\n\n```diff\n{diff_text}\n```\n\nApplying this fix will create a `.bak.1` backup and automatically pin this blueprint in the background to prevent broken upstream updates from overwriting your fix. When the upstream author publishes an official compatible update, it will automatically unpin.",
+            "data": {
+              "confirm_apply": "Apply modernized changes"
+            }
+          },
+          "acknowledge": {
+            "title": "Acknowledge Compatibility Warning",
+            "description": "You are dismissing this deprecation warning for **{name}** (`{path}`).\n\nThis warning is scheduled to become a breaking error in Home Assistant {breaks_in_ha_version}. If you update Home Assistant to a new version or edit the blueprint file, the warning will be automatically re-evaluated.",
+            "data": {
+              "confirm_acknowledge": "Dismiss this warning for now"
+            }
+          },
+          "change_url": {
+            "title": "Switch to Community Fork",
+            "description": "Enter the URL of an updated community fork for **{name}** (`{path}`).\n\nTo preserve existing automations without breaking them, the blueprint remains at its current filesystem path (`{relative_path}`) while updates will track the new URL.",
+            "data": {
+              "url": "Community Fork URL"
+            }
+          },
+          "confirm_fork": {
+            "title": "Confirm Fork Switch",
+            "description": "Review the fork compatibility and changes for **{name}**:\n\n{fork_notice}\n\n```diff\n{diff_text}\n```",
+            "data": {
+              "fork_action": "Action"
+            }
+          },
+          "unpin": {
+            "title": "Unpin Blueprint",
+            "description": "Are you sure you want to unpin **{name}** (`{path}`)?\n\nThis will resume tracking the upstream author ({source_url}) and allow auto-updates.",
+            "data": {
+              "confirm_unpin": "Unpin and resume upstream tracking"
+            }
+          }
+        },
+        "error": {
+          "missing_url": "URL is required.",
+          "invalid_url": "Invalid or unreachable blueprint URL.",
+          "fork_breaking_error": "This fork fails Home Assistant {ha_version} validation: {error}",
+          "confirmation_required": "Confirmation is required.",
+          "unpin_failed": "Failed to unpin blueprint: {error}"
+        },
+        "abort": {
+          "missing_issue_data": "Missing required blueprint issue data.",
+          "patch_failed": "Failed to apply modernization patch: {error}",
+          "file_changed": "Blueprint file was modified before the patch could be applied: {error}",
+          "apply_success": "Modernization patch applied successfully and blueprint pinned.",
+          "fork_applied": "Blueprint tracking switched to fork successfully.",
+          "unpinned_success": "Blueprint unpinned successfully."
+        }
+      }
     }
   },
   "exceptions": {
@@ -243,7 +327,7 @@
     "risk_unknown": "Unknown risk",
     "risk_compatibility": "Compatibility Error for {entity}: {error}",
     "risk_system_error": "System error: {error}",
-    "breaking_risks_report": "Auto-update for {name} was blocked as a precaution. Detected risks:\n{risks}\n\nPlease review and install manually if correct.",
+    "breaking_risks_report": "Auto-update for {name} was blocked as a precaution. Detected risks:\n{risks}\n\nPlease review these changes and install manually if you wish to proceed.",
     "auto_update_blocked_by_system_error": "Auto-update for {name} was paused due to an unexpected error during compatibility check.",
     "withdrawn_blueprint_error": "Blueprint source no longer available: {error}",
     "take_control_tip": "Tip: You can 'Take Control' of the automations, scripts, or template entities that depend on this blueprint to make them fully local before deleting it."

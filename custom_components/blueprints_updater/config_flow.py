@@ -34,7 +34,9 @@ from .const import (
     CONF_MAX_BACKUPS,
     CONF_SELECTED_BLUEPRINTS,
     CONF_UPDATE_INTERVAL,
+    CONF_VERIFY_ON_HA_UPDATE,
     DEFAULT_AUTO_UPDATE,
+    DEFAULT_VERIFY_ON_HA_UPDATE,
     DOMAIN,
     MAX_BACKUPS,
     MAX_UPDATE_INTERVAL_HOURS,
@@ -98,6 +100,9 @@ def _get_config_schema(
 
     """
     auto_update = get_config_bool(config, CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
+    verify_on_ha_update = get_config_bool(
+        config, CONF_VERIFY_ON_HA_UPDATE, DEFAULT_VERIFY_ON_HA_UPDATE
+    )
     filter_mode = get_config_str(config, CONF_FILTER_MODE, FilterMode.ALL.value)
     selected_blueprints = get_config_value(config, CONF_SELECTED_BLUEPRINTS, [])
 
@@ -106,6 +111,10 @@ def _get_config_schema(
             vol.Required(
                 CONF_AUTO_UPDATE,
                 default=auto_update,
+            ): cv.boolean,
+            vol.Required(
+                CONF_VERIFY_ON_HA_UPDATE,
+                default=verify_on_ha_update,
             ): cv.boolean,
             vol.Required(
                 CONF_UPDATE_INTERVAL,

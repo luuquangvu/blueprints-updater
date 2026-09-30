@@ -3,9 +3,10 @@
     "step": {
       "user": {
         "title": "Thiết lập Blueprints Updater",
-        "description": "Bạn có muốn thiết lập Blueprints Updater? Nó sẽ quét các blueprint cục bộ của bạn và tìm bản cập nhật.",
+        "description": "Bạn có muốn thiết lập Blueprints Updater? Tích hợp này sẽ quét các blueprint trên máy của bạn và tìm bản cập nhật.",
         "data": {
           "auto_update": "Tự động cập nhật",
+          "verify_on_ha_update": "Kiểm tra tương thích khi nâng cấp Home Assistant",
           "update_interval": "Khoảng thời gian cập nhật (giờ)",
           "filter_mode": "Chế độ lọc",
           "selected_blueprints": "Blueprints (không bắt buộc)",
@@ -14,16 +15,17 @@
       }
     },
     "abort": {
-      "single_instance_allowed": "Chỉ cho phép một thực thể Blueprints Updater duy nhất."
+      "single_instance_allowed": "Chỉ được phép cấu hình một phiên bản Blueprints Updater."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Cài đặt",
-        "description": "Cấu hình các tùy chọn và cài đặt cho Blueprints Updater.",
+        "description": "Tùy chỉnh cấu hình và hành vi của Blueprints Updater.",
         "data": {
           "auto_update": "Tự động cập nhật",
+          "verify_on_ha_update": "Kiểm tra tương thích khi nâng cấp Home Assistant",
           "update_interval": "Khoảng thời gian cập nhật (giờ)",
           "filter_mode": "Chế độ lọc",
           "selected_blueprints": "Blueprints đã chọn",
@@ -36,15 +38,30 @@
     "filter_mode": {
       "options": {
         "all": "Cập nhật tất cả",
-        "whitelist": "Whitelist (Chỉ cập nhật các blueprint trong danh sách)",
-        "blacklist": "Blacklist (Không cập nhật các blueprint trong danh sách)"
+        "whitelist": "Danh sách ưu tiên (Chỉ cập nhật các blueprint được chọn)",
+        "blacklist": "Danh sách loại trừ (Bỏ qua các blueprint được chọn)"
       }
     },
     "repair_risk_action": {
       "options": {
         "proceed": "Tiếp tục cập nhật (tạo bản sao lưu)",
-        "different_url": "Nhập một URL khác",
-        "stop_tracking": "Hủy và ngừng theo dõi"
+        "different_url": "Nhập URL khác",
+        "stop_tracking": "Hủy và dừng theo dõi"
+      }
+    },
+    "repair_incompatible_action": {
+      "options": {
+        "auto_fix": "Xem và áp dụng bản vá tự động (Auto Fix)",
+        "acknowledge": "Đã hiểu và tạm bỏ qua cảnh báo",
+        "change_url": "Chuyển sang bản fork từ cộng đồng",
+        "unpin": "Bỏ ghim để tiếp tục nhận cập nhật từ tác giả gốc"
+      }
+    },
+    "repair_fork_action": {
+      "options": {
+        "proceed": "Tiếp tục cập nhật từ bản fork này",
+        "auto_fix": "Tự sửa lỗi trên máy (Auto Fix)",
+        "different_url": "Nhập URL khác"
       }
     }
   },
@@ -58,11 +75,11 @@
   "services": {
     "reload": {
       "name": "Tải lại blueprints",
-      "description": "Quét tất cả các blueprint cục bộ và kiểm tra bản cập nhật ngay lập tức."
+      "description": "Quét lại toàn bộ blueprint trên máy và kiểm tra bản cập nhật ngay."
     },
     "restore_blueprint": {
       "name": "Khôi phục Blueprint",
-      "description": "Khôi phục lại tệp cấu hình blueprint từ bản sao lưu được đánh số (.bak.1, .bak.2,...) nếu có.",
+      "description": "Khôi phục tệp blueprint từ bản sao lưu tương ứng (.bak.1, .bak.2,...) nếu có.",
       "fields": {
         "entity_id": {
           "name": "Thực thể Blueprint",
@@ -70,79 +87,146 @@
         },
         "version": {
           "name": "Phiên bản sao lưu",
-          "description": "Chọn phiên bản sao lưu muốn khôi phục (1 = mới nhất, 2 = cũ hơn,...)"
+          "description": "Phiên bản sao lưu cần khôi phục (1 = mới nhất, 2 = cũ hơn,...)"
         }
       }
     },
     "update_all": {
       "name": "Cập nhật hàng loạt (Update All)",
-      "description": "Tự động tải về và cài đặt tất cả các bản cập nhật blueprint hiện có cùng một lúc.",
+      "description": "Tự động tải về và cài đặt toàn bộ các bản cập nhật blueprint hiện có.",
       "fields": {
         "backup": {
           "name": "Tạo bản sao lưu",
-          "description": "Tạo bản sao lưu đánh số cho tất cả các blueprint được cập nhật trước khi ghi đè."
+          "description": "Tạo bản sao lưu cho từng blueprint trước khi ghi đè bản cập nhật mới."
         }
       }
     },
     "import_blueprint": {
       "name": "Nhập Blueprint",
-      "description": "Tải xuống và cài đặt một blueprint từ một URL.",
+      "description": "Tải về và cài đặt blueprint từ URL.",
       "fields": {
         "url": {
           "name": "URL của Blueprint",
-          "description": "URL của blueprint. Hỗ trợ liên kết YAML trực tiếp hoặc URL từ GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket."
+          "description": "Đường dẫn URL của blueprint. Hỗ trợ liên kết YAML trực tiếp hoặc URL từ GitHub, GitHub Gist, Cộng đồng Home Assistant, GitLab, Codeberg, Bitbucket."
         },
         "confirm": {
           "name": "Xác nhận nguồn bên ngoài",
-          "description": "Yêu cầu xác nhận khi nhập từ các nguồn bên ngoài/không xác định."
+          "description": "Bắt buộc xác nhận trước khi nhập blueprint từ nguồn bên ngoài hoặc chưa xác minh."
         }
       }
     }
   },
   "issues": {
     "withdrawn_blueprint": {
-      "title": "Nguồn blueprint không còn khả dụng: {name}",
+      "title": "Nguồn blueprint không còn tồn tại: {name}",
       "fix_flow": {
         "step": {
           "init": {
-            "title": "Xử lý Blueprint Đã Bị Rút",
-            "description": "Blueprint {name} ({path}) đã bị gỡ bỏ khỏi {source_url}. Bạn muốn làm gì?",
+            "title": "Xử lý blueprint đã bị gỡ bỏ",
+            "description": "Blueprint {name} ({path}) đã bị xóa hoặc gỡ bỏ khỏi {source_url}. Bạn muốn xử lý như thế nào?",
             "menu_options": {
-              "change_url": "Cập nhật URL nguồn",
-              "stop_tracking": "Giữ bản sao cục bộ và ngừng theo dõi",
-              "delete_blueprint": "Xóa blueprint"
+              "change_url": "Thay đổi URL nguồn",
+              "stop_tracking": "Giữ lại bản cục bộ và dừng theo dõi",
+              "delete_blueprint": "Xóa blueprint này"
             }
           },
           "change_url": {
-            "title": "Cập nhật URL Nguồn",
-            "description": "Nhập URL nguồn mới cho {name} ({path}).",
+            "title": "Thay đổi URL Nguồn",
+            "description": "Nhập URL nguồn mới cho blueprint {name} ({path}).",
             "data": {
-              "url": "URL Blueprint Mới"
+              "url": "URL blueprint mới"
             }
           },
           "confirm_risks": {
-            "title": "Xem xét các thay đổi",
-            "description": "Xem xét các thay đổi cho {name}:\n\n{risk_report}\n\nBạn muốn tiếp tục như thế nào?",
+            "title": "Kiểm tra thay đổi",
+            "description": "Kiểm tra các thay đổi của {name}:\n\n{risk_report}\n\nBạn muốn xử lý như thế nào?",
             "data": {
-              "risk_action": "Hành động"
+              "risk_action": "Tùy chọn xử lý"
             }
           },
           "delete_blueprint": {
             "title": "Xóa Blueprint",
-            "description": "Bạn có chắc chắn muốn xóa {name} ({path})?\n\nĐang được sử dụng bởi {usage_count} thực thể: {entities}.{take_control_tip}",
+            "description": "Bạn có chắc chắn muốn xóa {name} ({path}) không?\n\nBlueprint này đang được dùng bởi {usage_count} thực thể: {entities}.{take_control_tip}",
             "data": {
-              "confirm_delete_in_use": "Tôi hiểu điều này sẽ làm hỏng các tự động hóa/tập lệnh phụ thuộc"
+              "confirm_delete_in_use": "Tôi hiểu việc xóa này sẽ làm gián đoạn các tự động hóa/kịch bản đang dùng"
             }
           }
         },
         "error": {
-          "missing_url": "Bắt buộc phải có URL.",
-          "invalid_url": "URL blueprint không hợp lệ hoặc không thể truy cập.",
-          "confirmation_required": "Cần xác nhận để xóa blueprint đang được sử dụng.",
-          "usage_discovery_failed": "Không thể xác định việc sử dụng blueprint. Vui lòng thử lại."
+          "missing_url": "Vui lòng nhập URL.",
+          "invalid_url": "URL blueprint không hợp lệ hoặc không thể kết nối.",
+          "confirmation_required": "Vui lòng xác nhận trước khi xóa blueprint đang được sử dụng.",
+          "usage_discovery_failed": "Không thể kiểm tra các thực thể đang dùng blueprint này. Vui lòng thử lại."
         },
         "abort": {
-          "missing_issue_data": "Thiếu dữ liệu sự cố blueprint bắt buộc."
+          "missing_issue_data": "Thiếu thông tin sự cố của blueprint."
+        }
+      }
+    },
+    "incompatible_blueprint": {
+      "title": "Blueprint không tương thích với Home Assistant: {name}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Khắc phục blueprint không tương thích",
+            "description": "Blueprint **{name}** (`{path}`) không hoàn toàn tương thích với Home Assistant {ha_version}.\n\n**Chi tiết vấn đề:**\n{error_summary}\n\n**Thực thể bị ảnh hưởng:**\n{affected_entities}\n\n**Tài liệu tham khảo:**\n{resource_links}\n\n**Báo cáo chẩn đoán:**\n```markdown\n{diagnostic_snippet}\n```\n\nBạn muốn xử lý như thế nào?",
+            "menu_options": {
+              "auto_fix": "Xem và áp dụng bản vá tự động (Auto Fix)",
+              "acknowledge": "Đã hiểu và tạm bỏ qua cảnh báo",
+              "change_url": "Chuyển sang bản fork từ cộng đồng",
+              "unpin": "Bỏ ghim để tiếp tục nhận cập nhật từ tác giả gốc"
+            }
+          },
+          "auto_fix": {
+            "title": "Xem trước bản sửa lỗi tự động",
+            "description": "Xem trước các thay đổi đề xuất để tương thích với Home Assistant mới cho **{name}** (`{path}`).\n\n{patch_notice}\n\n```diff\n{diff_text}\n```\n\nKhi áp dụng, hệ thống sẽ tự động tạo bản sao lưu `.bak.1` và ghim blueprint này lại để các bản cập nhật chưa sửa lỗi từ tác giả gốc không ghi đè lên bản vá. Khi tác giả gốc phát hành bản cập nhật chính thức tương thích, blueprint sẽ tự động được bỏ ghim.",
+            "data": {
+              "confirm_apply": "Đồng ý áp dụng các thay đổi trên"
+            }
+          },
+          "acknowledge": {
+            "title": "Bỏ qua cảnh báo tương thích",
+            "description": "Bạn đang tạm bỏ qua cảnh báo không còn tương thích này cho **{name}** (`{path}`).\n\nLưu ý: Cảnh báo này sẽ trở thành lỗi nghiêm trọng làm hỏng tính năng kể từ phiên bản Home Assistant {breaks_in_ha_version}. Hệ thống sẽ tự động đánh giá lại cảnh báo này khi bạn nâng cấp Home Assistant hoặc chỉnh sửa tệp blueprint.",
+            "data": {
+              "confirm_acknowledge": "Tạm thời bỏ qua cảnh báo này"
+            }
+          },
+          "change_url": {
+            "title": "Chuyển sang bản fork từ cộng đồng",
+            "description": "Nhập URL của bản fork cộng đồng đã khắc phục lỗi cho **{name}** (`{path}`).\n\nĐể đảm bảo các tự động hóa hiện có không bị gián đoạn, tệp blueprint vẫn được giữ nguyên tại đường dẫn (`{relative_path}`), chỉ có nguồn theo dõi cập nhật được chuyển sang URL mới.",
+            "data": {
+              "url": "URL bản fork từ cộng đồng"
+            }
+          },
+          "confirm_fork": {
+            "title": "Xác nhận chuyển sang bản fork",
+            "description": "Kiểm tra tính tương thích và các thay đổi của bản fork cho **{name}**:\n\n{fork_notice}\n\n```diff\n{diff_text}\n```",
+            "data": {
+              "fork_action": "Tùy chọn xử lý"
+            }
+          },
+          "unpin": {
+            "title": "Bỏ ghim blueprint",
+            "description": "Bạn có chắc chắn muốn bỏ ghim **{name}** (`{path}`)?\n\nSau khi bỏ ghim, blueprint sẽ tiếp tục theo dõi và nhận cập nhật tự động từ tác giả gốc ({source_url}).",
+            "data": {
+              "confirm_unpin": "Bỏ ghim và tiếp tục theo dõi tác giả gốc"
+            }
+          }
+        },
+        "error": {
+          "missing_url": "Vui lòng nhập URL.",
+          "invalid_url": "URL blueprint không hợp lệ hoặc không thể kết nối.",
+          "fork_breaking_error": "Bản fork này không tương thích với Home Assistant {ha_version}: {error}",
+          "confirmation_required": "Vui lòng xác nhận trước khi tiếp tục.",
+          "unpin_failed": "Không thể bỏ ghim blueprint: {error}"
+        },
+        "abort": {
+          "missing_issue_data": "Thiếu thông tin sự cố của blueprint.",
+          "patch_failed": "Không thể áp dụng bản vá: {error}",
+          "file_changed": "Tệp blueprint đã bị chỉnh sửa trước khi áp dụng bản vá: {error}",
+          "apply_success": "Đã áp dụng bản sửa lỗi và ghim blueprint thành công.",
+          "fork_applied": "Đã chuyển theo dõi sang bản fork thành công.",
+          "unpinned_success": "Đã bỏ ghim blueprint thành công."
         }
       }
     }
@@ -152,16 +236,16 @@
       "message": "Thiếu tham số entity_id."
     },
     "invalid_entity": {
-      "message": "Thực thể cập nhật blueprint không hợp lệ."
+      "message": "Thực thể blueprint không hợp lệ."
     },
     "not_found": {
       "message": "Không tìm thấy tệp blueprint gốc."
     },
     "success": {
-      "message": "Đã khôi phục thành công bản sao lưu."
+      "message": "Đã khôi phục bản sao lưu thành công."
     },
     "missing_backup": {
-      "message": "Không tìm thấy tệp sao lưu. Có thể bản sao lưu đã không được tạo trong lần cập nhật trước."
+      "message": "Không tìm thấy tệp sao lưu. Bản sao lưu có thể chưa được tạo ở lần cập nhật trước."
     },
     "invalid_version": {
       "message": "Phiên bản sao lưu {version} không hợp lệ. Phải nằm trong khoảng từ 1 đến {max_backups}."
@@ -173,79 +257,79 @@
       "message": "Thiếu tham số URL."
     },
     "no_coordinator": {
-      "message": "Không tìm thấy coordinator hoạt động. Vui lòng kiểm tra cài đặt tích hợp."
+      "message": "Không tìm thấy bộ điều phối (coordinator) đang hoạt động. Vui lòng kiểm tra lại cấu hình tích hợp."
     },
     "confirmation_required": {
-      "message": "Nhập từ nguồn bên ngoài yêu cầu xác nhận rõ ràng. Vui lòng tích chọn 'Xác nhận'."
+      "message": "Cần xác nhận rõ ràng khi nhập blueprint từ nguồn bên ngoài. Vui lòng đánh dấu vào ô 'Xác nhận'."
     },
     "unsupported_source": {
-      "message": "Nguồn không được hỗ trợ. Chỉ hỗ trợ GitHub, GitHub Gist, Home Assistant Community, GitLab, Codeberg, Bitbucket và các liên kết YAML trực tiếp."
+      "message": "Nguồn không được hỗ trợ. Chỉ hỗ trợ GitHub, GitHub Gist, Cộng đồng Home Assistant, GitLab, Codeberg, Bitbucket và các liên kết YAML trực tiếp."
     },
     "import_path_conflict": {
-      "message": "Một blueprint với tên này đã tồn tại từ một nguồn khác ({existing_url}). Vui lòng xóa nó trước để tránh xung đột."
+      "message": "Đã tồn tại một blueprint trùng tên từ nguồn khác ({existing_url}). Vui lòng xóa blueprint cũ trước để tránh xung đột."
     },
     "invalid_content_type": {
-      "message": "Loại nội dung không hợp lệ: {content_type}. Yêu cầu text/plain hoặc YAML."
+      "message": "Định dạng nội dung không hợp lệ: {content_type}. Yêu cầu text/plain hoặc YAML."
     },
     "invalid_yaml": {
-      "message": "Tệp được nhập không phải là một blueprint YAML hợp lệ."
+      "message": "Tệp tải về không phải là blueprint YAML hợp lệ."
     },
     "empty_blueprint_content": {
-      "message": "Nội dung nhận được bị trống"
+      "message": "Nội dung blueprint tải về bị trống."
     },
     "fetch_blueprint_error": {
-      "message": "Lỗi tải xuống: {error}"
+      "message": "Lỗi khi tải blueprint: {error}"
     },
     "unsafe_blueprint_url": {
       "message": "URL không an toàn: {url}"
     },
     "unsafe_blueprint_path": {
-      "message": "Đường dẫn mục tiêu không an toàn: {path}"
+      "message": "Đường dẫn lưu tệp không an toàn: {path}"
     },
     "blueprint_validation_error": {
-      "message": "Lỗi xác thực: {error}"
+      "message": "Lỗi xác thực blueprint: {error}"
     },
     "import_invalid_source_type": {
-      "message": "Kiểu dữ liệu source_url không hợp lệ: {type}. Yêu cầu một chuỗi ký tự (string)."
+      "message": "Định dạng source_url không hợp lệ: {type}. Giá trị phải là một chuỗi văn bản (string)."
     }
   },
   "common": {
-    "auto_update_title": "Blueprints Updater: Vừa tự động cập nhật",
-    "auto_update_message": "Các blueprint sau đã được tự động cập nhật:\n\n{blueprints}",
-    "update_available_short": "Có bản cập nhật",
+    "auto_update_title": "Blueprints Updater: Đã tự động cập nhật",
+    "auto_update_message": "Các blueprint sau vừa được tự động cập nhật:\n\n{blueprints}",
+    "update_available_short": "Có bản cập nhật mới",
     "update_available": "Có bản cập nhật mới từ {source_url}",
-    "update_safety_message": "Lưu ý: Khuyến nghị bạn nên bật tùy chọn sao lưu trước khi cài đặt để đảm bảo có thể khôi phục phiên bản cũ nếu cần thiết.",
-    "backup_automatic_notice": "Lưu ý an toàn: Bản sao lưu cục bộ sẽ được tạo tự động trước khi cập nhật để đảm bảo bạn có thể khôi phục nếu cần.",
-    "usage_warning": "Cảnh báo: Bản cập nhật này sẽ ảnh hưởng đến [{count} {domain} đang chạy]({usage_url}).",
-    "up_to_date": "Đã là bản mới nhất",
-    "install_error": "Không thể cài đặt blueprint: {error}. Tệp từ xa có lỗi và không thể áp dụng an toàn.",
-    "invalid_blueprint": "Blueprint không hợp lệ: Thiếu khóa 'blueprint' gốc",
+    "update_safety_message": "Khuyến nghị an toàn: Bạn nên bật tính năng sao lưu trước khi cập nhật để có thể khôi phục lại khi cần thiết.",
+    "backup_automatic_notice": "Lưu ý an toàn: Hệ thống sẽ tự động tạo bản sao lưu cục bộ trước khi cập nhật để bạn có thể khôi phục lại bất kỳ lúc nào.",
+    "usage_warning": "Cảnh báo: Bản cập nhật này sẽ ảnh hưởng đến [{count} {domain} đang hoạt động]({usage_url}).",
+    "up_to_date": "Đang ở bản mới nhất",
+    "install_error": "Không thể cài đặt blueprint: {error}. Tệp nguồn có lỗi nên không thể áp dụng an toàn.",
+    "invalid_blueprint": "Blueprint không hợp lệ: Thiếu trường 'blueprint' gốc.",
     "incompatible": "Không tương thích: {errors}",
     "validation_error": "Lỗi xác thực: {error}",
-    "empty_content": "Nội dung nhận được bị trống",
+    "empty_content": "Nội dung tải về bị trống",
     "yaml_syntax_error": "Lỗi cú pháp YAML: {error}",
-    "fetch_error": "Lỗi tải xuống: {error}",
+    "fetch_error": "Lỗi khi tải về: {error}",
     "processing_error": "Lỗi xử lý: {error}",
     "auto_update_failed": "Tự động cập nhật thất bại: {error}",
     "unsafe_url": "URL không an toàn: {url}",
-    "unsafe_path": "Đường dẫn mục tiêu không an toàn: {path}",
-    "content_missing": "Nội dung blueprint bị thiếu hoặc không thể tải xuống",
-    "git_diff_title": "Mã nguồn thay đổi (Git Diff)",
-    "semantic_sync_notice": "Bản blueprint này giống hệt về mặt logic, nhưng cần cập nhật cấu trúc để đồng bộ với định dạng chuẩn mới (ví dụ: chuẩn hóa xuống dòng, bổ sung metadata).",
-    "breaking_risks_title": "[CẢNH BÁO] NGUY CƠ GÂY MẤT TƯƠNG THÍCH",
-    "auto_update_blocked_by_breaking_change": "Tự động cập nhật cho {name} bị chặn do phát hiện nguy cơ gây mất tương thích",
-    "risk_new_mandatory": "Tham số bắt buộc mới {input} vừa được thêm vào.",
+    "unsafe_path": "Đường dẫn lưu tệp không an toàn: {path}",
+    "content_missing": "Nội dung blueprint bị thiếu hoặc không thể tải về",
+    "git_diff_title": "Nội dung thay đổi (Git Diff)",
+    "semantic_sync_notice": "Bản blueprint này tương đương về mặt logic nhưng cần cập nhật cấu trúc để chuẩn hóa theo định dạng mới (như chuẩn hóa ngắt dòng, bổ sung metadata).",
+    "breaking_risks_title": "[CẢNH BÁO] NGUY CƠ GÂY LỖI KHÔNG TƯƠNG THÍCH",
+    "auto_update_blocked_by_breaking_change": "Đã tạm dừng tự động cập nhật {name} do phát hiện thay đổi có thể gây xung đột",
+    "risk_new_mandatory": "Đã bổ sung thêm tham số bắt buộc mới: {input}.",
     "risk_missing_input": "Thực thể {entity} đang thiếu tham số bắt buộc {input} mà phiên bản mới yêu cầu.",
-    "risk_removed_input": "Tham số {input} đã bị xóa, nhưng hiện đang được sử dụng bởi {count} thực thể.",
-    "risk_selector_mismatch": "Kiểu selector đã thay đổi cho {input}: từ {old_type} sang {new_type} (ảnh hưởng {count} thực thể).",
-    "risk_selector_config_changed": "Tùy chọn/bộ lọc selector đã thay đổi cho {input} (selector {type}) (ảnh hưởng {count} thực thể).",
+    "risk_removed_input": "Tham số {input} đã bị xóa nhưng vẫn đang được {count} thực thể sử dụng.",
+    "risk_selector_mismatch": "Kiểu selector của {input} đã thay đổi: từ {old_type} sang {new_type} (ảnh hưởng đến {count} thực thể).",
+    "risk_selector_config_changed": "Bộ lọc/tùy chọn của selector {input} ({type}) đã thay đổi (ảnh hưởng đến {count} thực thể).",
     "risk_validation_failed_blueprint": "Nội dung blueprint mới không hợp lệ: {error}",
-    "risk_unknown": "Rủi ro không xác định",
+    "risk_unknown": "Nguy cơ không xác định",
     "risk_compatibility": "Lỗi tương thích cho {entity}: {error}",
     "risk_system_error": "Lỗi hệ thống: {error}",
-    "breaking_risks_report": "Tự động cập nhật cho {name} đã bị chặn để đảm bảo an toàn. Các rủi ro phát hiện được:\n{risks}\n\nVui lòng xem xét và cài đặt thủ công nếu thấy đúng.",
-    "auto_update_blocked_by_system_error": "Tự động cập nhật cho {name} đã bị tạm dừng do lỗi phát sinh ngoài dự kiến khi kiểm tra tương thích.",
-    "withdrawn_blueprint_error": "Nguồn blueprint không còn khả dụng: {error}",
-    "take_control_tip": "Mẹo: Bạn có thể sử dụng 'Lấy quyền kiểm soát' (Take control) cho các tự động hóa, tập lệnh hoặc thực thể template đang phụ thuộc vào blueprint này để chuyển chúng thành cấu hình cục bộ trước khi xóa."
+    "breaking_risks_report": "Đã tạm dừng tự động cập nhật cho {name} để đảm bảo an toàn do phát hiện các nguy cơ sau:\n{risks}\n\nVui lòng kiểm tra và cài đặt thủ công nếu muốn tiếp tục.",
+    "auto_update_blocked_by_system_error": "Đã tạm dừng tự động cập nhật cho {name} do phát sinh lỗi ngoài ý muốn trong quá trình kiểm tra tương thích.",
+    "withdrawn_blueprint_error": "Nguồn blueprint không còn tồn tại: {error}",
+    "take_control_tip": "Mẹo: Bạn có thể chọn 'Lấy quyền kiểm soát' (Take control) trên các tự động hóa, kịch bản hoặc thực thể template phụ thuộc để chuyển chúng thành cấu hình độc lập trước khi xóa blueprint."
   }
 }

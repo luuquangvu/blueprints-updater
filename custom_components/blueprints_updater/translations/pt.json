@@ -6,6 +6,7 @@
         "description": "Deseja configurar o Blueprints Updater? Ele irá verificar seus blueprints locais e procurar por atualizações.",
         "data": {
           "auto_update": "Ativar atualização automática",
+          "verify_on_ha_update": "Verificar compatibilidade na atualização do Home Assistant",
           "update_interval": "Intervalo de atualização (horas)",
           "filter_mode": "Modo de filtro",
           "selected_blueprints": "Blueprints (opcional)",
@@ -24,6 +25,7 @@
         "description": "Configure o comportamento e as definições do Blueprints Updater.",
         "data": {
           "auto_update": "Ativar atualização automática",
+          "verify_on_ha_update": "Verificar compatibilidade na atualização do Home Assistant",
           "update_interval": "Intervalo de atualização (horas)",
           "filter_mode": "Modo de filtro",
           "selected_blueprints": "Blueprints selecionados",
@@ -45,6 +47,21 @@
         "proceed": "Continuar com a atualização (criar cópia de segurança)",
         "different_url": "Introduzir um URL diferente",
         "stop_tracking": "Cancelar e parar de monitorizar"
+      }
+    },
+    "repair_incompatible_action": {
+      "options": {
+        "auto_fix": "Rever e aplicar correção automática (Auto Fix)",
+        "acknowledge": "Dispensar este aviso por agora",
+        "change_url": "Mudar para um fork da comunidade",
+        "unpin": "Desafixar blueprint e seguir autor original"
+      }
+    },
+    "repair_fork_action": {
+      "options": {
+        "proceed": "Continuar com a atualização a partir deste fork",
+        "auto_fix": "Aplicar correção automática local",
+        "different_url": "Introduzir um URL diferente"
       }
     }
   },
@@ -124,7 +141,7 @@
             "title": "Rever alterações",
             "description": "Reveja as alterações para {name}:\n\n{risk_report}\n\nComo deseja proceder?",
             "data": {
-              "risk_action": "Ação"
+              "risk_action": "Opções de ação"
             }
           },
           "delete_blueprint": {
@@ -143,6 +160,73 @@
         },
         "abort": {
           "missing_issue_data": "Faltam dados necessários do problema do blueprint."
+        }
+      }
+    },
+    "incompatible_blueprint": {
+      "title": "Blueprint incompatível com o Home Assistant: {name}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Resolver blueprint incompatível",
+            "description": "O blueprint **{name}** (`{path}`) não é totalmente compatível com o Home Assistant {ha_version}.\n\n**Detalhes do problema:**\n{error_summary}\n\n**Entidades afetadas:**\n{affected_entities}\n\n**Recursos e documentação:**\n{resource_links}\n\n**Relatório de diagnóstico:**\n```markdown\n{diagnostic_snippet}\n```\n\nComo deseja proceder?",
+            "menu_options": {
+              "auto_fix": "Rever e aplicar correção automática (Auto Fix)",
+              "acknowledge": "Dispensar este aviso por agora",
+              "change_url": "Mudar para um fork da comunidade",
+              "unpin": "Desafixar blueprint e seguir autor original"
+            }
+          },
+          "auto_fix": {
+            "title": "Pré-visualizar correção automática",
+            "description": "Reveja as alterações propostas para **{name}** (`{path}`).\n\n{patch_notice}\n\n```diff\n{diff_text}\n```\n\nA aplicação desta correção criará uma cópia de segurança (.bak.1) e fixará este blueprint para evitar que atualizações com problemas substituam a sua correção. Quando o autor original publicar uma versão compatível oficial, o blueprint será desafixado automaticamente.",
+            "data": {
+              "confirm_apply": "Aplicar estas alterações"
+            }
+          },
+          "acknowledge": {
+            "title": "Dispensar aviso de compatibilidade",
+            "description": "Está a dispensar temporariamente este aviso para **{name}** (`{path}`).\n\nNota: este aviso passará a ser um erro impeditivo a partir do Home Assistant {breaks_in_ha_version}. A compatibilidade será verificada novamente ao atualizar o Home Assistant ou ao editar o ficheiro.",
+            "data": {
+              "confirm_acknowledge": "Dispensar este aviso por agora"
+            }
+          },
+          "change_url": {
+            "title": "Mudar para fork da comunidade",
+            "description": "Introduza o URL de um fork atualizado da comunidade para **{name}** (`{path}`).\n\nPara não interromper as automações existentes, o blueprint permanecerá no seu caminho atual (`{relative_path}`), e as futuras atualizações seguirão o novo URL.",
+            "data": {
+              "url": "URL do fork da comunidade"
+            }
+          },
+          "confirm_fork": {
+            "title": "Confirmar mudança para fork",
+            "description": "Reveja a compatibilidade e as alterações do fork para **{name}**:\n\n{fork_notice}\n\n```diff\n{diff_text}\n```",
+            "data": {
+              "fork_action": "Opções de ação"
+            }
+          },
+          "unpin": {
+            "title": "Desafixar blueprint",
+            "description": "Tem a certeza de que deseja desafixar **{name}** (`{path}`)?\n\nO blueprint voltará a receber atualizações automáticas do autor original ({source_url}).",
+            "data": {
+              "confirm_unpin": "Desafixar e retomar atualizações do autor original"
+            }
+          }
+        },
+        "error": {
+          "missing_url": "O URL é obrigatório.",
+          "invalid_url": "URL do blueprint inválido ou inacessível.",
+          "fork_breaking_error": "Este fork não é compatível com o Home Assistant {ha_version}: {error}",
+          "confirmation_required": "Assinale a caixa de confirmação para continuar.",
+          "unpin_failed": "Não foi possível desafixar o blueprint: {error}"
+        },
+        "abort": {
+          "missing_issue_data": "Faltam dados necessários do problema do blueprint.",
+          "patch_failed": "Falha ao aplicar a correção: {error}",
+          "file_changed": "O ficheiro do blueprint foi modificado antes de aplicar a correção: {error}",
+          "apply_success": "Correção aplicada com sucesso e blueprint fixado.",
+          "fork_applied": "Monitorização do blueprint mudada para o fork com sucesso.",
+          "unpinned_success": "Blueprint desafixado com sucesso."
         }
       }
     }
@@ -243,7 +327,7 @@
     "risk_unknown": "Risco desconhecido",
     "risk_compatibility": "Erro de compatibilidade para {entity}: {error}",
     "risk_system_error": "Erro do sistema: {error}",
-    "breaking_risks_report": "A atualização automática para {name} foi bloqueada por precaução. Riscos detetados:\n{risks}\n\nPor favor, reveja e instale manualmente se estiver correto.",
+    "breaking_risks_report": "A atualização automática para {name} foi bloqueada por precaução. Riscos detetados:\n{risks}\n\nReveja as alterações e instale manualmente se pretender continuar.",
     "auto_update_blocked_by_system_error": "Atualização automática de {name} suspensa devido a um erro inesperado na verificação de compatibilidade.",
     "withdrawn_blueprint_error": "Origem do blueprint já não está disponível: {error}",
     "take_control_tip": "Dica: Pode utilizar 'Assumir o controlo' (Take Control) nas automações, scripts ou entidades de template que dependem deste blueprint para torná-los locais antes de o eliminar."

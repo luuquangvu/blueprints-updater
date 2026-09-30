@@ -6,6 +6,7 @@
         "description": "Vill du konfigurera Blueprints Updater? Den kommer att skanna dina lokala blueprints och leta efter uppdateringar.",
         "data": {
           "auto_update": "Aktivera automatisk uppdatering",
+          "verify_on_ha_update": "Verifiera kompatibilitet vid Home Assistant-uppdatering",
           "update_interval": "Uppdateringsintervall (timmar)",
           "filter_mode": "Filterläge",
           "selected_blueprints": "Blueprints (valfritt)",
@@ -24,6 +25,7 @@
         "description": "Konfigurera beteende och inställningar för Blueprints Updater.",
         "data": {
           "auto_update": "Aktivera automatisk uppdatering",
+          "verify_on_ha_update": "Verifiera kompatibilitet vid Home Assistant-uppdatering",
           "update_interval": "Uppdateringsintervall (timmar)",
           "filter_mode": "Filterläge",
           "selected_blueprints": "Valda Blueprints",
@@ -45,6 +47,21 @@
         "proceed": "Fortsätt med uppdatering (skapa säkerhetskopia)",
         "different_url": "Ange en annan webbadress",
         "stop_tracking": "Avbryt och sluta spåra"
+      }
+    },
+    "repair_incompatible_action": {
+      "options": {
+        "auto_fix": "Granska och tillämpa automatisk korrigering (Autofix)",
+        "acknowledge": "Avfärda denna varning tills vidare",
+        "change_url": "Byt till en gemenskapsfork",
+        "unpin": "Ta bort nålning och följ originalkällan"
+      }
+    },
+    "repair_fork_action": {
+      "options": {
+        "proceed": "Fortsätt med uppdatering från denna fork",
+        "auto_fix": "Tillämpa lokal Autofix istället",
+        "different_url": "Ange en annan webbadress"
       }
     }
   },
@@ -124,7 +141,7 @@
             "title": "Granska ändringar",
             "description": "Granska ändringarna för {name}:\n\n{risk_report}\n\nHur vill du gå vidare?",
             "data": {
-              "risk_action": "Åtgärd"
+              "risk_action": "Åtgärdsval"
             }
           },
           "delete_blueprint": {
@@ -143,6 +160,73 @@
         },
         "abort": {
           "missing_issue_data": "Obligatorisk information om blueprint-problemet saknas."
+        }
+      }
+    },
+    "incompatible_blueprint": {
+      "title": "Blueprint inte kompatibel med Home Assistant: {name}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Åtgärda inkompatibel blueprint",
+            "description": "Blueprinten **{name}** (`{path}`) är inte helt kompatibel med Home Assistant {ha_version}.\n\n**Information om problemet:**\n{error_summary}\n\n**Påverkade entiteter:**\n{affected_entities}\n\n**Resurser och dokumentation:**\n{resource_links}\n\n**Diagnostisk rapport:**\n```markdown\n{diagnostic_snippet}\n```\n\nHur vill du gå vidare?",
+            "menu_options": {
+              "auto_fix": "Granska och tillämpa automatisk korrigering (Autofix)",
+              "acknowledge": "Avfärda denna varning tills vidare",
+              "change_url": "Byt till en gemenskapsfork",
+              "unpin": "Ta bort nålning och följ originalkällan"
+            }
+          },
+          "auto_fix": {
+            "title": "Förhandsgranska automatisk korrigering",
+            "description": "Granska de föreslagna ändringarna för **{name}** (`{path}`).\n\n{patch_notice}\n\n```diff\n{diff_text}\n```\n\nNär du tillämpar korrigeringen skapas en säkerhetskopia (.bak.1) och blueprinten nålas så att trasiga uppdateringar från originalkällan inte skriver över din ändring. När originalförfattaren släpper en officiell kompatibel uppdatering tas nålningen bort automatiskt.",
+            "data": {
+              "confirm_apply": "Tillämpa dessa ändringar"
+            }
+          },
+          "acknowledge": {
+            "title": "Avfärda kompatibilitetsvarning",
+            "description": "Du avfärdar tillfälligt denna varning för **{name}** (`{path}`).\n\nObservera: Denna varning blir ett kritiskt fel från och med Home Assistant {breaks_in_ha_version}. Kompatibiliteten kontrolleras automatiskt igen när du uppdaterar Home Assistant eller redigerar blueprint-filen.",
+            "data": {
+              "confirm_acknowledge": "Avfärda denna varning tills vidare"
+            }
+          },
+          "change_url": {
+            "title": "Byt till gemenskapsfork",
+            "description": "Ange webbadressen till en uppdaterad gemenskapsfork för **{name}** (`{path}`).\n\nFör att befintliga automationer ska fungera utan avbrott förblir blueprinten på sin nuvarande sökväg (`{relative_path}`), medan framtida uppdateringar hämtas från den nya webbadressen.",
+            "data": {
+              "url": "Webbadress till gemenskapsfork"
+            }
+          },
+          "confirm_fork": {
+            "title": "Bekräfta byte till fork",
+            "description": "Granska forkens kompatibilitet och ändringar för **{name}**:\n\n{fork_notice}\n\n```diff\n{diff_text}\n```",
+            "data": {
+              "fork_action": "Åtgärdsval"
+            }
+          },
+          "unpin": {
+            "title": "Ta bort nålning för blueprint",
+            "description": "Är du säker på att du vill ta bort nålningen för **{name}** (`{path}`)?\n\nBlueprinten kommer återigen att ta emot automatiska uppdateringar från originalförfattaren ({source_url}).",
+            "data": {
+              "confirm_unpin": "Ta bort nålning och återuppta uppdateringar från originalkällan"
+            }
+          }
+        },
+        "error": {
+          "missing_url": "Webbadress krävs.",
+          "invalid_url": "Ogiltig eller onåbar blueprint-URL.",
+          "fork_breaking_error": "Denna fork är inte kompatibel med Home Assistant {ha_version}: {error}",
+          "confirmation_required": "Markera bekräftelserutan för att fortsätta.",
+          "unpin_failed": "Det gick inte att ta bort nålningen: {error}"
+        },
+        "abort": {
+          "missing_issue_data": "Obligatorisk information om blueprint-problemet saknas.",
+          "patch_failed": "Det gick inte att tillämpa korrigeringen: {error}",
+          "file_changed": "Blueprint-filen ändrades innan korrigeringen kunde tillämpas: {error}",
+          "apply_success": "Korrigeringen har tillämpats och blueprinten har nålats.",
+          "fork_applied": "Spårning av blueprint har bytts till fork.",
+          "unpinned_success": "Blueprinten är inte längre nålad."
         }
       }
     }
@@ -243,7 +327,7 @@
     "risk_unknown": "Okänd risk",
     "risk_compatibility": "Kompatibilitetsfel för {entity}: {error}",
     "risk_system_error": "Systemfel: {error}",
-    "breaking_risks_report": "Automatisk uppdatering för {name} blockerades som en försiktighetsåtgärd. Upptäckta risker:\n{risks}\n\nGranska och installera manuellt om det är korrekt.",
+    "breaking_risks_report": "Automatisk uppdatering för {name} blockerades som en försiktighetsåtgärd. Upptäckta risker:\n{risks}\n\nGranska ändringarna och installera manuellt om du vill fortsätta.",
     "auto_update_blocked_by_system_error": "Automatisk uppdatering för {name} har pausats på grund av ett oväntat fel vid kompatibilitetskontrollen.",
     "withdrawn_blueprint_error": "Blueprint-källan är inte längre tillgänglig: {error}",
     "take_control_tip": "Tips: Du kan använda 'Ta över kontrollen' (Take Control) på automationer, skript eller mallentiteter som är beroende av denna blueprint för att göra dem lokala innan du tar bort den."
