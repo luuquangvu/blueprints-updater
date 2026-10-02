@@ -3,9 +3,10 @@
     "step": {
       "user": {
         "title": "设置 Blueprints Updater",
-        "description": "您想设置 Blueprints Updater 吗？它将扫描您的本地蓝图并检查更新。",
+        "description": "您是否要设置 Blueprints Updater？该集成将扫描您本地的蓝图并自动检查更新。",
         "data": {
           "auto_update": "启用自动更新",
+          "verify_on_ha_update": "Home Assistant 更新时检查蓝图兼容性",
           "update_interval": "更新间隔（小时）",
           "filter_mode": "过滤模式",
           "selected_blueprints": "蓝图（可选）",
@@ -14,16 +15,17 @@
       }
     },
     "abort": {
-      "single_instance_allowed": "只允许运行一个 Blueprints Updater 实例。"
+      "single_instance_allowed": "只允许配置一个 Blueprints Updater 实例。"
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "设置",
-        "description": "配置 Blueprints Updater 的行为和设置。",
+        "description": "自定义 Blueprints Updater 的运行配置与选项。",
         "data": {
           "auto_update": "启用自动更新",
+          "verify_on_ha_update": "Home Assistant 更新时检查蓝图兼容性",
           "update_interval": "更新间隔（小时）",
           "filter_mode": "过滤模式",
           "selected_blueprints": "已选蓝图",
@@ -35,16 +37,31 @@
   "selector": {
     "filter_mode": {
       "options": {
-        "all": "更新全部",
-        "whitelist": "白名单（仅更新所选蓝图）",
-        "blacklist": "黑名单（不更新所选蓝图）"
+        "all": "全部更新",
+        "whitelist": "白名单模式（仅更新所选蓝图）",
+        "blacklist": "黑名单模式（排除所选蓝图）"
       }
     },
     "repair_risk_action": {
       "options": {
-        "proceed": "继续更新（创建备份）",
-        "different_url": "输入其他 URL",
+        "proceed": "继续更新（自动创建备份）",
+        "different_url": "更换其他 URL",
         "stop_tracking": "取消并停止跟踪"
+      }
+    },
+    "repair_incompatible_action": {
+      "options": {
+        "auto_fix": "查看并应用自动修复补丁 (Auto Fix)",
+        "acknowledge": "已了解并忽略此警告",
+        "change_url": "切换至社区修复分支 (Fork)",
+        "unpin": "取消锁定并恢复原作者更新"
+      }
+    },
+    "repair_fork_action": {
+      "options": {
+        "proceed": "继续从该分支更新",
+        "auto_fix": "改用本地自动修复 (Auto Fix)",
+        "different_url": "更换其他 URL"
       }
     }
   },
@@ -58,29 +75,29 @@
   "services": {
     "reload": {
       "name": "重新加载蓝图",
-      "description": "扫描所有本地蓝图以查找新文件并立即检查更新。"
+      "description": "重新扫描本地所有蓝图文件并立即检查更新。"
     },
     "restore_blueprint": {
       "name": "还原蓝图",
-      "description": "如果可用，从编号的备份文件（.bak.1、.bak.2 等）中还原蓝图。",
+      "description": "从历史备份文件（.bak.1、.bak.2 等）中还原蓝图。",
       "fields": {
         "entity_id": {
           "name": "蓝图实体",
-          "description": "您要还原的蓝图的更新实体。"
+          "description": "要还原的蓝图所对应的更新实体。"
         },
         "version": {
           "name": "备份版本",
-          "description": "要还原哪个备份版本（1 = 最新，2 = 较旧等）"
+          "description": "要还原的备份版本（1 = 最新备份，2 = 更早的备份等）。"
         }
       }
     },
     "update_all": {
-      "name": "更新所有蓝图",
-      "description": "自动同时下载并安装所有可用的蓝图更新。",
+      "name": "一键全部更新",
+      "description": "自动下载并同时安装所有可用的蓝图更新。",
       "fields": {
         "backup": {
           "name": "创建备份",
-          "description": "在覆盖之前为所有更新的蓝图创建编号的备份文件。"
+          "description": "在覆盖前为所有待更新的蓝图创建编号备份。"
         }
       }
     },
@@ -94,55 +111,122 @@
         },
         "confirm": {
           "name": "确认外部来源",
-          "description": "确认从外部/未验证的来源导入所需的确认。"
+          "description": "从外部或未验证来源导入蓝图时需勾选此项确认。"
         }
       }
     }
   },
   "issues": {
     "withdrawn_blueprint": {
-      "title": "蓝图源不再可用：{name}",
+      "title": "蓝图源已失效：{name}",
       "fix_flow": {
         "step": {
           "init": {
-            "title": "处理已撤回的蓝图",
-            "description": "蓝图“{name}”（{path}）已从 {source_url} 撤回。您想如何操作？",
+            "title": "处理已下线的蓝图",
+            "description": "蓝图“{name}”（{path}）已从原源地址（{source_url}）移除。请选择处理方式：",
             "menu_options": {
-              "change_url": "更新源 URL",
-              "stop_tracking": "保留本地副本并停止跟踪",
-              "delete_blueprint": "删除蓝图"
+              "change_url": "更换源 URL",
+              "stop_tracking": "保留本地文件并停止跟踪",
+              "delete_blueprint": "删除此蓝图"
             }
           },
           "change_url": {
-            "title": "更新源 URL",
-            "description": "为“{name}”（{path}）输入新的源 URL。",
+            "title": "更换源 URL",
+            "description": "请输入“{name}”（{path}）的新源地址。",
             "data": {
               "url": "新蓝图 URL"
             }
           },
           "confirm_risks": {
-            "title": "查看更改",
-            "description": "查看 {name} 的更改：\n\n{risk_report}\n\n您希望如何继续？",
+            "title": "检查变更内容",
+            "description": "检查 {name} 的更新变更：\n\n{risk_report}\n\n请选择后续处理方式：",
             "data": {
-              "risk_action": "操作"
+              "risk_action": "处理方式"
             }
           },
           "delete_blueprint": {
             "title": "删除蓝图",
             "description": "确定要删除“{name}”（{path}）吗？\n\n当前正被 {usage_count} 个实体使用：{entities}。{take_control_tip}",
             "data": {
-              "confirm_delete_in_use": "我了解这将破坏依赖此蓝图的自动化/脚本"
+              "confirm_delete_in_use": "我已知悉删除后将导致依赖此蓝图的自动化或脚本失效"
             }
           }
         },
         "error": {
-          "missing_url": "URL 为必填项。",
+          "missing_url": "请输入 URL。",
           "invalid_url": "蓝图 URL 无效或无法访问。",
-          "confirmation_required": "删除使用中的蓝图需要确认。",
-          "usage_discovery_failed": "无法确定蓝图使用情况。请重试。"
+          "confirmation_required": "删除正在使用的蓝图前必须勾选确认。",
+          "usage_discovery_failed": "无法获取蓝图使用情况，请重试。"
         },
         "abort": {
-          "missing_issue_data": "缺少必需的蓝图问题数据。"
+          "missing_issue_data": "缺少必要的问题诊断数据。"
+        }
+      }
+    },
+    "incompatible_blueprint": {
+      "title": "蓝图与 Home Assistant 不兼容：{name}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "处理不兼容蓝图",
+            "description": "蓝图 **{name}**（`{path}`）与当前 Home Assistant {ha_version} 存在兼容性问题。\n\n**问题详情：**\n{error_summary}\n\n**受影响实体：**\n{affected_entities}\n\n**参考资料：**\n{resource_links}\n\n**诊断报告：**\n```markdown\n{diagnostic_snippet}\n```\n\n请选择后续处理方式：",
+            "menu_options": {
+              "auto_fix": "查看并应用自动修复补丁 (Auto Fix)",
+              "acknowledge": "已了解并忽略此警告",
+              "change_url": "切换至社区修复分支 (Fork)",
+              "unpin": "取消锁定并恢复原作者更新"
+            }
+          },
+          "auto_fix": {
+            "title": "预览自动修复补丁",
+            "description": "查看为 **{name}**（`{path}`）生成的兼容性修改建议。\n\n{patch_notice}\n\n```diff\n{diff_text}\n```\n\n应用修复后，系统将自动创建 `.bak.1` 备份并锁定该蓝图，避免存在兼容问题的上游更新覆盖本地修复。当原作者发布官方兼容更新时，系统将自动解除锁定。",
+            "data": {
+              "confirm_apply": "确认应用上述修改"
+            }
+          },
+          "acknowledge": {
+            "title": "忽略兼容性警告",
+            "description": "您正在忽略 **{name}**（`{path}`）的弃用警告。\n\n自 Home Assistant {breaks_in_ha_version} 起，该问题将变成破坏性错误导致功能失效。升级 Home Assistant 或修改该蓝图文件时，系统将重新检测此问题。",
+            "data": {
+              "confirm_acknowledge": "暂时忽略此警告"
+            }
+          },
+          "change_url": {
+            "title": "切换至社区分支 (Fork)",
+            "description": "请输入已修复此问题的社区分支 URL。\n\n为确保现有自动化不受影响，蓝图在本地文件系统中的路径（`{relative_path}`）保持不变，仅更新源切换为新 URL。",
+            "data": {
+              "url": "社区分支 URL"
+            }
+          },
+          "confirm_fork": {
+            "title": "确认切换分支",
+            "description": "检查社区分支针对 **{name}** 的兼容性与代码差异：\n\n{fork_notice}\n\n```diff\n{diff_text}\n```",
+            "data": {
+              "fork_action": "处理方式"
+            }
+          },
+          "unpin": {
+            "title": "解除蓝图锁定",
+            "description": "确定要解除 **{name}**（`{path}`）的锁定状态吗？\n\n解除后将恢复跟踪原作者更新（{source_url}）并允许自动更新。",
+            "data": {
+              "confirm_unpin": "解除锁定并恢复跟踪原作者"
+            }
+          }
+        },
+        "error": {
+          "missing_url": "请输入 URL。",
+          "invalid_url": "蓝图 URL 无效或无法访问。",
+          "fork_breaking_error": "该分支未通过 Home Assistant {ha_version} 的兼容性验证：{error}",
+          "confirmation_required": "请勾选确认后再继续。",
+          "unpin_failed": "解除蓝图锁定失败：{error}"
+        },
+        "abort": {
+          "missing_issue_data": "缺少必要的问题诊断数据。",
+          "patch_failed": "应用修复补丁失败：{error}",
+          "file_changed": "蓝图文件在应用补丁前已被修改：{error}",
+          "apply_success": "修复补丁应用成功，已自动锁定蓝图以提供保护。",
+          "fork_applied": "已成功切换跟踪到社区分支。",
+          "unpinned_success": "已成功解除蓝图锁定。"
         }
       }
     }
@@ -173,16 +257,16 @@
       "message": "缺少 URL 参数。"
     },
     "no_coordinator": {
-      "message": "未找到活跃的协调器。请检查集成设置。"
+      "message": "未找到运行中的数据协调器，请检查集成配置。"
     },
     "confirmation_required": {
-      "message": "从外部来源导入需要明确确认。请勾选“确认”框。"
+      "message": "从外部来源导入需要确认，请勾选“确认”复选框。"
     },
     "unsupported_source": {
-      "message": "不支持的来源。仅支持 GitHub、GitHub Gist、Home Assistant Community、GitLab、Codeberg、Bitbucket 和直接 YAML 链接。"
+      "message": "不支持的来源。仅支持 GitHub、GitHub Gist、Home Assistant 社区、GitLab、Codeberg、Bitbucket 以及直接 YAML 链接。"
     },
     "import_path_conflict": {
-      "message": "具有此名称的蓝图已从其他来源 ({existing_url}) 存在。请先将其删除以避免冲突。"
+      "message": "已存在来自其他来源（{existing_url}）的同名蓝图。请先将其删除以避免冲突。"
     },
     "invalid_content_type": {
       "message": "无效的内容类型：{content_type}。应为 text/plain 或 YAML。"
@@ -191,10 +275,10 @@
       "message": "导入的文件不是有效的 YAML 蓝图。"
     },
     "empty_blueprint_content": {
-      "message": "收到的内容为空"
+      "message": "下载的蓝图内容为空"
     },
     "fetch_blueprint_error": {
-      "message": "获取错误：{error}"
+      "message": "下载失败：{error}"
     },
     "unsafe_blueprint_url": {
       "message": "不安全的 URL：{url}"
@@ -203,49 +287,49 @@
       "message": "目标路径不安全：{path}"
     },
     "blueprint_validation_error": {
-      "message": "验证错误：{error}"
+      "message": "蓝图验证未通过：{error}"
     },
     "import_invalid_source_type": {
-      "message": "source_url 类型无效：{type}。应为字符串 (string)。"
+      "message": "source_url 类型无效：{type}，必须为字符串。"
     }
   },
   "common": {
-    "auto_update_title": "Blueprints Updater：已自动更新",
-    "auto_update_message": "以下蓝图已自动更新：\n\n{blueprints}",
+    "auto_update_title": "Blueprints Updater：已完成自动更新",
+    "auto_update_message": "以下蓝图已自动更新完成：\n\n{blueprints}",
     "update_available_short": "有可用更新",
-    "update_available": "可从 {source_url} 获取更新",
-    "update_safety_message": "安全提示：建议在安装更新前启用备份选项，以确保您在需要时恢复内容。",
-    "backup_automatic_notice": "安全提示：更新前将自动创建本地备份，以确保在需要时可以恢复。",
-    "usage_warning": "警告：此更新将影响 [{count} 个正在运行的 {domain}]({usage_url})。",
-    "up_to_date": "已是最新",
-    "install_error": "无法安装蓝图：{error}。远程文件有错误，无法安全应用。",
-    "invalid_blueprint": "无效蓝图：缺少 'blueprint' 根键",
-    "incompatible": "不兼容：{errors}",
-    "validation_error": "验证错误：{error}",
-    "empty_content": "收到的内容为空",
+    "update_available": "发现来自 {source_url} 的新版本",
+    "update_safety_message": "安全建议：建议在安装更新前开启备份，以便在需要时随时回退。",
+    "backup_automatic_notice": "安全提示：更新前系统将自动创建本地备份，以便在需要时随时还原。",
+    "usage_warning": "警告：此更新将影响正在运行的 [{count} 个 {domain}]({usage_url})。",
+    "up_to_date": "已是最新版本",
+    "install_error": "无法安装蓝图：{error}。远程文件存在错误，无法安全应用。",
+    "invalid_blueprint": "蓝图格式无效：缺少根级 'blueprint' 键",
+    "incompatible": "存在兼容性问题：{errors}",
+    "validation_error": "验证失败：{error}",
+    "empty_content": "内容为空",
     "yaml_syntax_error": "YAML 语法错误：{error}",
-    "fetch_error": "获取错误：{error}",
-    "processing_error": "处理错误：{error}",
+    "fetch_error": "下载失败：{error}",
+    "processing_error": "处理失败：{error}",
     "auto_update_failed": "自动更新失败：{error}",
     "unsafe_url": "不安全的 URL：{url}",
     "unsafe_path": "目标路径不安全：{path}",
     "content_missing": "蓝图内容缺失或无法获取",
-    "git_diff_title": "代码更改 (Git Diff)",
-    "semantic_sync_notice": "此蓝图在语义上是完全相同的，但需要进行结构更新以符合新的规范格式（例如：换行符标准化、元数据注入）。",
-    "breaking_risks_title": "[警告] 潜在的不兼容更改",
-    "auto_update_blocked_by_breaking_change": "由于检测到潜在的不兼容更改，{name} 的自动更新已阻止",
-    "risk_new_mandatory": "添加了新的必填输入 {input}。",
-    "risk_missing_input": "实体 {entity} 缺少新版本要求的必填输入 {input}。",
-    "risk_removed_input": "输入 {input} 已移除，但当前正被 {count} 个实体使用。",
-    "risk_selector_mismatch": "{input} 的选择器类型已更改：从 {old_type} 更改为 {new_type}（影响 {count} 个实体）。",
-    "risk_selector_config_changed": "{input} 的选择器选项/过滤条件已更改（{type} 选择器）（影响 {count} 个实体）。",
-    "risk_validation_failed_blueprint": "新的蓝图内容无效：{error}",
+    "git_diff_title": "代码变更 (Git Diff)",
+    "semantic_sync_notice": "此蓝图逻辑完全相同，但需要调整格式以符合最新的规范标准（如换行符规范化、补全元数据）。",
+    "breaking_risks_title": "[警告] 检测到破坏性重大变更",
+    "auto_update_blocked_by_breaking_change": "检测到可能导致功能失效的重大变更，已暂停 {name} 的自动更新",
+    "risk_new_mandatory": "新增了必填参数项：{input}。",
+    "risk_missing_input": "实体 {entity} 缺少新版本所必需的参数项：{input}。",
+    "risk_removed_input": "参数项 {input} 已被移除，但当前仍有 {count} 个实体在使用。",
+    "risk_selector_mismatch": "{input} 的选择器类型发生变化：由 {old_type} 变为 {new_type}（影响 {count} 个实体）。",
+    "risk_selector_config_changed": "{input}（{type} 选择器）的配置或过滤选项已变更（影响 {count} 个实体）。",
+    "risk_validation_failed_blueprint": "新蓝图内容验证未通过：{error}",
     "risk_unknown": "未知风险",
-    "risk_compatibility": "{entity} 的兼容性错误：{error}",
+    "risk_compatibility": "{entity} 兼容性错误：{error}",
     "risk_system_error": "系统错误：{error}",
-    "breaking_risks_report": "为了预防起见，{name} 的自动更新已阻止。检测到的风险：\n{risks}\n\n如果正确，请检查并手动安装。",
-    "auto_update_blocked_by_system_error": "{name} 的自动更新已暂停，因为兼容性检查过程中出现意外错误。",
-    "withdrawn_blueprint_error": "蓝图源不再可用：{error}",
-    "take_control_tip": "提示：您可以在 Home Assistant 中对依赖此蓝图的自动化、脚本或模板实体使用“接管控制”（Take Control），将其转换为完全本地配置后再删除。"
+    "breaking_risks_report": "出于安全考虑，已暂停 {name} 的自动更新。检测到的潜在风险：\n{risks}\n\n如确认无误，请手动检查并安装。",
+    "auto_update_blocked_by_system_error": "检查兼容性时发生意外错误，已暂停 {name} 的自动更新。",
+    "withdrawn_blueprint_error": "蓝图源已失效：{error}",
+    "take_control_tip": "提示：在删除前，您可以对依赖此蓝图的自动化、脚本或模板实体使用“接管控制”（Take Control），将其转为独立的本地配置。"
   }
 }

@@ -954,6 +954,39 @@ blueprint:
   name: Selectorless Underivable Automation
   domain: automation
   input:
+    conflicting_param:
+      name: Conflicting Param
+trigger:
+  - platform: homeassistant
+    event: start
+action:
+  - !input conflicting_param
+  - action: light.turn_on
+    target: !input conflicting_param
+"""
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_validate_automation_config",
+        AsyncMock(),
+    ) as mock_validate:
+        risks = await coordinator._async_validate_blueprint_consumers(
+            relative_path, content, configs={}
+        )
+        # Excluded from baseline simulation without false-positive errors
+        assert risks == []
+        mock_validate.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_validate_baseline_candidate_selectorless_unrecognized_path_continues(
+    hass: Any, coordinator: Any
+) -> None:
+    """Verify baseline simulation continues for selectorless unrecognized paths."""
+    relative_path = "automation/selectorless_unrecognized.yaml"
+    content = """
+blueprint:
+  name: Selectorless Unrecognized Automation
+  domain: automation
+  input:
     opaque_param:
       name: Opaque Delay Setting
 trigger:
@@ -969,9 +1002,13 @@ action:
         risks = await coordinator._async_validate_blueprint_consumers(
             relative_path, content, configs={}
         )
-        # Excluded from baseline simulation without false-positive errors
         assert risks == []
-        mock_validate.assert_not_called()
+        mock_validate.assert_called_once()
+        assert mock_validate.await_args is not None
+        call_config = mock_validate.await_args[1]["config"]
+        actions = call_config.get("actions") or call_config.get("action")
+        assert isinstance(actions, list)
+        assert actions[0]["delay"] == "test.dummy"
 
 
 @pytest.mark.asyncio

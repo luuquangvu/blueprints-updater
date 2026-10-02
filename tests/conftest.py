@@ -9,7 +9,7 @@ import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 
 from custom_components.blueprints_updater.const import SPECIAL_USE_TLDS
 from custom_components.blueprints_updater.file_store import (
@@ -96,6 +96,15 @@ def _mock_hass():
         return asyncio.create_task(coro, name=name)
 
     hass_mock.async_create_background_task = MagicMock(side_effect=async_create_background_task)
+
+    hass_mock.state = CoreState.running
+    hass_mock.is_running = True
+
+    def async_run_hass_job(job, *args):
+        """Mock running a HassJob."""
+        return job.target(*args)
+
+    hass_mock.async_run_hass_job = MagicMock(side_effect=async_run_hass_job)
 
     hass_mock.data = {}
     return hass_mock

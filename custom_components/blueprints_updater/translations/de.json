@@ -6,6 +6,7 @@
         "description": "Möchten Sie Blueprints Updater einrichten? Es scannt Ihre lokalen Blueprints und sucht nach Updates.",
         "data": {
           "auto_update": "Automatisches Update aktivieren",
+          "verify_on_ha_update": "Kompatibilität bei Home Assistant-Updates prüfen",
           "update_interval": "Update-Intervall (Stunden)",
           "filter_mode": "Filter-Modus",
           "selected_blueprints": "Blueprints (wahlweise)",
@@ -24,6 +25,7 @@
         "description": "Konfigurieren Sie die Einstellungen und das Verhalten von Blueprints Updater.",
         "data": {
           "auto_update": "Automatisches Update aktivieren",
+          "verify_on_ha_update": "Kompatibilität bei Home Assistant-Updates prüfen",
           "update_interval": "Update-Intervall (Stunden)",
           "filter_mode": "Filter-Modus",
           "selected_blueprints": "Ausgewählte Blueprints",
@@ -45,6 +47,21 @@
         "proceed": "Mit Update fortfahren (Backup erstellen)",
         "different_url": "Eine andere URL eingeben",
         "stop_tracking": "Abbrechen und Nachverfolgung beenden"
+      }
+    },
+    "repair_incompatible_action": {
+      "options": {
+        "auto_fix": "Automatische Korrektur anwenden (Auto-Fix)",
+        "acknowledge": "Warnung vorerst ausblenden",
+        "change_url": "Auf Community-Fork umstellen",
+        "unpin": "Fixierung aufheben und Originalquelle wieder folgen"
+      }
+    },
+    "repair_fork_action": {
+      "options": {
+        "proceed": "Update von diesem Fork durchführen",
+        "auto_fix": "Lokalen Auto-Fix stattdessen anwenden",
+        "different_url": "Eine andere URL eingeben"
       }
     }
   },
@@ -105,8 +122,8 @@
       "fix_flow": {
         "step": {
           "init": {
-            "title": "Zurückgezogenen Blueprint beheben",
-            "description": "Der Blueprint {name} ({path}) wurde von {source_url} zurückgezogen. Was möchten Sie tun?",
+            "title": "Nicht mehr verfügbaren Blueprint beheben",
+            "description": "Der Blueprint {name} ({path}) ist unter {source_url} nicht mehr verfügbar oder wurde entfernt. Wie möchten Sie vorgehen?",
             "menu_options": {
               "change_url": "Quell-URL aktualisieren",
               "stop_tracking": "Lokale Kopie behalten und Nachverfolgung beenden",
@@ -124,25 +141,92 @@
             "title": "Änderungen überprüfen",
             "description": "Überprüfen Sie die Änderungen für {name}:\n\n{risk_report}\n\nWie möchten Sie vorgehen?",
             "data": {
-              "risk_action": "Aktion"
+              "risk_action": "Vorgehensweise"
             }
           },
           "delete_blueprint": {
             "title": "Blueprint löschen",
             "description": "Sind Sie sicher, dass Sie {name} ({path}) löschen möchten?\n\nDerzeit verwendet von {usage_count} Entität(en): {entities}.{take_control_tip}",
             "data": {
-              "confirm_delete_in_use": "Ich verstehe, dass dies abhängige Automatisierungen/Skripte beschädigen wird"
+              "confirm_delete_in_use": "Ich verstehe, dass abhängige Automatisierungen/Skripte dadurch funktionsunfähig werden"
             }
           }
         },
         "error": {
           "missing_url": "URL ist erforderlich.",
           "invalid_url": "Ungültige oder nicht erreichbare Blueprint-URL.",
-          "confirmation_required": "Zur Löschung eines verwendeten Blueprints ist eine Bestätigung erforderlich.",
-          "usage_discovery_failed": "Die Blueprint-Nutzung konnte nicht ermittelt werden. Bitte versuchen Sie es erneut."
+          "confirmation_required": "Bitte bestätigen Sie das Löschen des verwendeten Blueprints.",
+          "usage_discovery_failed": "Die abhängigen Entitäten konnten nicht ermittelt werden. Bitte versuchen Sie es erneut."
         },
         "abort": {
-          "missing_issue_data": "Erforderliche Blueprint-Problem-Daten fehlen."
+          "missing_issue_data": "Erforderliche Problemdaten zum Blueprint fehlen."
+        }
+      }
+    },
+    "incompatible_blueprint": {
+      "title": "Blueprint nicht kompatibel mit Home Assistant: {name}",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Inkompatiblen Blueprint beheben",
+            "description": "Der Blueprint **{name}** (`{path}`) ist nicht vollständig kompatibel mit Home Assistant {ha_version}.\n\n**Problem-Details:**\n{error_summary}\n\n**Betroffene Entitäten:**\n{affected_entities}\n\n**Ressourcen:**\n{resource_links}\n\n**Diagnosebericht:**\n```markdown\n{diagnostic_snippet}\n```\n\nWie möchten Sie vorgehen?",
+            "menu_options": {
+              "auto_fix": "Automatische Korrektur anwenden (Auto-Fix)",
+              "acknowledge": "Warnung vorerst ausblenden",
+              "change_url": "Auf Community-Fork umstellen",
+              "unpin": "Fixierung aufheben und Originalquelle wieder folgen"
+            }
+          },
+          "auto_fix": {
+            "title": "Vorschau der automatischen Korrektur",
+            "description": "Überprüfen Sie die vorgeschlagene Korrektur für **{name}** (`{path}`).\n\n{patch_notice}\n\n```diff\n{diff_text}\n```\n\nBeim Anwenden wird ein Backup (.bak.1) erstellt und der Blueprint automatisch fixiert, damit fehlerhafte Upstream-Versionen Ihre Korrektur nicht überschreiben. Sobald der Originalautor ein kompatibles Update bereitstellt, wird die Fixierung automatisch aufgehoben.",
+            "data": {
+              "confirm_apply": "Korrektur jetzt anwenden"
+            }
+          },
+          "acknowledge": {
+            "title": "Kompatibilitätswarnung ausblenden",
+            "description": "Sie blenden diese Warnung für **{name}** (`{path}`) vorerst aus.\n\nHinweis: Diese Warnung wird ab Home Assistant {breaks_in_ha_version} zu einem kritischen Fehler führen. Bei einem Home Assistant-Update oder beim Bearbeiten der Blueprint-Datei wird die Warnung automatisch erneut überprüft.",
+            "data": {
+              "confirm_acknowledge": "Diese Warnung vorerst ausblenden"
+            }
+          },
+          "change_url": {
+            "title": "Auf Community-Fork umstellen",
+            "description": "Geben Sie die URL eines gepflegten Community-Forks für **{name}** (`{path}`) ein.\n\nDamit bestehende Automatisierungen ohne Unterbrechung weiterlaufen, verbleibt der Blueprint unter seinem bisherigen Pfad (`{relative_path}`), während künftige Updates der neuen URL folgen.",
+            "data": {
+              "url": "Community-Fork-URL"
+            }
+          },
+          "confirm_fork": {
+            "title": "Fork-Wechsel bestätigen",
+            "description": "Überprüfen Sie die Kompatibilität und Änderungen des Forks für **{name}**:\n\n{fork_notice}\n\n```diff\n{diff_text}\n```",
+            "data": {
+              "fork_action": "Vorgehensweise"
+            }
+          },
+          "unpin": {
+            "title": "Fixierung des Blueprints aufheben",
+            "description": "Möchten Sie die Fixierung für **{name}** (`{path}`) wirklich aufheben?\n\nDadurch werden künftig wieder automatische Updates von der Originalquelle ({source_url}) bezogen.",
+            "data": {
+              "confirm_unpin": "Fixierung aufheben und Originalquelle folgen"
+            }
+          }
+        },
+        "error": {
+          "missing_url": "URL ist erforderlich.",
+          "invalid_url": "Ungültige oder nicht erreichbare Blueprint-URL.",
+          "fork_breaking_error": "Dieser Fork ist nicht mit Home Assistant {ha_version} kompatibel: {error}",
+          "confirmation_required": "Eine Bestätigung ist erforderlich.",
+          "unpin_failed": "Fixierung konnte nicht aufgehoben werden: {error}"
+        },
+        "abort": {
+          "missing_issue_data": "Erforderliche Problemdaten zum Blueprint fehlen.",
+          "patch_failed": "Korrektur konnte nicht angewendet werden: {error}",
+          "file_changed": "Die Blueprint-Datei wurde vor dem Anwenden der Korrektur geändert: {error}",
+          "apply_success": "Korrektur erfolgreich angewendet und Blueprint fixiert.",
+          "fork_applied": "Blueprint-Nachverfolgung erfolgreich auf Fork umgestellt.",
+          "unpinned_success": "Fixierung des Blueprints erfolgreich aufgehoben."
         }
       }
     }
@@ -222,7 +306,7 @@
     "invalid_blueprint": "Ungültiger Blueprint: Root-Schlüssel 'blueprint' fehlt",
     "incompatible": "Inkompatibel: {errors}",
     "validation_error": "Validierungsfehler: {error}",
-    "empty_content": "Leerer Inhalt empfangen",
+    "empty_content": "Der empfangene Inhalt ist leer",
     "yaml_syntax_error": "YAML-Syntaxfehler: {error}",
     "fetch_error": "Abruffehler: {error}",
     "processing_error": "Verarbeitungsfehler: {error}",
@@ -233,7 +317,7 @@
     "git_diff_title": "Codeänderungen (Git Diff)",
     "semantic_sync_notice": "Dieser Blueprint ist inhaltlich unverändert, erfordert jedoch eine strukturelle Aktualisierung zur Anpassung an die neue kanonische Formatierung (z. B. Normalisierung der Zeilenenden, Metadaten-Injektion).",
     "breaking_risks_title": "[WARNUNG] POTENZIELLE INKOMPATIBILITÄTEN",
-    "auto_update_blocked_by_breaking_change": "Automatisches Update für {name} wegen potenzieller Inkompatibilitäten blockiert",
+    "auto_update_blocked_by_breaking_change": "Automatisches Update für {name} vorsorglich wegen möglicher Inkompatibilitäten gestoppt",
     "risk_new_mandatory": "Neue obligatorische Eingabe {input} hinzugefügt.",
     "risk_missing_input": "Der Entität {entity} fehlt die für die neue Version erforderliche obligatorische Eingabe {input}.",
     "risk_removed_input": "Eingabe {input} entfernt, wird aber derzeit von {count} Entitäten verwendet.",
@@ -243,8 +327,8 @@
     "risk_unknown": "Unbekanntes Risiko",
     "risk_compatibility": "Kompatibilitätsfehler für {entity}: {error}",
     "risk_system_error": "Systemfehler: {error}",
-    "breaking_risks_report": "Das automatische Update für {name} wurde vorsorglich blockiert. Erkannte Risiken:\n{risks}\n\nBitte überprüfen Sie diese und installieren Sie sie manuell, falls sie korrekt sind.",
-    "auto_update_blocked_by_system_error": "Automatisches Update für {name} pausiert; ein unerwarteter Fehler trat bei der Kompatibilitätsprüfung auf.",
+    "breaking_risks_report": "Das automatische Update für {name} wurde vorsorglich blockiert. Erkannte Risiken:\n{risks}\n\nBitte überprüfen Sie diese Änderungen und installieren Sie sie bei Bedarf manuell.",
+    "auto_update_blocked_by_system_error": "Das automatische Update für {name} wurde pausiert, da bei der Kompatibilitätsprüfung ein unerwarteter Fehler aufgetreten ist.",
     "withdrawn_blueprint_error": "Blueprint-Quelle nicht mehr verfügbar: {error}",
     "take_control_tip": "Tipp: Sie können 'Steuerung übernehmen' (Take Control) für die von diesem Blueprint abhängigen Automatisierungen, Skripte oder Template-Entitäten nutzen, um sie vor dem Löschen in lokale Konfigurationen umzuwandeln."
   }

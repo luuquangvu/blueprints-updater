@@ -2,18 +2,22 @@
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import logging
 import os
 import random
 import socket
 import time
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+import warnings
+from collections.abc import AsyncIterator, Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import timedelta
+from difflib import unified_diff
 from http import HTTPStatus
-from typing import TYPE_CHECKING, ClassVar, Self, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, TypedDict
 from urllib.parse import urlparse
+from warnings import WarningMessage
 
 import httpx
 import orjson
@@ -27,11 +31,17 @@ else:
         import voluptuous as vol
 
 from homeassistant.components.automation.config import (
+    ValidationStatus as AutomationValidationStatus,
+)
+from homeassistant.components.automation.config import (
     async_validate_config_item as async_validate_automation_config,
 )
-from homeassistant.components.blueprint.const import CONF_INPUT
+from homeassistant.components.blueprint.const import CONF_BLUEPRINT, CONF_INPUT
 from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
+from homeassistant.components.script.config import (
+    ValidationStatus as ScriptValidationStatus,
+)
 from homeassistant.components.script.config import (
     async_validate_config_item as async_validate_script_config,
 )
@@ -45,6 +55,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError, TemplateError
+from homeassistant.helpers import frame
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import async_get_platforms
 from homeassistant.helpers.selector import validate_selector
@@ -68,7 +79,9 @@ except ImportError:
     SSL_ALPN_HTTP11_HTTP2 = None
 
 from .blueprint_validation import (
+    ACTION_PATH_SEGMENTS,
     DEFAULT_SELECTOR_FILTER_PATHS,
+    TRIGGER_PATH_SEGMENTS,
     StructuredRisk,
     build_template_path,
     check_ha_template_ast_compatibility,
@@ -77,6 +90,7 @@ from .blueprint_validation import (
     derive_selector_filter_paths,
     detect_missing_inputs,
     detect_new_mandatory_inputs,
+    detect_unsupported_yaml_constructs,
     ensure_source_url,
     extract_blueprint_text,
     extract_input_configs,
@@ -90,6 +104,7 @@ from .blueprint_validation import (
     hash_content,
     invalidate_selector_filter_paths_cache,
     is_invalid_for_input_default,
+    modernize_legacy_blueprint_yaml,
     normalize_content,
     read_and_diff,
     validate_input_references,
@@ -98,12 +113,15 @@ from .blueprint_validation import (
 from .const import (
     ALLOWED_RELOAD_DOMAINS,
     ALLOWED_YAML_MIME_TYPES,
+    BLUEPRINT_ROUNDTRIP_INVARIANT_KEYS,
     BLUEPRINTS_DATA_DIR,
     CONF_AUTO_UPDATE,
     CONF_FILTER_MODE,
     CONF_SELECTED_BLUEPRINTS,
+    CONF_VERIFY_ON_HA_UPDATE,
     DEFAULT_AUTO_UPDATE,
     DEFAULT_MAX_BACKUPS,
+    DEFAULT_VERIFY_ON_HA_UPDATE,
     DOMAIN,
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
     MAX_CONCURRENT_REQUESTS,
@@ -116,12 +134,23 @@ from .const import (
     RETRY_BACKOFF,
     RISK_TYPE_TRANSLATIONS,
     STORAGE_KEY_DATA,
+    STORAGE_KEY_LAST_HA_VERSION,
     STORAGE_VERSION,
+    URL_GIST_COMMENTS_TEMPLATE,
+    URL_GITHUB_ISSUES_TEMPLATE,
+    URL_HA_COMMUNITY_TOPIC_TEMPLATE,
+    URL_HA_DOCS_ACTIONS,
+    URL_HA_DOCS_BLUEPRINT_DEFAULT,
+    URL_HA_DOCS_TARGETING,
+    URL_HA_DOCS_TEMPLATING_MATH,
+    URL_HA_DOCS_TEMPLATING_NUMERIC,
     BlueprintBlockingReason,
     BlueprintRiskType,
     FilterMode,
     FunctionalDomain,
+    IncompatibilitySeverity,
     RepairIssueType,
+    SourceDomain,
     SourceProviderType,
 )
 from .exceptions import (
@@ -324,10 +353,223 @@ TOP_LEVEL_SELECTOR_PRESENTATION_KEYS = frozenset({"name", "description", "label"
 
 _LOCAL_REVISION_MISMATCH_ERROR = "Local blueprint changed; refresh and retry the update"
 _RESTORE_REVISION_MISMATCH = "revision_mismatch"
+_POST_UPDATE_GUARD_TIMEOUT: Final[float] = 30.0
+"""Maximum timeout in seconds for per-blueprint compatibility validation."""
 
 _generate_dummy_input_value = generate_dummy_input_value
 _is_invalid_for_input_default = is_invalid_for_input_default
 _check_ha_template_ast_compatibility = check_ha_template_ast_compatibility
+
+
+@dataclass
+class CompatibilityReport:
+    """Report summarizing blueprint compatibility inspection."""
+
+    severity: IncompatibilitySeverity | None = None
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    affected_entities: list[str] = field(default_factory=list)
+    breaks_in_ha_version: str | None = None
+    renamed_keys: dict[str, str] = field(default_factory=dict)
+    learn_more_url: str | None = None
+    author_report_url: str | None = None
+    ha_docs_url: str | None = None
+
+
+@dataclass
+class ValidationDiagnostics:
+    """Captured diagnostics from native validation."""
+
+    reports: list[tuple[tuple[object, ...], dict[str, object]]] = field(default_factory=list)
+    warnings: list[WarningMessage] = field(default_factory=list)
+    new_issues: list[ir.IssueEntry] = field(default_factory=list)
+    renamed_keys: dict[str, str] = field(default_factory=dict)
+    deprecated_keys: list[str] = field(default_factory=list)
+
+
+_DIAGNOSTICS_CAPTURE_LOCK: Final[asyncio.Lock] = asyncio.Lock()
+
+
+@contextlib.contextmanager
+def _patch_attribute(target: object, name: str, replacement: object) -> Iterator[None]:
+    """Temporarily replace an attribute on a target object for runtime instrumentation.
+
+    Args:
+        target: Object or module whose attribute is being replaced.
+        name: Name of attribute to patch.
+        replacement: Temporary replacement value.
+
+    Yields:
+        None while the attribute is patched.
+
+    """
+    original = getattr(target, name)
+    setattr(target, name, replacement)
+    try:
+        yield
+    finally:
+        setattr(target, name, original)
+
+
+@contextlib.asynccontextmanager
+async def capture_structural_validation_diagnostics(
+    hass: HomeAssistant,
+) -> AsyncIterator[ValidationDiagnostics]:
+    """Capture typed report_usage, IssueRegistry, warnings and structural diffs during validation.
+
+    Args:
+        hass: HomeAssistant instance.
+
+    Yields:
+        ValidationDiagnostics object collecting all captured diagnostics.
+
+    """
+    async with _DIAGNOSTICS_CAPTURE_LOCK:
+        diagnostics = ValidationDiagnostics()
+        orig_report_usage = frame.report_usage
+        orig_create_issue = ir.async_create_issue
+        current_task = asyncio.current_task()
+        created_issues: list[tuple[str, str]] = []
+
+        def _intercept_report_usage(
+            what: str,
+            *args: Any,
+            **kwargs: Any,
+        ) -> None:
+            """Intercept frame.report_usage invocations and record structured diagnostics."""
+            if current_task is not None and asyncio.current_task() is not current_task:
+                forward_kwargs = dict(kwargs)
+                ex_int = forward_kwargs.get("exclude_integrations")
+                extended = set(ex_int) if ex_int is not None else set()
+                extended.add(DOMAIN)
+                forward_kwargs["exclude_integrations"] = extended
+                orig_report_usage(what, *args, **forward_kwargs)
+                return
+
+            diag_kwargs: dict[str, Any] = {
+                "what": what,
+                "breaks_in_ha_version": kwargs.get("breaks_in_ha_version"),
+                "core_behavior": kwargs.get("core_behavior", frame.ReportBehavior.ERROR),
+                "core_integration_behavior": kwargs.get(
+                    "core_integration_behavior", frame.ReportBehavior.LOG
+                ),
+                "custom_integration_behavior": kwargs.get(
+                    "custom_integration_behavior", frame.ReportBehavior.LOG
+                ),
+                "exclude_integrations": kwargs.get("exclude_integrations"),
+                "integration_domain": kwargs.get("integration_domain"),
+                "level": kwargs.get("level", 30),
+            }
+            diag_kwargs.update(kwargs)
+            diagnostics.reports.append(((what, *args), diag_kwargs))
+            orig_report_usage(what, *args, **kwargs)
+
+        def _intercept_create_issue(
+            hass: HomeAssistant,
+            domain: str,
+            issue_id: str,
+            *args: Any,
+            **kwargs: Any,
+        ) -> None:
+            """Intercept issue creation for the current validation task."""
+            if current_task is not None and asyncio.current_task() is current_task:
+                created_issues.append((domain, issue_id))
+
+            orig_create_issue(hass, domain, issue_id, *args, **kwargs)
+
+        registry = ir.async_get(hass)
+        existing_issue_keys = set(registry.issues.keys())
+
+        try:
+            with (
+                _patch_attribute(frame, "report_usage", _intercept_report_usage),
+                _patch_attribute(ir, "async_create_issue", _intercept_create_issue),
+                warnings.catch_warnings(record=True) as recorded_warnings,
+            ):
+                warnings.simplefilter("always")
+                yield diagnostics
+                diagnostics.warnings.extend(recorded_warnings)
+        finally:
+            for domain_name, issue_id_val in created_issues:
+                issue_key = (domain_name, issue_id_val)
+                if issue_key not in existing_issue_keys and (
+                    issue_entry := registry.issues.get(issue_key)
+                ):
+                    diagnostics.new_issues.append(issue_entry)
+                    ir.async_delete_issue(hass, issue_entry.domain, issue_entry.issue_id)
+
+
+def diff_structural_configs(
+    input_cfg: object,
+    validated_cfg: object,
+    diagnostics: ValidationDiagnostics,
+    path: tuple[str | int, ...] = (),
+) -> None:
+    """Compare input configuration AST with post-validation configuration AST.
+
+    Detects renamed keys (e.g. 'service' -> 'action') and deprecated keys.
+
+    Args:
+        input_cfg: Input configuration dictionary or list prior to validation.
+        validated_cfg: Post-validation configuration dictionary or list.
+        diagnostics: ValidationDiagnostics to record discovered key migrations.
+        path: Current traversal path within the configuration hierarchy.
+
+    """
+    if isinstance(input_cfg, dict) and isinstance(validated_cfg, dict):
+        plural_keys = {
+            "trigger": "triggers",
+            "condition": "conditions",
+            "action": "actions",
+        }
+        for k, v in input_cfg.items():
+            current_path = (*path, k)
+            if k not in validated_cfg:
+                plural_k = plural_keys.get(k)
+                if (
+                    not path
+                    and plural_k is not None
+                    and plural_k in validated_cfg
+                    and plural_k not in input_cfg
+                ):
+                    val_plural = validated_cfg[plural_k]
+                    if isinstance(v, dict) and isinstance(val_plural, list) and val_plural:
+                        diff_structural_configs(v, val_plural[0], diagnostics, (*path, k, 0))
+                    else:
+                        diff_structural_configs(v, val_plural, diagnostics, current_path)
+                    continue
+
+                found_rename = False
+                is_generic_scalar = v is None or isinstance(v, bool) or v in ("", 0, 1, {}, [])
+                if not is_generic_scalar:
+                    for val_k, val_v in validated_cfg.items():
+                        if val_k not in input_cfg and (val_v == v or str(val_v) == str(v)):
+                            diagnostics.renamed_keys[k] = val_k
+                            found_rename = True
+                            break
+                if not found_rename:
+                    diagnostics.deprecated_keys.append(k)
+            else:
+                diff_structural_configs(v, validated_cfg[k], diagnostics, current_path)
+    elif isinstance(input_cfg, list) and isinstance(validated_cfg, list):
+        for idx in range(min(len(input_cfg), len(validated_cfg))):
+            diff_structural_configs(input_cfg[idx], validated_cfg[idx], diagnostics, (*path, idx))
+
+
+def format_validation_error(err: Exception) -> str:
+    """Format a validation exception or vol.Invalid path into a readable string.
+
+    Args:
+        err: Exception raised during schema or domain validation.
+
+    Returns:
+        Formatted error message including path if applicable.
+
+    """
+    if isinstance(err, vol.Invalid):
+        path_str = f"At {' -> '.join(str(p) for p in err.path)}: " if err.path else ""
+        return f"{path_str}{err.error_message}"
+    return str(err)
 
 
 class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, object]]]):
@@ -438,6 +680,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         self._blueprint_validate_lock = asyncio.Lock()
         self._file_store = BlueprintFileStore()
         self._first_update_done = False
+        self._last_ha_version: str | None = None
+        self._persisted_last_ha_version: str | None = None
+        self._post_ha_update_task: asyncio.Task | None = None
+        self._post_ha_update_lock = asyncio.Lock()
         if self.config_entry:
             self.config_entry.async_on_unload(self._async_cancel_background_task)
 
@@ -446,6 +692,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if self._background_task and not self._background_task.done():
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._background_task
+        if self._post_ha_update_task and not self._post_ha_update_task.done():
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._post_ha_update_task
 
     def clear_translations(self) -> None:
         """Clear the internal translation cache.
@@ -543,6 +792,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 if isinstance(domain, str) and domain in ALLOWED_RELOAD_DOMAINS
             }
             self._persisted_pending_reload_domains = set(self._pending_reload_domains)
+
+        if version_data := storage_data.get(STORAGE_KEY_LAST_HA_VERSION):
+            self._last_ha_version = str(version_data)
+            self._persisted_last_ha_version = self._last_ha_version
 
         _LOGGER.debug(
             "Loaded metadata for %d blueprints from storage",
@@ -685,12 +938,22 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             return None
 
         validated: dict[str, object] = {}
-        for field in METADATA_STORAGE_FIELDS:
-            val = entry.get(field)
-            if val is None or isinstance(val, str):
-                validated[field] = val
-            else:
+        for storage_field in METADATA_STORAGE_FIELDS:
+            val = entry.get(storage_field)
+            if val is None:
+                continue
+            if storage_field == "pinned":
+                if not isinstance(val, bool):
+                    return None
+            elif storage_field == "pinned_at":
+                if not isinstance(val, (str, int, float)):
+                    return None
+            elif storage_field == "dismissed_warning":
+                if not isinstance(val, dict):
+                    return None
+            elif not isinstance(val, str):
                 return None
+            validated[storage_field] = val
         return validated
 
     async def _async_prune_stale_metadata(self, scanned_paths: set[str]) -> None:
@@ -791,6 +1054,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 else persisted.get("last_modified"),
                 "persisted_source_url": persisted.get("source_url"),
                 "backups_count": info.get("backups_count", 0),
+                "pinned": True if persisted.get("pinned") else None,
+                "pinned_reason": persisted.get("pinned_reason"),
+                "pinned_at": persisted.get("pinned_at"),
+                "upstream_incompatible_hash": persisted.get("upstream_incompatible_hash"),
+                "dismissed_warning": persisted.get("dismissed_warning"),
             }
         return results
 
@@ -815,9 +1083,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 if prev is not info:
                     info.update(prev)
                 elif remote_hash := info.get("remote_hash"):
-                    is_mismatch = info["local_hash"] != remote_hash
-                    info["updatable"] = is_mismatch
-                    if is_mismatch:
+                    relative_path = str(info.get("relative_path") or "")
+                    persisted = self._persisted_metadata.get(relative_path, {})
+                    is_pinned = bool(info.get("pinned") or persisted.get("pinned"))
+                    upstream_bad_hash = info.get("upstream_incompatible_hash") or persisted.get(
+                        "upstream_incompatible_hash"
+                    )
+                    if is_pinned and remote_hash == upstream_bad_hash:
+                        info["updatable"] = False
+                    else:
+                        is_mismatch = info["local_hash"] != remote_hash
+                        info["updatable"] = is_mismatch
+                    if info["updatable"]:
                         info["etag"] = None
                         info["last_modified"] = None
             return
@@ -844,6 +1121,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                         else None,
                         "backups_count": info.get("backups_count", prev.get("backups_count", 0)),
                         "breaking_risks": prev.get("breaking_risks", []) if is_updatable else [],
+                        "pinned": True if (info.get("pinned") or prev.get("pinned")) else None,
+                        "pinned_reason": info.get("pinned_reason") or prev.get("pinned_reason"),
+                        "pinned_at": info.get("pinned_at") or prev.get("pinned_at"),
+                        "upstream_incompatible_hash": info.get("upstream_incompatible_hash")
+                        or prev.get("upstream_incompatible_hash"),
+                        "dismissed_warning": info.get("dismissed_warning")
+                        or prev.get("dismissed_warning"),
                     }
                 )
 
@@ -1027,6 +1311,26 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         next_invalid = prev_data.get("invalid_remote_hash")
         next_error = prev_data.get("last_error")
 
+        relative_path = str(info.get("relative_path") or "")
+        persisted = self._persisted_metadata.get(relative_path, {})
+        is_pinned = bool(info.get("pinned") or prev_data.get("pinned") or persisted.get("pinned"))
+        upstream_bad_hash = (
+            info.get("upstream_incompatible_hash")
+            or prev_data.get("upstream_incompatible_hash")
+            or persisted.get("upstream_incompatible_hash")
+        )
+        if is_pinned and remote_hash and remote_hash == upstream_bad_hash:
+            _LOGGER.debug(
+                "Pinned blueprint %s: remote hash matches incompatible hash; suppressing update",
+                path,
+            )
+            return (
+                False,
+                str(next_invalid) if isinstance(next_invalid, str) else None,
+                str(next_error) if isinstance(next_error, str) else None,
+                str(local_hash) if local_hash else None,
+            )
+
         if is_updatable and self._is_ghost_update(local_hash, prev_data):
             _LOGGER.debug("Ghost update detected for %s; forcing updatable=False", path)
             return False, None, None, str(local_hash) if local_hash else None
@@ -1093,6 +1397,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if self._background_task and not self._background_task.done():
             _LOGGER.debug("Cancelling background refresh task on unload")
             self._background_task.cancel()
+        if self._post_ha_update_task and not self._post_ha_update_task.done():
+            _LOGGER.debug("Cancelling post HA update task on unload")
+            self._post_ha_update_task.cancel()
 
     def _is_current_refresh_item(
         self,
@@ -1218,6 +1525,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             if asyncio.current_task() is self._background_task:
                 self._background_task = None
 
+    async def _async_save_persisted_metadata(
+        self, force: bool = False, skip_filter: bool = False
+    ) -> None:
+        """Save persisted metadata to persistent storage."""
+        await self._async_save_metadata(force=force, skip_filter=skip_filter)
+
     async def _async_save_metadata(self, force: bool = False, skip_filter: bool = False) -> None:
         """Save current ETags and remote hashes to persistent storage.
 
@@ -1250,6 +1563,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             if info := current_data_map.get(relative_path):
                 for field in ("remote_hash", "etag", "last_modified", "source_url"):
                     existing[field] = info.get(field)
+                for field in (
+                    "pinned",
+                    "pinned_reason",
+                    "pinned_at",
+                    "upstream_incompatible_hash",
+                    "dismissed_warning",
+                ):
+                    if field in info:
+                        val = info.get(field)
+                        if val is not None and val is not False:
+                            existing[field] = val
+                        else:
+                            existing.pop(field, None)
             candidate_metadata[relative_path] = existing
 
         if not skip_filter:
@@ -1268,6 +1594,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             not force
             and final_metadata == self._persisted_metadata
             and self._pending_reload_domains == self._persisted_pending_reload_domains
+            and self._last_ha_version == self._persisted_last_ha_version
         ):
             return
 
@@ -1275,17 +1602,123 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             "Saving metadata for %d blueprints to storage",
             len(final_metadata),
         )
+        save_payload: dict[str, object] = {
+            "metadata": final_metadata,
+            "pending_reload_domains": sorted(self._pending_reload_domains),
+        }
+        if self._last_ha_version is not None:
+            save_payload[STORAGE_KEY_LAST_HA_VERSION] = self._last_ha_version
+
         try:
-            await self._store.async_save(
-                {
-                    "metadata": final_metadata,
-                    "pending_reload_domains": sorted(self._pending_reload_domains),
-                }
-            )
+            await self._store.async_save(save_payload)
             self._persisted_metadata = final_metadata
             self._persisted_pending_reload_domains = set(self._pending_reload_domains)
+            self._persisted_last_ha_version = self._last_ha_version
         except Exception:
             _LOGGER.exception("Failed to save metadata to storage")
+
+    async def async_pin_blueprint(
+        self,
+        rel_path: str,
+        full_path: str,
+        reason: str,
+        upstream_incompatible_hash: str | None = None,
+    ) -> None:
+        """Pin a blueprint locally, persisting reason and incompatible upstream hash.
+
+        Args:
+            rel_path: Relative path of the blueprint.
+            full_path: Full filesystem path of the blueprint.
+            reason: Reason identifier for pinning.
+            upstream_incompatible_hash: Optional upstream remote hash
+                that triggered incompatibility.
+
+        """
+        now = time.time()
+        persisted = self._persisted_metadata.setdefault(rel_path, {})
+        persisted["pinned"] = True
+        persisted["pinned_reason"] = reason
+        persisted["pinned_at"] = now
+        if upstream_incompatible_hash:
+            persisted["upstream_incompatible_hash"] = upstream_incompatible_hash
+
+        if self.data and full_path in self.data:
+            self.data[full_path]["updatable"] = False
+            self.data[full_path]["pinned"] = True
+            self.data[full_path]["pinned_reason"] = reason
+            self.data[full_path]["pinned_at"] = now
+            if upstream_incompatible_hash:
+                self.data[full_path]["upstream_incompatible_hash"] = upstream_incompatible_hash
+            elif "upstream_incompatible_hash" in persisted:
+                self.data[full_path]["upstream_incompatible_hash"] = persisted[
+                    "upstream_incompatible_hash"
+                ]
+
+        await self._async_save_persisted_metadata(force=True)
+
+    async def async_unpin_blueprint(self, rel_path: str, full_path: str | None = None) -> None:
+        """Unpin a blueprint and clear incompatible state across metadata and runtime data.
+
+        Args:
+            rel_path: Relative path of the blueprint.
+            full_path: Optional full filesystem path. If omitted, resolved from runtime data.
+
+        """
+        persisted = self._persisted_metadata.get(rel_path)
+        if persisted is not None:
+            persisted.pop("pinned", None)
+            persisted.pop("pinned_reason", None)
+            persisted.pop("pinned_at", None)
+            persisted.pop("upstream_incompatible_hash", None)
+
+        target_path = full_path
+        if not target_path and self.data:
+            for p, entry in self.data.items():
+                if entry.get("relative_path") == rel_path:
+                    target_path = p
+                    break
+
+        if target_path and self.data and target_path in self.data:
+            self.data[target_path].pop("pinned", None)
+            self.data[target_path].pop("pinned_reason", None)
+            self.data[target_path].pop("pinned_at", None)
+            self.data[target_path].pop("upstream_incompatible_hash", None)
+
+        await self._async_save_persisted_metadata(force=True)
+
+    async def async_set_dismissed_warning(
+        self,
+        rel_path: str,
+        full_path: str | None = None,
+        dismissed_data: dict[str, object] | None = None,
+    ) -> None:
+        """Update or clear dismissed warning across metadata and runtime data.
+
+        Args:
+            rel_path: Relative path of the blueprint.
+            full_path: Optional full filesystem path. If omitted, resolved from runtime data.
+            dismissed_data: Dismissal data dict, or None to clear dismissal.
+
+        """
+        target_path = full_path
+        if not target_path and self.data:
+            for p, entry in self.data.items():
+                if entry.get("relative_path") == rel_path:
+                    target_path = p
+                    break
+
+        if dismissed_data is not None:
+            persisted = self._persisted_metadata.setdefault(rel_path, {})
+            persisted["dismissed_warning"] = dismissed_data
+            if target_path and self.data and target_path in self.data:
+                self.data[target_path]["dismissed_warning"] = dismissed_data
+        else:
+            if rel_path in self._persisted_metadata:
+                self._persisted_metadata[rel_path].pop("dismissed_warning", None)
+            if target_path and self.data and target_path in self.data:
+                self.data[target_path].pop("dismissed_warning", None)
+
+        await self._async_save_persisted_metadata(force=True)
 
     async def async_shutdown(self) -> None:
         """Shutdown the coordinator and cancel tasks."""
@@ -1296,6 +1729,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             with contextlib.suppress(asyncio.CancelledError):
                 await self._background_task
             self._background_task = None
+        if self._post_ha_update_task and not self._post_ha_update_task.done():
+            _LOGGER.debug("Cancelling post HA update task due to shutdown")
+            self._post_ha_update_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._post_ha_update_task
+            self._post_ha_update_task = None
 
     def _mark_pending_reload_state(self) -> None:
         """Expose pending reload state on affected coordinator entries."""
@@ -3230,50 +3669,75 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             vol.Invalid: If substituted configuration fails voluptuous schema validation.
 
         """
-        has_executable_structure = (
-            (
-                domain == FunctionalDomain.AUTOMATION
-                and (
-                    ("trigger" in blueprint_dict or "triggers" in blueprint_dict)
-                    and (
-                        "action" in blueprint_dict
-                        or "actions" in blueprint_dict
-                        or "sequence" in blueprint_dict
-                    )
-                )
-            )
-            or (domain == FunctionalDomain.SCRIPT and CONF_SEQUENCE in blueprint_dict)
-            or (
-                domain == FunctionalDomain.TEMPLATE
-                and any(k in blueprint_dict for k in ("sensor", "binary_sensor", "template"))
-            )
+        substituted_baseline = self._derive_substituted_baseline_config(
+            blueprint_dict, blueprint_obj, relative_path, domain
         )
-        if not has_executable_structure:
+        if substituted_baseline is None:
             return
-
-        bp_meta = blueprint_dict.get("blueprint")
-        input_meta = bp_meta.get(CONF_INPUT) if isinstance(bp_meta, Mapping) else None
-        input_configs = extract_input_configs(input_meta)
-        dummy_inputs: dict[str, object] = {}
-        for input_name, input_cfg in input_configs.items():
-            if CONF_DEFAULT in input_cfg:
-                continue
-            dummy_val = derive_dummy_input_value(input_name, input_cfg, blueprint_dict)
-            if dummy_val is None:
-                return
-            dummy_inputs[input_name] = dummy_val
-        baseline_config: dict[str, object] = {
-            "use_blueprint": {
-                "path": relative_path,
-                "input": dummy_inputs,
-            }
-        }
-        baseline_inputs = BlueprintInputs(blueprint_obj, baseline_config)
-        baseline_inputs.validate()
-        substituted_baseline = baseline_inputs.async_substitute()
         await self._async_validate_substituted_domain_config(
             domain, relative_path, substituted_baseline
         )
+
+    async def _async_run_domain_validator(
+        self,
+        domain: FunctionalDomain,
+        config_key: str,
+        substituted_config: dict[str, object],
+    ) -> object:
+        """Run Home Assistant Core domain validator and return validated config.
+
+        Args:
+            domain: Functional domain (automation, script, template).
+            config_key: Entity ID or path label for error reporting.
+            substituted_config: Config dictionary after input substitution.
+
+        Returns:
+            Validated configuration object returned by Core validator.
+
+        Raises:
+            HomeAssistantError: If configuration fails domain validation.
+            vol.Invalid: If configuration fails schema validation.
+
+        """
+        if domain == FunctionalDomain.AUTOMATION:
+            validated = await async_validate_automation_config(
+                self.hass,
+                config_key=config_key,
+                config=substituted_config,
+            )
+            status = getattr(validated, "validation_status", None)
+            if (
+                isinstance(status, AutomationValidationStatus)
+                and status != AutomationValidationStatus.OK
+            ):
+                err_msg = (
+                    getattr(validated, "validation_error", None)
+                    or f"Automation validation failed with status {status}"
+                )
+                raise HomeAssistantError(str(err_msg))
+            return validated
+        if domain == FunctionalDomain.TEMPLATE:
+            return await async_validate_template_config(
+                self.hass,
+                config=substituted_config,
+            )
+        if config_key.startswith("script."):
+            object_id = config_key.split(".", 1)[1]
+        else:
+            object_id = slugify(f"{domain}_{config_key}")
+        validated = await async_validate_script_config(
+            self.hass,
+            object_id=object_id,
+            config=substituted_config,
+        )
+        status = getattr(validated, "validation_status", None)
+        if isinstance(status, ScriptValidationStatus) and status != ScriptValidationStatus.OK:
+            err_msg = (
+                getattr(validated, "validation_error", None)
+                or f"Script validation failed with status {status}"
+            )
+            raise HomeAssistantError(str(err_msg))
+        return validated
 
     async def _async_validate_substituted_domain_config(
         self,
@@ -3293,27 +3757,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             vol.Invalid: If configuration fails schema validation.
 
         """
-        if domain == FunctionalDomain.AUTOMATION:
-            await async_validate_automation_config(
-                self.hass,
-                config_key=config_key,
-                config=substituted_config,
-            )
-        elif domain == FunctionalDomain.TEMPLATE:
-            await async_validate_template_config(
-                self.hass,
-                config=substituted_config,
-            )
-        elif domain == FunctionalDomain.SCRIPT:
-            if config_key.startswith("script."):
-                object_id = config_key.split(".", 1)[1]
-            else:
-                object_id = slugify(f"{domain}_{config_key}")
-            await async_validate_script_config(
-                self.hass,
-                object_id=object_id,
-                config=substituted_config,
-            )
+        await self._async_run_domain_validator(domain, config_key, substituted_config)
 
     async def async_summarize_risks(self, risks: Iterable[Mapping[str, object]]) -> str:
         """Create a localized newline-separated string of risks.
@@ -3982,6 +4426,38 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 local_hash = info.get("local_hash")
                 updatable = bool(remote_hash and remote_hash != local_hash)
                 last_error = None
+
+                # Compatibility Guard: Auto-pin and Auto-unpin state machine
+                rel_path_val = str(info.get("relative_path") or "")
+                persisted_entry = (
+                    self._persisted_metadata.get(rel_path_val) if rel_path_val else None
+                ) or {}
+                is_pinned = bool(info.get("pinned") or persisted_entry.get("pinned"))
+                upstream_bad_hash = info.get("upstream_incompatible_hash") or persisted_entry.get(
+                    "upstream_incompatible_hash"
+                )
+
+                if is_pinned and updatable and remote_hash:
+                    if remote_hash == upstream_bad_hash:
+                        updatable = False
+                    else:
+                        comp_report = await self.async_validate_local_blueprint_compatibility(
+                            rel_path_val, path, remote_content
+                        )
+                        if comp_report.severity is not None:
+                            updatable = False
+                            if rel_path_val:
+                                persisted_record = self._persisted_metadata.setdefault(
+                                    rel_path_val, {}
+                                )
+                                persisted_record["upstream_incompatible_hash"] = remote_hash
+                            if self.data and path in self.data:
+                                self.data[path]["upstream_incompatible_hash"] = remote_hash
+                                self.data[path]["updatable"] = False
+                            await self._async_save_persisted_metadata()
+                        else:
+                            await self.async_unpin_blueprint(rel_path_val, path)
+                            self._async_delete_incompatibility_issue(path)
         except (HomeAssistantError, InvalidBlueprint) as err:
             _LOGGER.warning(
                 "Invalid blueprint content from %s: %s",
@@ -4403,6 +4879,49 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         """Compatibility property setter for tests."""
         self._last_request_times.clear()
         self._last_request_times["_default_"] = val
+
+    @property
+    def verify_on_ha_update(self) -> bool:
+        """Return whether to verify blueprint compatibility on Home Assistant update."""
+        if not self.config_entry:
+            return DEFAULT_VERIFY_ON_HA_UPDATE
+        return bool(
+            self.config_entry.options.get(
+                CONF_VERIFY_ON_HA_UPDATE,
+                self.config_entry.data.get(
+                    CONF_VERIFY_ON_HA_UPDATE,
+                    DEFAULT_VERIFY_ON_HA_UPDATE,
+                ),
+            )
+        )
+
+    async def async_check_ha_version_update(self, force: bool = False) -> bool:
+        """Check if Home Assistant version has changed since last recorded version.
+
+        Args:
+            force: If True, bypass version check and return True.
+
+        Returns:
+            True if Home Assistant was updated or force is True, False otherwise.
+
+        """
+        current_version = getattr(self.hass.config, "version", "")
+        if force:
+            return True
+        if self._last_ha_version is None:
+            await self.async_save_ha_version(current_version)
+            return False
+        return self._last_ha_version != current_version
+
+    async def async_save_ha_version(self, version: str) -> None:
+        """Persist the validated Home Assistant version to storage.
+
+        Args:
+            version: Home Assistant version string to store.
+
+        """
+        self._last_ha_version = version
+        await self._async_save_persisted_metadata()
 
     async def _apply_request_pacing(self, url: str) -> None:
         """Enforce a random pacing delay between outbound HTTP requests per domain.
@@ -4874,3 +5393,840 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         except (OSError, ValueError) as err:
             _LOGGER.exception("Filesystem error during blueprint restoration: %s", err)
             return False, "system_error", 0
+
+    @staticmethod
+    def _scan_all_local_blueprint_files_sync(
+        hass: HomeAssistant,
+    ) -> dict[str, dict[str, object]]:
+        """Scan all blueprint files on disk including those without source_url.
+
+        Runs in executor thread pool to avoid blocking the event loop.
+
+        Args:
+            hass: HomeAssistant instance.
+
+        Returns:
+            Dictionary of blueprint metadata indexed by full file path.
+
+        """
+        blueprint_path = hass.config.path(BLUEPRINTS_DATA_DIR)
+        found: dict[str, dict[str, object]] = {}
+        if not os.path.isdir(blueprint_path):
+            return found
+
+        real_blueprint_path = os.path.realpath(blueprint_path)
+
+        for domain in ALLOWED_RELOAD_DOMAINS:
+            domain_path = os.path.join(blueprint_path, domain)
+            if not os.path.isdir(domain_path):
+                continue
+
+            for root, _, files in os.walk(domain_path):
+                for file in files:
+                    if not file.endswith((".yaml", ".yml")):
+                        continue
+
+                    full_path = os.path.join(root, file)
+                    if os.path.islink(full_path):
+                        continue
+                    real_full_path = os.path.realpath(full_path)
+                    try:
+                        if (
+                            os.path.commonpath([real_full_path, real_blueprint_path])
+                            != real_blueprint_path
+                        ):
+                            continue
+                    except (ValueError, OSError):
+                        continue
+
+                    relative_path = get_blueprint_relative_path(hass, full_path)
+                    if not relative_path:
+                        continue
+
+                    try:
+                        content, file_hash = BlueprintUpdateCoordinator._read_blueprint_file(
+                            full_path
+                        )
+                        bp_dict: dict[str, object] = {}
+                        with contextlib.suppress(HomeAssistantError):
+                            parsed = yaml_util.parse_yaml(content)
+                            if isinstance(parsed, dict):
+                                bp_dict = parsed
+                        bp_info = bp_dict.get("blueprint")
+                        if not isinstance(bp_info, dict):
+                            bp_info = {}
+
+                        raw_name = bp_info.get("name")
+                        name = (
+                            raw_name.strip()
+                            if isinstance(raw_name, str) and raw_name.strip()
+                            else os.path.basename(full_path)
+                        )
+                        source_url = bp_info.get("source_url")
+                        clean_url = (
+                            source_url.strip()
+                            if isinstance(source_url, str) and source_url.strip()
+                            else ""
+                        )
+                        func_domain = normalize_domain(bp_info.get("domain") or domain)
+
+                        found[full_path] = {
+                            "name": name,
+                            "domain": func_domain,
+                            "source_url": clean_url,
+                            "relative_path": relative_path,
+                            "path": full_path,
+                            "content": content,
+                            "local_file_hash": file_hash,
+                            "local_hash": (
+                                hash_content(content, clean_url) if clean_url else file_hash
+                            ),
+                        }
+                    except (HomeAssistantError, ValueError, OSError):
+                        continue
+
+        return found
+
+    async def async_scan_all_local_blueprint_files(self) -> dict[str, dict[str, object]]:
+        """Discover all installed local blueprints without event-loop blocking.
+
+        Returns:
+            Dictionary mapping full paths to blueprint metadata dictionaries.
+
+        """
+        return await self.hass.async_add_executor_job(
+            self._scan_all_local_blueprint_files_sync, self.hass
+        )
+
+    async def _async_run_baseline_validation(
+        self,
+        blueprint_dict: dict[str, object],
+        blueprint_obj: Blueprint,
+        relative_path: str,
+        domain: FunctionalDomain,
+        diagnostics: ValidationDiagnostics,
+    ) -> None:
+        """Run baseline validation with dummy inputs, diffing configs to capture migrations.
+
+        Args:
+            blueprint_dict: Parsed blueprint dictionary.
+            blueprint_obj: Blueprint instance.
+            relative_path: Relative blueprint path.
+            domain: Blueprint functional domain.
+            diagnostics: Validation diagnostics collector.
+
+        """
+        substituted_baseline = self._derive_substituted_baseline_config(
+            blueprint_dict, blueprint_obj, relative_path, domain
+        )
+        if substituted_baseline is None:
+            return
+        input_cfg = copy.deepcopy(substituted_baseline)
+        validated_cfg = await self._async_run_domain_validator(
+            domain, relative_path, substituted_baseline
+        )
+        if validated_cfg:
+            diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    @staticmethod
+    def _derive_substituted_baseline_config(
+        blueprint_dict: dict[str, object],
+        blueprint_obj: Blueprint,
+        relative_path: str,
+        domain: FunctionalDomain,
+    ) -> dict[str, object] | None:
+        """Construct dummy inputs and generate substituted baseline configuration.
+
+        Args:
+            blueprint_dict: Parsed blueprint dictionary.
+            blueprint_obj: Instantiated Blueprint object.
+            relative_path: Relative blueprint path.
+            domain: Functional domain of the blueprint.
+
+        Returns:
+            Substituted baseline configuration dictionary, or None if the blueprint
+            lacks an executable structure or dummy inputs could not be derived.
+
+        """
+        has_executable_structure = (
+            (
+                domain == FunctionalDomain.AUTOMATION
+                and (
+                    ("trigger" in blueprint_dict or "triggers" in blueprint_dict)
+                    and (
+                        "action" in blueprint_dict
+                        or "actions" in blueprint_dict
+                        or "sequence" in blueprint_dict
+                    )
+                )
+            )
+            or (domain == FunctionalDomain.SCRIPT and CONF_SEQUENCE in blueprint_dict)
+            or (
+                domain == FunctionalDomain.TEMPLATE
+                and any(k in blueprint_dict for k in ("sensor", "binary_sensor", "template"))
+            )
+        )
+        if not has_executable_structure:
+            return None
+
+        bp_meta = blueprint_dict.get("blueprint")
+        input_meta = bp_meta.get(CONF_INPUT) if isinstance(bp_meta, Mapping) else None
+        input_configs = extract_input_configs(input_meta)
+        dummy_inputs: dict[str, object] = {}
+        for input_name, input_cfg in input_configs.items():
+            if CONF_DEFAULT in input_cfg:
+                continue
+            dummy_val = derive_dummy_input_value(input_name, input_cfg, blueprint_dict)
+            if dummy_val is None:
+                return None
+            dummy_inputs[input_name] = dummy_val
+        baseline_config: dict[str, object] = {
+            "use_blueprint": {
+                "path": relative_path,
+                "input": dummy_inputs,
+            }
+        }
+        baseline_inputs = BlueprintInputs(blueprint_obj, baseline_config)
+        baseline_inputs.validate()
+        substituted_baseline: dict[str, object] = baseline_inputs.async_substitute()
+        return substituted_baseline
+
+    @staticmethod
+    def _resolve_learn_more_url(
+        source_url: str,
+        report: CompatibilityReport,
+        ha_version: str,
+    ) -> tuple[str | None, str | None, str | None]:
+        """Resolve primary learn more URL, upstream bug report URL, and official HA docs URL.
+
+        Args:
+            source_url: Blueprint source URL.
+            report: Discovered compatibility report.
+            ha_version: Current Home Assistant version string.
+
+        Returns:
+            Tuple of (primary_learn_more_url, author_report_url, ha_docs_url).
+
+        """
+        author_report_url: str | None = None
+        ha_docs_url: str | None = None
+
+        if source_url:
+            parsed = urlparse(source_url)
+            host = (parsed.hostname or "").lower()
+            path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+            if host in (SourceDomain.GITHUB, SourceDomain.GITHUB_RAW):
+                if len(path_parts) >= 2:
+                    owner, repo = path_parts[0], path_parts[1]
+                    if path_parts and path_parts[0] == SourceProviderType.GIST:
+                        gist_id = path_parts[-1]
+                        author_report_url = URL_GIST_COMMENTS_TEMPLATE.format(gist_id=gist_id)
+                    else:
+                        author_report_url = URL_GITHUB_ISSUES_TEMPLATE.format(
+                            owner=owner, repo=repo
+                        )
+            elif host == SourceDomain.GIST:
+                if path_parts:
+                    gist_id = path_parts[-1]
+                    author_report_url = URL_GIST_COMMENTS_TEMPLATE.format(gist_id=gist_id)
+            elif host == SourceDomain.GIST_RAW:
+                if len(path_parts) >= 2:
+                    gist_id = path_parts[1]
+                    author_report_url = URL_GIST_COMMENTS_TEMPLATE.format(gist_id=gist_id)
+            elif host == SourceDomain.HA_FORUM:
+                if len(path_parts) >= 2 and path_parts[0] == "t":
+                    topic_id = path_parts[-1]
+                    author_report_url = URL_HA_COMMUNITY_TOPIC_TEMPLATE.format(topic_id=topic_id)
+                else:
+                    author_report_url = source_url
+
+        all_text = " ".join(
+            report.errors
+            + report.warnings
+            + list(report.renamed_keys.keys())
+            + list(report.renamed_keys.values())
+        ).lower()
+        if "service" in all_text and "action" in all_text:
+            ha_docs_url = URL_HA_DOCS_ACTIONS
+        elif "math." in all_text or "math" in all_text:
+            ha_docs_url = URL_HA_DOCS_TEMPLATING_MATH
+        elif "float" in all_text or "int" in all_text:
+            ha_docs_url = URL_HA_DOCS_TEMPLATING_NUMERIC
+        elif "target" in all_text:
+            ha_docs_url = URL_HA_DOCS_TARGETING
+        else:
+            ha_docs_url = URL_HA_DOCS_BLUEPRINT_DEFAULT
+
+        primary_url = ha_docs_url or author_report_url
+        return primary_url, author_report_url, ha_docs_url
+
+    @staticmethod
+    def get_incompatible_issue_id(
+        relative_path: str, domain: str | FunctionalDomain | None = None
+    ) -> str:
+        """Return the deterministic repair issue ID for an incompatible blueprint.
+
+        Args:
+            relative_path: Relative path of the blueprint.
+            domain: Domain of the blueprint.
+
+        Returns:
+            Deterministic repair issue ID string.
+
+        """
+        normalized_rel = relative_path.replace("\\", "/").strip("/")
+        norm_domain: str | None = None
+        if isinstance(domain, FunctionalDomain):
+            norm_domain = domain.value
+        elif isinstance(domain, str) and domain.strip():
+            norm_domain = domain.strip().lower()
+
+        if norm_domain and not normalized_rel.startswith(f"{norm_domain}/"):
+            normalized_rel = f"{norm_domain}/{normalized_rel}"
+        path_hash = hashlib.sha256(normalized_rel.encode("utf-8")).hexdigest()[:16]
+        return f"{RepairIssueType.INCOMPATIBLE_BLUEPRINT}_{path_hash}"
+
+    def _async_create_incompatibility_issue(
+        self,
+        path: str,
+        report: CompatibilityReport,
+        info: Mapping[str, object] | None = None,
+        candidate: tuple[str, str] | None = None,
+    ) -> None:
+        """Raise a Home Assistant repair issue for an incompatible or deprecated blueprint.
+
+        Args:
+            path: Full path to blueprint file.
+            report: Compatibility report.
+            info: Optional scanned blueprint info.
+            candidate: Optional tuple of (modernized_content, diff_text).
+
+        """
+        if not report.severity:
+            return
+
+        info_dict = dict(info) if info else (self.data.get(path) or {})
+        relative_path_obj = info_dict.get("relative_path")
+        relative_path = (
+            str(relative_path_obj)
+            if relative_path_obj
+            else get_blueprint_relative_path(self.hass, path)
+        )
+        if not relative_path:
+            return
+
+        name = str(info_dict.get("name") or relative_path)
+        source_url = str(info_dict.get("source_url") or "")
+        domain_obj = info_dict.get("domain")
+        domain = normalize_domain(domain_obj) if domain_obj else None
+        domain_str = domain.value if domain else ""
+
+        issue_id = self.get_incompatible_issue_id(relative_path, domain)
+        ha_version = getattr(self.hass.config, "version", "Core")
+
+        error_summary = "\n".join(f"- {e}" for e in (report.errors or report.warnings))
+        affected_entities_str = (
+            ", ".join(report.affected_entities)
+            if report.affected_entities
+            else "None (standalone blueprint)"
+        )
+        links: list[str] = []
+        if report.author_report_url:
+            links.append(f"[Report to Blueprint Author]({report.author_report_url})")
+        if report.ha_docs_url:
+            links.append(f"[Official Documentation]({report.ha_docs_url})")
+        resource_links = "\n".join(f"- {link}" for link in links) if links else "None"
+
+        diag_snippet = (
+            f"Blueprint: {name} ({relative_path})\n"
+            f"HA Version: {ha_version}\n"
+            f"Severity: {report.severity.value}\n"
+            f"Issues:\n{error_summary}"
+        )
+
+        local_hash = str(info_dict.get("local_hash") or info_dict.get("local_file_hash") or "")
+        candidate_source_file_hash = (
+            str(info_dict.get("local_file_hash") or info_dict.get("local_hash") or "")
+            if candidate
+            else None
+        )
+
+        ir.async_create_issue(
+            hass=self.hass,
+            domain=DOMAIN,
+            issue_id=issue_id,
+            is_fixable=True,
+            is_persistent=True,
+            learn_more_url=report.learn_more_url,
+            severity=(
+                ir.IssueSeverity.ERROR
+                if report.severity == IncompatibilitySeverity.BREAKING
+                else ir.IssueSeverity.WARNING
+            ),
+            translation_key=RepairIssueType.INCOMPATIBLE_BLUEPRINT,
+            translation_placeholders={
+                "name": name,
+                "path": relative_path,
+                "ha_version": ha_version,
+                "error_summary": error_summary,
+                "affected_entities": affected_entities_str,
+                "resource_links": resource_links,
+                "diagnostic_snippet": diag_snippet,
+                "breaks_in_ha_version": report.breaks_in_ha_version or "a future release",
+            },
+            data={
+                "config_entry_id": self.config_entry.entry_id if self.config_entry else None,
+                "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+                "path": path,
+                "relative_path": relative_path,
+                "domain": domain_str,
+                "name": name,
+                "source_url": source_url,
+                "local_hash": local_hash,
+                "severity": report.severity.value,
+                "errors": "\n".join(report.errors) if report.errors else None,
+                "warnings": "\n".join(report.warnings) if report.warnings else None,
+                "affected_entities": (
+                    ",".join(report.affected_entities) if report.affected_entities else None
+                ),
+                "breaks_in_ha_version": report.breaks_in_ha_version,
+                "renamed_keys": (
+                    orjson.dumps(report.renamed_keys).decode("utf-8")
+                    if report.renamed_keys
+                    else None
+                ),
+                "learn_more_url": report.learn_more_url,
+                "author_report_url": report.author_report_url,
+                "ha_docs_url": report.ha_docs_url,
+                "has_auto_fix": "true" if candidate else "false",
+                "candidate_content": candidate[0] if candidate else None,
+                "diff_text": candidate[1] if candidate else None,
+                "candidate_source_file_hash": candidate_source_file_hash,
+            },
+        )
+
+    def _async_delete_incompatibility_issue(self, path: str) -> None:
+        """Delete any incompatibility repair issue for the given blueprint path.
+
+        Args:
+            path: Full path to blueprint file.
+
+        """
+        info = self.data.get(path, {})
+        relative_path_obj = info.get("relative_path")
+        domain_obj = info.get("domain")
+        domain = normalize_domain(domain_obj) if domain_obj else None
+        relative_path = (
+            str(relative_path_obj)
+            if relative_path_obj
+            else get_blueprint_relative_path(self.hass, path)
+        )
+        if relative_path:
+            issue_id = self.get_incompatible_issue_id(relative_path, domain)
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
+    async def async_validate_local_blueprint_compatibility(
+        self,
+        rel_path: str,
+        full_path: str,
+        content: str,
+    ) -> CompatibilityReport:
+        """Inspect blueprint for compatibility with the running Home Assistant Core version.
+
+        Args:
+            rel_path: Relative blueprint path.
+            full_path: Full filesystem path.
+            content: Raw blueprint YAML content.
+
+        Returns:
+            CompatibilityReport describing severity, errors, warnings, and links.
+
+        """
+        report = CompatibilityReport()
+        parts = rel_path.split("/", 1)
+        domain = normalize_domain(parts[0]) if len(parts) > 1 else FunctionalDomain.AUTOMATION
+
+        # Step A & B: Parse YAML & schema validation
+        try:
+            blueprint_dict = yaml_util.parse_yaml(content)
+        except Exception as err:
+            report.errors.append(f"Invalid YAML syntax: {err}")
+            report.severity = IncompatibilitySeverity.BREAKING
+            return report
+
+        if not isinstance(blueprint_dict, dict):
+            report.errors.append("Invalid blueprint structure: root must be a mapping")
+            report.severity = IncompatibilitySeverity.BREAKING
+            return report
+
+        # Template AST & Jinja2 sandbox check
+        if tmpl_err := self._validate_template_value(
+            blueprint_dict, "", skip_blueprint_metadata=True
+        ):
+            report.errors.append(f"Template compatibility error at {tmpl_err[0]}: {tmpl_err[1]}")
+
+        schema = get_blueprint_schema(domain)
+        try:
+            schema(blueprint_dict)
+        except (vol.Invalid, HomeAssistantError) as err:
+            report.errors.append(format_validation_error(err))
+
+        # Instantiate Blueprint object
+        try:
+            blueprint_obj = Blueprint(blueprint_dict, expected_domain=domain, schema=schema)
+        except Exception as err:
+            report.errors.append(f"Failed to instantiate Blueprint: {err}")
+            report.severity = IncompatibilitySeverity.BREAKING
+            return report
+
+        # Step C & D: Consumer validation & Structural diagnostics
+        consumers = self._get_blueprint_consumers(rel_path) or []
+        report.affected_entities = consumers
+        full_configs = self._get_entities_configs(consumers) if consumers else {}
+
+        try:
+            async with capture_structural_validation_diagnostics(self.hass) as diagnostics:
+                if full_configs:
+                    for eid, cfg in full_configs.items():
+                        try:
+                            raw_sub = BlueprintInputs(blueprint_obj, cfg).async_substitute()
+                            input_cfg = copy.deepcopy(raw_sub)
+                            validated_cfg = await self._async_run_domain_validator(
+                                domain, eid, raw_sub
+                            )
+                            if validated_cfg:
+                                diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+                        except (vol.Invalid, HomeAssistantError) as err:
+                            report.errors.append(f"{eid}: {format_validation_error(err)}")
+                        except Exception as err:
+                            report.errors.append(f"{eid}: Validation error: {err}")
+                else:
+                    try:
+                        await self._async_run_baseline_validation(
+                            blueprint_dict, blueprint_obj, rel_path, domain, diagnostics
+                        )
+                    except (vol.Invalid, HomeAssistantError) as err:
+                        report.errors.append(
+                            f"Baseline validation failed: {format_validation_error(err)}"
+                        )
+                    except Exception as err:
+                        report.errors.append(f"Baseline validation error: {err}")
+
+            # Collect diagnostics
+            report.renamed_keys.update(diagnostics.renamed_keys)
+            for item in diagnostics.reports:
+                kwargs = item[1]
+                what = kwargs.get("what")
+                if breaks_in := kwargs.get("breaks_in_ha_version"):
+                    report.breaks_in_ha_version = str(breaks_in)
+                if what:
+                    report.warnings.append(str(what))
+
+            for issue in diagnostics.new_issues:
+                if issue.breaks_in_ha_version:
+                    report.breaks_in_ha_version = str(issue.breaks_in_ha_version)
+                if issue.issue_id:
+                    report.warnings.append(f"Home Assistant issue: {issue.issue_id}")
+
+            for dep_k in diagnostics.deprecated_keys:
+                report.warnings.append(f"Deprecated key used: '{dep_k}'")
+
+        except Exception as err:
+            _LOGGER.exception("Unexpected error during structural validation: %s", err)
+            report.errors.append(f"Diagnostics error: {err}")
+
+        # Step E: Severity classification
+        if report.errors:
+            report.severity = IncompatibilitySeverity.BREAKING
+        elif report.warnings or report.breaks_in_ha_version:
+            report.severity = IncompatibilitySeverity.DEPRECATION
+        else:
+            report.severity = None
+
+        # Resolve URLs
+        source_url = ""
+        bp_meta = blueprint_dict.get("blueprint")
+        if isinstance(bp_meta, dict):
+            s_url = bp_meta.get("source_url")
+            if isinstance(s_url, str):
+                source_url = s_url
+
+        primary_url, author_url, docs_url = self._resolve_learn_more_url(
+            source_url, report, getattr(self.hass.config, "version", "")
+        )
+        report.learn_more_url = primary_url
+        report.author_report_url = author_url
+        report.ha_docs_url = docs_url
+
+        return report
+
+    def _validate_modernization_roundtrip(
+        self,
+        orig_parsed: object,
+        mod_parsed: object,
+        dynamic_replacements: Mapping[str, str] | None = None,
+    ) -> bool:
+        """Validate structural AST round-trip preservation after modernization.
+
+        Ensures that non-modernized metadata, inputs, and configurations remain
+        intact and that transformations only affect intended schema elements.
+
+        Args:
+            orig_parsed: Parsed YAML dictionary before modernization.
+            mod_parsed: Parsed YAML dictionary after modernization.
+            dynamic_replacements: Optional map of old key names to new replacement keys.
+
+        Returns:
+            True if candidate passes structural round-trip validation, False otherwise.
+
+        """
+        if not isinstance(orig_parsed, dict) or not isinstance(mod_parsed, dict):
+            return False
+
+        if orig_parsed.get(CONF_BLUEPRINT) != mod_parsed.get(CONF_BLUEPRINT):
+            return False
+
+        if any(
+            key in orig_parsed and orig_parsed[key] != mod_parsed.get(key)
+            for key in BLUEPRINT_ROUNDTRIP_INVARIANT_KEYS
+        ):
+            return False
+
+        dynamic_keys = set(dynamic_replacements.keys()) if dynamic_replacements else set()
+        return not any(
+            (
+                key not in ACTION_PATH_SEGMENTS
+                and key not in TRIGGER_PATH_SEGMENTS
+                and key not in dynamic_keys
+                and (key not in mod_parsed or mod_parsed[key] != val)
+            )
+            for key, val in orig_parsed.items()
+        )
+
+    async def async_generate_modernized_candidate(
+        self,
+        rel_path: str,
+        full_path: str,
+        content: str,
+        domain: FunctionalDomain,
+        dynamic_replacements: dict[str, str] | None = None,
+    ) -> tuple[str, str] | None:
+        """Generate in-memory modernized blueprint candidate and unified diff.
+
+        Candidate is validated against Home Assistant Core. If breaking errors
+        remain, candidate is rejected and None is returned. Disk files are
+        never modified.
+
+        Args:
+            rel_path: Relative blueprint path.
+            full_path: Full file path.
+            content: Current blueprint file content.
+            domain: Blueprint functional domain.
+            dynamic_replacements: Optional key migrations discovered during validation.
+
+        Returns:
+            Tuple of (candidate_content, diff_text) if successful, None otherwise.
+
+        """
+        try:
+            orig_parsed = yaml_util.parse_yaml(content)
+        except Exception as err:
+            _LOGGER.debug("Original blueprint %s cannot be parsed: %s", rel_path, err)
+            return None
+
+        if unsupported_reason := detect_unsupported_yaml_constructs(content):
+            _LOGGER.debug(
+                "Blueprint %s rejected for auto-fix candidate: %s",
+                rel_path,
+                unsupported_reason,
+            )
+            return None
+
+        modernized = modernize_legacy_blueprint_yaml(
+            content, domain, dynamic_replacements=dynamic_replacements
+        )
+        if modernized == content:
+            return None
+
+        try:
+            mod_parsed = yaml_util.parse_yaml(modernized)
+        except Exception as err:
+            _LOGGER.debug(
+                "Modernized blueprint candidate %s failed YAML parsing: %s", rel_path, err
+            )
+            return None
+
+        if not self._validate_modernization_roundtrip(
+            orig_parsed, mod_parsed, dynamic_replacements=dynamic_replacements
+        ):
+            _LOGGER.debug(
+                "Modernized blueprint candidate %s failed round-trip structural validation",
+                rel_path,
+            )
+            return None
+
+        # Validate candidate
+        report = await self.async_validate_local_blueprint_compatibility(
+            rel_path, full_path, modernized
+        )
+        if report.severity == IncompatibilitySeverity.BREAKING:
+            _LOGGER.debug(
+                "Rejected auto-fix candidate for %s: still has breaking errors: %s",
+                rel_path,
+                report.errors,
+            )
+            return None
+
+        diff_lines = list(
+            unified_diff(
+                content.splitlines(keepends=True),
+                modernized.splitlines(keepends=True),
+                fromfile=f"a/{rel_path}",
+                tofile=f"b/{rel_path}",
+            )
+        )
+        diff_text = "".join(diff_lines)
+        return modernized, diff_text
+
+    @callback
+    def async_schedule_post_update_compatibility_guard(self) -> asyncio.Task | None:
+        """Schedule post-HA-update compatibility check as a background task.
+
+        Returns:
+            Created or currently running asyncio.Task, or None if disabled.
+
+        """
+        if not self.verify_on_ha_update:
+            _LOGGER.debug("Post-HA-update compatibility guard is disabled")
+            return None
+
+        if self._post_ha_update_task and not self._post_ha_update_task.done():
+            _LOGGER.debug("Post-HA-update compatibility guard task is already running")
+            return self._post_ha_update_task
+
+        async def _run_guard() -> None:
+            """Run guard coroutine, log unexpected exceptions, and clear task reference."""
+            try:
+                await self.async_run_post_update_compatibility_guard()
+            except asyncio.CancelledError:
+                _LOGGER.debug("Post-HA-update compatibility guard task was cancelled")
+                raise
+            except Exception as err:
+                _LOGGER.exception(
+                    "Unexpected error in post-HA-update blueprint compatibility check: %s",
+                    err,
+                )
+            finally:
+                if asyncio.current_task() is self._post_ha_update_task:
+                    self._post_ha_update_task = None
+
+        self._post_ha_update_task = self.hass.async_create_background_task(
+            _run_guard(),
+            name=f"{DOMAIN}_post_ha_update_check",
+        )
+        return self._post_ha_update_task
+
+    async def async_run_post_update_compatibility_guard(self, force: bool = False) -> None:
+        """Run compatibility guard check across all installed local blueprints.
+
+        Called automatically on Home Assistant startup after core update.
+
+        Args:
+            force: If True, execute check even if version hasn't changed.
+
+        """
+        if not self.verify_on_ha_update and not force:
+            _LOGGER.debug("Post-HA-update compatibility guard is disabled")
+            return
+
+        async with self._post_ha_update_lock:
+            should_run = await self.async_check_ha_version_update(force=force)
+            if not should_run:
+                _LOGGER.debug(
+                    "Skipping post-HA-update compatibility guard; no version change detected"
+                )
+                return
+
+            _LOGGER.info(
+                "Running post-HA-update blueprint compatibility guard for version %s",
+                getattr(self.hass.config, "version", "unknown"),
+            )
+            completed_cleanly = False
+            try:
+                all_blueprints = await self.async_scan_all_local_blueprint_files()
+                has_failures = False
+
+                for full_path, bp_info in all_blueprints.items():
+                    await asyncio.sleep(0)  # Yield to event loop
+                    rel_path = str(bp_info["relative_path"])
+                    content = str(bp_info["content"])
+                    domain = normalize_domain(bp_info.get("domain"))
+                    local_hash = str(bp_info["local_hash"])
+
+                    persisted_meta = self._persisted_metadata.get(rel_path) or {}
+                    dismissed_data = persisted_meta.get("dismissed_warning")
+                    if isinstance(dismissed_data, dict):
+                        dismissed_at_hash = dismissed_data.get("dismissed_at_hash")
+                        dismissed_at_ha_version = dismissed_data.get("dismissed_at_ha_version")
+                        current_ha_version = getattr(self.hass.config, "version", "")
+                        if (
+                            local_hash != dismissed_at_hash
+                            or current_ha_version != dismissed_at_ha_version
+                        ):
+                            await self.async_set_dismissed_warning(rel_path, full_path, None)
+                            dismissed_data = None
+
+                    try:
+                        async with asyncio.timeout(_POST_UPDATE_GUARD_TIMEOUT):
+                            report = await self.async_validate_local_blueprint_compatibility(
+                                rel_path, full_path, content
+                            )
+                            if not report.severity:
+                                self._async_delete_incompatibility_issue(full_path)
+                                continue
+
+                            if (
+                                report.severity == IncompatibilitySeverity.DEPRECATION
+                                and isinstance(dismissed_data, dict)
+                            ):
+                                # User dismissed this warning for this file hash and HA version
+                                continue
+
+                            candidate = await self.async_generate_modernized_candidate(
+                                rel_path,
+                                full_path,
+                                content,
+                                domain,
+                                dynamic_replacements=report.renamed_keys,
+                            )
+                            self._async_create_incompatibility_issue(
+                                full_path, report, info=bp_info, candidate=candidate
+                            )
+                    except TimeoutError:
+                        has_failures = True
+                        _LOGGER.warning(
+                            "Post-HA-update compatibility check timed out for %s after %ss",
+                            rel_path,
+                            _POST_UPDATE_GUARD_TIMEOUT,
+                        )
+                    except Exception as err:
+                        has_failures = True
+                        _LOGGER.exception(
+                            "Error inspecting compatibility for %s: %s", rel_path, err
+                        )
+
+                if not has_failures:
+                    completed_cleanly = True
+            except asyncio.CancelledError:
+                _LOGGER.info("Post-HA-update compatibility check was cancelled before completion")
+                raise
+            except Exception as err:
+                _LOGGER.exception(
+                    "Failed to scan or complete post-HA-update compatibility guard: %s", err
+                )
+                raise
+            finally:
+                if completed_cleanly and (
+                    current_version := getattr(self.hass.config, "version", "")
+                ):
+                    await self.async_save_ha_version(current_version)

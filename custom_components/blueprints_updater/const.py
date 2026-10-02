@@ -2,6 +2,11 @@
 
 import re
 from enum import StrEnum
+from typing import Final
+
+from homeassistant.components.automation.const import CONF_TRIGGER_VARIABLES
+from homeassistant.const import CONF_MODE, CONF_VARIABLES
+from homeassistant.helpers.script import CONF_MAX, CONF_MAX_EXCEEDED
 
 DOMAIN = "blueprints_updater"
 BLUEPRINTS_DATA_DIR = "blueprints"
@@ -10,6 +15,7 @@ CONF_FILTER_MODE = "filter_mode"
 CONF_SELECTED_BLUEPRINTS = "selected_blueprints"
 CONF_AUTO_UPDATE = "auto_update"
 CONF_MAX_BACKUPS = "max_backups"
+CONF_VERIFY_ON_HA_UPDATE = "verify_on_ha_update"
 EVENT_BLUEPRINTS_UPDATER_UPDATED = f"{DOMAIN}_updated"
 
 # ASCII Unit Separator is not a Jinja2 syntax character. It separates a
@@ -17,6 +23,7 @@ EVENT_BLUEPRINTS_UPDATER_UPDATED = f"{DOMAIN}_updated"
 ERROR_SEPARATOR = "\x1f"
 
 DEFAULT_AUTO_UPDATE = False
+DEFAULT_VERIFY_ON_HA_UPDATE = True
 DEFAULT_MAX_BACKUPS = 3
 MIN_BACKUPS = 1
 MAX_BACKUPS = 10
@@ -52,7 +59,25 @@ MAX_UPDATE_INTERVAL_HOURS = 720
 
 STORAGE_VERSION = 1
 STORAGE_KEY_DATA = f"{DOMAIN}_data"
-METADATA_STORAGE_FIELDS = ("etag", "remote_hash", "source_url", "last_modified")
+STORAGE_KEY_LAST_HA_VERSION = "last_ha_version"
+METADATA_STORAGE_FIELDS = (
+    "etag",
+    "remote_hash",
+    "source_url",
+    "last_modified",
+    "pinned",
+    "pinned_reason",
+    "pinned_at",
+    "upstream_incompatible_hash",
+    "dismissed_warning",
+)
+BLUEPRINT_ROUNDTRIP_INVARIANT_KEYS: Final[tuple[str, ...]] = (
+    CONF_MODE,
+    CONF_MAX,
+    CONF_MAX_EXCEEDED,
+    CONF_VARIABLES,
+    CONF_TRIGGER_VARIABLES,
+)
 
 
 class SourceDomain(StrEnum):
@@ -61,10 +86,34 @@ class SourceDomain(StrEnum):
     GITHUB = "github.com"
     GITHUB_RAW = "raw.githubusercontent.com"
     GIST = "gist.github.com"
+    GIST_RAW = "gist.githubusercontent.com"
     HA_FORUM = "community.home-assistant.io"
     GITLAB = "gitlab.com"
     CODEBERG = "codeberg.org"
     BITBUCKET = "bitbucket.org"
+
+
+class PinReason(StrEnum):
+    """Reasons why a blueprint is pinned."""
+
+    HA_UPDATE_INCOMPATIBILITY = "ha_update_incompatibility"
+    USER_APPLIED_AUTO_FIX = "user_applied_auto_fix"
+    MANUAL = "manual"
+
+
+URL_HA_DOCS_ACTIONS = "https://www.home-assistant.io/blog/2024/08/07/release-20248/#service-calls-are-now-action-calls"
+URL_HA_DOCS_TEMPLATING_MATH = "https://www.home-assistant.io/docs/configuration/templating/#math"
+URL_HA_DOCS_TEMPLATING_NUMERIC = (
+    "https://www.home-assistant.io/docs/configuration/templating/#numeric-conversions"
+)
+URL_HA_DOCS_TARGETING = (
+    "https://www.home-assistant.io/docs/scripts/#targeting-areas-devices-and-entities"
+)
+URL_HA_DOCS_BLUEPRINT_DEFAULT = "https://www.home-assistant.io/docs/blueprint/"
+
+URL_GITHUB_ISSUES_TEMPLATE = "https://github.com/{owner}/{repo}/issues"
+URL_GIST_COMMENTS_TEMPLATE = "https://gist.github.com/{gist_id}#comments"
+URL_HA_COMMUNITY_TOPIC_TEMPLATE = "https://community.home-assistant.io/t/{topic_id}"
 
 
 RE_FORUM_TOPIC_ID = re.compile(r"/t/(?:[^/]+/)?(\d+)")
@@ -161,6 +210,31 @@ class RepairIssueType(StrEnum):
     """Types of repair issues raised by Blueprints Updater."""
 
     WITHDRAWN_BLUEPRINT = "withdrawn_blueprint"
+    INCOMPATIBLE_BLUEPRINT = "incompatible_blueprint"
+
+
+class RepairIncompatibleAction(StrEnum):
+    """Actions available in the incompatible blueprint repair menu."""
+
+    AUTO_FIX = "auto_fix"
+    ACKNOWLEDGE = "acknowledge"
+    CHANGE_URL = "change_url"
+    UNPIN = "unpin"
+
+
+class IncompatibilitySeverity(StrEnum):
+    """Severity classification for blueprint incompatibility."""
+
+    BREAKING = "breaking"
+    DEPRECATION = "deprecation"
+
+
+class RepairForkAction(StrEnum):
+    """Actions available when confirming a fork switch."""
+
+    PROCEED = "proceed"
+    AUTO_FIX = "auto_fix"
+    DIFFERENT_URL = "different_url"
 
 
 class RepairAction(StrEnum):
