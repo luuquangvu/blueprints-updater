@@ -6237,6 +6237,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 for full_path, bp_info in all_blueprints.items():
                     await asyncio.sleep(0)  # Yield to event loop
                     if not isinstance(bp_info, dict):
+                        has_failures = True
                         continue
                     rel_path_obj = bp_info.get("relative_path")
                     rel_path = (
