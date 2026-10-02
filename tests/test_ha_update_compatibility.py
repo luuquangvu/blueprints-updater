@@ -3,6 +3,7 @@
 import asyncio
 import os
 import tempfile
+from contextlib import nullcontext
 from datetime import timedelta
 from types import MappingProxyType
 from typing import Any, cast
@@ -1388,6 +1389,58 @@ async def test_capture_structural_validation_diagnostics_isolation(hass, monkeyp
 
     # Unrelated task issue preserved in registry
     assert ("unrelated_domain", "unrelated_issue") in registry.issues
+
+
+@pytest.mark.parametrize("validation_error", [None, RuntimeError, asyncio.CancelledError])
+async def test_capture_diagnostics_restores_issue_notifications(hass, validation_error) -> None:
+    """Test restored issues are published and saved even when validation is interrupted."""
+    hass.loop = asyncio.get_running_loop()
+    registry = ir.async_get(hass)
+    with patch.object(registry, "async_schedule_save") as save:
+        for issue_id in ("first", "second"):
+            ir.async_create_issue(
+                hass,
+                "automation",
+                issue_id,
+                is_fixable=False,
+                is_persistent=True,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="original",
+            )
+        snapshot = dict(registry.issues)
+        observed_entries = []
+
+        def observe_restoration(event_type, event_data) -> None:
+            """Read restored issue data when the notification is published."""
+            assert event_type == ir.EVENT_REPAIRS_ISSUE_REGISTRY_UPDATED
+            assert event_data["action"] == "update"
+            key = (event_data["domain"], event_data["issue_id"])
+            observed_entries.append(registry.issues[key])
+
+        with (
+            pytest.raises(validation_error) if validation_error else nullcontext(),
+            patch.object(hass.bus, "async_fire", side_effect=observe_restoration),
+        ):
+            async with capture_structural_validation_diagnostics(hass) as diagnostics:
+                for issue_id in ("first", "second", "first"):
+                    ir.async_create_issue(
+                        hass,
+                        "automation",
+                        issue_id,
+                        is_fixable=False,
+                        is_persistent=True,
+                        severity=ir.IssueSeverity.ERROR,
+                        translation_key="temporary",
+                    )
+                observed_entries.clear()
+                save.reset_mock()
+                if validation_error:
+                    raise validation_error()
+
+        assert observed_entries == list(snapshot.values())
+        assert registry.issues == snapshot
+        assert diagnostics.new_issues == []
+        save.assert_called_once_with()
 
 
 async def test_setup_entry_ha_running_triggers_compatibility_guard(hass) -> None:
@@ -2860,14 +2913,20 @@ sequence:
     assert "entity_id: light.bulb" in modernized
 
 
-async def test_check_compatibility_service(coordinator: BlueprintUpdateCoordinator, hass) -> None:
-    """Test calling check_compatibility admin service triggers guard with force=True."""
+@pytest.mark.parametrize(
+    "guard_error", [None, RuntimeError("guard failed"), asyncio.CancelledError()]
+)
+async def test_check_compatibility_service(
+    coordinator: BlueprintUpdateCoordinator, hass, guard_error, caplog
+) -> None:
+    """Test forced checks isolate coordinator errors while propagating cancellation."""
     entry = coordinator.config_entry
     coordinator_mock = MagicMock(spec=BlueprintUpdateCoordinator)
     coordinator_mock.async_setup = AsyncMock()
     coordinator_mock.async_config_entry_first_refresh = AsyncMock()
     coordinator_mock.async_schedule_post_update_compatibility_guard = MagicMock()
-    coordinator_mock.async_run_post_update_compatibility_guard = AsyncMock()
+    coordinator_mock.async_run_post_update_compatibility_guard = AsyncMock(side_effect=guard_error)
+    coordinator_mock.config_entry = entry
     coordinator_mock.data = {}
 
     hass.config_entries = MagicMock()
@@ -2892,7 +2951,22 @@ async def test_check_compatibility_service(coordinator: BlueprintUpdateCoordinat
         or call.kwargs.get("service") == IntegrationService.CHECK_COMPATIBILITY
     )
     handler = check_call.args[3] if len(check_call.args) > 3 else check_call.kwargs["handler"]
-    await handler(MagicMock())
+    next_coordinator = MagicMock(spec=BlueprintUpdateCoordinator)
+    next_guard = next_coordinator.async_run_post_update_compatibility_guard = AsyncMock()
+    hass.data[DOMAIN]["coordinators"]["next_entry"] = next_coordinator
+    if isinstance(guard_error, asyncio.CancelledError):
+        with pytest.raises(asyncio.CancelledError):
+            await handler(MagicMock())
+        next_guard.assert_not_awaited()
+        assert "Error checking blueprint compatibility" not in caplog.text
+    else:
+        await handler(MagicMock())
+        next_guard.assert_awaited_once_with(force=True)
+        if guard_error is not None:
+            assert (
+                f"Error checking blueprint compatibility for entry {entry.entry_id}" in caplog.text
+            )
+            assert "guard failed" in caplog.text
     coordinator_mock.async_run_post_update_compatibility_guard.assert_awaited_once_with(force=True)
 
 

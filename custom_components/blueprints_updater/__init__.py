@@ -255,7 +255,13 @@ def _async_register_services(hass: HomeAssistant) -> None:
     async def async_check_compatibility_handler(_: ServiceCall) -> None:
         """Handle checking blueprints compatibility against Home Assistant Core."""
         for active_coordinator in _get_coordinators():
-            await active_coordinator.async_run_post_update_compatibility_guard(force=True)
+            try:
+                await active_coordinator.async_run_post_update_compatibility_guard(force=True)
+            except Exception:
+                _LOGGER.exception(
+                    "Error checking blueprint compatibility for entry %s",
+                    active_coordinator.config_entry.entry_id,
+                )
 
     async def async_restore_blueprint_handler(call: ServiceCall) -> dict:
         """Handle the restore blueprint action."""
