@@ -36,6 +36,8 @@ from custom_components.blueprints_updater.const import (
     STORAGE_KEY_LAST_HA_VERSION,
     FunctionalDomain,
     IncompatibilitySeverity,
+    IntegrationService,
+    PinReason,
     RepairForkAction,
     RepairIncompatibleAction,
     RepairIssueType,
@@ -1237,7 +1239,7 @@ async def test_modernize_preserves_multiline_and_plain_strings() -> None:
     assert "        service: light.turn_on\n" in modernized
     assert "        platform: state\n" in modernized
     # Jinja template inside multiline modernized
-    assert "(states('sensor.x') | float * 2) | round(0, \"floor\")" in modernized
+    assert "(states('sensor.x') | float(0) * 2) | round(0, \"floor\")" in modernized
     # Actual action outside multiline modernized
     assert "  - action: light.turn_on\n" in modernized
 
@@ -1343,6 +1345,14 @@ async def test_capture_structural_validation_diagnostics_isolation(hass, monkeyp
             severity=ir.IssueSeverity.ERROR,
             translation_key="val_issue",
         )
+        ir.async_create_issue(
+            hass,
+            "existing_domain",
+            "existing_issue",
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="existing_mutated",
+        )
 
         async def _unrelated_task() -> None:
             """Simulate an unrelated background task in Home Assistant."""
@@ -1369,8 +1379,14 @@ async def test_capture_structural_validation_diagnostics_isolation(hass, monkeyp
     assert any(i.issue_id == "validation_task_issue" for i in diagnostics.new_issues)
     assert ("automation", "validation_task_issue") not in registry.issues
 
-    # Existing and unrelated task issues preserved in registry
+    # Existing issue not captured in new_issues and original state restored
+    assert all(i.issue_id != "existing_issue" for i in diagnostics.new_issues)
     assert ("existing_domain", "existing_issue") in registry.issues
+    existing_entry = registry.issues[("existing_domain", "existing_issue")]
+    assert existing_entry.severity == ir.IssueSeverity.WARNING
+    assert existing_entry.translation_key == "existing"
+
+    # Unrelated task issue preserved in registry
     assert ("unrelated_domain", "unrelated_issue") in registry.issues
 
 
@@ -2165,7 +2181,7 @@ def test_modernize_preserves_jinja_in_variables_and_trigger_variables() -> None:
     assert 'math_var: "{{ math.custom_func(1.5) }}"' in modernized
     assert 'trig_var: "{{ 10 | int }}"' in modernized
     # Jinja in action must be modernized
-    assert "brightness: \"{{ states('sensor.bright') | float }}\"" in modernized
+    assert "brightness: \"{{ states('sensor.bright') | float(0) }}\"" in modernized
 
 
 def test_derive_value_for_path_indexed_scalar_fields() -> None:
@@ -2482,3 +2498,420 @@ async def test_incompatible_repair_fork_fails_closed_without_precondition(
     assert result_exec.get("type") == data_entry_flow.FlowResultType.FORM
     assert result_exec.get("step_id") == "change_url"
     assert (result_exec.get("errors") or {}).get("url") == "invalid_url"
+
+
+async def test_incompatible_repair_fork_auto_fix_diff_against_local_file(
+    coordinator: BlueprintUpdateCoordinator, hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test fork auto-fix step computes diff against local file content, not fork content."""
+    issue_id = coordinator.get_incompatible_issue_id(
+        "automation/local_diff_test.yaml", FunctionalDomain.AUTOMATION
+    )
+    issue_data: dict[str, object] = {
+        "config_entry_id": coordinator.config_entry.entry_id,
+        "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+        "path": "/config/blueprints/automation/local_diff_test.yaml",
+        "relative_path": "automation/local_diff_test.yaml",
+        "domain": FunctionalDomain.AUTOMATION.value,
+        "name": "Local Diff Test",
+        "source_url": "https://github.com/original/bp.yaml",
+        "has_auto_fix": "false",
+        "candidate_content": "",
+        "diff_text": "",
+        "severity": IncompatibilitySeverity.DEPRECATION.value,
+    }
+    flow = IncompatibleBlueprintRepairFlow(coordinator, issue_id, issue_data)
+    flow._pending_url = "https://github.com/fork/bp.yaml"
+    flow._pending_content = "blueprint:\n  name: Community Fork\n"
+    modernized_content = "blueprint:\n  name: Modernized Candidate\n"
+    flow._fork_candidate = (modernized_content, "- fork\n+ modernized")
+    flow._pending_precondition = FileRevisionPrecondition.existing("local_hash_123")
+
+    local_disk_content = "blueprint:\n  name: User Local Customized\n"
+    monkeypatch.setattr(
+        BlueprintUpdateCoordinator,
+        "_read_blueprint_file",
+        MagicMock(return_value=(local_disk_content, "local_hash_123")),
+    )
+
+    result = await flow.async_step_confirm_fork({"fork_action": RepairForkAction.AUTO_FIX.value})
+    assert result.get("step_id") == "auto_fix"
+    assert flow.candidate_content == modernized_content
+    assert "User Local Customized" in flow.diff_text
+    assert "Modernized Candidate" in flow.diff_text
+    assert "- fork" not in flow.diff_text
+
+
+async def test_manual_pin_preserved_during_update_checks(
+    coordinator: BlueprintUpdateCoordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that blueprints pinned with PinReason.MANUAL are never auto-unpinned."""
+    rel_path = "automation/manually_pinned.yaml"
+    full_path = f"/config/blueprints/{rel_path}"
+
+    coordinator._persisted_metadata[rel_path] = {
+        "pinned": True,
+        "pinned_reason": PinReason.MANUAL.value,
+        "remote_hash": "hash_v1",
+        "source_url": "https://github.com/author/bp.yaml",
+    }
+    coordinator.data[full_path] = {
+        "relative_path": rel_path,
+        "pinned": True,
+        "pinned_reason": PinReason.MANUAL.value,
+        "local_hash": "hash_v1",
+        "remote_hash": "hash_v2",
+        "source_url": "https://github.com/author/bp.yaml",
+        "domain": FunctionalDomain.AUTOMATION,
+    }
+
+    # 1. Source URL change must preserve manual pin
+    info_new = {
+        **coordinator.data[full_path],
+        "source_url": "https://github.com/new_author/bp.yaml",
+    }
+    prev_dict = {
+        **coordinator.data[full_path],
+        "source_url": "https://github.com/author/bp.yaml",
+    }
+    coordinator._handle_source_url_change(full_path, info_new, prev_dict)
+    assert coordinator._persisted_metadata[rel_path].get("pinned") is True
+    assert coordinator._persisted_metadata[rel_path].get("pinned_reason") == PinReason.MANUAL.value
+    assert coordinator._persisted_metadata[rel_path].get("remote_hash") is None
+    assert (
+        coordinator._persisted_metadata[rel_path].get("source_url")
+        == "https://github.com/new_author/bp.yaml"
+    )
+
+    # 2. Ghost update detection must NOT clear pinned flag or make updatable
+    info_ghost: dict[str, object] = {
+        "local_hash": "hash_v1",
+        "relative_path": rel_path,
+        "pinned": True,
+        "pinned_reason": PinReason.MANUAL.value,
+    }
+    prev_ghost: dict[str, object] = {
+        "pinned": True,
+        "pinned_reason": PinReason.MANUAL.value,
+        "remote_hash": "hash_v2",
+    }
+    is_updatable, _, _, _ = coordinator._apply_ghost_update_detection(
+        full_path, info_ghost, prev_ghost
+    )
+    assert is_updatable is False
+
+    # 3. _process_blueprint_content must not auto-unpin manual pins
+    monkeypatch.setattr(
+        coordinator,
+        "async_validate_local_blueprint_compatibility",
+        AsyncMock(return_value=CompatibilityReport(severity=None)),
+    )
+    unpin_mock = AsyncMock()
+    monkeypatch.setattr(coordinator, "async_unpin_blueprint", unpin_mock)
+
+    await coordinator._process_blueprint_content(
+        full_path,
+        coordinator.data[full_path],
+        "blueprint:\n  name: V2\n",
+        "https://github.com/author/bp.yaml",
+        results_to_notify=[],
+        updated_domains=set(),
+    )
+    unpin_mock.assert_not_called()
+    assert coordinator._persisted_metadata[rel_path].get("pinned") is True
+
+
+async def test_post_update_compatibility_guard_deletes_orphaned_issues(
+    coordinator: BlueprintUpdateCoordinator, hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that orphaned incompatible blueprint issues are purged when file is deleted."""
+    monkeypatch.setattr(coordinator, "async_check_ha_version_update", AsyncMock(return_value=True))
+    monkeypatch.setattr(coordinator, "async_save_ha_version", AsyncMock())
+
+    all_blueprints = {
+        "/config/blueprints/automation/existing.yaml": {
+            "relative_path": "automation/existing.yaml",
+            "content": "blueprint:\n  name: Existing\n",
+            "domain": FunctionalDomain.AUTOMATION,
+            "local_hash": "existing_hash",
+        }
+    }
+    monkeypatch.setattr(
+        coordinator, "async_scan_all_local_blueprint_files", AsyncMock(return_value=all_blueprints)
+    )
+    monkeypatch.setattr(
+        coordinator,
+        "async_validate_local_blueprint_compatibility",
+        AsyncMock(return_value=CompatibilityReport(severity=None)),
+    )
+
+    issue_registry = ir.async_get(hass)
+    orphaned_issue_id = coordinator.get_incompatible_issue_id(
+        "automation/deleted.yaml", FunctionalDomain.AUTOMATION
+    )
+    issue_registry.issues[(DOMAIN, orphaned_issue_id)] = MagicMock()
+
+    delete_mock = MagicMock()
+    monkeypatch.setattr(ir, "async_delete_issue", delete_mock)
+
+    await coordinator.async_run_post_update_compatibility_guard(force=True)
+    delete_mock.assert_any_call(hass, DOMAIN, orphaned_issue_id)
+
+
+async def test_post_update_compatibility_guard_preserves_orphaned_issues_on_scan_failure(
+    coordinator: BlueprintUpdateCoordinator, hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that orphaned issues are NOT purged if blueprint validation fails."""
+    monkeypatch.setattr(coordinator, "async_check_ha_version_update", AsyncMock(return_value=True))
+    monkeypatch.setattr(coordinator, "async_save_ha_version", AsyncMock())
+
+    all_blueprints = {
+        "/config/blueprints/automation/broken.yaml": {
+            "relative_path": "automation/broken.yaml",
+            "content": "blueprint:\n  name: Broken\n",
+            "domain": FunctionalDomain.AUTOMATION,
+            "local_hash": "broken_hash",
+        }
+    }
+    monkeypatch.setattr(
+        coordinator, "async_scan_all_local_blueprint_files", AsyncMock(return_value=all_blueprints)
+    )
+    monkeypatch.setattr(
+        coordinator,
+        "async_validate_local_blueprint_compatibility",
+        AsyncMock(side_effect=RuntimeError("Validation crashed")),
+    )
+
+    issue_registry = ir.async_get(hass)
+    orphaned_issue_id = coordinator.get_incompatible_issue_id(
+        "automation/deleted.yaml", FunctionalDomain.AUTOMATION
+    )
+    issue_registry.issues[(DOMAIN, orphaned_issue_id)] = MagicMock()
+
+    delete_mock = MagicMock()
+    monkeypatch.setattr(ir, "async_delete_issue", delete_mock)
+
+    await coordinator.async_run_post_update_compatibility_guard(force=True)
+    delete_mock.assert_not_called()
+
+
+async def test_post_update_compatibility_guard_handles_missing_relative_path(
+    coordinator: BlueprintUpdateCoordinator, hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test post-update guard handles blueprints with missing relative_path gracefully."""
+    monkeypatch.setattr(coordinator, "async_check_ha_version_update", AsyncMock(return_value=True))
+    monkeypatch.setattr(coordinator, "async_save_ha_version", AsyncMock())
+
+    all_blueprints = {
+        "/config/blueprints/automation/malformed.yaml": {
+            "content": "blueprint:\n  name: Malformed\n",
+            "domain": FunctionalDomain.AUTOMATION,
+        },
+        "/invalid/path/none.yaml": {
+            "content": "",
+        },
+    }
+    monkeypatch.setattr(
+        coordinator, "async_scan_all_local_blueprint_files", AsyncMock(return_value=all_blueprints)
+    )
+    monkeypatch.setattr(
+        coordinator,
+        "async_validate_local_blueprint_compatibility",
+        AsyncMock(return_value=CompatibilityReport(severity=None)),
+    )
+
+    issue_registry = ir.async_get(hass)
+    orphaned_issue_id = coordinator.get_incompatible_issue_id(
+        "automation/deleted.yaml", FunctionalDomain.AUTOMATION
+    )
+    issue_registry.issues[(DOMAIN, orphaned_issue_id)] = MagicMock()
+
+    delete_mock = MagicMock()
+    monkeypatch.setattr(ir, "async_delete_issue", delete_mock)
+
+    await coordinator.async_run_post_update_compatibility_guard(force=True)
+    delete_mock.assert_any_call(hass, DOMAIN, orphaned_issue_id)
+
+
+async def test_post_update_compatibility_guard_ignores_unrelated_prefix_issues(
+    coordinator: BlueprintUpdateCoordinator, hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test post-update guard does not delete unrelated repair issues that share ID prefix."""
+    monkeypatch.setattr(coordinator, "async_check_ha_version_update", AsyncMock(return_value=True))
+    monkeypatch.setattr(coordinator, "async_save_ha_version", AsyncMock())
+
+    all_blueprints = {
+        "/config/blueprints/automation/valid.yaml": {
+            "relative_path": "automation/valid.yaml",
+            "content": "blueprint:\n  name: Valid\n",
+            "domain": FunctionalDomain.AUTOMATION,
+            "local_hash": "valid_hash",
+        }
+    }
+    monkeypatch.setattr(
+        coordinator, "async_scan_all_local_blueprint_files", AsyncMock(return_value=all_blueprints)
+    )
+    monkeypatch.setattr(
+        coordinator,
+        "async_validate_local_blueprint_compatibility",
+        AsyncMock(return_value=CompatibilityReport(severity=None)),
+    )
+
+    issue_registry = ir.async_get(hass)
+    unrelated_prefix_issue_id = "incompatible_blueprint_summary"
+    unrelated_mock_1 = MagicMock()
+    unrelated_mock_1.translation_key = "summary"
+    issue_registry.issues[(DOMAIN, unrelated_prefix_issue_id)] = unrelated_mock_1
+
+    unrelated_hash_issue_id = f"{RepairIssueType.INCOMPATIBLE_BLUEPRINT.value}_0123456789abcdef"
+    unrelated_mock_2 = MagicMock()
+    unrelated_mock_2.translation_key = "other_repair"
+    unrelated_mock_2.data = {"issue_type": "other_repair"}
+    issue_registry.issues[(DOMAIN, unrelated_hash_issue_id)] = unrelated_mock_2
+
+    mismatched_issue_id = f"{RepairIssueType.INCOMPATIBLE_BLUEPRINT.value}_abcdef0123456789"
+    unrelated_mock_3 = MagicMock()
+    unrelated_mock_3.translation_key = RepairIssueType.INCOMPATIBLE_BLUEPRINT.value
+    unrelated_mock_3.data = {
+        "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+        "relative_path": "automation/different.yaml",
+    }
+    issue_registry.issues[(DOMAIN, mismatched_issue_id)] = unrelated_mock_3
+
+    orphaned_issue_id = coordinator.get_incompatible_issue_id(
+        "automation/deleted.yaml", FunctionalDomain.AUTOMATION
+    )
+    legit_orphaned_mock = MagicMock()
+    legit_orphaned_mock.translation_key = RepairIssueType.INCOMPATIBLE_BLUEPRINT.value
+    legit_orphaned_mock.data = {
+        "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+        "relative_path": "automation/deleted.yaml",
+        "domain": "automation",
+    }
+    issue_registry.issues[(DOMAIN, orphaned_issue_id)] = legit_orphaned_mock
+
+    delete_mock = MagicMock()
+    monkeypatch.setattr(ir, "async_delete_issue", delete_mock)
+
+    await coordinator.async_run_post_update_compatibility_guard(force=True)
+
+    valid_issue_id = coordinator.get_incompatible_issue_id(
+        "automation/valid.yaml", FunctionalDomain.AUTOMATION
+    )
+    # The valid blueprint has its issue cleared, and the orphaned issue is purged
+    delete_mock.assert_any_call(hass, DOMAIN, valid_issue_id)
+    delete_mock.assert_any_call(hass, DOMAIN, orphaned_issue_id)
+    assert delete_mock.call_count == 2
+
+    # None of the unrelated prefix issues should have been deleted
+    deleted_issue_ids = [call.args[2] for call in delete_mock.call_args_list]
+    assert unrelated_prefix_issue_id not in deleted_issue_ids
+    assert unrelated_hash_issue_id not in deleted_issue_ids
+    assert mismatched_issue_id not in deleted_issue_ids
+
+
+async def test_modernize_legacy_blueprint_numeric_filter_defaults() -> None:
+    """Test modernize_legacy_blueprint_yaml preserves existing numeric filter defaults."""
+    legacy_content = """blueprint:
+  name: Numeric Filters Test
+  domain: automation
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ states('sensor.temperature') | float > 20.0 }}"
+          - condition: template
+            value_template: "{{ states('sensor.humidity') | float(2) > 50.0 }}"
+          - condition: template
+            value_template: "{{ states('sensor.pressure') | float('1013.25') > 1000.0 }}"
+        sequence:
+          - action: notify.notify
+            data:
+              message: "{{ states('sensor.count') | int }}"
+              extra: "{{ states('sensor.level') | int(3) }}"
+              quoted: "{{ states('sensor.offset') | int('5') }}"
+              templated: "{{ states('sensor.step') | int(default=1) }}"
+"""
+    modernized = modernize_legacy_blueprint_yaml(legacy_content, FunctionalDomain.AUTOMATION)
+    # Filters without defaults are updated to (0)
+    assert "| float(0)" in modernized
+    assert "| int(0)" in modernized
+    # Existing defaults are preserved without duplication
+    assert "| float(2)" in modernized
+    assert "| float('1013.25')" in modernized
+    assert "| int(3)" in modernized
+    assert "| int('5')" in modernized
+    assert "| int(default=1)" in modernized
+    assert "| float(2)(0)" not in modernized
+    assert "| int(3)(0)" not in modernized
+
+
+async def test_wrap_action_target_blocks_sequence_no_dash() -> None:
+    """Test target wrapping when action property line starts after a dash on sequence item."""
+    legacy_content = """blueprint:
+  name: Sequence Formatting Test
+  domain: automation
+sequence:
+  - action: light.turn_on
+    entity_id: light.bulb
+"""
+    modernized = modernize_legacy_blueprint_yaml(legacy_content, FunctionalDomain.AUTOMATION)
+    assert "target:" in modernized
+    assert "entity_id: light.bulb" in modernized
+
+
+async def test_check_compatibility_service(coordinator: BlueprintUpdateCoordinator, hass) -> None:
+    """Test calling check_compatibility admin service triggers guard with force=True."""
+    entry = coordinator.config_entry
+    coordinator_mock = MagicMock(spec=BlueprintUpdateCoordinator)
+    coordinator_mock.async_setup = AsyncMock()
+    coordinator_mock.async_config_entry_first_refresh = AsyncMock()
+    coordinator_mock.async_schedule_post_update_compatibility_guard = MagicMock()
+    coordinator_mock.async_run_post_update_compatibility_guard = AsyncMock()
+    coordinator_mock.data = {}
+
+    hass.config_entries = MagicMock()
+    hass.config_entries.async_update_entry = MagicMock()
+    hass.config_entries.async_forward_entry_setups = AsyncMock(return_value=True)
+    hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.BlueprintUpdateCoordinator",
+            return_value=coordinator_mock,
+        ),
+        patch("custom_components.blueprints_updater.async_register_admin_service") as mock_register,
+        patch.object(hass.services, "has_service", return_value=False),
+    ):
+        assert await async_setup_entry(hass, entry) is True
+
+    check_call = next(
+        call
+        for call in mock_register.call_args_list
+        if (len(call.args) > 2 and call.args[2] == IntegrationService.CHECK_COMPATIBILITY)
+        or call.kwargs.get("service") == IntegrationService.CHECK_COMPATIBILITY
+    )
+    handler = check_call.args[3] if len(check_call.args) > 3 else check_call.kwargs["handler"]
+    await handler(MagicMock())
+    coordinator_mock.async_run_post_update_compatibility_guard.assert_awaited_once_with(force=True)
+
+
+async def test_wrap_action_target_blocks_nested_list_items() -> None:
+    """Test target wrapping does not truncate nested list items such as multiple entities."""
+    legacy_content = """blueprint:
+  name: Nested Lists Test
+  domain: automation
+action:
+  - service: light.turn_on
+    entity_id:
+      - light.kitchen
+      - light.living_room
+    data:
+      brightness: 100
+"""
+    modernized = modernize_legacy_blueprint_yaml(legacy_content, FunctionalDomain.AUTOMATION)
+    assert "target:" in modernized
+    assert "entity_id:" in modernized
+    assert "- light.kitchen" in modernized
+    assert "- light.living_room" in modernized
+    assert "brightness: 100" in modernized

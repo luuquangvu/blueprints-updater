@@ -1699,13 +1699,23 @@ def _wrap_action_target_blocks(
                 continue
 
             next_indent = len(next_line) - len(next_line.lstrip())
-            if next_indent < action_indent or (next_indent == action_indent and not has_dash):
+            next_key_token = next_stripped.partition(":")[0].strip().strip("'\"")
+            if next_indent < action_indent:
                 break
-            if next_indent == action_indent and has_dash and next_line.lstrip().startswith("- "):
+            if next_indent == action_indent and next_line.lstrip().startswith("- "):
+                break
+            if (
+                not has_dash
+                and next_indent == action_indent
+                and (
+                    next_key_token in (CONF_ACTION, "service", "service_template")
+                    or next_key_token in _ACTION_PATH_SEGMENTS
+                )
+            ):
                 break
 
             if base_child_indent is None:
-                base_child_indent = next_indent
+                base_child_indent = next_indent if has_dash else action_indent
 
             if next_indent < base_child_indent:
                 break
@@ -1803,6 +1813,8 @@ def _modernize_jinja_expressions(text: str) -> str:
         quote = "'" if prefix_on_line.count('"') % 2 == 1 else '"'
         if _HA_MATH_ROUND_METHODS and _RE_MATH_ROUND_FILTER.search(s):
             s = _rewrite_floor_ceil_in_expr(s, quote=quote)
+        if _RE_NUMBER_FILTER.search(s):
+            s = _RE_NUMBER_FILTER.sub(r"| \1(0)", s)
         if "math." in s:
             s = _RE_MATH_CALL.sub(_sub_math, s)
             if "math." in s:
@@ -1985,7 +1997,7 @@ def derive_dummy_input_value(
     for path in usages:
         val = _derive_value_for_path(path)
         if val is None:
-            val = _DEFAULT_DUMMY_VALUE
+            return None
         derived_values.append(val)
 
     first = derived_values[0]

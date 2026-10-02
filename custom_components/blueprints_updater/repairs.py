@@ -488,6 +488,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
 
         """
         if not self.relative_path or not self.path:
+            self._delete_current_issue()
             return self.async_abort(reason="missing_issue_data")
 
         menu_options: list[str] = []
@@ -848,7 +849,23 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
             action = user_input.get("fork_action")
             if action == RepairForkAction.AUTO_FIX.value:
                 if self._fork_candidate:
-                    self.candidate_content, self.diff_text = self._fork_candidate
+                    candidate_content, fork_diff = self._fork_candidate
+                    self.candidate_content = candidate_content
+                    try:
+                        current_content, _ = await self.coordinator.hass.async_add_executor_job(
+                            BlueprintUpdateCoordinator._read_blueprint_file, self.path
+                        )
+                        diff_lines = list(
+                            unified_diff(
+                                current_content.splitlines(keepends=True),
+                                candidate_content.splitlines(keepends=True),
+                                fromfile=f"a/{self.relative_path}",
+                                tofile=f"b/{self.relative_path}",
+                            )
+                        )
+                        self.diff_text = "".join(diff_lines)
+                    except Exception:
+                        self.diff_text = fork_diff
                     if (
                         self._pending_precondition
                         and self._pending_precondition.must_exist

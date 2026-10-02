@@ -622,14 +622,14 @@ def test_derive_dummy_input_value():
     # Unused input
     assert derive_dummy_input_value("unused_inp", {}, bp_dict) == "test.dummy"
 
-    # Unrecognized usage paths fall back to default dummy value
+    # Unrecognized usage paths return None to safely bypass baseline simulation
     bp_underivable: dict[str, object] = {
         "blueprint": {"name": "Test", "domain": "automation"},
         "action": [{"delay": Input("delay_inp")}],
         "data": {"weird_unknown": Input("weird_inp")},
     }
-    assert derive_dummy_input_value("delay_inp", {}, bp_underivable) == "test.dummy"
-    assert derive_dummy_input_value("weird_inp", {}, bp_underivable) == "test.dummy"
+    assert derive_dummy_input_value("delay_inp", {}, bp_underivable) is None
+    assert derive_dummy_input_value("weird_inp", {}, bp_underivable) is None
 
     # Conflicting multiple usages
     bp_conflict: dict[str, object] = {

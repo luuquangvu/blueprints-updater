@@ -160,6 +160,7 @@ class IntegrationService(StrEnum):
     RESTORE_BLUEPRINT = "restore_blueprint"
     UPDATE_ALL = "update_all"
     IMPORT_BLUEPRINT = "import_blueprint"
+    CHECK_COMPATIBILITY = "check_compatibility"
 
 
 class BlueprintRiskType(StrEnum):

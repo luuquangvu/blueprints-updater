@@ -48,3 +48,6 @@ import_blueprint:
       default: false
       selector:
         boolean:
+check_compatibility:
+  name: Check Compatibility
+  description: Scans all local blueprints for compatibility and deprecation issues against the current Home Assistant release.
