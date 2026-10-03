@@ -12,6 +12,7 @@ import math
 import os
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Final, NamedTuple, TypedDict
@@ -60,7 +61,7 @@ else:
         from homeassistant.const import ATTR_CONFIG_ENTRY_ID
     except ImportError:
         ATTR_CONFIG_ENTRY_ID = "config_entry_id"
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector as ha_selector
 from homeassistant.helpers.template import MAX_CUSTOM_TEMPLATE_SIZE, TemplateEnvironment
@@ -70,11 +71,27 @@ from jinja2 import nodes
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 from .const import (
+    PLURAL_CONFIG_KEYS,
     BlueprintRiskType,
     FunctionalDomain,
 )
 from .providers import registry
-from .utils import redact_url
+from .utils import extract_leaf_strings, redact_url
+
+_DEVICE_AUTOMATION_EXCEPTIONS: tuple[type[Exception], ...]
+_ENTITY_NOT_FOUND_EXCEPTIONS: tuple[type[Exception], ...]
+try:
+    from homeassistant.components.device_automation.exceptions import (
+        DeviceNotFound,
+        EntityNotFound,
+        InvalidDeviceAutomationConfig,
+    )
+
+    _DEVICE_AUTOMATION_EXCEPTIONS = (InvalidDeviceAutomationConfig, DeviceNotFound)
+    _ENTITY_NOT_FOUND_EXCEPTIONS = (EntityNotFound,)
+except ImportError:
+    _DEVICE_AUTOMATION_EXCEPTIONS = ()
+    _ENTITY_NOT_FOUND_EXCEPTIONS = ()
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1027,19 +1044,30 @@ def _dummy_media_value(sub_cfg: object) -> object:
     return dummy_item
 
 
-def _dummy_entity_value(sub_cfg: object) -> list[str] | str:
-    """Derive dummy entity ID honoring domain filter and multiple flag.
+def _extract_selector_domain(cfg: object) -> str:
+    """Extract domain from selector configuration mapping or filter if present.
 
     Args:
-        sub_cfg: Entity selector configuration mapping.
+        cfg: Selector configuration mapping or filter dictionary.
 
     Returns:
-        Entity ID string or list of entity ID strings satisfying schema constraints.
+        The extracted domain string, or 'test' as a fallback.
 
     """
     domain = "test"
-    if isinstance(sub_cfg, Mapping):
-        domain_cfg = sub_cfg.get("domain")
+    if isinstance(cfg, Mapping):
+        domain_cfg = cfg.get("domain")
+        if not domain_cfg:
+            filt = cfg.get("filter")
+            if isinstance(filt, Mapping):
+                domain_cfg = filt.get("domain")
+            elif (
+                isinstance(filt, Sequence)
+                and not isinstance(filt, (str, bytes, bytearray))
+                and filt
+                and isinstance(filt[0], Mapping)
+            ):
+                domain_cfg = filt[0].get("domain")
         if isinstance(domain_cfg, str) and domain_cfg:
             domain = domain_cfg
         elif (
@@ -1050,7 +1078,20 @@ def _dummy_entity_value(sub_cfg: object) -> list[str] | str:
             first = domain_cfg[0]
             if isinstance(first, str) and first:
                 domain = first
+    return domain
 
+
+def _dummy_entity_value(sub_cfg: object) -> list[str] | str:
+    """Derive dummy entity ID honoring domain filter and multiple flag.
+
+    Args:
+        sub_cfg: Entity selector configuration mapping.
+
+    Returns:
+        Entity ID string or list of entity ID strings satisfying schema constraints.
+
+    """
+    domain = _extract_selector_domain(sub_cfg)
     dummy_entity = f"{domain}.dummy"
     return _multi_or_single(sub_cfg, dummy_entity)
 
@@ -1067,19 +1108,7 @@ def _dummy_target_value(sub_cfg: object) -> dict[str, str]:
     """
     domain = "test"
     if isinstance(sub_cfg, Mapping):
-        entity_cfg = sub_cfg.get("entity")
-        if isinstance(entity_cfg, Mapping):
-            domain_cfg = entity_cfg.get("domain")
-            if isinstance(domain_cfg, str) and domain_cfg:
-                domain = domain_cfg
-            elif (
-                isinstance(domain_cfg, Sequence)
-                and not isinstance(domain_cfg, (str, bytes, bytearray))
-                and domain_cfg
-            ):
-                first = domain_cfg[0]
-                if isinstance(first, str) and first:
-                    domain = first
+        domain = _extract_selector_domain(sub_cfg.get("entity"))
 
     return {ATTR_ENTITY_ID: f"{domain}.dummy"}
 
@@ -1111,6 +1140,51 @@ _CANDIDATE_DYNAMIC_DUMMIES: Final[tuple[object, ...]] = (
     {},
     [],
 )
+
+
+def _is_dummy_value_valid_for_selector(sel_cfg: Mapping[str, object], dummy: object) -> bool:
+    """Verify if the generated dummy value satisfies the Home Assistant selector schema.
+
+    Args:
+        sel_cfg: Selector configuration mapping.
+        dummy: Generated candidate dummy value.
+
+    Returns:
+        True if the dummy value satisfies selector schema or if selector cannot be resolved,
+        False if the selector schema explicitly rejects the dummy value.
+
+    """
+    if not isinstance(sel_cfg, Mapping) or not sel_cfg:
+        return False
+
+    sel_type = next(iter(sel_cfg.keys()), None)
+    if not isinstance(sel_type, str):
+        return False
+
+    try:
+        from homeassistant.helpers import selector as ha_selector
+    except ImportError:
+        return sel_type in _KNOWN_SELECTOR_TYPES
+
+    registry = getattr(ha_selector, "SELECTORS", None)
+    if registry is not None and sel_type not in registry:
+        return sel_type in _KNOWN_SELECTOR_TYPES
+
+    try:
+        raw_selector: object = ha_selector.selector(dict(sel_cfg))
+        if callable(raw_selector):
+            raw_selector(dummy)
+        return True
+    except Exception as err:
+        if "outside the event loop" in str(err):
+            return True
+        _LOGGER.debug(
+            "Selector %r rejected dummy value %r: %s",
+            sel_cfg,
+            dummy,
+            err,
+        )
+        return False
 
 
 def generate_dummy_input_value(sel_cfg: object) -> object:
@@ -1171,7 +1245,31 @@ def generate_dummy_input_value(sel_cfg: object) -> object:
     return _DEFAULT_DUMMY_VALUE
 
 
-_generate_dummy_input_value = generate_dummy_input_value
+def get_standard_dummy_ids() -> frozenset[str]:
+    """Derive standard dummy identifiers from ID defaults, simple selectors, and dummy generators.
+
+    Returns:
+        Frozenset of standard dummy string identifiers used in baseline validation.
+
+    """
+    dummy_ids: set[str] = set(_ID_DUMMY_DEFAULTS.values())
+    dummy_ids.add(_DEFAULT_DUMMY_VALUE)
+
+    for val in _SIMPLE_DUMMY_SELECTORS.values():
+        for item in extract_leaf_strings(val):
+            if item.endswith(".dummy") or item.startswith("dummy_"):
+                dummy_ids.add(item)
+
+    for sel_type in SelectorType:
+        val = generate_dummy_input_value({sel_type: {}})
+        for item in extract_leaf_strings(val):
+            if item.endswith(".dummy") or item.startswith("dummy_"):
+                dummy_ids.add(item)
+
+    return frozenset(dummy_ids)
+
+
+STANDARD_DUMMY_IDS: Final[frozenset[str]] = get_standard_dummy_ids()
 
 
 _EMPTY_UNSAFE_SELECTORS: Final[frozenset[str]] = frozenset(
@@ -1219,9 +1317,6 @@ def is_invalid_for_input_default(value: object, cfg: Mapping[str, object]) -> bo
             return not any(value.values())
 
     return False
-
-
-_is_invalid_for_input_default = is_invalid_for_input_default
 
 
 def _iter_input_nodes(value: object, path: str) -> list[tuple[Input, str]]:
@@ -1927,51 +2022,6 @@ def _derive_value_for_path(path: str) -> object | None:
     return {} if last_base in _HA_VARIABLE_BLOCK_KEYS else None
 
 
-def _is_dummy_value_valid_for_selector(sel_cfg: Mapping[str, object], dummy: object) -> bool:
-    """Verify if the generated dummy value satisfies the Home Assistant selector schema.
-
-    Args:
-        sel_cfg: Selector configuration mapping.
-        dummy: Generated candidate dummy value.
-
-    Returns:
-        True if the dummy value satisfies selector schema or if selector cannot be resolved,
-        False if the selector schema explicitly rejects the dummy value.
-
-    """
-    if not isinstance(sel_cfg, Mapping) or not sel_cfg:
-        return False
-
-    sel_type = next(iter(sel_cfg.keys()), None)
-    if not isinstance(sel_type, str):
-        return False
-
-    try:
-        from homeassistant.helpers import selector as ha_selector
-    except ImportError:
-        return sel_type in _KNOWN_SELECTOR_TYPES
-
-    registry = getattr(ha_selector, "SELECTORS", None)
-    if registry is not None and sel_type not in registry:
-        return sel_type in _KNOWN_SELECTOR_TYPES
-
-    try:
-        raw_selector: object = ha_selector.selector(dict(sel_cfg))
-        if callable(raw_selector):
-            raw_selector(dummy)
-        return True
-    except Exception as err:
-        if "outside the event loop" in str(err):
-            return True
-        _LOGGER.debug(
-            "Selector %r rejected dummy value %r: %s",
-            sel_cfg,
-            dummy,
-            err,
-        )
-        return False
-
-
 def derive_dummy_input_value(
     input_name: str,
     input_cfg: Mapping[str, object],
@@ -2015,6 +2065,592 @@ def derive_dummy_input_value(
 
     first = derived_values[0]
     return None if any(v != first for v in derived_values[1:]) else first
+
+
+def is_synthetic_identifier(val: str) -> bool:
+    """Determine if a string value is a synthetic dummy identifier rather than an ordinary value.
+
+    Args:
+        val: String value to check.
+
+    Returns:
+        True if value is a synthetic dummy identifier token.
+
+    """
+    if not val:
+        return False
+    if val in STANDARD_DUMMY_IDS:
+        return True
+    return bool(val.endswith(".dummy") or val.startswith("dummy_") or val == "dummy")
+
+
+_RE_YAML_PATH_SEGMENT: Final[re.Pattern[str]] = re.compile(r"([^.\[\]]+)|\[(\d+)\]")
+"""Pattern matching dot-and-bracket YAML path components."""
+
+_RE_IDENTIFIER_TOKEN: Final[re.Pattern[str]] = re.compile(r"[a-zA-Z0-9_.-]+")
+"""Pattern extracting isolated alphanumeric tokens from validation error messages."""
+
+
+def _parse_yaml_path(path: str) -> tuple[str | int, ...]:
+    """Parse a dot-and-bracket path string into a tuple of string keys and int indices.
+
+    Args:
+        path: Path string such as 'action[0].target.entity_id'.
+
+    Returns:
+        Tuple of path segments matching _extract_config_path_from_error format.
+
+    """
+    segments: list[str | int] = []
+    for m in _RE_YAML_PATH_SEGMENT.finditer(path):
+        key, idx = m.groups()
+        if idx is not None:
+            segments.append(int(idx))
+        elif key:
+            segments.append(key)
+    return tuple(segments)
+
+
+def _get_path_segment_alias(seg: str) -> str | None:
+    """Return the plural or singular alias for a path segment if one exists.
+
+    Args:
+        seg: Path segment string.
+
+    Returns:
+        Aliased counterpart string, or None if no alias exists.
+
+    """
+    if seg in PLURAL_CONFIG_KEYS:
+        return PLURAL_CONFIG_KEYS[seg]
+    return next(
+        (singular for singular, plural in PLURAL_CONFIG_KEYS.items() if seg == plural),
+        None,
+    )
+
+
+def _path_segments_match(seg1: str | int, seg2: str | int) -> bool:
+    """Check if two path segments match, accounting for plural/singular aliases.
+
+    Args:
+        seg1: First path segment.
+        seg2: Second path segment.
+
+    Returns:
+        True if segments are identical or plural/singular aliases.
+
+    """
+    if seg1 == seg2:
+        return True
+    return isinstance(seg1, str) and isinstance(seg2, str) and _get_path_segment_alias(seg1) == seg2
+
+
+def _path_starts_with(
+    full_path: Sequence[str | int],
+    prefix_path: Sequence[str | int],
+) -> bool:
+    """Check if full_path begins with prefix_path, allowing plural/singular aliases.
+
+    Args:
+        full_path: Traversal path to test.
+        prefix_path: Prefix path to match against.
+
+    Returns:
+        True if full_path begins with prefix_path.
+
+    """
+    if len(full_path) < len(prefix_path):
+        return False
+    return all(_path_segments_match(full_path[i], prefix_path[i]) for i in range(len(prefix_path)))
+
+
+@dataclass(frozen=True)
+class SyntheticDummyEntry:
+    """Record of a synthetic dummy value generated for a blueprint input.
+
+    Attributes:
+        input_name: Blueprint input configuration name.
+        paths: Tuple of parsed YAML path tuples where the input is referenced.
+        raw_value: The derived dummy value.
+        synthetic_ids: Frozenset of synthetic identifier tokens.
+        ordinary_strings: Frozenset of ordinary string values generated for this input.
+
+    """
+
+    input_name: str
+    paths: tuple[tuple[str | int, ...], ...]
+    raw_value: object
+    synthetic_ids: frozenset[str]
+    ordinary_strings: frozenset[str]
+
+
+class SyntheticDummyValues(set[str]):
+    """Collection of synthetic dummy identifiers retaining originating input and path metadata.
+
+    Inherits from set[str] for backward compatibility with callers and tests expecting
+    a set of synthetic dummy string identifiers, while retaining input names, substituted
+    paths, and ordinary value mappings.
+    """
+
+    def __init__(
+        self,
+        synthetic_ids: Iterable[str] = (),
+        entries: Iterable[SyntheticDummyEntry] = (),
+    ) -> None:
+        """Initialize with synthetic identifier strings and per-input dummy entries.
+
+        Args:
+            synthetic_ids: Iterable of synthetic dummy string identifiers.
+            entries: Iterable of SyntheticDummyEntry records for required inputs.
+
+        """
+        super().__init__(synthetic_ids)
+        self.entries: tuple[SyntheticDummyEntry, ...] = tuple(entries)
+        self._entries_by_input: dict[str, SyntheticDummyEntry] = {
+            entry.input_name: entry for entry in self.entries
+        }
+
+    @property
+    def entries_by_input(self) -> Mapping[str, SyntheticDummyEntry]:
+        """Mapping of input names to their corresponding dummy entries.
+
+        Returns:
+            Dictionary mapping input names to SyntheticDummyEntry records.
+
+        """
+        return self._entries_by_input
+
+    def maps_failing_path_to_input(
+        self,
+        failing_path: Sequence[str | int],
+        resolved_val: object = None,
+        config: Mapping[str, object] | None = None,
+    ) -> bool:
+        """Check if a failing configuration path maps to an input that produced the dummy value.
+
+        Args:
+            failing_path: Path tuple extracted from the validation error.
+            resolved_val: Optional resolved value at the failing path.
+            config: Optional substituted configuration mapping to resolve failing_path.
+
+        Returns:
+            True if failing_path maps to an input whose dummy value produced this error.
+
+        """
+        if resolved_val is None and config is not None:
+            resolved_val = _resolve_config_path(config, failing_path)
+
+        if resolved_val is None:
+            return False
+
+        for entry in self.entries:
+            if not any(_path_starts_with(failing_path, inp_path) for inp_path in entry.paths):
+                continue
+            if isinstance(resolved_val, str):
+                if (
+                    resolved_val in entry.synthetic_ids
+                    or resolved_val in entry.ordinary_strings
+                    or resolved_val == entry.raw_value
+                ):
+                    return True
+                leaf_strings = extract_leaf_strings(entry.raw_value)
+                if resolved_val in leaf_strings:
+                    return True
+            elif resolved_val == entry.raw_value:
+                return True
+            leaves = extract_leaf_strings(resolved_val)
+            if leaves and all(
+                leaf in entry.synthetic_ids or leaf in entry.ordinary_strings for leaf in leaves
+            ):
+                return True
+        return False
+
+
+def extract_synthetic_dummy_values(
+    blueprint_dict: Mapping[str, object],
+) -> SyntheticDummyValues:
+    """Extract synthetic dummy values for a blueprint, retaining input and path metadata.
+
+    Args:
+        blueprint_dict: Parsed blueprint dictionary.
+
+    Returns:
+        SyntheticDummyValues collection retaining each generated dummy's originating
+        input name, substituted paths, synthetic identifier tokens, and ordinary values.
+
+    """
+    bp_meta = blueprint_dict.get("blueprint")
+    input_meta = bp_meta.get(CONF_INPUT) if isinstance(bp_meta, Mapping) else None
+    input_configs = extract_input_configs(input_meta)
+
+    # Pre-collect all input node YAML paths by input name
+    all_input_nodes = _iter_input_nodes(blueprint_dict, "")
+    input_paths_map: dict[str, list[tuple[str | int, ...]]] = {}
+    for inp, raw_path in all_input_nodes:
+        input_paths_map.setdefault(inp.name, []).append(_parse_yaml_path(raw_path))
+
+    entries: list[SyntheticDummyEntry] = []
+    all_synthetic_ids: set[str] = set()
+
+    for input_name, input_cfg in input_configs.items():
+        if CONF_DEFAULT in input_cfg:
+            continue
+        dummy_val = derive_dummy_input_value(input_name, input_cfg, blueprint_dict)
+        if dummy_val is None:
+            continue
+
+        raw_strings = extract_leaf_strings(dummy_val)
+        synthetic_ids = {s for s in raw_strings if is_synthetic_identifier(s)}
+        ordinary_strings = {s for s in raw_strings if not is_synthetic_identifier(s)}
+
+        paths = tuple(input_paths_map.get(input_name, ()))
+        entry = SyntheticDummyEntry(
+            input_name=input_name,
+            paths=paths,
+            raw_value=dummy_val,
+            synthetic_ids=frozenset(synthetic_ids),
+            ordinary_strings=frozenset(ordinary_strings),
+        )
+        entries.append(entry)
+        all_synthetic_ids.update(synthetic_ids)
+
+    return SyntheticDummyValues(synthetic_ids=all_synthetic_ids, entries=entries)
+
+
+def _error_identifies_synthetic_id(
+    err_msg: str,
+    identifier: str,
+    err: Exception | None = None,
+) -> bool:
+    """Check if an error specifically identifies the failed synthetic identifier.
+
+    Args:
+        err_msg: String representation of the validation error.
+        identifier: The synthetic dummy string identifier.
+        err: Optional original exception to inspect structured attributes.
+
+    Returns:
+        True if the error references the identifier as a distinct token.
+
+    """
+    if not identifier:
+        return False
+
+    # 1. Structural check: a synthetic input value is an input value, never a config schema key.
+    # If the identifier appears as a path element in a Voluptuous Invalid error, the error
+    # is targeting an author-defined key in the dictionary, not a failed synthetic input value.
+    if err is not None:
+        err_path = getattr(err, "path", None)
+        if isinstance(err_path, (list, tuple)) and any(str(p) == identifier for p in err_path):
+            return False
+
+    # 2. Strip Voluptuous key path notation ('@ data[...]' or '@ data['key']') so we only
+    # match identifiers referenced in the validator error message itself, not author key names.
+    content_msg = err_msg.partition(" @ data")[0]
+
+    # 3. Match identifier as an isolated token (not a substring of e.g. dummy_extra_key,
+    # dummy_action, notify.dummy, or light.dummy_author_light). Strip trailing periods
+    # and hyphens so sentence punctuation does not prevent synthetic-ID matches.
+    return any(
+        token.rstrip(".-") == identifier for token in _RE_IDENTIFIER_TOKEN.findall(content_msg)
+    )
+
+
+def _extract_config_path_from_error(err: Exception) -> tuple[str | int, ...] | None:
+    """Extract configuration path from structured exception attributes.
+
+    Args:
+        err: Validation exception to inspect.
+
+    Returns:
+        Tuple of path segments if a structured path was identified, or None.
+
+    """
+    for candidate in (
+        err,
+        getattr(err, "__cause__", None),
+        getattr(err, "__context__", None),
+    ):
+        if candidate is None:
+            continue
+        path = getattr(candidate, "path", None)
+        if isinstance(path, (list, tuple)) and path:
+            return tuple(path)
+        errors = getattr(candidate, "errors", None)
+        if isinstance(errors, (list, tuple)) and errors:
+            first_path = getattr(errors[0], "path", None)
+            if isinstance(first_path, (list, tuple)) and first_path:
+                return tuple(first_path)
+    return None
+
+
+def _resolve_config_path(config: object, path: Sequence[str | int]) -> object | None:
+    """Resolve a path of keys and indices within a nested configuration object.
+
+    Args:
+        config: Nested configuration object to traverse.
+        path: Sequence of key strings or integer indices.
+
+    Returns:
+        Resolved value at path, or None if path cannot be traversed.
+
+    """
+    current = config
+    for seg in path:
+        if isinstance(current, Mapping):
+            if seg in current:
+                current = current[seg]
+            elif (
+                isinstance(seg, str)
+                and (alias := _get_path_segment_alias(seg)) is not None
+                and alias in current
+            ):
+                current = current[alias]
+            else:
+                return None
+        elif isinstance(current, (list, tuple)):
+            idx: int | None = None
+            if isinstance(seg, int):
+                idx = seg
+            elif isinstance(seg, str) and seg.isdigit():
+                idx = int(seg)
+            if idx is not None and 0 <= idx < len(current):
+                current = current[idx]
+            else:
+                return None
+        else:
+            return None
+    return current
+
+
+def _exception_identifies_synthetic_id(
+    err: Exception,
+    identifier: str,
+) -> bool:
+    """Check if exception message or structured attributes reference the synthetic identifier.
+
+    Args:
+        err: Exception raised during baseline validation.
+        identifier: The synthetic dummy string identifier.
+
+    Returns:
+        True if the exception specifically references the identifier.
+
+    """
+    if not identifier:
+        return False
+
+    err_msg = str(err)
+    if _error_identifies_synthetic_id(err_msg, identifier, err):
+        return True
+
+    for arg in getattr(err, "args", ()):
+        if isinstance(arg, str) and _error_identifies_synthetic_id(arg, identifier, err):
+            return True
+
+    for attr_name in ("device_id", "entity_id", "area_id", "floor_id", "label_id"):
+        attr_val = getattr(err, attr_name, None)
+        if isinstance(attr_val, str) and attr_val == identifier:
+            return True
+
+    placeholders = getattr(err, "translation_placeholders", None)
+    if isinstance(placeholders, Mapping):
+        for ph_val in placeholders.values():
+            if isinstance(ph_val, str) and (
+                ph_val == identifier or _error_identifies_synthetic_id(ph_val, identifier, err)
+            ):
+                return True
+
+    err_dict = getattr(err, "__dict__", None)
+    if isinstance(err_dict, dict):
+        for attr_val in err_dict.values():
+            if isinstance(attr_val, str) and attr_val == identifier:
+                return True
+
+    return False
+
+
+def _is_extra_keys_error(err: Exception) -> bool:
+    """Check if an exception represents an extra-keys schema error.
+
+    Args:
+        err: Exception to inspect.
+
+    Returns:
+        True if the exception indicates extra keys were not allowed.
+
+    """
+    for candidate in (
+        err,
+        getattr(err, "__cause__", None),
+        getattr(err, "__context__", None),
+    ):
+        if candidate is None:
+            continue
+        errors = getattr(candidate, "errors", None)
+        if isinstance(errors, (list, tuple)):
+            for sub in errors:
+                if isinstance(sub, Exception) and _is_extra_keys_error(sub):
+                    return True
+            continue
+
+        with contextlib.suppress(IndexError, AttributeError):
+            msg = getattr(candidate, "msg", None)
+            if isinstance(msg, str) and "extra keys not allowed" in msg.lower():
+                return True
+        with contextlib.suppress(IndexError, AttributeError):
+            error_message = getattr(candidate, "error_message", None)
+            if isinstance(error_message, str) and "extra keys not allowed" in error_message.lower():
+                return True
+        with contextlib.suppress(IndexError, AttributeError):
+            err_str = str(candidate)
+            if "extra keys not allowed" in err_str.lower():
+                return True
+        for arg in getattr(candidate, "args", ()):
+            if isinstance(arg, str) and "extra keys not allowed" in arg.lower():
+                return True
+    return False
+
+
+def _is_failing_path_dummy_error(
+    err: Exception,
+    synthetic_values: SyntheticDummyValues | set[str] | None = None,
+    substituted_config: Mapping[str, object] | None = None,
+) -> bool:
+    """Determine if a failing configuration path maps to a synthetic dummy input.
+
+    Args:
+        err: Exception raised during baseline validation.
+        synthetic_values: Optional set or SyntheticDummyValues generated for the blueprint.
+        substituted_config: Optional fully substituted blueprint configuration dictionary.
+
+    Returns:
+        True if the failing path resolves to a dummy device or entity input.
+
+    """
+    if substituted_config is not None and (failing_path := _extract_config_path_from_error(err)):
+        resolved = _resolve_config_path(substituted_config, failing_path)
+        if isinstance(synthetic_values, SyntheticDummyValues):
+            return synthetic_values.maps_failing_path_to_input(
+                failing_path, resolved, substituted_config
+            )
+        active_synthetic = synthetic_values if synthetic_values is not None else STANDARD_DUMMY_IDS
+        return resolved is not None and (
+            (isinstance(resolved, str) and resolved in active_synthetic)
+            or any(s in active_synthetic for s in extract_leaf_strings(resolved))
+        )
+    return False
+
+
+def is_dummy_validation_error(
+    err: Exception,
+    synthetic_values: SyntheticDummyValues | set[str] | None = None,
+    substituted_config: Mapping[str, object] | None = None,
+) -> bool:
+    """Determine if a validation failure was caused by synthetic dummy inputs.
+
+    Identifies errors caused by synthetic dummy inputs (such as devices or entities
+    that do not exist in the Home Assistant registry) without relying on fragile
+    localized English error string regexes.
+
+    Args:
+        err: Exception raised during baseline validation.
+        synthetic_values: Optional set or SyntheticDummyValues generated for the blueprint.
+        substituted_config: Optional fully substituted blueprint configuration dictionary.
+
+    Returns:
+        True if the failure is attributable to dummy device/entity inputs.
+
+    """
+    # 0. Template rendering errors are never synthetic dummy input validation failures:
+    if isinstance(err, TemplateError):
+        return False
+
+    # 1. MultipleInvalid / aggregate errors: all contained errors must be synthetic dummy failures.
+    # Voluptuous aggregates errors in MultipleInvalid.errors, but str() and path reflect only
+    # the first error. Classify each contained error separately, returning True only when every
+    # contained error is attributable to synthetic dummy inputs.
+    for candidate in (
+        err,
+        getattr(err, "__cause__", None),
+        getattr(err, "__context__", None),
+    ):
+        if candidate is None:
+            continue
+        errors = getattr(candidate, "errors", None)
+        if isinstance(errors, (list, tuple)):
+            if not errors:
+                return False
+            return all(
+                is_dummy_validation_error(sub_err, synthetic_values, substituted_config)
+                for sub_err in errors
+            )
+
+    # 2. Extra-key schema errors are never synthetic dummy input validation failures:
+    # A dummy input value cannot introduce an unauthorized dictionary key. Even if an
+    # extra key points to a path containing a dummy input (e.g. trigger[0].state),
+    # the error is caused by an unsupported or removed schema key, not the input value.
+    # Guarding here prevents device/entity and path-based branches from
+    # suppressing extra-key errors.
+    if _is_extra_keys_error(err):
+        return False
+
+    # 3. Device automation exception type:
+    if _DEVICE_AUTOMATION_EXCEPTIONS and isinstance(err, _DEVICE_AUTOMATION_EXCEPTIONS):
+        device_ids = (
+            {v for v in synthetic_values if "device" in v.lower() or v in STANDARD_DUMMY_IDS}
+            if synthetic_values is not None
+            else {v for v in STANDARD_DUMMY_IDS if "device" in v.lower()}
+        )
+        if any(_exception_identifies_synthetic_id(err, dev_id) for dev_id in device_ids):
+            return True
+        return _is_failing_path_dummy_error(err, synthetic_values, substituted_config)
+
+    # 4. Entity not found exception type:
+    if _ENTITY_NOT_FOUND_EXCEPTIONS and isinstance(err, _ENTITY_NOT_FOUND_EXCEPTIONS):
+        active_synthetic = synthetic_values if synthetic_values is not None else STANDARD_DUMMY_IDS
+        synthetic_tokens = (
+            synthetic_values
+            if isinstance(synthetic_values, SyntheticDummyValues)
+            else {s for s in active_synthetic if is_synthetic_identifier(s)}
+        )
+        if any(_exception_identifies_synthetic_id(err, val) for val in synthetic_tokens):
+            return True
+        return _is_failing_path_dummy_error(err, synthetic_values, substituted_config)
+
+    # 5. Exact synthetic value occurrence identifying the failed identifier:
+    # Match ONLY synthetic dummy identifiers (e.g. 'dummy_device_id', 'test.dummy', 'dummy'),
+    # NOT ordinary strings (e.g. 'on', 'default', 'battery').
+    if synthetic_values:
+        synthetic_tokens = (
+            synthetic_values
+            if isinstance(synthetic_values, SyntheticDummyValues)
+            else {s for s in synthetic_values if is_synthetic_identifier(s)}
+        )
+        for val in synthetic_tokens:
+            if _exception_identifies_synthetic_id(err, val):
+                return True
+
+    # 6. Path-based suppression for ordinary-value errors mapping to a substituted input:
+    if isinstance(synthetic_values, SyntheticDummyValues) and (
+        failing_path := _extract_config_path_from_error(err)
+    ):
+        resolved = (
+            _resolve_config_path(substituted_config, failing_path)
+            if substituted_config is not None
+            else None
+        )
+        if synthetic_values.maps_failing_path_to_input(failing_path, resolved, substituted_config):
+            return True
+
+    # 7. Fallback when synthetic_values is None (e.g. standalone checks/tests):
+    if synthetic_values is None:
+        return any(
+            _exception_identifies_synthetic_id(err, dummy_id)
+            for dummy_id in get_standard_dummy_ids()
+        )
+
+    return False
 
 
 def _extract_target_names(target: nodes.Node, names: set[str]) -> None:
@@ -2539,9 +3175,6 @@ def check_ha_template_ast_compatibility(
     errors.extend(_check_mutating_method_calls(ast))
     errors.extend(_check_template_imports(ast, env))
     return errors
-
-
-_check_ha_template_ast_compatibility = check_ha_template_ast_compatibility
 
 
 def extract_defined_inputs(input_dict: object) -> set[str]:

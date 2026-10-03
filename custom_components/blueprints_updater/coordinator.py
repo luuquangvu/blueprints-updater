@@ -36,6 +36,7 @@ from homeassistant.components.automation.config import (
 from homeassistant.components.automation.config import (
     async_validate_config_item as async_validate_automation_config,
 )
+from homeassistant.components.automation.const import CONF_TRIGGER_VARIABLES
 from homeassistant.components.blueprint.const import CONF_BLUEPRINT, CONF_INPUT
 from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
@@ -52,6 +53,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_DEFAULT,
     CONF_SEQUENCE,
+    CONF_VARIABLES,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError, TemplateError
@@ -95,7 +97,7 @@ from .blueprint_validation import (
     extract_blueprint_text,
     extract_input_configs,
     extract_inputs_with_default,
-    generate_dummy_input_value,
+    extract_synthetic_dummy_values,
     get_affected_entities,
     get_blueprint_block,
     get_blueprint_schema,
@@ -103,6 +105,7 @@ from .blueprint_validation import (
     get_selector_filter_paths,
     hash_content,
     invalidate_selector_filter_paths_cache,
+    is_dummy_validation_error,
     is_invalid_for_input_default,
     modernize_legacy_blueprint_yaml,
     normalize_content,
@@ -130,6 +133,7 @@ from .const import (
     MAX_SEND_INTERVAL,
     METADATA_STORAGE_FIELDS,
     MIN_SEND_INTERVAL,
+    PLURAL_CONFIG_KEYS,
     REQUEST_TIMEOUT,
     RETRY_BACKOFF,
     RISK_TYPE_TRANSLATIONS,
@@ -179,6 +183,7 @@ from .utils import (
     get_blueprint_relative_path,
     get_blueprint_usage_entities,
     get_config_bool,
+    get_ha_version,
     get_max_backups,
     get_validated_filter_mode,
     get_validated_selected_blueprints,
@@ -190,6 +195,7 @@ from .utils import (
     sanitize_error_detail,
     should_include_blueprint,
     split_error_message,
+    stringify_keys,
     verify_https_enforcement,
 )
 
@@ -352,14 +358,13 @@ MAX_HOSTNAME_CACHE_SIZE = 1024
 TOP_LEVEL_SELECTOR_PRESENTATION_KEYS = frozenset({"name", "description", "label", "help"})
 """Selector presentation keys excluded from compatibility comparisons."""
 
+_HA_RESHAPED_KEYS: Final[frozenset[str]] = frozenset({CONF_VARIABLES, CONF_TRIGGER_VARIABLES})
+"""Configuration keys reshaped or relocated into child entities by Home Assistant Core."""
+
 _LOCAL_REVISION_MISMATCH_ERROR = "Local blueprint changed; refresh and retry the update"
 _RESTORE_REVISION_MISMATCH = "revision_mismatch"
 _POST_UPDATE_GUARD_TIMEOUT: Final[float] = 30.0
 """Maximum timeout in seconds for per-blueprint compatibility validation."""
-
-_generate_dummy_input_value = generate_dummy_input_value
-_is_invalid_for_input_default = is_invalid_for_input_default
-_check_ha_template_ast_compatibility = check_ha_template_ast_compatibility
 
 
 @dataclass
@@ -508,6 +513,273 @@ async def capture_structural_validation_diagnostics(
                 registry.async_schedule_save()
 
 
+def _is_relocated_value(source_val: object, target_val: object) -> bool:
+    """Check if a source configuration value was relocated into a target value.
+
+    Args:
+        source_val: Source configuration value.
+        target_val: Candidate target configuration value.
+
+    Returns:
+        True if target_val contains or matches source_val.
+
+    """
+    if source_val == target_val or str(source_val) == str(target_val):
+        return True
+    if isinstance(source_val, dict) and isinstance(target_val, dict) and source_val:
+        return all(k in target_val and target_val[k] == v for k, v in source_val.items())
+    return False
+
+
+def _find_relocated_key_value(
+    cfg: object,
+    key: str,
+    source_val: object,
+    input_counterpart: object = None,
+) -> bool:
+    """Recursively search for a key with matching relocated value in configuration children.
+
+    Args:
+        cfg: Configuration dictionary or list to search within.
+        key: The key to locate (e.g. 'variables').
+        source_val: The original value to match against.
+        input_counterpart: Counterpart configuration from input_cfg to detect preexisting values.
+
+    Returns:
+        True if the key is found in a child with a matching relocated value that
+        did not already exist.
+
+    """
+    if isinstance(cfg, dict):
+        if key in cfg and _is_relocated_value(source_val, cfg[key]):
+            already_existed = (
+                isinstance(input_counterpart, dict)
+                and key in input_counterpart
+                and _is_relocated_value(source_val, input_counterpart[key])
+            )
+            if not already_existed:
+                return True
+        return any(
+            _find_relocated_key_value(
+                v,
+                key,
+                source_val,
+                input_counterpart.get(sub_k) if isinstance(input_counterpart, dict) else None,
+            )
+            for sub_k, v in cfg.items()
+        )
+    if isinstance(cfg, list):
+        if isinstance(input_counterpart, list):
+            return any(
+                _find_relocated_key_value(
+                    item,
+                    key,
+                    source_val,
+                    input_counterpart[idx] if idx < len(input_counterpart) else None,
+                )
+                for idx, item in enumerate(cfg)
+            )
+        if isinstance(input_counterpart, dict):
+            return any(
+                _find_relocated_key_value(item, key, source_val, input_counterpart) for item in cfg
+            )
+        return any(_find_relocated_key_value(item, key, source_val, None) for item in cfg)
+    return False
+
+
+def _detect_colliding_keys(cfg: Mapping[object, object], label: str) -> set[str]:
+    """Detect keys in configuration mapping that collide when converted to strings.
+
+    Args:
+        cfg: Configuration mapping to check for stringified key collisions.
+        label: Descriptive label of the configuration for logging.
+
+    Returns:
+        Set of stringified keys that collide.
+
+    """
+    colliding: set[str] = set()
+    try:
+        stringify_keys(cfg, preserve_collisions=False)
+    except ValueError:
+        seen: dict[str, object] = {}
+        for k in cfg:
+            sk = str(k)
+            if sk in seen and seen[sk] != k:
+                colliding.add(sk)
+            seen[sk] = k
+        _LOGGER.warning(
+            "Key collision detected in %s configuration for keys %s; rejecting rename collision",
+            label,
+            colliding,
+        )
+    return colliding
+
+
+def _diff_plural_alias(
+    k: object,
+    v: object,
+    input_cfg: dict[object, object],
+    validated_cfg: dict[object, object],
+    diagnostics: ValidationDiagnostics,
+    path: tuple[str | int, ...],
+    current_path: tuple[str | int, ...],
+) -> bool:
+    """Diff top-level singular key against its plural alias in validated configuration.
+
+    Args:
+        k: Current configuration key being inspected.
+        v: Input configuration value corresponding to key.
+        input_cfg: Full input configuration dictionary.
+        validated_cfg: Full post-validation configuration dictionary.
+        diagnostics: ValidationDiagnostics to record discovered key migrations.
+        path: Parent traversal path before the current key.
+        current_path: Traversal path including the current key.
+
+    Returns:
+        True if the key was handled as a top-level plural alias, False otherwise.
+
+    """
+    if path or not isinstance(k, str):
+        return False
+    plural_k = PLURAL_CONFIG_KEYS.get(k)
+    if plural_k is None or plural_k not in validated_cfg or plural_k in input_cfg:
+        return False
+
+    val_plural = validated_cfg[plural_k]
+    if isinstance(v, dict) and isinstance(val_plural, list) and val_plural:
+        diff_structural_configs(v, val_plural[0], diagnostics, (*path, k, 0))
+    else:
+        diff_structural_configs(v, val_plural, diagnostics, current_path)
+    return True
+
+
+def _is_relocated_ha_key(
+    k: object,
+    v: object,
+    input_cfg: dict[object, object],
+    validated_cfg: dict[object, object],
+    path: tuple[str | int, ...],
+) -> bool:
+    """Check if a top-level key's value was relocated into a nested section by HA.
+
+    Args:
+        k: Current configuration key being inspected.
+        v: Input configuration value corresponding to key.
+        input_cfg: Full input configuration dictionary.
+        validated_cfg: Full post-validation configuration dictionary.
+        path: Traversal path within the configuration hierarchy.
+
+    Returns:
+        True if the key was relocated into a nested section, False otherwise.
+
+    """
+    if path or not isinstance(k, str) or k not in _HA_RESHAPED_KEYS:
+        return False
+
+    for domain_k, val_sub in validated_cfg.items():
+        in_counterpart = input_cfg.get(domain_k)
+        if in_counterpart is None and isinstance(domain_k, str):
+            for singular_k, plural_k in PLURAL_CONFIG_KEYS.items():
+                if domain_k == plural_k:
+                    in_counterpart = input_cfg.get(singular_k)
+                    break
+        if _find_relocated_key_value(val_sub, k, v, in_counterpart):
+            return True
+    return False
+
+
+def _detect_rename_or_deprecation(
+    k: object,
+    v: object,
+    input_cfg: dict[object, object],
+    validated_cfg: dict[object, object],
+    colliding_keys: set[str],
+    diagnostics: ValidationDiagnostics,
+) -> None:
+    """Detect renamed key or record deprecation diagnostic for missing key.
+
+    Args:
+        k: Missing input configuration key.
+        v: Value associated with missing key.
+        input_cfg: Full input configuration dictionary.
+        validated_cfg: Full post-validation configuration dictionary.
+        colliding_keys: Set of stringified keys that had collisions.
+        diagnostics: ValidationDiagnostics to record discovered migrations or deprecations.
+
+    """
+    src_key = str(k)
+    found_rename = False
+    is_generic_scalar = v is None or isinstance(v, bool) or v in ("", 0, 1, {}, [])
+    if not is_generic_scalar:
+        for val_k, val_v in validated_cfg.items():
+            if val_k not in input_cfg and (val_v == v or str(val_v) == str(v)):
+                target_key = str(val_k)
+                if src_key in colliding_keys:
+                    _LOGGER.warning(
+                        "Rejecting rename diagnostic for colliding source key %r",
+                        src_key,
+                    )
+                    break
+                if (
+                    src_key in diagnostics.renamed_keys
+                    and diagnostics.renamed_keys[src_key] != target_key
+                ):
+                    _LOGGER.warning(
+                        "Rejecting conflicting rename diagnostic for key %r: "
+                        "existing %r != candidate %r",
+                        src_key,
+                        diagnostics.renamed_keys[src_key],
+                        target_key,
+                    )
+                    break
+                diagnostics.renamed_keys[src_key] = target_key
+                found_rename = True
+                break
+    if (
+        not found_rename
+        and src_key not in diagnostics.deprecated_keys
+        and src_key not in colliding_keys
+    ):
+        diagnostics.deprecated_keys.append(src_key)
+
+
+def _diff_nested_values(
+    v: object,
+    val_target: object,
+    diagnostics: ValidationDiagnostics,
+    current_path: tuple[str | int, ...],
+) -> None:
+    """Recursively diff nested values, unwrapping single-item list/dict mismatches.
+
+    Args:
+        v: Input configuration value.
+        val_target: Post-validation counterpart configuration value.
+        diagnostics: ValidationDiagnostics to record discovered key migrations.
+        current_path: Traversal path for the current key.
+
+    """
+    if (
+        isinstance(v, dict)
+        and len(v) == 1
+        and "triggers" in v
+        and isinstance(v["triggers"], list)
+        and isinstance(val_target, list)
+    ):
+        diff_structural_configs(v["triggers"], val_target, diagnostics, (*current_path, "triggers"))
+    elif (
+        isinstance(v, dict)
+        and isinstance(val_target, list)
+        and val_target
+        and isinstance(val_target[0], dict)
+    ):
+        diff_structural_configs(v, val_target[0], diagnostics, (*current_path, 0))
+    elif isinstance(v, list) and isinstance(val_target, dict) and v and isinstance(v[0], dict):
+        diff_structural_configs(v[0], val_target, diagnostics, (*current_path, 0))
+    else:
+        diff_structural_configs(v, val_target, diagnostics, current_path)
+
+
 def diff_structural_configs(
     input_cfg: object,
     validated_cfg: object,
@@ -526,40 +798,24 @@ def diff_structural_configs(
 
     """
     if isinstance(input_cfg, dict) and isinstance(validated_cfg, dict):
-        plural_keys = {
-            "trigger": "triggers",
-            "condition": "conditions",
-            "action": "actions",
-        }
+        colliding_keys = _detect_colliding_keys(input_cfg, "input") | _detect_colliding_keys(
+            validated_cfg, "validated"
+        )
+
         for k, v in input_cfg.items():
             current_path = (*path, k)
             if k not in validated_cfg:
-                plural_k = plural_keys.get(k)
-                if (
-                    not path
-                    and plural_k is not None
-                    and plural_k in validated_cfg
-                    and plural_k not in input_cfg
+                if _diff_plural_alias(
+                    k, v, input_cfg, validated_cfg, diagnostics, path, current_path
                 ):
-                    val_plural = validated_cfg[plural_k]
-                    if isinstance(v, dict) and isinstance(val_plural, list) and val_plural:
-                        diff_structural_configs(v, val_plural[0], diagnostics, (*path, k, 0))
-                    else:
-                        diff_structural_configs(v, val_plural, diagnostics, current_path)
                     continue
-
-                found_rename = False
-                is_generic_scalar = v is None or isinstance(v, bool) or v in ("", 0, 1, {}, [])
-                if not is_generic_scalar:
-                    for val_k, val_v in validated_cfg.items():
-                        if val_k not in input_cfg and (val_v == v or str(val_v) == str(v)):
-                            diagnostics.renamed_keys[k] = val_k
-                            found_rename = True
-                            break
-                if not found_rename:
-                    diagnostics.deprecated_keys.append(k)
+                if _is_relocated_ha_key(k, v, input_cfg, validated_cfg, path):
+                    continue
+                _detect_rename_or_deprecation(
+                    k, v, input_cfg, validated_cfg, colliding_keys, diagnostics
+                )
             else:
-                diff_structural_configs(v, validated_cfg[k], diagnostics, current_path)
+                _diff_nested_values(v, validated_cfg[k], diagnostics, current_path)
     elif isinstance(input_cfg, list) and isinstance(validated_cfg, list):
         for idx in range(min(len(input_cfg), len(validated_cfg))):
             diff_structural_configs(input_cfg[idx], validated_cfg[idx], diagnostics, (*path, idx))
@@ -1943,7 +2199,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         empty_default_inputs: dict[str, object] = {
             k: v[CONF_DEFAULT]
             for k, v in input_configs.items()
-            if CONF_DEFAULT in v and _is_invalid_for_input_default(v[CONF_DEFAULT], v)
+            if CONF_DEFAULT in v and is_invalid_for_input_default(v[CONF_DEFAULT], v)
         }
         if empty_default_inputs and (
             usage_errors := validate_safe_input_usages(data, empty_default_inputs)
@@ -2017,7 +2273,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 if env is None or not isinstance(env, TemplateEnvironment):
                     env = TemplateEnvironment(self.hass)
                 ast = env.parse(value)
-                if ast_errors := _check_ha_template_ast_compatibility(ast, env):
+                if ast_errors := check_ha_template_ast_compatibility(ast, env):
                     return path, "; ".join(ast_errors)
             except TemplateError as err:
                 return path, str(err)
@@ -3703,9 +3959,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         )
         if substituted_baseline is None:
             return
-        await self._async_validate_substituted_domain_config(
-            domain, relative_path, substituted_baseline
-        )
+        synthetic_values = extract_synthetic_dummy_values(blueprint_dict)
+        try:
+            await self._async_validate_substituted_domain_config(
+                domain, relative_path, substituted_baseline
+            )
+        except (HomeAssistantError, vol.Invalid) as err:
+            if is_dummy_validation_error(err, synthetic_values, substituted_baseline):
+                _LOGGER.debug(
+                    "Baseline candidate validation for %s ignored synthetic input error: %s",
+                    relative_path,
+                    err,
+                )
+                return
+            raise
 
     async def _async_run_domain_validator(
         self,
@@ -4968,7 +5235,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             True if Home Assistant was updated or force is True, False otherwise.
 
         """
-        current_version = getattr(self.hass.config, "version", "")
+        current_version = get_ha_version(self.hass)
         if force:
             return True
         if self._last_ha_version is None:
@@ -5596,11 +5863,22 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if substituted_baseline is None:
             return
         input_cfg = copy.deepcopy(substituted_baseline)
-        validated_cfg = await self._async_run_domain_validator(
-            domain, relative_path, substituted_baseline
-        )
-        if validated_cfg:
-            diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+        synthetic_values = extract_synthetic_dummy_values(blueprint_dict)
+        try:
+            validated_cfg = await self._async_run_domain_validator(
+                domain, relative_path, substituted_baseline
+            )
+            if validated_cfg:
+                diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+        except (vol.Invalid, HomeAssistantError) as err:
+            if is_dummy_validation_error(err, synthetic_values, substituted_baseline):
+                _LOGGER.debug(
+                    "Baseline validation skipped domain checks for %s due to dummy input: %s",
+                    relative_path,
+                    err,
+                )
+                return
+            raise
 
     @staticmethod
     def _derive_substituted_baseline_config(
@@ -5841,7 +6119,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         domain_str = domain.value if domain else ""
 
         issue_id = self.get_incompatible_issue_id(relative_path, domain)
-        ha_version = getattr(self.hass.config, "version", "Core")
+        ha_version = get_ha_version(self.hass)
 
         error_summary = "\n".join(f"- {e}" for e in (report.errors or report.warnings))
         affected_entities_str = (
@@ -5910,7 +6188,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 ),
                 "breaks_in_ha_version": report.breaks_in_ha_version,
                 "renamed_keys": (
-                    orjson.dumps(report.renamed_keys).decode("utf-8")
+                    orjson.dumps(stringify_keys(report.renamed_keys)).decode("utf-8")
                     if report.renamed_keys
                     else None
                 ),
@@ -6025,9 +6303,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                             blueprint_dict, blueprint_obj, rel_path, domain, diagnostics
                         )
                     except (vol.Invalid, HomeAssistantError) as err:
-                        report.errors.append(
-                            f"Baseline validation failed: {format_validation_error(err)}"
+                        synthetic_values = extract_synthetic_dummy_values(blueprint_dict)
+                        substituted_baseline = self._derive_substituted_baseline_config(
+                            blueprint_dict, blueprint_obj, rel_path, domain
                         )
+                        if is_dummy_validation_error(err, synthetic_values, substituted_baseline):
+                            _LOGGER.debug(
+                                "Ignoring baseline validation failure for %s "
+                                "due to dummy input: %s",
+                                rel_path,
+                                err,
+                            )
+                        else:
+                            report.errors.append(
+                                f"Baseline validation failed: {format_validation_error(err)}"
+                            )
                     except Exception as err:
                         report.errors.append(f"Baseline validation error: {err}")
 
@@ -6071,7 +6361,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 source_url = s_url
 
         primary_url, author_url, docs_url = self._resolve_learn_more_url(
-            source_url, report, getattr(self.hass.config, "version", "")
+            source_url, report, get_ha_version(self.hass)
         )
         report.learn_more_url = primary_url
         report.author_report_url = author_url
@@ -6273,7 +6563,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
             _LOGGER.info(
                 "Running post-HA-update blueprint compatibility guard for version %s",
-                getattr(self.hass.config, "version", "unknown"),
+                get_ha_version(self.hass),
             )
             completed_cleanly = False
             try:
@@ -6309,7 +6599,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     if isinstance(dismissed_data, dict):
                         dismissed_at_hash = dismissed_data.get("dismissed_at_hash")
                         dismissed_at_ha_version = dismissed_data.get("dismissed_at_ha_version")
-                        current_ha_version = getattr(self.hass.config, "version", "")
+                        current_ha_version = get_ha_version(self.hass)
                         if (
                             local_hash != dismissed_at_hash
                             or current_ha_version != dismissed_at_ha_version
@@ -6412,7 +6702,5 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 )
                 raise
             finally:
-                if completed_cleanly and (
-                    current_version := getattr(self.hass.config, "version", "")
-                ):
+                if completed_cleanly and (current_version := get_ha_version(self.hass)):
                     await self.async_save_ha_version(current_version)

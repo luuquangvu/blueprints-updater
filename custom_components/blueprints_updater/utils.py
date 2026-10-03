@@ -9,7 +9,7 @@ import logging
 import os
 import random
 import textwrap
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from functools import wraps
 from typing import ParamSpec, TypeVar
 from urllib.parse import quote
@@ -18,6 +18,7 @@ import httpx
 from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.script import scripts_with_blueprint
 from homeassistant.components.template.helpers import templates_with_blueprint
+from homeassistant.const import __version__
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
@@ -640,3 +641,91 @@ def get_blueprint_dashboard_url(domain: FunctionalDomain, blueprint_id: str) -> 
         return URL_BLUEPRINT_DASHBOARD
     encoded_id = quote(blueprint_id, safe="")
     return f"/config/{domain.value}/dashboard?blueprint={encoded_id}"
+
+
+def extract_leaf_strings(obj: object) -> set[str]:
+    """Recursively collect all leaf string values from a nested data structure.
+
+    Args:
+        obj: The object to inspect.
+
+    Returns:
+        Set of string values extracted from the object.
+
+    """
+    strings: set[str] = set()
+    if isinstance(obj, str):
+        strings.add(obj)
+    elif isinstance(obj, Mapping):
+        for v in obj.values():
+            strings.update(extract_leaf_strings(v))
+    elif isinstance(obj, (list, tuple, set, frozenset)):
+        for item in obj:
+            strings.update(extract_leaf_strings(item))
+    return strings
+
+
+def get_ha_version(hass: HomeAssistant | None = None) -> str:
+    """Return the current Home Assistant version string.
+
+    Args:
+        hass: HomeAssistant instance if available.
+
+    Returns:
+        The detected or configured Home Assistant version string.
+
+    """
+    if hass is not None:
+        version = getattr(hass.config, "version", None)
+        if version and isinstance(version, str):
+            return version
+    return __version__
+
+
+def stringify_keys(
+    obj: object,
+    *,
+    preserve_collisions: bool = False,
+) -> object:
+    """Recursively convert dictionary keys to strings.
+
+    Args:
+        obj: Object containing dictionaries with potentially non-string keys.
+        preserve_collisions: Whether to preserve distinct source keys that convert
+            to the same string by disambiguating colliding names. When False,
+            a ValueError is raised on key collision.
+
+    Returns:
+        New object with all dictionary keys converted to strings.
+
+    Raises:
+        ValueError: If preserve_collisions is False and distinct source keys convert
+            to the same string.
+
+    """
+    if isinstance(obj, dict):
+        result: dict[str, object] = {}
+        seen_keys: dict[str, object] = {}
+        for key, value in obj.items():
+            str_key = str(key)
+            if str_key in seen_keys and seen_keys[str_key] != key:
+                if preserve_collisions:
+                    suffix = 1
+                    disambiguated = f"{str_key}_{type(key).__name__}"
+                    while disambiguated in result:
+                        suffix += 1
+                        disambiguated = f"{str_key}_{type(key).__name__}_{suffix}"
+                    str_key = disambiguated
+                else:
+                    raise ValueError(
+                        f"Key collision detected in stringify_keys: {seen_keys[str_key]!r} "
+                        f"and {key!r} both convert to {str_key!r}"
+                    )
+            seen_keys[str_key] = key
+            result[str_key] = stringify_keys(value, preserve_collisions=preserve_collisions)
+        return result
+    if isinstance(obj, list):
+        return [stringify_keys(item, preserve_collisions=preserve_collisions) for item in obj]
+    if isinstance(obj, tuple):
+        return tuple(stringify_keys(item, preserve_collisions=preserve_collisions) for item in obj)
+    return obj

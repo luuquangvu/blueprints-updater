@@ -79,6 +79,13 @@ BLUEPRINT_ROUNDTRIP_INVARIANT_KEYS: Final[tuple[str, ...]] = (
     CONF_TRIGGER_VARIABLES,
 )
 
+PLURAL_CONFIG_KEYS: Final[dict[str, str]] = {
+    "trigger": "triggers",
+    "condition": "conditions",
+    "action": "actions",
+}
+"""Mapping of top-level singular configuration keys to their plural counterparts."""
+
 
 class SourceDomain(StrEnum):
     """Domains for blueprint source providers."""
