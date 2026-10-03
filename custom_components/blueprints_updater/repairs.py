@@ -55,6 +55,7 @@ from .exceptions import FileRevisionMismatchError
 from .file_store import BlueprintFileStore, FileRevisionPrecondition
 from .utils import (
     get_blueprint_usage_entities,
+    get_ha_version,
     get_validated_filter_mode,
     normalize_domain,
     redact_url,
@@ -514,7 +515,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
             description_placeholders={
                 "name": self.blueprint_name,
                 "path": self.relative_path,
-                "ha_version": getattr(self.coordinator.hass.config, "version", "Home Assistant"),
+                "ha_version": get_ha_version(self.coordinator.hass),
                 "error_summary": str(
                     self.issue_data.get("errors")
                     or self.issue_data.get("warnings")
@@ -707,9 +708,9 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
             or self.coordinator.data.get(self.path, {}).get("local_hash")
             or self.coordinator._persisted_metadata.get(self.relative_path, {}).get("local_hash")
         )
-        dismissed_data = {
+        dismissed_data: dict[str, object] = {
             "dismissed_at_hash": str(local_h) if local_h else "",
-            "dismissed_at_ha_version": getattr(self.coordinator.hass.config, "version", ""),
+            "dismissed_at_ha_version": get_ha_version(self.coordinator.hass),
             "issue_id": self.issue_id,
         }
         await self.coordinator.async_set_dismissed_warning(
@@ -819,7 +820,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
                 "name": self.blueprint_name,
                 "path": self.relative_path,
                 "relative_path": self.relative_path,
-                "ha_version": getattr(self.coordinator.hass.config, "version", "Home Assistant"),
+                "ha_version": get_ha_version(self.coordinator.hass),
                 "error": self._fork_breaking_error or "",
             },
         )

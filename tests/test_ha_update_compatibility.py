@@ -9,14 +9,21 @@ from types import MappingProxyType
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import orjson
 import pytest
 import voluptuous as vol
 from homeassistant import data_entry_flow
+from homeassistant.components.device_automation.exceptions import (
+    EntityNotFound,
+    InvalidDeviceAutomationConfig,
+)
+from homeassistant.const import CONF_VARIABLES, __version__
 from homeassistant.core import CoreState
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import frame
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import yaml as yaml_util
+from homeassistant.util.yaml.objects import Input
 
 from custom_components.blueprints_updater import (
     async_setup_entry,
@@ -25,10 +32,15 @@ from custom_components.blueprints_updater import (
 from custom_components.blueprints_updater.blueprint_validation import (
     _DEFAULT_MATH_FILTER_METHODS,
     _DEFAULT_MATH_GLOBALS,
+    SyntheticDummyValues,
     _derive_value_for_path,
     _discover_ha_math_capabilities,
+    _resolve_config_path,
     _wrap_action_target_blocks,
     detect_unsupported_yaml_constructs,
+    extract_synthetic_dummy_values,
+    is_dummy_validation_error,
+    is_synthetic_identifier,
     modernize_legacy_blueprint_yaml,
 )
 from custom_components.blueprints_updater.const import (
@@ -58,6 +70,10 @@ from custom_components.blueprints_updater.file_store import (
 from custom_components.blueprints_updater.repairs import (
     IncompatibleBlueprintRepairFlow,
     async_create_fix_flow,
+)
+from custom_components.blueprints_updater.utils import (
+    get_ha_version,
+    stringify_keys,
 )
 
 
@@ -191,7 +207,27 @@ async def test_local_blueprint_discovery(coordinator, hass):
         assert blueprints[script_file]["domain"] == FunctionalDomain.SCRIPT
 
 
-def test_legacy_blueprint_modernization_engine():
+def _assert_modernization_substitutions(
+    modernized: str,
+    *,
+    expected_absent: tuple[str, ...],
+    expected_present: tuple[str, ...],
+) -> None:
+    """Assert expected modernization substitutions are present and obsolete syntax is absent.
+
+    Args:
+        modernized: The modernized YAML string.
+        expected_absent: Strings that must not appear in the modernized output.
+        expected_present: Strings that must appear in the modernized output.
+
+    """
+    for item in expected_absent:
+        assert item not in modernized
+    for item in expected_present:
+        assert item in modernized
+
+
+def test_legacy_blueprint_modernization_engine() -> None:
     """Test modernization engine transformations."""
     legacy_content = (
         "blueprint:\n"
@@ -217,30 +253,30 @@ def test_legacy_blueprint_modernization_engine():
         dynamic_replacements={"legacy_param": "modern_param"},
     )
 
-    # Verify service -> action
-    assert "service:" not in modernized
-    assert "service_template:" not in modernized
-    assert "action: light.turn_on" in modernized
-    assert "action: light.turn_off" in modernized
+    _assert_modernization_substitutions(
+        modernized,
+        expected_absent=(
+            "service:",
+            "service_template:",
+            "data_template:",
+            "math.floor",
+            "floor(",
+        ),
+        expected_present=(
+            "action: light.turn_on",
+            "action: light.turn_off",
+            "data:",
+            "trigger: state",
+            "round(0, 'floor')",
+            "| float",
+            "target:",
+            "entity_id: light.living_room",
+        ),
+    )
 
-    # Verify data_template -> data
-    assert "data_template:" not in modernized
-    assert "data:" in modernized
 
-    # Verify trigger platform -> trigger: state
-    assert "trigger: state" in modernized
-
-    # Verify Jinja math and float defaults
-    assert "math.floor" not in modernized
-    assert "floor(" not in modernized
-    assert "round(0, 'floor')" in modernized
-    assert "| float" in modernized
-
-    # Verify target wrapping
-    assert "target:" in modernized
-    assert "entity_id: light.living_room" in modernized
-
-    # Test list of entity IDs target wrapping
+def test_legacy_blueprint_modernization_list_target() -> None:
+    """Test list of entity IDs target wrapping during blueprint modernization."""
     list_target_content = (
         "blueprint:\n"
         "  name: List Target BP\n"
@@ -3056,3 +3092,868 @@ action:
     assert "- light.kitchen" in modernized
     assert "- light.living_room" in modernized
     assert "brightness: 100" in modernized
+
+
+def test_get_ha_version_detection(hass: MagicMock) -> None:
+    """Test get_ha_version returns configured version or core constant."""
+    hass.config.version = "2025.1.0"
+    assert get_ha_version(hass) == "2025.1.0"
+
+    del hass.config.version
+    assert get_ha_version(hass) == __version__
+    assert get_ha_version(None) == __version__
+
+
+def test_is_dummy_validation_error_matching() -> None:
+    """Test is_dummy_validation_error detects dummy devices, entities, areas, and labels."""
+    # Standard dummy identifiers when synthetic_values is None
+    for err in (
+        HomeAssistantError("Unknown device 'dummy_device_id'"),
+        vol.Invalid("Unknown entity 'test.dummy'"),
+        HomeAssistantError("Unknown area 'dummy_area_id'"),
+        HomeAssistantError("Unknown floor 'dummy_floor_id'"),
+        HomeAssistantError("Unknown label 'dummy_label_id'"),
+        HomeAssistantError("Device not found: dummy_device_id"),
+        HomeAssistantError("Device not found: dummy_device_id."),
+        HomeAssistantError("Device dummy_device_id not found."),
+        HomeAssistantError("Could not find device dummy_device_id-"),
+        vol.Invalid("Entity not found: test.dummy"),
+        vol.Invalid("Entity not found: test.dummy."),
+        vol.Invalid("Entity test.dummy does not exist."),
+        vol.Invalid("Entity not found: test.dummy..."),
+    ):
+        assert is_dummy_validation_error(err)
+
+    # Errors where blueprint author uses 'dummy' string must NOT match
+    for err in (
+        vol.Invalid("extra keys not allowed @ data['dummy']"),
+        vol.Invalid("extra keys not allowed @ data['dummy_key']"),
+        vol.Invalid("Invalid action key 'dummy_action'"),
+        HomeAssistantError("Service notify.dummy not found"),
+        HomeAssistantError("Template error: 'dummy' is undefined"),
+        HomeAssistantError("Unknown entity 'light.dummy_author_light'"),
+        HomeAssistantError("Service light.turn_on not found"),
+        vol.Invalid("Invalid action key"),
+        vol.Invalid("extra keys not allowed @ data['custom_prop']"),
+    ):
+        assert not is_dummy_validation_error(err)
+
+    # Contextual matching with injected synthetic_values
+    synthetic = {"dummy_device_id", "person.dummy"}
+    assert is_dummy_validation_error(
+        HomeAssistantError("Unknown device 'dummy_device_id'"), synthetic
+    )
+    assert is_dummy_validation_error(vol.Invalid("Unknown entity 'person.dummy'"), synthetic)
+    assert not is_dummy_validation_error(
+        HomeAssistantError("Unknown device 'real_device_id'"), synthetic
+    )
+    assert not is_dummy_validation_error(vol.Invalid("Unknown entity 'light.dummy'"), synthetic)
+    # Device automation exceptions without identifier must NOT be classified as dummy
+    # merely because a synthetic value contains 'device'
+    assert not is_dummy_validation_error(
+        InvalidDeviceAutomationConfig("Unable to resolve webhook ID from the device ID"),
+        synthetic,
+    )
+    assert not is_dummy_validation_error(
+        InvalidDeviceAutomationConfig("Unable to resolve webhook ID from the device ID"),
+        {"person.dummy"},
+    )
+
+    # When error message or attributes reference a synthetic device ID, classify as dummy
+    assert is_dummy_validation_error(
+        InvalidDeviceAutomationConfig("Device dummy_device_id not found"),
+        synthetic,
+    )
+
+    class _MockDeviceAutomationException(InvalidDeviceAutomationConfig):
+        """Mock device automation exception with structured attributes."""
+
+        device_id: str
+        path: list[str | int]
+
+    exc_with_attr = _MockDeviceAutomationException(
+        "Unable to resolve webhook ID from the device ID"
+    )
+    exc_with_attr.device_id = "dummy_device_id"
+    assert is_dummy_validation_error(exc_with_attr, synthetic)
+
+    exc_with_tp = InvalidDeviceAutomationConfig(
+        "Device error",
+        translation_placeholders={"device_id": "dummy_device_id"},
+    )
+    assert is_dummy_validation_error(exc_with_tp, synthetic)
+
+    # When exception has no identifier, accept only when failing config path
+    # resolves to synthetic input
+    exc_with_path = _MockDeviceAutomationException(
+        "Unable to resolve webhook ID from the device ID"
+    )
+    exc_with_path.path = ["trigger", 0, "device_id"]
+    cfg_with_dummy = {"trigger": [{"device_id": "dummy_device_id"}]}
+    assert is_dummy_validation_error(exc_with_path, synthetic, substituted_config=cfg_with_dummy)
+
+    cfg_with_author = {"trigger": [{"device_id": "author_device_123"}]}
+    assert not is_dummy_validation_error(
+        exc_with_path, synthetic, substituted_config=cfg_with_author
+    )
+    assert is_dummy_validation_error(EntityNotFound("Unknown entity 'test.dummy'"))
+    assert is_dummy_validation_error(EntityNotFound("Unknown entity 'person.dummy'"), synthetic)
+    assert not is_dummy_validation_error(
+        EntityNotFound("Unknown entity 'light.real_entity'"), synthetic
+    )
+
+    # Author uses dummy in extra keys or action with synthetic app input generating 'dummy'
+    synthetic_app = {"dummy"}
+    assert not is_dummy_validation_error(
+        vol.Invalid("extra keys not allowed @ data['dummy_extra_key']"), synthetic_app
+    )
+    assert not is_dummy_validation_error(
+        vol.Invalid("extra keys not allowed @ data['dummy']"), synthetic_app
+    )
+    assert not is_dummy_validation_error(
+        vol.Invalid("Invalid action key 'dummy_action'"), synthetic_app
+    )
+    assert not is_dummy_validation_error(
+        HomeAssistantError("Service notify.dummy not found"), synthetic_app
+    )
+    assert not is_dummy_validation_error(
+        TemplateError("Template error: 'dummy' is undefined"), synthetic_app
+    )
+    assert not is_dummy_validation_error(
+        HomeAssistantError("Unknown entity 'light.dummy_author_light'"), synthetic_app
+    )
+    assert is_dummy_validation_error(vol.Invalid("Unknown app 'dummy'"), synthetic_app)
+    assert is_dummy_validation_error(vol.Invalid("App not found: dummy"), synthetic_app)
+
+
+def test_error_identifies_synthetic_id_strips_trailing_punctuation() -> None:
+    """Test _error_identifies_synthetic_id strips trailing periods and hyphens."""
+    from custom_components.blueprints_updater.blueprint_validation import (
+        _error_identifies_synthetic_id,
+    )
+
+    assert _error_identifies_synthetic_id("Device dummy_device_id not found.", "dummy_device_id")
+    assert _error_identifies_synthetic_id("Device not found: dummy_device_id.", "dummy_device_id")
+    assert _error_identifies_synthetic_id("Device not found: dummy_device_id-", "dummy_device_id")
+    assert _error_identifies_synthetic_id("Device not found: dummy_device_id...", "dummy_device_id")
+    assert _error_identifies_synthetic_id("Entity light.dummy does not exist.", "light.dummy")
+    assert _error_identifies_synthetic_id("Unknown entity: light.dummy.", "light.dummy")
+    assert not _error_identifies_synthetic_id("Unknown entity: light.dummy_other.", "light.dummy")
+    assert not _error_identifies_synthetic_id("Service notify.dummy not found.", "dummy")
+
+
+def test_standard_dummy_ids_drift_prevention(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test standard dummy IDs are dynamically derived to avoid drift."""
+    from custom_components.blueprints_updater.blueprint_validation import (
+        _ID_DUMMY_DEFAULTS,
+        STANDARD_DUMMY_IDS,
+        get_standard_dummy_ids,
+    )
+
+    # Verify standard dummy IDs contain all current _ID_DUMMY_DEFAULTS values
+    standard_ids = get_standard_dummy_ids()
+    assert isinstance(standard_ids, frozenset)
+    assert standard_ids == STANDARD_DUMMY_IDS
+    for expected_id in _ID_DUMMY_DEFAULTS.values():
+        assert expected_id in standard_ids
+
+    assert "test.dummy" in standard_ids
+    assert "sensor.dummy" in standard_ids
+
+    # Test dynamic reflection when _ID_DUMMY_DEFAULTS is updated
+    monkeypatch.setitem(_ID_DUMMY_DEFAULTS, "custom_zone", "dummy_custom_zone_id")
+    fresh_ids = get_standard_dummy_ids()
+    assert "dummy_custom_zone_id" in fresh_ids
+    assert is_dummy_validation_error(HomeAssistantError("Unknown zone 'dummy_custom_zone_id'"))
+
+
+async def test_baseline_validation_ignores_dummy_device_error(
+    coordinator: BlueprintUpdateCoordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test baseline validation ignores dummy device failures for unused blueprints."""
+    rel_path = "automation/homeassistant/notify_leaving_zone.yaml"
+    path = "/config/blueprints/automation/homeassistant/notify_leaving_zone.yaml"
+    content = (
+        "blueprint:\n"
+        "  name: Zone Notification\n"
+        "  domain: automation\n"
+        "  input:\n"
+        "    notify_device:\n"
+        "      selector:\n"
+        "        device:\n"
+        "trigger:\n"
+        "  - platform: state\n"
+        "    entity_id: sensor.test\n"
+        "actions:\n"
+        "  - domain: mobile_app\n"
+        "    type: notify\n"
+        "    device_id: !input notify_device\n"
+        "    message: test\n"
+    )
+
+    async def _mock_run_domain_validator(*args: object, **kwargs: object) -> None:
+        """Simulate device automation validation failure on unknown dummy device."""
+        raise HomeAssistantError("Unknown device 'dummy_device_id'")
+
+    monkeypatch.setattr(coordinator, "_async_run_domain_validator", _mock_run_domain_validator)
+    report = await coordinator.async_validate_local_blueprint_compatibility(rel_path, path, content)
+
+    # Must NOT report breaking failure or repair issue for missing dummy device
+    assert report.severity is None
+    assert report.errors == []
+
+
+async def test_baseline_validation_ignores_dummy_entity_error(
+    coordinator: BlueprintUpdateCoordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test baseline validation ignores dummy entity failures for unused blueprints."""
+    rel_path = "automation/homeassistant/zone_notify.yaml"
+    path = "/config/blueprints/automation/homeassistant/zone_notify.yaml"
+    content = (
+        "blueprint:\n"
+        "  name: Zone Entity Test\n"
+        "  domain: automation\n"
+        "  input:\n"
+        "    person_entity:\n"
+        "      selector:\n"
+        "        entity:\n"
+        "          filter:\n"
+        "            domain: person\n"
+        "trigger:\n"
+        "  - platform: state\n"
+        "    entity_id: sensor.test\n"
+        "actions:\n"
+        "  - action: notify.notify\n"
+        "    target:\n"
+        "      entity_id: !input person_entity\n"
+    )
+
+    async def _mock_run_domain_validator(*args: object, **kwargs: object) -> None:
+        """Simulate entity validation failure on unknown dummy entity."""
+        raise vol.Invalid("Unknown entity 'person.dummy'")
+
+    monkeypatch.setattr(coordinator, "_async_run_domain_validator", _mock_run_domain_validator)
+    report = await coordinator.async_validate_local_blueprint_compatibility(rel_path, path, content)
+
+    assert report.severity is None
+    assert report.errors == []
+
+
+async def test_baseline_validation_reports_error_when_author_uses_dummy_string(
+    coordinator: BlueprintUpdateCoordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test baseline validation does not suppress real errors containing 'dummy' string."""
+    rel_path = "automation/homeassistant/author_dummy_test.yaml"
+    path = "/config/blueprints/automation/homeassistant/author_dummy_test.yaml"
+    content = (
+        "blueprint:\n"
+        "  name: Author Dummy Test\n"
+        "  domain: automation\n"
+        "  input:\n"
+        "    notify_device:\n"
+        "      selector:\n"
+        "        device:\n"
+        "trigger:\n"
+        "  - platform: state\n"
+        "    entity_id: sensor.test\n"
+        "actions:\n"
+        "  - action: light.turn_on\n"
+        "    target:\n"
+        "      entity_id: light.living_room\n"
+        "    dummy_extra_key: true\n"
+    )
+
+    async def _mock_run_domain_validator(*args: object, **kwargs: object) -> None:
+        """Simulate schema validation error on author's dummy property."""
+        raise vol.Invalid("extra keys not allowed @ data['dummy_extra_key']")
+
+    monkeypatch.setattr(coordinator, "_async_run_domain_validator", _mock_run_domain_validator)
+    report = await coordinator.async_validate_local_blueprint_compatibility(rel_path, path, content)
+
+    assert report.severity == IncompatibilitySeverity.BREAKING
+    assert any("dummy_extra_key" in err for err in report.errors)
+
+
+def test_diff_structural_configs_variables_not_deprecated() -> None:
+    """Test diff_structural_configs does not flag popped variables as deprecated."""
+    input_cfg = {
+        CONF_VARIABLES: {
+            "reference_entity": "binary_sensor.test",
+        },
+        "binary_sensor": {
+            "state": "{{ states(reference_entity) }}",
+        },
+    }
+    validated_cfg = {
+        "binary_sensor": [
+            {
+                "state": "{{ states(reference_entity) }}",
+                CONF_VARIABLES: {
+                    "reference_entity": "binary_sensor.test",
+                },
+            }
+        ],
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert CONF_VARIABLES not in diagnostics.deprecated_keys
+    assert diagnostics.deprecated_keys == []
+
+
+def test_diff_structural_configs_deprecated_keys_detected() -> None:
+    """Test diff_structural_configs detects genuinely removed keys and handles list reshaping."""
+    input_cfg = {
+        "legacy_root_key": "old_value",
+        "binary_sensor": {
+            "name": "Test Sensor",
+            "deprecated_inner_key": "some_value",
+        },
+    }
+    validated_cfg = {
+        "binary_sensor": [
+            {
+                "name": "Test Sensor",
+            }
+        ],
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert "legacy_root_key" in diagnostics.deprecated_keys
+    assert "deprecated_inner_key" in diagnostics.deprecated_keys
+    assert not diagnostics.renamed_keys
+
+
+def test_diff_structural_configs_unrelated_variables_still_deprecated() -> None:
+    """Test root variables are deprecated when child variables differ."""
+    input_cfg = {
+        CONF_VARIABLES: {
+            "deprecated_root_var": "legacy_val",
+        },
+        "binary_sensor": {
+            "state": "on",
+        },
+    }
+    validated_cfg = {
+        "binary_sensor": [
+            {
+                "state": "on",
+                CONF_VARIABLES: {
+                    "unrelated_child_var": "other_val",
+                },
+            }
+        ],
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert CONF_VARIABLES in diagnostics.deprecated_keys
+
+
+def test_stringify_keys_serialization() -> None:
+    """Test stringify_keys converts non-string dictionary keys for orjson."""
+    data: dict[object, object] = {
+        100: "numeric_key",
+        ("nested", "tuple"): {
+            200: "inner_val",
+            "list": [{300: "item_val"}],
+        },
+    }
+    stringified = stringify_keys(data)
+    encoded = orjson.dumps(stringified)
+    decoded = orjson.loads(encoded)
+
+    assert decoded["100"] == "numeric_key"
+    assert decoded["('nested', 'tuple')"]["200"] == "inner_val"
+    assert decoded["('nested', 'tuple')"]["list"][0]["300"] == "item_val"
+
+
+def test_stringify_keys_collision_handling() -> None:
+    """Test stringify_keys detects collisions between distinct source keys."""
+    colliding_data: dict[object, object] = {
+        1: "int_key",
+        "1": "str_key",
+    }
+    with pytest.raises(ValueError, match="Key collision detected in stringify_keys"):
+        stringify_keys(colliding_data)
+
+    preserved = stringify_keys(colliding_data, preserve_collisions=True)
+    assert isinstance(preserved, dict)
+    assert preserved.get("1") == "int_key"
+    assert preserved.get("1_str") == "str_key"
+
+
+def test_diff_structural_configs_key_collision_rejected() -> None:
+    """Test diff_structural_configs detects and rejects colliding keys before storing renames."""
+    input_cfg: dict[object, object] = {
+        1: "service_val",
+        "1": "other_val",
+    }
+    validated_cfg = {
+        "action": "service_val",
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    # Collision is rejected rather than silently storing a corrupted rename
+    assert "1" not in diagnostics.renamed_keys
+    assert not diagnostics.renamed_keys
+
+
+def test_diff_structural_configs_conflicting_rename_rejected() -> None:
+    """Test diff_structural_configs does not overwrite existing rename diagnostics on conflict."""
+    diagnostics = ValidationDiagnostics()
+    diagnostics.renamed_keys["service"] = "action"
+
+    input_cfg = {
+        "service": "turn_on",
+    }
+    validated_cfg = {
+        "perform_action": "turn_on",
+    }
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    # Existing rename "service" -> "action" is preserved and not overwritten by "perform_action"
+    assert diagnostics.renamed_keys["service"] == "action"
+
+
+async def test_baseline_validation_reports_error_when_app_input_and_author_dummy_extra_key(
+    coordinator: BlueprintUpdateCoordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test baseline validation preserves extra-key error when app input generates dummy."""
+    from homeassistant.helpers import selector as ha_selector
+
+    if "app" not in getattr(ha_selector, "SELECTORS", {}):
+
+        class _MockAppSelector(ha_selector.Selector):
+            """Mock app selector for Home Assistant versions prior to core app selector."""
+
+            CONFIG_SCHEMA = vol.Schema({})
+
+            def __init__(self, config: object = None) -> None:
+                """Init mock app selector."""
+
+        if hasattr(ha_selector, "SELECTORS") and isinstance(ha_selector.SELECTORS, dict):
+            monkeypatch.setitem(ha_selector.SELECTORS, "app", _MockAppSelector)
+
+    rel_path = "automation/homeassistant/app_dummy_test.yaml"
+    path = "/config/blueprints/automation/homeassistant/app_dummy_test.yaml"
+    content = (
+        "blueprint:\n"
+        "  name: App Dummy Test\n"
+        "  domain: automation\n"
+        "  input:\n"
+        "    app_target:\n"
+        "      selector:\n"
+        "        app: {}\n"
+        "trigger:\n"
+        "  - platform: state\n"
+        "    entity_id: sensor.test\n"
+        "actions:\n"
+        "  - action: media_player.play_media\n"
+        "    target:\n"
+        "      entity_id: media_player.living_room\n"
+        "    dummy_extra_key: true\n"
+    )
+
+    async def _mock_run_domain_validator(*args: object, **kwargs: object) -> None:
+        """Simulate schema validation error on author's dummy property."""
+        raise vol.Invalid("extra keys not allowed @ data['dummy_extra_key']")
+
+    monkeypatch.setattr(coordinator, "_async_run_domain_validator", _mock_run_domain_validator)
+    report = await coordinator.async_validate_local_blueprint_compatibility(rel_path, path, content)
+
+    assert report.severity == IncompatibilitySeverity.BREAKING
+    assert any("dummy_extra_key" in err for err in report.errors)
+
+
+def test_is_relocated_value_none_keys_and_missing_keys() -> None:
+    """Test _is_relocated_value requires keys to exist in target even when value is None."""
+    from custom_components.blueprints_updater.coordinator import _is_relocated_value
+
+    assert _is_relocated_value({"a": None}, {"a": None})
+    assert not _is_relocated_value({"a": None}, {})
+    assert not _is_relocated_value({"a": None}, {"b": None})
+    assert _is_relocated_value({"a": None, "b": 1}, {"a": None, "b": 1, "c": 2})
+    assert not _is_relocated_value({"a": None, "b": 1}, {"b": 1})
+
+
+def test_diff_structural_configs_variables_not_suppressed_when_already_in_child() -> None:
+    """Test root variables are deprecated if the same value already existed in the child."""
+    input_cfg = {
+        CONF_VARIABLES: {
+            "reference_entity": "binary_sensor.test",
+        },
+        "binary_sensor": {
+            "state": "{{ states(reference_entity) }}",
+            CONF_VARIABLES: {
+                "reference_entity": "binary_sensor.test",
+            },
+        },
+    }
+    validated_cfg = {
+        "binary_sensor": [
+            {
+                "state": "{{ states(reference_entity) }}",
+                CONF_VARIABLES: {
+                    "reference_entity": "binary_sensor.test",
+                },
+            }
+        ],
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert CONF_VARIABLES in diagnostics.deprecated_keys
+
+
+def test_diff_nested_values_wrapper_dict_triggers() -> None:
+    """Test _diff_nested_values unwraps dict with single triggers list and uses triggers path."""
+    input_cfg = {
+        "triggers": {
+            "triggers": [
+                {
+                    "platform": "state",
+                    "entity_id": "light.first",
+                    "service": "light.turn_on",
+                },
+                {
+                    "platform": "state",
+                    "entity_id": "light.second",
+                    "service": "light.turn_off",
+                },
+            ]
+        }
+    }
+    validated_cfg = {
+        "triggers": [
+            {
+                "platform": "state",
+                "entity_id": "light.first",
+                "action": "light.turn_on",
+            },
+            {
+                "platform": "state",
+                "entity_id": "light.second",
+                "action": "light.turn_off",
+            },
+        ]
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    # Renamed key "service" -> "action" is detected across items in the unwrapped triggers list
+    assert diagnostics.renamed_keys.get("service") == "action"
+
+
+def test_extract_synthetic_dummy_values_retains_metadata_and_suppresses_ordinary_errors() -> None:
+    """Test dummy values retain input/path metadata and suppress appropriately."""
+    bp_dict: dict[str, object] = {
+        "blueprint": {
+            "name": "Metadata Test",
+            "domain": "automation",
+            "input": {
+                "state_inp": {
+                    "name": "State Input",
+                    "selector": {"state": {"entity_id": "light.dummy"}},
+                },
+                "device_inp": {
+                    "name": "Device Input",
+                    "selector": {"device": {}},
+                },
+            },
+        },
+        "trigger": [
+            {
+                "platform": "state",
+                "entity_id": "light.dummy",
+                "state": Input("state_inp"),
+            }
+        ],
+        "action": [
+            {
+                "service": "light.turn_on",
+                "target": {"device_id": Input("device_inp")},
+            }
+        ],
+    }
+
+    synthetic = extract_synthetic_dummy_values(bp_dict)
+    assert isinstance(synthetic, SyntheticDummyValues)
+
+    # Synthetic identifiers (e.g. dummy_device_id) are in the free-standing token set
+    assert "dummy_device_id" in synthetic
+    # Ordinary string values (e.g. "on") are NOT in the free-standing token set
+    assert "on" not in synthetic
+
+    # Verify per-input metadata retention
+    state_entry = synthetic.entries_by_input["state_inp"]
+    assert state_entry.input_name == "state_inp"
+    assert ("trigger", 0, "state") in state_entry.paths
+    assert "on" in state_entry.ordinary_strings
+    assert not state_entry.synthetic_ids
+
+    device_entry = synthetic.entries_by_input["device_inp"]
+    assert "dummy_device_id" in device_entry.synthetic_ids
+
+    # 1. Free-standing error with ordinary string 'on' is NOT suppressed without matching path
+    assert not is_dummy_validation_error(
+        HomeAssistantError("Invalid state 'on'"),
+        synthetic,
+    )
+    assert not is_dummy_validation_error(
+        vol.Invalid("Invalid state 'on'"),
+        synthetic,
+    )
+
+    # 2. Error at path matching the input's substituted path IS suppressed
+    exc_matching = vol.Invalid("Invalid state 'on'", path=["trigger", 0, "state"])
+    substituted_config = {
+        "trigger": [
+            {
+                "platform": "state",
+                "entity_id": "light.dummy",
+                "state": "on",
+            }
+        ]
+    }
+    assert is_dummy_validation_error(
+        exc_matching,
+        synthetic,
+        substituted_config=substituted_config,
+    )
+
+    # 3. Error at path NOT matching the input (e.g. another trigger) is NOT suppressed
+    exc_author_error = vol.Invalid("Invalid state 'on'", path=["trigger", 1, "state"])
+    assert not is_dummy_validation_error(
+        exc_author_error,
+        synthetic,
+        substituted_config=substituted_config,
+    )
+
+    # 4. Extra-keys error at matching input path is NOT suppressed
+    exc_extra_keys = vol.Invalid(
+        "extra keys not allowed @ data['trigger'][0]['state']",
+        path=["trigger", 0, "state"],
+    )
+    assert not is_dummy_validation_error(
+        exc_extra_keys,
+        synthetic,
+        substituted_config=substituted_config,
+    )
+
+    # 5. MultipleInvalid with synthetic error and author error is NOT suppressed
+    mult_with_author = vol.MultipleInvalid([exc_matching, exc_author_error])
+    assert not is_dummy_validation_error(
+        mult_with_author,
+        synthetic,
+        substituted_config=substituted_config,
+    )
+
+    # 6. MultipleInvalid where all errors are synthetic IS suppressed
+    mult_all_synthetic = vol.MultipleInvalid([exc_matching])
+    assert is_dummy_validation_error(
+        mult_all_synthetic,
+        synthetic,
+        substituted_config=substituted_config,
+    )
+
+    # 7. Empty MultipleInvalid is NOT suppressed
+    assert not is_dummy_validation_error(
+        vol.MultipleInvalid([]),
+        synthetic,
+        substituted_config=substituted_config,
+    )
+
+
+def test_blueprint_select_option_extra_does_not_waive_extra_keys_error() -> None:
+    """Test select option 'extra' cannot waive 'extra keys not allowed' errors."""
+    bp_dict: dict[str, object] = {
+        "blueprint": {
+            "name": "Exploit Attempt",
+            "domain": "automation",
+            "input": {
+                "select_input": {
+                    "name": "Select Input",
+                    "selector": {
+                        "select": {
+                            "options": ["extra", "normal"],
+                        }
+                    },
+                },
+            },
+        },
+        "trigger": [
+            {
+                "platform": "state",
+                "entity_id": "light.test",
+            }
+        ],
+        "action": [
+            {
+                "service": "light.turn_on",
+                "target": {"entity_id": "light.test"},
+                "data": {"mode": Input("select_input")},
+            }
+        ],
+    }
+
+    synthetic = extract_synthetic_dummy_values(bp_dict)
+
+    # "extra" is a blueprint-controlled ordinary value and must NOT be in the synthetic tokens set
+    assert "extra" not in synthetic
+    assert "extra" in synthetic.entries_by_input["select_input"].ordinary_strings
+
+    # An unrelated schema validation failure (e.g. author wrote invalid extra keys in action)
+    unrelated_err = vol.Invalid(
+        "extra keys not allowed @ data['action'][0]['unrelated_bad_key']",
+        path=["action", 0, "unrelated_bad_key"],
+    )
+    substituted_config = {
+        "trigger": [{"platform": "state", "entity_id": "light.test"}],
+        "action": [
+            {
+                "service": "light.turn_on",
+                "target": {"entity_id": "light.test"},
+                "data": {"mode": "extra"},
+                "unrelated_bad_key": "bad_value",
+            }
+        ],
+    }
+
+    # The unrelated error must NOT be classified as a dummy validation error
+    assert not is_dummy_validation_error(
+        unrelated_err,
+        synthetic,
+        substituted_config=substituted_config,
+    )
+
+
+def test_is_synthetic_identifier_restricts_to_generated_shapes() -> None:
+    """Test is_synthetic_identifier matches explicit shapes and keeps author tokens ordinary."""
+    # Standard and generated dummy shapes
+    assert is_synthetic_identifier("dummy_device_id")
+    assert is_synthetic_identifier("dummy_area_id")
+    assert is_synthetic_identifier("test.dummy")
+    assert is_synthetic_identifier("sensor.dummy")
+    assert is_synthetic_identifier("dummy")
+
+    # Author-defined values containing 'dummy' without explicit shapes
+    assert not is_synthetic_identifier("my_dummy_mode")
+    assert not is_synthetic_identifier("custom_dummy")
+    assert not is_synthetic_identifier("is_dummy")
+    assert not is_synthetic_identifier("dummy123")
+
+    # Blueprint using select option 'my_dummy_mode'
+    bp_dict: dict[str, object] = {
+        "blueprint": {
+            "name": "Select Dummy Mode Test",
+            "domain": "automation",
+            "input": {
+                "mode_inp": {
+                    "name": "Mode Input",
+                    "selector": {
+                        "select": {
+                            "options": ["my_dummy_mode", "standard_mode"],
+                        }
+                    },
+                },
+            },
+        },
+        "trigger": [{"platform": "state", "entity_id": "light.test"}],
+        "action": [
+            {
+                "service": "light.turn_on",
+                "target": {"entity_id": "light.test"},
+                "data": {"mode": Input("mode_inp")},
+            }
+        ],
+    }
+
+    synthetic = extract_synthetic_dummy_values(bp_dict)
+    assert "my_dummy_mode" not in synthetic
+    assert "my_dummy_mode" in synthetic.entries_by_input["mode_inp"].ordinary_strings
+
+    # A generic baseline error mentioning my_dummy_mode without path is not suppressed
+    unrelated_err = HomeAssistantError("Option my_dummy_mode failed during setup")
+    assert not is_dummy_validation_error(unrelated_err, synthetic)
+
+
+def test_maps_failing_path_rejects_unresolved_path_and_preserves_aliased_path() -> None:
+    """Test failing path rejection on traversal failure and preservation of aliased paths."""
+    # Test _resolve_config_path handles singular/plural aliases
+    cfg_plural = {"actions": [{"target": {"device_id": "dummy_device_id"}}]}
+    assert (
+        _resolve_config_path(cfg_plural, ["action", 0, "target", "device_id"]) == "dummy_device_id"
+    )
+
+    cfg_singular = {"action": [{"target": {"device_id": "dummy_device_id"}}]}
+    assert (
+        _resolve_config_path(cfg_singular, ["actions", 0, "target", "device_id"])
+        == "dummy_device_id"
+    )
+
+    cfg_trigger = {"triggers": [{"platform": "state", "entity_id": "test.dummy"}]}
+    assert _resolve_config_path(cfg_trigger, ["trigger", 0, "entity_id"]) == "test.dummy"
+
+    # Path traversal failure returns None
+    assert _resolve_config_path(cfg_plural, ["action", 0, "target", "nonexistent"]) is None
+
+    # Blueprint defining device input under plural actions
+    bp_dict: dict[str, object] = {
+        "blueprint": {
+            "name": "Aliased Device Path Test",
+            "domain": "automation",
+            "input": {
+                "dev_inp": {
+                    "name": "Target Device",
+                    "selector": {"device": {}},
+                },
+            },
+        },
+        "actions": [
+            {
+                "service": "light.turn_on",
+                "target": {"device_id": Input("dev_inp")},
+            }
+        ],
+    }
+    synthetic = extract_synthetic_dummy_values(bp_dict)
+    assert isinstance(synthetic, SyntheticDummyValues)
+
+    # 1. Aliased path (HA reports 'action', config has 'actions') resolves and is suppressed
+    class _MockDeviceError(InvalidDeviceAutomationConfig):
+        """Mock device automation exception."""
+
+        path: list[str | int]
+
+    aliased_err = _MockDeviceError("Unable to resolve webhook ID from the device ID")
+    aliased_err.path = ["action", 0, "target", "device_id"]
+    substituted_config = {
+        "actions": [
+            {
+                "service": "light.turn_on",
+                "target": {"device_id": "dummy_device_id"},
+            }
+        ]
+    }
+    assert is_dummy_validation_error(
+        aliased_err,
+        synthetic,
+        substituted_config=substituted_config,
+    )
+
+    # 2. Unresolved sibling path under input prefix must NOT be matched or suppressed
+    sibling_err = vol.Invalid("Invalid sibling", path=["action", 0, "target", "bad_sibling"])
+    assert not is_dummy_validation_error(
+        sibling_err,
+        synthetic,
+        substituted_config=substituted_config,
+    )
+
+    # 3. Direct call with resolved_val=None must not match
+    assert not synthetic.maps_failing_path_to_input(
+        ["action", 0, "target", "device_id"],
+        resolved_val=None,
+    )
