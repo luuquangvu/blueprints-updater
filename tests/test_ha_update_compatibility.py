@@ -393,10 +393,7 @@ async def test_compatibility_inspection_and_urls(coordinator):
         "2025.1.0",
     )
     assert author == "https://github.com/home-assistant/blueprints/issues"
-    assert (
-        docs
-        == "https://www.home-assistant.io/blog/2024/08/07/release-20248/#service-calls-are-now-action-calls"
-    )
+    assert docs == "https://www.home-assistant.io/blog/2024/08/07/release-20248/"
     assert primary == docs
 
     # Community forum URL
@@ -3957,3 +3954,65 @@ def test_maps_failing_path_rejects_unresolved_path_and_preserves_aliased_path() 
         ["action", 0, "target", "device_id"],
         resolved_val=None,
     )
+
+
+def test_diff_structural_configs_variables_script_variables_not_deprecated() -> None:
+    """Test diff_structural_configs does not flag variables when wrapped in ScriptVariables."""
+    from homeassistant.helpers.script_variables import ScriptVariables
+
+    input_cfg = {
+        CONF_VARIABLES: {
+            "reference_entity": "binary_sensor.test",
+        },
+        "binary_sensor": {
+            "state": "{{ states(reference_entity) }}",
+        },
+    }
+    validated_cfg = {
+        "binary_sensor": [
+            {
+                "state": "{{ states(reference_entity) }}",
+                CONF_VARIABLES: ScriptVariables(
+                    {
+                        "reference_entity": "binary_sensor.test",
+                    }
+                ),
+            }
+        ],
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert CONF_VARIABLES not in diagnostics.deprecated_keys
+    assert diagnostics.deprecated_keys == []
+
+
+def test_diff_structural_configs_script_variables_automation_root() -> None:
+    """Test diff_structural_configs handles root ScriptVariables in automation/script domains."""
+    from homeassistant.helpers.script_variables import ScriptVariables
+
+    # 1. Valid automation with root variables wrapped in ScriptVariables: no deprecations
+    input_cfg = {
+        CONF_VARIABLES: {"my_var": "value"},
+        "trigger": [{"platform": "state"}],
+    }
+    validated_cfg = {
+        CONF_VARIABLES: ScriptVariables({"my_var": "value"}),
+        "trigger": [{"platform": "state"}],
+    }
+    diag = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diag)
+    assert diag.deprecated_keys == []
+
+    # 2. Inner variable dropped inside ScriptVariables is correctly detected
+    input_cfg_dropped = {
+        CONF_VARIABLES: {"legacy_var": "value"},
+        "trigger": [{"platform": "state"}],
+    }
+    validated_cfg_dropped = {
+        CONF_VARIABLES: ScriptVariables({}),
+        "trigger": [{"platform": "state"}],
+    }
+    diag_dropped = ValidationDiagnostics()
+    diff_structural_configs(input_cfg_dropped, validated_cfg_dropped, diag_dropped)
+    assert diag_dropped.deprecated_keys == ["legacy_var"]

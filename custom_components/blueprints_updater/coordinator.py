@@ -524,10 +524,24 @@ def _is_relocated_value(source_val: object, target_val: object) -> bool:
         True if target_val contains or matches source_val.
 
     """
+    source_vars = getattr(source_val, "variables", None)
+    if isinstance(source_vars, dict):
+        source_val = source_vars
+    target_vars = getattr(target_val, "variables", None)
+    if isinstance(target_vars, dict):
+        target_val = target_vars
     if source_val == target_val or str(source_val) == str(target_val):
         return True
     if isinstance(source_val, dict) and isinstance(target_val, dict) and source_val:
-        return all(k in target_val and target_val[k] == v for k, v in source_val.items())
+        return all(
+            k in target_val
+            and (
+                target_val[k] == v
+                or str(target_val[k]) == str(v)
+                or getattr(target_val[k], "template", None) == v
+            )
+            for k, v in source_val.items()
+        )
     return False
 
 
@@ -797,6 +811,12 @@ def diff_structural_configs(
         path: Current traversal path within the configuration hierarchy.
 
     """
+    input_vars = getattr(input_cfg, "variables", None)
+    if isinstance(input_vars, dict):
+        input_cfg = input_vars
+    validated_vars = getattr(validated_cfg, "variables", None)
+    if isinstance(validated_vars, dict):
+        validated_cfg = validated_vars
     if isinstance(input_cfg, dict) and isinstance(validated_cfg, dict):
         colliding_keys = _detect_colliding_keys(input_cfg, "input") | _detect_colliding_keys(
             validated_cfg, "validated"
