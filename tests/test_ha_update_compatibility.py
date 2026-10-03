@@ -2899,6 +2899,73 @@ action:
     assert "| int(3)(0)" not in modernized
 
 
+@pytest.mark.parametrize(
+    "section",
+    [
+        "action:\n  - action: notify.notify\n    data:\n      message: |-\n        ",
+        "trigger:\n  - trigger: template\n    value_template: |-\n      ",
+    ],
+    ids=["action", "trigger"],
+)
+@pytest.mark.parametrize(
+    ("template", "expected"),
+    [
+        ("{{ '| float and | int' }}", "{{ '| float and | int' }}"),
+        ('{{ "| float and | int" }}', '{{ "| float and | int" }}'),
+        ("{{ '| float' | float }}", "{{ '| float' | float(0) }}"),
+        ('{{ "| int" | int }}', '{{ "| int" | int(0) }}'),
+        (
+            r"{{ 'it\'s | float' | int }}",
+            r"{{ 'it\'s | float' | int(0) }}",
+        ),
+        (
+            r'{{ "say \"| int\"" | float }}',
+            r'{{ "say \"| int\"" | float(0) }}',
+        ),
+        (
+            r"{{ 'path\\' | float | int }}",
+            r"{{ 'path\\' | float(0) | int(0) }}",
+        ),
+        (
+            "{{ (value | int) ~ '| float' ~ (other | float) }}",
+            "{{ (value | int(0)) ~ '| float' ~ (other | float(0)) }}",
+        ),
+        (
+            "{{ value | float(default='| int') | int(2) }}",
+            "{{ value | float(default='| int') | int(2) }}",
+        ),
+        (
+            "{% set value = '| float' %}{{ value | float }}",
+            "{% set value = '| float' %}{{ value | float(0) }}",
+        ),
+        (
+            '{% set value = "| int" | int %}{{ value }}',
+            '{% set value = "| int" | int(0) %}{{ value }}',
+        ),
+        (
+            "{{ '| float }}' | int }}",
+            "{{ '| float }}' | int(0) }}",
+        ),
+        (
+            '{% set value = "| int %}" | float %}{{ value }}',
+            '{% set value = "| int %}" | float(0) %}{{ value }}',
+        ),
+    ],
+)
+def test_modernize_numeric_filters_preserves_jinja_strings(
+    section: str, template: str, expected: str
+) -> None:
+    """Preserve Jinja string literals while modernizing action and trigger filters."""
+    prefix = "blueprint:\n  name: Quoted Numeric Filters\n  domain: automation\n" + section
+    content = prefix + template + "\n"
+    expected_content = prefix + expected + "\n"
+
+    modernized = modernize_legacy_blueprint_yaml(content, FunctionalDomain.AUTOMATION)
+
+    assert modernized == expected_content
+    assert modernize_legacy_blueprint_yaml(modernized, FunctionalDomain.AUTOMATION) == modernized
+
+
 async def test_wrap_action_target_blocks_sequence_no_dash() -> None:
     """Test target wrapping when action property line starts after a dash on sequence item."""
     legacy_content = """blueprint:
