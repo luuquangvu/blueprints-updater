@@ -108,14 +108,12 @@ class PinReason(StrEnum):
     MANUAL = "manual"
 
 
-URL_HA_DOCS_ACTIONS = "https://www.home-assistant.io/blog/2024/08/07/release-20248/#service-calls-are-now-action-calls"
-URL_HA_DOCS_TEMPLATING_MATH = "https://www.home-assistant.io/docs/configuration/templating/#math"
+URL_HA_DOCS_ACTIONS = "https://www.home-assistant.io/blog/2024/08/07/release-20248/"
+URL_HA_DOCS_TEMPLATING_MATH = "https://www.home-assistant.io/template-functions/#math"
 URL_HA_DOCS_TEMPLATING_NUMERIC = (
-    "https://www.home-assistant.io/docs/configuration/templating/#numeric-conversions"
+    "https://www.home-assistant.io/docs/templating/types/#converting-between-types"
 )
-URL_HA_DOCS_TARGETING = (
-    "https://www.home-assistant.io/docs/scripts/#targeting-areas-devices-and-entities"
-)
+URL_HA_DOCS_TARGETING = "https://www.home-assistant.io/docs/scripts/#performing-an-action-in-yaml"
 URL_HA_DOCS_BLUEPRINT_DEFAULT = "https://www.home-assistant.io/docs/blueprint/"
 
 URL_GITHUB_ISSUES_TEMPLATE = "https://github.com/{owner}/{repo}/issues"
