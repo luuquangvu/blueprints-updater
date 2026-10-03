@@ -149,6 +149,7 @@ from .const import (
     FilterMode,
     FunctionalDomain,
     IncompatibilitySeverity,
+    PinReason,
     RepairIssueType,
     SourceDomain,
     SourceProviderType,
@@ -478,7 +479,7 @@ async def capture_structural_validation_diagnostics(
             orig_create_issue(hass, domain, issue_id, *args, **kwargs)
 
         registry = ir.async_get(hass)
-        existing_issue_keys = set(registry.issues.keys())
+        existing_issues_snapshot = dict(registry.issues)
 
         try:
             with (
@@ -490,13 +491,21 @@ async def capture_structural_validation_diagnostics(
                 yield diagnostics
                 diagnostics.warnings.extend(recorded_warnings)
         finally:
-            for domain_name, issue_id_val in created_issues:
+            restored_issues = False
+            for domain_name, issue_id_val in dict.fromkeys(created_issues):
                 issue_key = (domain_name, issue_id_val)
-                if issue_key not in existing_issue_keys and (
-                    issue_entry := registry.issues.get(issue_key)
-                ):
+                if issue_key in existing_issues_snapshot:
+                    registry.issues[issue_key] = existing_issues_snapshot[issue_key]
+                    restored_issues = True
+                    hass.bus.async_fire(
+                        ir.EVENT_REPAIRS_ISSUE_REGISTRY_UPDATED,
+                        {"action": "update", "domain": domain_name, "issue_id": issue_id_val},
+                    )
+                elif (issue_entry := registry.issues.get(issue_key)) is not None:
                     diagnostics.new_issues.append(issue_entry)
-                    ir.async_delete_issue(hass, issue_entry.domain, issue_entry.issue_id)
+                    ir.async_delete_issue(hass, domain_name, issue_id_val)
+            if restored_issues:
+                registry.async_schedule_save()
 
 
 def diff_structural_configs(
@@ -1086,10 +1095,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     relative_path = str(info.get("relative_path") or "")
                     persisted = self._persisted_metadata.get(relative_path, {})
                     is_pinned = bool(info.get("pinned") or persisted.get("pinned"))
+                    pinned_reason = info.get("pinned_reason") or persisted.get("pinned_reason")
                     upstream_bad_hash = info.get("upstream_incompatible_hash") or persisted.get(
                         "upstream_incompatible_hash"
                     )
-                    if is_pinned and remote_hash == upstream_bad_hash:
+                    if is_pinned and (
+                        pinned_reason == PinReason.MANUAL.value or remote_hash == upstream_bad_hash
+                    ):
                         info["updatable"] = False
                     else:
                         is_mismatch = info["local_hash"] != remote_hash
@@ -1267,7 +1279,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             relative_path = get_blueprint_relative_path(self.hass, path)
 
         if relative_path and isinstance(relative_path, str):
-            self._persisted_metadata.pop(relative_path, None)
+            prev_entry = self._persisted_metadata.get(relative_path)
+            if (
+                isinstance(prev_entry, dict)
+                and prev_entry.get("pinned_reason") == PinReason.MANUAL.value
+            ):
+                prev_entry["remote_hash"] = None
+                prev_entry["source_url"] = curr_url
+            else:
+                self._persisted_metadata.pop(relative_path, None)
 
         invalidated = {
             **prev,
@@ -1314,21 +1334,30 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         relative_path = str(info.get("relative_path") or "")
         persisted = self._persisted_metadata.get(relative_path, {})
         is_pinned = bool(info.get("pinned") or prev_data.get("pinned") or persisted.get("pinned"))
+        pinned_reason = (
+            info.get("pinned_reason")
+            or prev_data.get("pinned_reason")
+            or persisted.get("pinned_reason")
+        )
         upstream_bad_hash = (
             info.get("upstream_incompatible_hash")
             or prev_data.get("upstream_incompatible_hash")
             or persisted.get("upstream_incompatible_hash")
         )
-        if is_pinned and remote_hash and remote_hash == upstream_bad_hash:
+        if is_pinned and (
+            pinned_reason == PinReason.MANUAL.value
+            or (remote_hash and remote_hash == upstream_bad_hash)
+        ):
             _LOGGER.debug(
-                "Pinned blueprint %s: remote hash matches incompatible hash; suppressing update",
+                "Pinned blueprint %s: remote matches incompatible hash or manually pinned; "
+                "suppressing update",
                 path,
             )
             return (
                 False,
                 str(next_invalid) if isinstance(next_invalid, str) else None,
                 str(next_error) if isinstance(next_error, str) else None,
-                str(local_hash) if local_hash else None,
+                str(remote_hash) if isinstance(remote_hash, str) else None,
             )
 
         if is_updatable and self._is_ghost_update(local_hash, prev_data):
@@ -4365,8 +4394,35 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if not remote_hash:
             return None, new_etag, new_last_modified
 
-        local_hash = info.get("local_hash")
-        self.data[path]["updatable"] = local_hash != remote_hash
+        rel_path = str(info.get("relative_path") or self.data[path].get("relative_path") or "")
+        persisted = self._persisted_metadata.get(rel_path, {}) if rel_path else {}
+        is_pinned = bool(
+            info.get("pinned") or self.data[path].get("pinned") or persisted.get("pinned")
+        )
+        pinned_reason = (
+            info.get("pinned_reason")
+            or self.data[path].get("pinned_reason")
+            or persisted.get("pinned_reason")
+        )
+        upstream_bad_hash = (
+            info.get("upstream_incompatible_hash")
+            or self.data[path].get("upstream_incompatible_hash")
+            or persisted.get("upstream_incompatible_hash")
+        )
+
+        if is_pinned and (
+            pinned_reason == PinReason.MANUAL.value
+            or (upstream_bad_hash and remote_hash == upstream_bad_hash)
+        ):
+            _LOGGER.debug(
+                "Pinned blueprint %s: remote matches incompatible hash or manually pinned; "
+                "suppressing update on 304 response",
+                path,
+            )
+            self.data[path]["updatable"] = False
+        else:
+            local_hash = info.get("local_hash")
+            self.data[path]["updatable"] = local_hash != remote_hash
 
         if self.data[path]["updatable"] and self.is_auto_update_enabled():
             _LOGGER.debug(
@@ -4433,12 +4489,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     self._persisted_metadata.get(rel_path_val) if rel_path_val else None
                 ) or {}
                 is_pinned = bool(info.get("pinned") or persisted_entry.get("pinned"))
+                pinned_reason = info.get("pinned_reason") or persisted_entry.get("pinned_reason")
                 upstream_bad_hash = info.get("upstream_incompatible_hash") or persisted_entry.get(
                     "upstream_incompatible_hash"
                 )
 
                 if is_pinned and updatable and remote_hash:
-                    if remote_hash == upstream_bad_hash:
+                    if pinned_reason == PinReason.MANUAL.value:
+                        _LOGGER.debug(
+                            "Blueprint %s is manually pinned; suppressing auto-update",
+                            path,
+                        )
+                        updatable = False
+                    elif remote_hash == upstream_bad_hash:
                         updatable = False
                     else:
                         comp_report = await self.async_validate_local_blueprint_compatibility(
@@ -5482,8 +5545,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                                 hash_content(content, clean_url) if clean_url else file_hash
                             ),
                         }
-                    except (HomeAssistantError, ValueError, OSError):
-                        continue
+                    except (HomeAssistantError, ValueError, OSError) as err:
+                        _LOGGER.warning(
+                            "Failed to read local blueprint file %s during scan: %s",
+                            full_path,
+                            err,
+                        )
+                        found[full_path] = {
+                            "name": os.path.basename(full_path),
+                            "domain": domain,
+                            "relative_path": relative_path,
+                            "path": full_path,
+                            "scan_error": str(err),
+                        }
 
         return found
 
@@ -5685,6 +5759,51 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             normalized_rel = f"{norm_domain}/{normalized_rel}"
         path_hash = hashlib.sha256(normalized_rel.encode("utf-8")).hexdigest()[:16]
         return f"{RepairIssueType.INCOMPATIBLE_BLUEPRINT}_{path_hash}"
+
+    @staticmethod
+    def _is_incompatible_blueprint_issue(iss_domain: str, iss_id: str, issue_entry: object) -> bool:
+        """Determine if an issue matches an incompatible blueprint issue.
+
+        Args:
+            iss_domain: Issue domain string.
+            iss_id: Issue ID string.
+            issue_entry: Issue registry entry object.
+
+        Returns:
+            True if the issue is a verified incompatible blueprint issue.
+
+        """
+        if iss_domain != DOMAIN:
+            return False
+
+        prefix = f"{RepairIssueType.INCOMPATIBLE_BLUEPRINT.value}_"
+        if not iss_id.startswith(prefix):
+            return False
+
+        suffix = iss_id[len(prefix) :]
+        if len(suffix) != 16 or any(c not in "0123456789abcdef" for c in suffix):
+            return False
+
+        if issue_entry is not None:
+            trans_key = getattr(issue_entry, "translation_key", None)
+            if (
+                isinstance(trans_key, str)
+                and trans_key != RepairIssueType.INCOMPATIBLE_BLUEPRINT.value
+            ):
+                return False
+
+            data = getattr(issue_entry, "data", None)
+            if isinstance(data, dict):
+                if data.get("issue_type") != RepairIssueType.INCOMPATIBLE_BLUEPRINT.value:
+                    return False
+                if rel_path := data.get("relative_path"):
+                    expected_id = BlueprintUpdateCoordinator.get_incompatible_issue_id(
+                        str(rel_path), normalize_domain(data.get("domain"))
+                    )
+                    if iss_id != expected_id:
+                        return False
+
+        return True
 
     def _async_create_incompatibility_issue(
         self,
@@ -6089,14 +6208,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         return modernized, diff_text
 
     @callback
-    def async_schedule_post_update_compatibility_guard(self) -> asyncio.Task | None:
+    def async_schedule_post_update_compatibility_guard(
+        self, force: bool = False
+    ) -> asyncio.Task | None:
         """Schedule post-HA-update compatibility check as a background task.
+
+        Args:
+            force: If True, execute check even if version hasn't changed.
 
         Returns:
             Created or currently running asyncio.Task, or None if disabled.
 
         """
-        if not self.verify_on_ha_update:
+        if not self.verify_on_ha_update and not force:
             _LOGGER.debug("Post-HA-update compatibility guard is disabled")
             return None
 
@@ -6107,7 +6231,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         async def _run_guard() -> None:
             """Run guard coroutine, log unexpected exceptions, and clear task reference."""
             try:
-                await self.async_run_post_update_compatibility_guard()
+                await self.async_run_post_update_compatibility_guard(force=force)
             except asyncio.CancelledError:
                 _LOGGER.debug("Post-HA-update compatibility guard task was cancelled")
                 raise
@@ -6158,10 +6282,27 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
                 for full_path, bp_info in all_blueprints.items():
                     await asyncio.sleep(0)  # Yield to event loop
-                    rel_path = str(bp_info["relative_path"])
-                    content = str(bp_info["content"])
+                    if not isinstance(bp_info, dict) or bp_info.get("scan_error"):
+                        has_failures = True
+                        continue
+                    rel_path_obj = bp_info.get("relative_path")
+                    rel_path = (
+                        str(rel_path_obj)
+                        if rel_path_obj
+                        else get_blueprint_relative_path(self.hass, full_path)
+                    )
+                    if not rel_path:
+                        _LOGGER.debug(
+                            "Ignoring invalid or unsafe blueprint path during "
+                            "post-update compatibility check: %s",
+                            full_path,
+                        )
+                        continue
+                    content = str(bp_info.get("content") or "")
                     domain = normalize_domain(bp_info.get("domain"))
-                    local_hash = str(bp_info["local_hash"])
+                    local_hash = str(
+                        bp_info.get("local_hash") or bp_info.get("local_file_hash") or ""
+                    )
 
                     persisted_meta = self._persisted_metadata.get(rel_path) or {}
                     dismissed_data = persisted_meta.get("dismissed_warning")
@@ -6217,6 +6358,51 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
                 if not has_failures:
                     completed_cleanly = True
+                    valid_issue_ids: set[str] = set()
+                    for full_path, info in all_blueprints.items():
+                        if not isinstance(info, dict):
+                            continue
+                        rel_path_obj = info.get("relative_path")
+                        rel_path = (
+                            str(rel_path_obj)
+                            if rel_path_obj
+                            else get_blueprint_relative_path(self.hass, full_path)
+                        )
+                        if rel_path:
+                            valid_issue_ids.add(
+                                self.get_incompatible_issue_id(
+                                    rel_path, normalize_domain(info.get("domain"))
+                                )
+                            )
+                    issue_registry = ir.async_get(self.hass)
+                    for (iss_domain, iss_id), issue_entry in list(issue_registry.issues.items()):
+                        if (
+                            iss_domain == DOMAIN
+                            and self._is_incompatible_blueprint_issue(
+                                iss_domain, iss_id, issue_entry
+                            )
+                            and iss_id not in valid_issue_ids
+                        ):
+                            file_path: str | None = None
+                            if issue_entry is not None:
+                                data = getattr(issue_entry, "data", None)
+                                if isinstance(data, dict):
+                                    file_path = data.get("path")
+                                    if not file_path and (rel := data.get("relative_path")):
+                                        file_path = self.hass.config.path(
+                                            BLUEPRINTS_DATA_DIR, str(rel)
+                                        )
+                            if file_path and os.path.exists(file_path):
+                                has_failures = True
+                                completed_cleanly = False
+                                _LOGGER.warning(
+                                    "Blueprint file %s still exists; skipping issue deletion "
+                                    "for %s and marking scan incomplete",
+                                    file_path,
+                                    iss_id,
+                                )
+                                continue
+                            ir.async_delete_issue(self.hass, DOMAIN, iss_id)
             except asyncio.CancelledError:
                 _LOGGER.info("Post-HA-update compatibility check was cancelled before completion")
                 raise

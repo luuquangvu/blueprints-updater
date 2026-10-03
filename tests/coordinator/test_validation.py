@@ -980,7 +980,7 @@ action:
 async def test_async_validate_baseline_candidate_selectorless_unrecognized_path_continues(
     hass: Any, coordinator: Any
 ) -> None:
-    """Verify baseline simulation continues for selectorless unrecognized paths."""
+    """Verify baseline simulation safely bypasses for selectorless unrecognized paths."""
     relative_path = "automation/selectorless_unrecognized.yaml"
     content = """
 blueprint:
@@ -1003,12 +1003,7 @@ action:
             relative_path, content, configs={}
         )
         assert risks == []
-        mock_validate.assert_called_once()
-        assert mock_validate.await_args is not None
-        call_config = mock_validate.await_args[1]["config"]
-        actions = call_config.get("actions") or call_config.get("action")
-        assert isinstance(actions, list)
-        assert actions[0]["delay"] == "test.dummy"
+        mock_validate.assert_not_called()
 
 
 @pytest.mark.asyncio

@@ -1458,8 +1458,18 @@ _RE_MATH_ROUND_FILTER: Final[re.Pattern[str]] = (
     else re.compile(r"$^")
 )
 _RE_MATH_FLOOR_CEIL: Final[re.Pattern[str]] = _RE_MATH_ROUND_FILTER
-_RE_NUMBER_FILTER: Final[re.Pattern[str]] = re.compile(r"\|\s*(float|int)(?!\s*[\(\w])")
-_RE_JINJA_TAG: Final[re.Pattern[str]] = re.compile(r"(\{\{.*?\}\}|\{%.*?%\})", re.DOTALL)
+_JINJA_STRING_PATTERN: Final[str] = r"""(?:'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")"""
+# Match quoted strings first so filter-like text within them is preserved.
+_RE_NUMBER_FILTER: Final[re.Pattern[str]] = re.compile(
+    rf"{_JINJA_STRING_PATTERN}|\|\s*(float|int)(?!\s*[\(\w])",
+    re.DOTALL,
+)
+# Closing delimiters within quoted strings do not end a Jinja tag.
+_RE_JINJA_TAG: Final[re.Pattern[str]] = re.compile(
+    rf"""(\{{\{{(?:{_JINJA_STRING_PATTERN}|[^'"])*?\}}\}}"""
+    rf"""|\{{%(?:{_JINJA_STRING_PATTERN}|[^'"])*?%\}})""",
+    re.DOTALL,
+)
 
 
 def _find_matching_paren(s: str, start_idx: int) -> int:
@@ -1699,13 +1709,23 @@ def _wrap_action_target_blocks(
                 continue
 
             next_indent = len(next_line) - len(next_line.lstrip())
-            if next_indent < action_indent or (next_indent == action_indent and not has_dash):
+            next_key_token = next_stripped.partition(":")[0].strip().strip("'\"")
+            if next_indent < action_indent:
                 break
-            if next_indent == action_indent and has_dash and next_line.lstrip().startswith("- "):
+            if next_indent == action_indent and next_line.lstrip().startswith("- "):
+                break
+            if (
+                not has_dash
+                and next_indent == action_indent
+                and (
+                    next_key_token in (CONF_ACTION, "service", "service_template")
+                    or next_key_token in _ACTION_PATH_SEGMENTS
+                )
+            ):
                 break
 
             if base_child_indent is None:
-                base_child_indent = next_indent
+                base_child_indent = next_indent if has_dash else action_indent
 
             if next_indent < base_child_indent:
                 break
@@ -1794,6 +1814,10 @@ def _modernize_jinja_expressions(text: str) -> str:
         ident = m.group(1)
         return ident if ident in _ALL_MATH_IDENTIFIERS else m.group(0)
 
+    def _sub_number_filter(m: re.Match[str]) -> str:
+        ident = m.group(1)
+        return f"| {ident}(0)" if ident else m.group(0)
+
     def _sub_jinja(m: re.Match[str]) -> str:
         s = m.group(0)
         start_pos = m.start()
@@ -1803,6 +1827,7 @@ def _modernize_jinja_expressions(text: str) -> str:
         quote = "'" if prefix_on_line.count('"') % 2 == 1 else '"'
         if _HA_MATH_ROUND_METHODS and _RE_MATH_ROUND_FILTER.search(s):
             s = _rewrite_floor_ceil_in_expr(s, quote=quote)
+        s = _RE_NUMBER_FILTER.sub(_sub_number_filter, s)
         if "math." in s:
             s = _RE_MATH_CALL.sub(_sub_math, s)
             if "math." in s:
@@ -1985,7 +2010,7 @@ def derive_dummy_input_value(
     for path in usages:
         val = _derive_value_for_path(path)
         if val is None:
-            val = _DEFAULT_DUMMY_VALUE
+            return None
         derived_values.append(val)
 
     first = derived_values[0]

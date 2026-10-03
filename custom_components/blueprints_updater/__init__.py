@@ -252,6 +252,17 @@ def _async_register_services(hass: HomeAssistant) -> None:
         for active_coordinator in _get_coordinators():
             await active_coordinator.async_request_refresh()
 
+    async def async_check_compatibility_handler(_: ServiceCall) -> None:
+        """Handle checking blueprints compatibility against Home Assistant Core."""
+        for active_coordinator in _get_coordinators():
+            try:
+                await active_coordinator.async_run_post_update_compatibility_guard(force=True)
+            except Exception:
+                _LOGGER.exception(
+                    "Error checking blueprint compatibility for entry %s",
+                    active_coordinator.config_entry.entry_id,
+                )
+
     async def async_restore_blueprint_handler(call: ServiceCall) -> dict:
         """Handle the restore blueprint action."""
         entity_id = call.data.get("entity_id")
@@ -451,6 +462,15 @@ def _async_register_services(hass: HomeAssistant) -> None:
                 schema=vol.Schema({vol.Optional("backup", default=True): cv.boolean}),
             )
             registered_services.append(IntegrationService.UPDATE_ALL)
+
+        if not hass.services.has_service(DOMAIN, IntegrationService.CHECK_COMPATIBILITY):
+            async_register_admin_service(
+                hass,
+                DOMAIN,
+                IntegrationService.CHECK_COMPATIBILITY,
+                async_check_compatibility_handler,
+            )
+            registered_services.append(IntegrationService.CHECK_COMPATIBILITY)
     except asyncio.CancelledError:
         raise
     except Exception as err:
