@@ -141,7 +141,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             """
             if hasattr(blueprint_coordinator, "async_schedule_post_update_compatibility_guard"):
                 blueprint_coordinator.async_schedule_post_update_compatibility_guard()
-            elif getattr(blueprint_coordinator, "verify_on_ha_update", False) and hasattr(
+            elif getattr(blueprint_coordinator, "check_compatibility", False) and hasattr(
                 blueprint_coordinator, "async_run_post_update_compatibility_guard"
             ):
                 coro = blueprint_coordinator.async_run_post_update_compatibility_guard()

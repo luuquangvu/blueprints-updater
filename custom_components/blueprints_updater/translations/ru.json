@@ -6,7 +6,7 @@
         "description": "Хотите настроить Blueprints Updater? Он просканирует ваши локальные чертежи и проверит наличие обновлений.",
         "data": {
           "auto_update": "Включить автообновление",
-          "verify_on_ha_update": "Проверять совместимость при обновлении Home Assistant",
+          "check_compatibility": "Проверять совместимость чертежей",
           "update_interval": "Интервал обновления (часы)",
           "filter_mode": "Режим фильтрации",
           "selected_blueprints": "Чертежи (необязательно)",
@@ -25,7 +25,7 @@
         "description": "Настройте поведение и параметры Blueprints Updater.",
         "data": {
           "auto_update": "Включить автообновление",
-          "verify_on_ha_update": "Проверять совместимость при обновлении Home Assistant",
+          "check_compatibility": "Проверять совместимость чертежей",
           "update_interval": "Интервал обновления (часы)",
           "filter_mode": "Режим фильтрации",
           "selected_blueprints": "Выбранные чертежи",

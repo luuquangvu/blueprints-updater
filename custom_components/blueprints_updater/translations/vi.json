@@ -6,7 +6,7 @@
         "description": "Bạn có muốn thiết lập Blueprints Updater? Tích hợp này sẽ quét các blueprint trên máy của bạn và tìm bản cập nhật.",
         "data": {
           "auto_update": "Tự động cập nhật",
-          "verify_on_ha_update": "Kiểm tra tương thích khi nâng cấp Home Assistant",
+          "check_compatibility": "Kiểm tra tương thích của blueprint",
           "update_interval": "Khoảng thời gian cập nhật (giờ)",
           "filter_mode": "Chế độ lọc",
           "selected_blueprints": "Blueprints (không bắt buộc)",
@@ -25,7 +25,7 @@
         "description": "Tùy chỉnh cấu hình và hành vi của Blueprints Updater.",
         "data": {
           "auto_update": "Tự động cập nhật",
-          "verify_on_ha_update": "Kiểm tra tương thích khi nâng cấp Home Assistant",
+          "check_compatibility": "Kiểm tra tương thích của blueprint",
           "update_interval": "Khoảng thời gian cập nhật (giờ)",
           "filter_mode": "Chế độ lọc",
           "selected_blueprints": "Blueprints đã chọn",

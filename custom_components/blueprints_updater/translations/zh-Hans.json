@@ -6,7 +6,7 @@
         "description": "您是否要设置 Blueprints Updater？该集成将扫描您本地的蓝图并自动检查更新。",
         "data": {
           "auto_update": "启用自动更新",
-          "verify_on_ha_update": "Home Assistant 更新时检查蓝图兼容性",
+          "check_compatibility": "检查蓝图兼容性",
           "update_interval": "更新间隔（小时）",
           "filter_mode": "过滤模式",
           "selected_blueprints": "蓝图（可选）",
@@ -25,7 +25,7 @@
         "description": "自定义 Blueprints Updater 的运行配置与选项。",
         "data": {
           "auto_update": "启用自动更新",
-          "verify_on_ha_update": "Home Assistant 更新时检查蓝图兼容性",
+          "check_compatibility": "检查蓝图兼容性",
           "update_interval": "更新间隔（小时）",
           "filter_mode": "过滤模式",
           "selected_blueprints": "已选蓝图",

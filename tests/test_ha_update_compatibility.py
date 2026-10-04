@@ -44,7 +44,7 @@ from custom_components.blueprints_updater.blueprint_validation import (
     modernize_legacy_blueprint_yaml,
 )
 from custom_components.blueprints_updater.const import (
-    CONF_VERIFY_ON_HA_UPDATE,
+    CONF_CHECK_COMPATIBILITY,
     DOMAIN,
     STORAGE_KEY_LAST_HA_VERSION,
     FunctionalDomain,
@@ -88,7 +88,7 @@ def hass(_mock_hass):
 def coordinator(hass, monkeypatch) -> BlueprintUpdateCoordinator:
     """Fixture for BlueprintUpdateCoordinator."""
     entry = MagicMock()
-    entry.options = MappingProxyType({CONF_VERIFY_ON_HA_UPDATE: True})
+    entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
     entry.data = {}
     entry.entry_id = "test_entry_id"
     coord = BlueprintUpdateCoordinator(
@@ -115,9 +115,13 @@ def coordinator(hass, monkeypatch) -> BlueprintUpdateCoordinator:
 
 async def test_version_comparison_and_state_storage(coordinator, hass):
     """Test Home Assistant version tracking and update detection."""
-    # First boot: last_ha_version is None
+    # First boot: last_ha_version is None (triggers check on initial install)
     coordinator._last_ha_version = None
-    assert await coordinator.async_check_ha_version_update() is False
+    assert await coordinator.async_check_ha_version_update() is True
+    assert coordinator._last_ha_version is None
+
+    # Version is saved on clean completion
+    await coordinator.async_save_ha_version("2024.12.0")
     assert coordinator._last_ha_version == "2024.12.0"
 
     # Same version: no update
@@ -396,6 +400,14 @@ async def test_compatibility_inspection_and_urls(coordinator):
     assert docs == "https://www.home-assistant.io/blog/2024/08/07/release-20248/"
     assert primary == docs
 
+    # GitHub with owner named "gist"
+    _, author_gh_gist_owner, _ = coordinator._resolve_learn_more_url(
+        "https://github.com/gist/my_repo/blob/main/test.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gh_gist_owner == "https://github.com/gist/my_repo/issues"
+
     # Community forum URL
     _primary_forum, author_forum, _ = coordinator._resolve_learn_more_url(
         "https://community.home-assistant.io/t/awesome-blueprint/12345",
@@ -419,6 +431,129 @@ async def test_compatibility_inspection_and_urls(coordinator):
         "2025.1.0",
     )
     assert author_gist_raw == "https://gist.github.com/1234567890abcdef#comments"
+
+    # GitLab with /-/raw/
+    _primary_gl, author_gl, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/test_author/test_repo/-/raw/main/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl == "https://gitlab.com/test_author/test_repo/-/issues"
+
+    # GitLab with /-/snippets/
+    _primary_gl_snippet, author_gl_snippet, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/-/snippets/12345/raw/main/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl_snippet == "https://gitlab.com/-/snippets/12345"
+
+    # GitLab with plain /snippets/
+    _primary_gl_snippet_plain, author_gl_snippet_plain, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/snippets/54321",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl_snippet_plain == "https://gitlab.com/-/snippets/54321"
+
+    # GitLab without /-/
+    _primary_gl_no_dash, author_gl_no_dash, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/test_author/test_repo/raw/main/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl_no_dash == "https://gitlab.com/test_author/test_repo/-/issues"
+
+    # GitLab nested groups with /-/
+    _, author_gl_nested, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/org/group/subgroup/test_repo/-/raw/main/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl_nested == "https://gitlab.com/org/group/subgroup/test_repo/-/issues"
+
+    # GitLab nested groups without /-/
+    _, author_gl_nested_no_dash, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/org/group/subgroup/test_repo/raw/main/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl_nested_no_dash == "https://gitlab.com/org/group/subgroup/test_repo/-/issues"
+
+    # GitLab nested groups with route-named subgroup without /-/
+    _, author_gl_route_subgroup, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/org/raw/subgroup/test_repo/raw/main/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl_route_subgroup == "https://gitlab.com/org/raw/subgroup/test_repo/-/issues"
+
+    # GitLab without /-/ with route-named branch
+    _, author_gl_branch_route_marker, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/test_author/test_repo/raw/tree/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl_branch_route_marker == "https://gitlab.com/test_author/test_repo/-/issues"
+
+    # GitLab without /-/ with route-named file-path segment
+    _, author_gl_filepath_route_marker, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/test_author/test_repo/raw/main/raw/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl_filepath_route_marker == "https://gitlab.com/test_author/test_repo/-/issues"
+
+    # GitLab nested group snippet
+    _, author_gl_nested_snippet, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/org/group/subgroup/test_repo/-/snippets/67890/raw",
+        test_report,
+        "2025.1.0",
+    )
+    assert (
+        author_gl_nested_snippet
+        == "https://gitlab.com/org/group/subgroup/test_repo/-/snippets/67890"
+    )
+
+    # GitLab malformed snippet without ID
+    _, author_gl_bad_snippet, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/-/snippets",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl_bad_snippet == "https://gitlab.com/-/snippets"
+
+    # GitLab project with user/group named snippets
+    _, author_gl_snippets_owner, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/snippets/my_repo/-/raw/main/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl_snippets_owner == "https://gitlab.com/snippets/my_repo/-/issues"
+
+    # GitLab project with subgroup named snippets
+    _, author_gl_snippets_subgroup, _ = coordinator._resolve_learn_more_url(
+        "https://gitlab.com/my_org/snippets/my_repo/-/raw/main/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_gl_snippets_subgroup == "https://gitlab.com/my_org/snippets/my_repo/-/issues"
+
+    # Codeberg
+    _primary_cb, author_cb, _ = coordinator._resolve_learn_more_url(
+        "https://codeberg.org/test_author/test_repo/raw/branch/main/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_cb == "https://codeberg.org/test_author/test_repo/issues"
+
+    # Bitbucket (repository root)
+    _primary_bb, author_bb, _ = coordinator._resolve_learn_more_url(
+        "https://bitbucket.org/test_workspace/test_repo/raw/main/blueprint.yaml",
+        test_report,
+        "2025.1.0",
+    )
+    assert author_bb == "https://bitbucket.org/test_workspace/test_repo"
 
 
 async def test_auto_pin_and_auto_unpin_state_machine(coordinator, monkeypatch):
@@ -1481,7 +1616,7 @@ async def test_setup_entry_ha_running_triggers_compatibility_guard(hass) -> None
     entry = MagicMock()
     entry.entry_id = "test_entry"
     entry.data = {}
-    entry.options = MappingProxyType({CONF_VERIFY_ON_HA_UPDATE: True})
+    entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
     entry.add_update_listener = MagicMock(return_value=lambda: None)
     entry.async_on_unload = MagicMock()
 
@@ -1514,7 +1649,7 @@ async def test_setup_entry_ha_not_running_waits_for_startup_event(hass) -> None:
     entry = MagicMock()
     entry.entry_id = "test_entry"
     entry.data = {}
-    entry.options = MappingProxyType({CONF_VERIFY_ON_HA_UPDATE: True})
+    entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
     entry.add_update_listener = MagicMock(return_value=lambda: None)
     entry.async_on_unload = MagicMock()
 
@@ -1556,8 +1691,8 @@ async def test_setup_entry_ha_not_running_waits_for_startup_event(hass) -> None:
 
 
 async def test_schedule_post_update_guard_disabled(coordinator) -> None:
-    """Test scheduling compatibility guard when verify_on_ha_update is disabled."""
-    coordinator.config_entry.options = MappingProxyType({CONF_VERIFY_ON_HA_UPDATE: False})
+    """Test scheduling compatibility guard when check_compatibility is disabled."""
+    coordinator.config_entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: False})
     task = coordinator.async_schedule_post_update_compatibility_guard()
     assert task is None
     assert coordinator._post_ha_update_task is None
@@ -1565,7 +1700,7 @@ async def test_schedule_post_update_guard_disabled(coordinator) -> None:
 
 async def test_schedule_post_update_guard_lifecycle_and_deduplication(coordinator) -> None:
     """Test scheduling compatibility guard deduplication, completion, and cleanup."""
-    coordinator.config_entry.options = MappingProxyType({CONF_VERIFY_ON_HA_UPDATE: True})
+    coordinator.config_entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
     guard_executed = False
 
     async def _mock_guard(force: bool = False) -> None:
@@ -1590,7 +1725,7 @@ async def test_schedule_post_update_guard_lifecycle_and_deduplication(coordinato
 
 async def test_schedule_post_update_guard_error_handling(coordinator) -> None:
     """Test that unexpected exceptions during post-update check are caught and cleared."""
-    coordinator.config_entry.options = MappingProxyType({CONF_VERIFY_ON_HA_UPDATE: True})
+    coordinator.config_entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
 
     async def _failing_guard(force: bool = False) -> None:
         """Simulate failing compatibility guard execution."""
@@ -1607,7 +1742,7 @@ async def test_schedule_post_update_guard_error_handling(coordinator) -> None:
 
 async def test_unload_cancels_post_update_guard_task(coordinator) -> None:
     """Test that unloading and cancellation cancels running post-update check."""
-    coordinator.config_entry.options = MappingProxyType({CONF_VERIFY_ON_HA_UPDATE: True})
+    coordinator.config_entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
 
     started = asyncio.Event()
     stop_event = asyncio.Event()
@@ -1833,7 +1968,7 @@ async def test_post_update_guard_does_not_persist_version_on_exception(
     """Test that HA version is NOT persisted if an exception occurs during blueprint scan."""
     hass.config.version = "2026.10.0"
     coordinator._last_ha_version = "2026.9.0"
-    coordinator.config_entry.options = MappingProxyType({CONF_VERIFY_ON_HA_UPDATE: True})
+    coordinator.config_entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
 
     monkeypatch.setattr(
         coordinator,
@@ -1856,7 +1991,7 @@ async def test_post_update_guard_does_not_persist_version_on_timeout(
     """Test that HA version is NOT persisted if validation times out."""
     hass.config.version = "2026.10.0"
     coordinator._last_ha_version = "2026.9.0"
-    coordinator.config_entry.options = MappingProxyType({CONF_VERIFY_ON_HA_UPDATE: True})
+    coordinator.config_entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
 
     monkeypatch.setattr(
         coordinator,
@@ -1892,7 +2027,7 @@ async def test_post_update_guard_persists_version_on_clean_completion(
     """Test that HA version is persisted when all scans and validations succeed cleanly."""
     hass.config.version = "2026.10.0"
     coordinator._last_ha_version = "2026.9.0"
-    coordinator.config_entry.options = MappingProxyType({CONF_VERIFY_ON_HA_UPDATE: True})
+    coordinator.config_entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
 
     monkeypatch.setattr(
         coordinator,
@@ -1921,6 +2056,30 @@ async def test_post_update_guard_persists_version_on_clean_completion(
 
     save_spy.assert_awaited_once_with("2026.10.0")
     assert coordinator._last_ha_version == "2026.10.0"
+
+
+async def test_post_update_guard_initial_boot_retried_after_interruption(
+    coordinator: BlueprintUpdateCoordinator, hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that HA version is not persisted when first boot scan is interrupted, allowing retry."""
+    hass.config.version = "2026.10.0"
+    coordinator._last_ha_version = None
+    coordinator.config_entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
+
+    monkeypatch.setattr(
+        coordinator,
+        "async_scan_all_local_blueprint_files",
+        AsyncMock(side_effect=RuntimeError("Interrupted scan")),
+    )
+    save_spy = AsyncMock(side_effect=coordinator.async_save_ha_version)
+    monkeypatch.setattr(coordinator, "async_save_ha_version", save_spy)
+
+    with pytest.raises(RuntimeError, match="Interrupted scan"):
+        await coordinator.async_run_post_update_compatibility_guard()
+
+    save_spy.assert_not_called()
+    assert coordinator._last_ha_version is None
+    assert await coordinator.async_check_ha_version_update() is True
 
 
 def test_detect_unsupported_yaml_constructs() -> None:
