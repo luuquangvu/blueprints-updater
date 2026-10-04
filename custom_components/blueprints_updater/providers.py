@@ -20,6 +20,7 @@ from .const import (
     RE_GIST_RAW,
     SourceDomain,
     SourceProviderType,
+    SourceUrlTemplate,
 )
 
 _DEFAULT_BLUEPRINT_FILENAME = "blueprint.yaml"
@@ -206,6 +207,10 @@ class SourceProvider(ABC):
             self.normalize_url(url2)
         )
 
+    def get_report_url(self, url: str) -> str | None:
+        """Resolve the upstream issue tracker, forum topic, or reporting URL."""
+        return None
+
 
 class GitHubProvider(SourceProvider):
     """Provider for GitHub hosted blueprints."""
@@ -259,6 +264,15 @@ class GitHubProvider(SourceProvider):
         name = _strip_yaml_extension(filename)
         return {"author": author, "name": name}
 
+    def get_report_url(self, url: str) -> str | None:
+        """Resolve GitHub issue tracker URL."""
+        parsed = urlparse(_without_fragment(url))
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        if len(path_parts) >= 2:
+            owner, repo = path_parts[0], path_parts[1]
+            return SourceUrlTemplate.GITHUB_ISSUES.format(owner=owner, repo=repo)
+        return url
+
 
 class GistProvider(SourceProvider):
     """Provider for GitHub Gist hosted blueprints."""
@@ -272,7 +286,7 @@ class GistProvider(SourceProvider):
         """Check if URL is a Gist URL."""
         parsed = urlparse(_without_fragment(url))
         hostname = _normalize_hostname(parsed.hostname)
-        return hostname == SourceDomain.GIST
+        return hostname in (SourceDomain.GIST, SourceDomain.GIST_RAW)
 
     def normalize_url(self, url: str) -> str:
         """Normalize Gist URL to raw endpoint."""
@@ -302,6 +316,20 @@ class GistProvider(SourceProvider):
             filename = path_parts[-2]
         name = _strip_yaml_extension(filename)
         return {"author": author, "name": name}
+
+    def get_report_url(self, url: str) -> str | None:
+        """Resolve GitHub Gist comments URL."""
+        parsed = urlparse(_without_fragment(url))
+        hostname = _normalize_hostname(parsed.hostname)
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        if hostname == SourceDomain.GIST_RAW:
+            if len(path_parts) >= 2:
+                gist_id = path_parts[1]
+                return SourceUrlTemplate.GIST_COMMENTS.format(gist_id=gist_id)
+        elif path_parts:
+            gist_id = path_parts[1] if len(path_parts) > 1 else path_parts[0]
+            return SourceUrlTemplate.GIST_COMMENTS.format(gist_id=gist_id)
+        return url
 
 
 def _extract_blueprint_from_forum_post(post: object) -> str | None:
@@ -441,9 +469,17 @@ class HAForumProvider(SourceProvider):
 
         return None
 
+    def get_report_url(self, url: str) -> str | None:
+        """Resolve Home Assistant community forum topic URL."""
+        parsed = urlparse(_without_fragment(url))
+        if match := RE_FORUM_TOPIC_ID.search(parsed.path):
+            topic_id = match.group(1)
+            return SourceUrlTemplate.HA_COMMUNITY_TOPIC.format(topic_id=topic_id)
+        return url
+
 
 class GitLabProvider(SourceProvider):
-    """Provider for GitLab hosted blueprints."""
+    """Provider for GitLab hosted blueprints (projects and snippets)."""
 
     @property
     def provider_type(self) -> SourceProviderType:
@@ -456,13 +492,147 @@ class GitLabProvider(SourceProvider):
         hostname = _normalize_hostname(parsed.hostname)
         return hostname == SourceDomain.GITLAB
 
+    @staticmethod
+    def _find_snippet_index(path_parts: list[str]) -> int | None:
+        """Find the segment index of a valid GitLab snippets route.
+
+        Accepts a leading snippets segment only for a bare route or a numeric
+        ID (optionally followed by raw), and project snippets only when
+        snippets immediately follows a '-' segment.
+        """
+        if not path_parts:
+            return None
+
+        if path_parts[0].lower() == "snippets":
+            if len(path_parts) == 1:
+                return 0
+            if path_parts[1].isdigit() and (
+                len(path_parts) == 2 or (len(path_parts) == 3 and path_parts[2].lower() == "raw")
+            ):
+                return 0
+
+        return next(
+            (
+                i
+                for i in range(1, len(path_parts))
+                if path_parts[i].lower() == "snippets" and path_parts[i - 1] == "-"
+            ),
+            None,
+        )
+
     def normalize_url(self, url: str) -> str:
-        """Normalize GitLab URL to raw endpoint."""
-        return _replace_path_segment(url, "/-/raw/", "/-/blob/", "/-/raw/")
+        """Normalize GitLab URL to raw endpoint for projects and snippets."""
+        parsed = urlparse(_without_fragment(url))
+        scheme = parsed.scheme.lower()
+        netloc = _normalize_netloc(parsed)
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        path_parts_lower = [p.lower() for p in path_parts]
+
+        if (idx := self._find_snippet_index(path_parts)) is not None:
+            if len(path_parts) > idx + 1 and "raw" not in path_parts_lower[idx + 1 :]:
+                prefix = path_parts[:idx]
+                prefix_parts = [*prefix, "-"] if not prefix or prefix[-1] != "-" else prefix
+                snippet_parts = [*prefix_parts, *path_parts[idx:], "raw"]
+                return urlunparse(
+                    parsed._replace(
+                        scheme=scheme,
+                        netloc=netloc,
+                        path="/" + "/".join(snippet_parts),
+                    )
+                )
+            return urlunparse(parsed._replace(scheme=scheme, netloc=netloc))
+
+        normalized = _replace_path_segment(url, "/-/raw/", "/-/blob/", "/-/raw/")
+        if normalized == url and "/blob/" in url:
+            normalized = _replace_path_segment(url, "/raw/", "blob", "raw")
+        return normalized
+
+    def _get_snippet_metadata(
+        self,
+        parsed: ParseResult,
+        path_parts: list[str],
+        snippet_idx: int,
+        content: str | None = None,
+    ) -> dict[str, str]:
+        """Extract metadata for GitLab snippet URLs."""
+        project_parts = [p for p in path_parts[:snippet_idx] if p != "-"]
+        author = (
+            project_parts[0]
+            if project_parts
+            else (parsed.hostname.lower() if parsed.hostname else "imported")
+        )
+        snippet_id = path_parts[snippet_idx + 1] if len(path_parts) > snippet_idx + 1 else "unknown"
+
+        last_part = path_parts[-1]
+        if last_part.lower() in ("raw", "", "snippets") or last_part == snippet_id:
+            name = ""
+            if content:
+                try:
+                    data = yaml_util.parse_yaml(content)
+                    if isinstance(data, dict):
+                        bp = data.get("blueprint")
+                        if isinstance(bp, dict):
+                            name = slugify(str(bp.get("name", "")))
+                except HomeAssistantError:
+                    name = ""
+            if not name:
+                name = f"snippet_{snippet_id}"
+        else:
+            name = _strip_yaml_extension(last_part)
+
+        return {"author": author, "name": name}
 
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
-        """Extract metadata from GitLab URL (Matching HA Generic Logic)."""
+        """Extract metadata from GitLab URL (projects and snippets)."""
+        parsed = urlparse(url)
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        if (snippet_idx := self._find_snippet_index(path_parts)) is not None:
+            return self._get_snippet_metadata(parsed, path_parts, snippet_idx, content)
+
         return _default_url_metadata(url)
+
+    def get_report_url(self, url: str) -> str | None:
+        """Resolve GitLab issue tracker or snippet URL."""
+        parsed = urlparse(_without_fragment(url))
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        path_parts_lower = [p.lower() for p in path_parts]
+
+        if (idx := self._find_snippet_index(path_parts)) is not None:
+            if len(path_parts) > idx + 1:
+                snippet_id = path_parts[idx + 1]
+                project_parts = [p for p in path_parts[:idx] if p != "-"]
+                if project_parts:
+                    return SourceUrlTemplate.GITLAB_PROJECT_SNIPPET.format(
+                        project_path="/".join(project_parts),
+                        snippet_id=snippet_id,
+                    )
+                return SourceUrlTemplate.GITLAB_SNIPPET.format(snippet_id=snippet_id)
+            return url
+
+        if "-" in path_parts:
+            project_parts = path_parts[: path_parts.index("-")]
+        elif route_candidates := [
+            i
+            for i in range(2, len(path_parts) - 1)
+            if path_parts_lower[i] in ("raw", "blob", "tree")
+        ]:
+            route_idx = route_candidates[0]
+            if (
+                len(route_candidates) > 1
+                and route_candidates[1] == route_idx + 1
+                and path_parts_lower[route_candidates[1]] == path_parts_lower[route_idx]
+                and route_candidates[1] <= len(path_parts) - 3
+            ):
+                route_idx = route_candidates[1]
+            project_parts = path_parts[:route_idx]
+        else:
+            project_parts = path_parts
+
+        if len(project_parts) >= 2:
+            owner = "/".join(project_parts[:-1])
+            repo = project_parts[-1]
+            return SourceUrlTemplate.GITLAB_ISSUES.format(owner=owner, repo=repo)
+        return url
 
 
 class CodebergProvider(SourceProvider):
@@ -487,6 +657,15 @@ class CodebergProvider(SourceProvider):
         """Extract metadata from Codeberg URL (Matching HA Generic Logic)."""
         return _default_url_metadata(url)
 
+    def get_report_url(self, url: str) -> str | None:
+        """Resolve Codeberg issue tracker URL."""
+        parsed = urlparse(_without_fragment(url))
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        if len(path_parts) >= 2:
+            owner, repo = path_parts[0], path_parts[1]
+            return SourceUrlTemplate.CODEBERG_ISSUES.format(owner=owner, repo=repo)
+        return url
+
 
 class BitbucketProvider(SourceProvider):
     """Provider for Bitbucket hosted blueprints."""
@@ -509,6 +688,15 @@ class BitbucketProvider(SourceProvider):
     def get_metadata(self, url: str, content: str | None = None) -> dict[str, str]:
         """Extract metadata from Bitbucket URL (Matching HA Generic Logic)."""
         return _default_url_metadata(url)
+
+    def get_report_url(self, url: str) -> str | None:
+        """Resolve Bitbucket repository URL."""
+        parsed = urlparse(_without_fragment(url))
+        path_parts = [p for p in parsed.path.strip("/").split("/") if p]
+        if len(path_parts) >= 2:
+            owner, repo = path_parts[0], path_parts[1]
+            return SourceUrlTemplate.BITBUCKET_REPO.format(owner=owner, repo=repo)
+        return url
 
 
 class GenericProvider(SourceProvider):
@@ -560,6 +748,10 @@ class GenericProvider(SourceProvider):
 
         return {"author": author, "name": name}
 
+    def get_report_url(self, url: str) -> str | None:
+        """Return original URL as fallback report URL."""
+        return url
+
 
 class ProviderRegistry:
     """Registry to manage and lookup source providers."""
@@ -589,6 +781,7 @@ class ProviderRegistry:
             SourceDomain.GITHUB: GitHubProvider,
             SourceDomain.GITHUB_RAW: GitHubProvider,
             SourceDomain.GIST: GistProvider,
+            SourceDomain.GIST_RAW: GistProvider,
             SourceDomain.HA_FORUM: HAForumProvider,
             SourceDomain.GITLAB: GitLabProvider,
             SourceDomain.CODEBERG: CodebergProvider,
@@ -630,6 +823,15 @@ class ProviderRegistry:
         with contextlib.suppress(ValueError):
             if provider := self.get_provider(url):
                 return provider.normalize_url(url)
+        return url
+
+    def get_report_url(self, url: str) -> str:
+        """Find appropriate provider and resolve report/issue URL."""
+        with contextlib.suppress(ValueError):
+            if (provider := self.get_provider(url)) and (
+                report_url := provider.get_report_url(url)
+            ):
+                return report_url
         return url
 
     def canonicalize_url(self, url: str) -> str:

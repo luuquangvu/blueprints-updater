@@ -30,13 +30,13 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_AUTO_UPDATE,
+    CONF_CHECK_COMPATIBILITY,
     CONF_FILTER_MODE,
     CONF_MAX_BACKUPS,
     CONF_SELECTED_BLUEPRINTS,
     CONF_UPDATE_INTERVAL,
-    CONF_VERIFY_ON_HA_UPDATE,
     DEFAULT_AUTO_UPDATE,
-    DEFAULT_VERIFY_ON_HA_UPDATE,
+    DEFAULT_CHECK_COMPATIBILITY,
     DOMAIN,
     MAX_BACKUPS,
     MAX_UPDATE_INTERVAL_HOURS,
@@ -100,8 +100,8 @@ def _get_config_schema(
 
     """
     auto_update = get_config_bool(config, CONF_AUTO_UPDATE, DEFAULT_AUTO_UPDATE)
-    verify_on_ha_update = get_config_bool(
-        config, CONF_VERIFY_ON_HA_UPDATE, DEFAULT_VERIFY_ON_HA_UPDATE
+    check_compatibility = get_config_bool(
+        config, CONF_CHECK_COMPATIBILITY, DEFAULT_CHECK_COMPATIBILITY
     )
     filter_mode = get_config_str(config, CONF_FILTER_MODE, FilterMode.ALL.value)
     selected_blueprints = get_config_value(config, CONF_SELECTED_BLUEPRINTS, [])
@@ -113,8 +113,8 @@ def _get_config_schema(
                 default=auto_update,
             ): cv.boolean,
             vol.Required(
-                CONF_VERIFY_ON_HA_UPDATE,
-                default=verify_on_ha_update,
+                CONF_CHECK_COMPATIBILITY,
+                default=check_compatibility,
             ): cv.boolean,
             vol.Required(
                 CONF_UPDATE_INTERVAL,

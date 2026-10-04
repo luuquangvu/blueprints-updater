@@ -15,7 +15,7 @@ CONF_FILTER_MODE = "filter_mode"
 CONF_SELECTED_BLUEPRINTS = "selected_blueprints"
 CONF_AUTO_UPDATE = "auto_update"
 CONF_MAX_BACKUPS = "max_backups"
-CONF_VERIFY_ON_HA_UPDATE = "verify_on_ha_update"
+CONF_CHECK_COMPATIBILITY = "check_compatibility"
 EVENT_BLUEPRINTS_UPDATER_UPDATED = f"{DOMAIN}_updated"
 
 # ASCII Unit Separator is not a Jinja2 syntax character. It separates a
@@ -23,7 +23,7 @@ EVENT_BLUEPRINTS_UPDATER_UPDATED = f"{DOMAIN}_updated"
 ERROR_SEPARATOR = "\x1f"
 
 DEFAULT_AUTO_UPDATE = False
-DEFAULT_VERIFY_ON_HA_UPDATE = True
+DEFAULT_CHECK_COMPATIBILITY = True
 DEFAULT_MAX_BACKUPS = 3
 MIN_BACKUPS = 1
 MAX_BACKUPS = 10
@@ -116,9 +116,18 @@ URL_HA_DOCS_TEMPLATING_NUMERIC = (
 URL_HA_DOCS_TARGETING = "https://www.home-assistant.io/docs/scripts/#performing-an-action-in-yaml"
 URL_HA_DOCS_BLUEPRINT_DEFAULT = "https://www.home-assistant.io/docs/blueprint/"
 
-URL_GITHUB_ISSUES_TEMPLATE = "https://github.com/{owner}/{repo}/issues"
-URL_GIST_COMMENTS_TEMPLATE = "https://gist.github.com/{gist_id}#comments"
-URL_HA_COMMUNITY_TOPIC_TEMPLATE = "https://community.home-assistant.io/t/{topic_id}"
+
+class SourceUrlTemplate(StrEnum):
+    """URL templates for blueprint source providers."""
+
+    GITHUB_ISSUES = "https://github.com/{owner}/{repo}/issues"
+    GIST_COMMENTS = "https://gist.github.com/{gist_id}#comments"
+    HA_COMMUNITY_TOPIC = "https://community.home-assistant.io/t/{topic_id}"
+    GITLAB_ISSUES = "https://gitlab.com/{owner}/{repo}/-/issues"
+    GITLAB_SNIPPET = "https://gitlab.com/-/snippets/{snippet_id}"
+    GITLAB_PROJECT_SNIPPET = "https://gitlab.com/{project_path}/-/snippets/{snippet_id}"
+    CODEBERG_ISSUES = "https://codeberg.org/{owner}/{repo}/issues"
+    BITBUCKET_REPO = "https://bitbucket.org/{owner}/{repo}"
 
 
 RE_FORUM_TOPIC_ID = re.compile(r"/t/(?:[^/]+/)?(\d+)")

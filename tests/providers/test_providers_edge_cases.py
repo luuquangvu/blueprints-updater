@@ -265,9 +265,307 @@ def _test_gist_metadata_normalization(provider, url):
     assert metadata["name"] == "gist_id"
 
 
+def _assert_snippet_normalization_and_same_source(
+    provider: GitLabProvider, ui_url: str, raw_url: str
+) -> None:
+    """Verify normalization to raw endpoint and same-source equivalence."""
+    assert provider.normalize_url(ui_url) == raw_url
+    assert provider.normalize_url(raw_url) == raw_url
+    assert provider.is_same_source(ui_url, raw_url)
+
+
+def _assert_provider_metadata(
+    provider: SourceProvider,
+    url: str,
+    expected_author: str,
+    expected_name: str,
+    content: str | None = None,
+) -> None:
+    """Verify provider metadata extraction matches expected author and name."""
+    meta = provider.get_metadata(url, content=content)
+    assert meta["author"] == expected_author
+    assert meta["name"] == expected_name
+
+
+def test_gitlab_snippet_normalization_and_metadata():
+    """Verify GitLabProvider handles snippets for normalization, metadata, and same-source."""
+    provider = GitLabProvider()
+
+    raw_url = "https://gitlab.com/-/snippets/12345/raw"
+    _assert_snippet_normalization_and_same_source(
+        provider, "https://gitlab.com/-/snippets/12345", raw_url
+    )
+    _assert_snippet_normalization_and_same_source(
+        provider, "https://gitlab.com/snippets/12345", raw_url
+    )
+
+    proj_raw = "https://gitlab.com/test_user/test_repo/-/snippets/67890/raw"
+    _assert_snippet_normalization_and_same_source(
+        provider, "https://gitlab.com/test_user/test_repo/-/snippets/67890", proj_raw
+    )
+
+    _assert_provider_metadata(provider, raw_url, "gitlab.com", "snippet_12345")
+    _assert_provider_metadata(provider, proj_raw, "test_user", "snippet_67890")
+
+    content = "blueprint:\n  name: Awesome Snippet Blueprint\n"
+    _assert_provider_metadata(
+        provider, raw_url, "gitlab.com", "awesome_snippet_blueprint", content=content
+    )
+
+
+def test_gitlab_snippet_edge_cases_and_variants() -> None:
+    """Verify GitLabProvider handles malformed and variant snippet URLs gracefully."""
+    provider = GitLabProvider()
+
+    # Query strings and fragments on UI snippet URL:
+    ui_with_query_frag = "https://gitlab.com/-/snippets/12345?ref_type=heads#L1-10"
+    expected_raw_with_query = "https://gitlab.com/-/snippets/12345/raw?ref_type=heads"
+    assert provider.normalize_url(ui_with_query_frag) == expected_raw_with_query
+
+    # Query strings and fragments on raw snippet URL:
+    raw_with_query_frag = "https://gitlab.com/-/snippets/12345/raw?inline=false#notes"
+    expected_raw_preserved = "https://gitlab.com/-/snippets/12345/raw?inline=false"
+    assert provider.normalize_url(raw_with_query_frag) == expected_raw_preserved
+    _assert_provider_metadata(provider, raw_with_query_frag, "gitlab.com", "snippet_12345")
+
+    # Missing snippet IDs: stable normalization and fallback metadata without exceptions
+    assert (
+        provider.normalize_url("https://gitlab.com/-/snippets") == "https://gitlab.com/-/snippets"
+    )
+    assert provider.normalize_url("https://gitlab.com/snippets") == "https://gitlab.com/snippets"
+    _assert_provider_metadata(
+        provider, "https://gitlab.com/-/snippets", "gitlab.com", "snippet_unknown"
+    )
+
+    # Raw URLs with filenames
+    filename_url = "https://gitlab.com/-/snippets/12345/raw/motion.yaml"
+    assert provider.normalize_url(filename_url) == filename_url
+    _assert_provider_metadata(provider, filename_url, "gitlab.com", "motion")
+
+    # Raw URLs with subpath filenames
+    subpath_filename_url = "https://gitlab.com/-/snippets/12345/raw/main/motion.yaml"
+    assert provider.normalize_url(subpath_filename_url) == subpath_filename_url
+    _assert_provider_metadata(provider, subpath_filename_url, "gitlab.com", "motion")
+
+    # Safe fallback on malformed or non-dict YAML content
+    _assert_provider_metadata(
+        provider,
+        "https://gitlab.com/-/snippets/12345/raw",
+        "gitlab.com",
+        "snippet_12345",
+        content="invalid: yaml: [[",
+    )
+    _assert_provider_metadata(
+        provider,
+        "https://gitlab.com/-/snippets/12345/raw",
+        "gitlab.com",
+        "snippet_12345",
+        content="- item1\n- item2",
+    )
+
+    # Ambiguous leading snippets segment representing owner or project
+    snippets_project_url = "https://gitlab.com/snippets/my_repo/-/raw/main/bp.yaml"
+    assert (
+        provider.normalize_url("https://gitlab.com/snippets/my_repo/-/blob/main/bp.yaml")
+        == snippets_project_url
+    )
+    assert (
+        provider.get_report_url(snippets_project_url)
+        == "https://gitlab.com/snippets/my_repo/-/issues"
+    )
+    assert provider.get_metadata(snippets_project_url) == {"author": "gitlab.com", "name": "bp"}
+
+    # Subgroup named snippets
+    snippets_subgroup_url = "https://gitlab.com/my_org/snippets/repo/-/raw/main/bp.yaml"
+    assert (
+        provider.get_report_url(snippets_subgroup_url)
+        == "https://gitlab.com/my_org/snippets/repo/-/issues"
+    )
+
+    # Non-numeric segment after leading snippets
+    assert (
+        provider.get_report_url("https://gitlab.com/snippets/not_a_number")
+        == "https://gitlab.com/snippets/not_a_number/-/issues"
+    )
+
+    # Project snippet under owner named snippets
+    owner_snippet_url = "https://gitlab.com/snippets/my_repo/-/snippets/777"
+    assert (
+        provider.normalize_url(owner_snippet_url)
+        == "https://gitlab.com/snippets/my_repo/-/snippets/777/raw"
+    )
+    assert (
+        provider.get_report_url(owner_snippet_url)
+        == "https://gitlab.com/snippets/my_repo/-/snippets/777"
+    )
+    _assert_provider_metadata(provider, owner_snippet_url, "snippets", "snippet_777")
+
+
+def test_gitlab_project_blob_without_dash_normalization():
+    """Verify that GitLab project URLs with /blob/ without /-/ are normalized to /raw/."""
+    provider = GitLabProvider()
+    url_without_dash = "https://gitlab.com/test_user/test_repo/blob/main/bp.yaml"
+    expected = "https://gitlab.com/test_user/test_repo/raw/main/bp.yaml"
+    assert provider.normalize_url(url_without_dash) == expected
+
+
 def test_gitlab_normalization_keeps_empty_path_unchanged():
     """Verify GitLab normalization is inert when there is no path to inspect."""
     assert GitLabProvider().normalize_url("https://gitlab.com") == "https://gitlab.com"
+
+
+def test_provider_registry_get_report_url_all_providers() -> None:
+    """Verify get_report_url correctly resolves across all provider types and fallbacks."""
+    reg = ProviderRegistry()
+    cases = (
+        (
+            "https://github.com/owner/repo/blob/main/bp.yaml",
+            "https://github.com/owner/repo/issues",
+        ),
+        (
+            "https://raw.githubusercontent.com/owner/repo/main/bp.yaml",
+            "https://github.com/owner/repo/issues",
+        ),
+        (
+            "https://github.com/gist/myrepo/blob/main/bp.yaml",
+            "https://github.com/gist/myrepo/issues",
+        ),
+        (
+            "https://gist.github.com/author/gist123",
+            "https://gist.github.com/gist123#comments",
+        ),
+        (
+            "https://gist.github.com/author/gist123/raw/bp.yaml",
+            "https://gist.github.com/gist123#comments",
+        ),
+        (
+            "https://gist.github.com/anonymous123",
+            "https://gist.github.com/anonymous123#comments",
+        ),
+        (
+            "https://gist.githubusercontent.com/author/gist456/raw/bp.yaml",
+            "https://gist.github.com/gist456#comments",
+        ),
+        (
+            "https://community.home-assistant.io/t/topic-slug/999",
+            "https://community.home-assistant.io/t/999",
+        ),
+        (
+            "https://community.home-assistant.io/t/topic-slug/999/4",
+            "https://community.home-assistant.io/t/999",
+        ),
+        (
+            "https://community.home-assistant.io/t/999",
+            "https://community.home-assistant.io/t/999",
+        ),
+        (
+            "https://community.home-assistant.io/t/999.json",
+            "https://community.home-assistant.io/t/999",
+        ),
+        (
+            "https://community.home-assistant.io/t/topic-slug",
+            "https://community.home-assistant.io/t/topic-slug",
+        ),
+        (
+            "https://gitlab.com/owner/repo/-/raw/main/bp.yaml",
+            "https://gitlab.com/owner/repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/org/group/subgroup/test_repo/raw/main/bp.yaml",
+            "https://gitlab.com/org/group/subgroup/test_repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/raw/test_repo/raw/main/bp.yaml",
+            "https://gitlab.com/raw/test_repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/org/raw/subgroup/test_repo/raw/main/bp.yaml",
+            "https://gitlab.com/org/raw/subgroup/test_repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/org/group/raw/raw/main/bp.yaml",
+            "https://gitlab.com/org/group/raw/-/issues",
+        ),
+        (
+            "https://gitlab.com/owner/repo/raw/tree/bp.yaml",
+            "https://gitlab.com/owner/repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/owner/repo/raw/blob/bp.yaml",
+            "https://gitlab.com/owner/repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/owner/repo/raw/main/raw/bp.yaml",
+            "https://gitlab.com/owner/repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/owner/repo/raw/main/tree/bp.yaml",
+            "https://gitlab.com/owner/repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/org/group/subgroup/test_repo/raw/main/raw/bp.yaml",
+            "https://gitlab.com/org/group/subgroup/test_repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/org/group/subgroup/test_repo/raw/tree/bp.yaml",
+            "https://gitlab.com/org/group/subgroup/test_repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/org/group/raw",
+            "https://gitlab.com/org/group/raw/-/issues",
+        ),
+        (
+            "https://gitlab.com/raw/test_repo",
+            "https://gitlab.com/raw/test_repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/-/snippets/123/raw",
+            "https://gitlab.com/-/snippets/123",
+        ),
+        (
+            "https://gitlab.com/snippets/my_repo/-/raw/main/bp.yaml",
+            "https://gitlab.com/snippets/my_repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/snippets/54321",
+            "https://gitlab.com/-/snippets/54321",
+        ),
+        (
+            "https://gitlab.com/snippets/54321/raw",
+            "https://gitlab.com/-/snippets/54321",
+        ),
+        (
+            "https://gitlab.com/org/snippets/repo/-/raw/main/bp.yaml",
+            "https://gitlab.com/org/snippets/repo/-/issues",
+        ),
+        (
+            "https://gitlab.com/snippets/my_repo/-/snippets/123",
+            "https://gitlab.com/snippets/my_repo/-/snippets/123",
+        ),
+        (
+            "https://gitlab.com/snippets/my_repo/raw/main/bp.yaml",
+            "https://gitlab.com/snippets/my_repo/-/issues",
+        ),
+        (
+            "https://codeberg.org/owner/repo/raw/branch/main/bp.yaml",
+            "https://codeberg.org/owner/repo/issues",
+        ),
+        (
+            "https://bitbucket.org/owner/repo/raw/master/bp.yaml",
+            "https://bitbucket.org/owner/repo",
+        ),
+        (
+            "https://example.com/custom_blueprint.yaml",
+            "https://example.com/custom_blueprint.yaml",
+        ),
+        (
+            "not-a-valid-url",
+            "not-a-valid-url",
+        ),
+    )
+
+    for source_url, expected_url in cases:
+        assert reg.get_report_url(source_url) == expected_url
 
 
 def test_provider_registry_returns_original_url_without_matching_provider():

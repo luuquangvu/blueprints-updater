@@ -38,6 +38,36 @@ from custom_components.blueprints_updater.providers import (
             "bp",
         ),
         (
+            "https://gitlab.com/-/snippets/12345",
+            "https://gitlab.com/-/snippets/12345/raw",
+            "gitlab.com",
+            "snippet_12345",
+        ),
+        (
+            "https://gitlab.com/snippets/54321",
+            "https://gitlab.com/-/snippets/54321/raw",
+            "gitlab.com",
+            "snippet_54321",
+        ),
+        (
+            "https://gitlab.com/-/snippets/12345/raw/main/motion.yaml",
+            "https://gitlab.com/-/snippets/12345/raw/main/motion.yaml",
+            "gitlab.com",
+            "motion",
+        ),
+        (
+            "https://gitlab.com/project_owner/test_repo/-/snippets/98765",
+            "https://gitlab.com/project_owner/test_repo/-/snippets/98765/raw",
+            "project_owner",
+            "snippet_98765",
+        ),
+        (
+            "https://gitlab.com/snippets/my_repo/-/blob/main/bp.yaml",
+            "https://gitlab.com/snippets/my_repo/-/raw/main/bp.yaml",
+            "gitlab.com",
+            "bp",
+        ),
+        (
             "https://bitbucket.org/user/repo/src/master/bp.yaml",
             "https://bitbucket.org/user/repo/raw/master/bp.yaml",
             "bitbucket.org",

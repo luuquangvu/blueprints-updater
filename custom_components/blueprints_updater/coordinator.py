@@ -119,12 +119,12 @@ from .const import (
     BLUEPRINT_ROUNDTRIP_INVARIANT_KEYS,
     BLUEPRINTS_DATA_DIR,
     CONF_AUTO_UPDATE,
+    CONF_CHECK_COMPATIBILITY,
     CONF_FILTER_MODE,
     CONF_SELECTED_BLUEPRINTS,
-    CONF_VERIFY_ON_HA_UPDATE,
     DEFAULT_AUTO_UPDATE,
+    DEFAULT_CHECK_COMPATIBILITY,
     DEFAULT_MAX_BACKUPS,
-    DEFAULT_VERIFY_ON_HA_UPDATE,
     DOMAIN,
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
     MAX_CONCURRENT_REQUESTS,
@@ -140,9 +140,6 @@ from .const import (
     STORAGE_KEY_DATA,
     STORAGE_KEY_LAST_HA_VERSION,
     STORAGE_VERSION,
-    URL_GIST_COMMENTS_TEMPLATE,
-    URL_GITHUB_ISSUES_TEMPLATE,
-    URL_HA_COMMUNITY_TOPIC_TEMPLATE,
     URL_HA_DOCS_ACTIONS,
     URL_HA_DOCS_BLUEPRINT_DEFAULT,
     URL_HA_DOCS_TARGETING,
@@ -155,7 +152,6 @@ from .const import (
     IncompatibilitySeverity,
     PinReason,
     RepairIssueType,
-    SourceDomain,
     SourceProviderType,
 )
 from .exceptions import (
@@ -5231,16 +5227,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         self._last_request_times["_default_"] = val
 
     @property
-    def verify_on_ha_update(self) -> bool:
-        """Return whether to verify blueprint compatibility on Home Assistant update."""
+    def check_compatibility(self) -> bool:
+        """Return whether to check blueprint compatibility."""
         if not self.config_entry:
-            return DEFAULT_VERIFY_ON_HA_UPDATE
+            return DEFAULT_CHECK_COMPATIBILITY
         return bool(
             self.config_entry.options.get(
-                CONF_VERIFY_ON_HA_UPDATE,
+                CONF_CHECK_COMPATIBILITY,
                 self.config_entry.data.get(
-                    CONF_VERIFY_ON_HA_UPDATE,
-                    DEFAULT_VERIFY_ON_HA_UPDATE,
+                    CONF_CHECK_COMPATIBILITY,
+                    DEFAULT_CHECK_COMPATIBILITY,
                 ),
             )
         )
@@ -5259,8 +5255,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if force:
             return True
         if self._last_ha_version is None:
-            await self.async_save_ha_version(current_version)
-            return False
+            return True
         return self._last_ha_version != current_version
 
     async def async_save_ha_version(self, version: str) -> None:
@@ -5980,38 +5975,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             Tuple of (primary_learn_more_url, author_report_url, ha_docs_url).
 
         """
-        author_report_url: str | None = None
         ha_docs_url: str | None = None
 
-        if source_url:
-            parsed = urlparse(source_url)
-            host = (parsed.hostname or "").lower()
-            path_parts = [p for p in parsed.path.strip("/").split("/") if p]
-            if host in (SourceDomain.GITHUB, SourceDomain.GITHUB_RAW):
-                if len(path_parts) >= 2:
-                    owner, repo = path_parts[0], path_parts[1]
-                    if path_parts and path_parts[0] == SourceProviderType.GIST:
-                        gist_id = path_parts[-1]
-                        author_report_url = URL_GIST_COMMENTS_TEMPLATE.format(gist_id=gist_id)
-                    else:
-                        author_report_url = URL_GITHUB_ISSUES_TEMPLATE.format(
-                            owner=owner, repo=repo
-                        )
-            elif host == SourceDomain.GIST:
-                if path_parts:
-                    gist_id = path_parts[-1]
-                    author_report_url = URL_GIST_COMMENTS_TEMPLATE.format(gist_id=gist_id)
-            elif host == SourceDomain.GIST_RAW:
-                if len(path_parts) >= 2:
-                    gist_id = path_parts[1]
-                    author_report_url = URL_GIST_COMMENTS_TEMPLATE.format(gist_id=gist_id)
-            elif host == SourceDomain.HA_FORUM:
-                if len(path_parts) >= 2 and path_parts[0] == "t":
-                    topic_id = path_parts[-1]
-                    author_report_url = URL_HA_COMMUNITY_TOPIC_TEMPLATE.format(topic_id=topic_id)
-                else:
-                    author_report_url = source_url
-
+        author_report_url = registry.get_report_url(source_url) if source_url else None
         all_text = " ".join(
             report.errors
             + report.warnings
@@ -6530,7 +6496,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             Created or currently running asyncio.Task, or None if disabled.
 
         """
-        if not self.verify_on_ha_update and not force:
+        if not self.check_compatibility and not force:
             _LOGGER.debug("Post-HA-update compatibility guard is disabled")
             return None
 
@@ -6569,7 +6535,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             force: If True, execute check even if version hasn't changed.
 
         """
-        if not self.verify_on_ha_update and not force:
+        if not self.check_compatibility and not force:
             _LOGGER.debug("Post-HA-update compatibility guard is disabled")
             return
 

@@ -6,7 +6,7 @@
         "description": "Voulez-vous configurer Blueprints Updater ? Il scannera vos blueprints locaux et cherchera des mises à jour.",
         "data": {
           "auto_update": "Activer la mise à jour automatique",
-          "verify_on_ha_update": "Vérifier la compatibilité lors des mises à jour de Home Assistant",
+          "check_compatibility": "Vérifier la compatibilité des blueprints",
           "update_interval": "Intervalle de mise à jour (heures)",
           "filter_mode": "Mode de filtrage",
           "selected_blueprints": "Blueprints (facultatif)",
@@ -25,7 +25,7 @@
         "description": "Configurez les options et les paramètres de Blueprints Updater.",
         "data": {
           "auto_update": "Activer la mise à jour automatique",
-          "verify_on_ha_update": "Vérifier la compatibilité lors des mises à jour de Home Assistant",
+          "check_compatibility": "Vérifier la compatibilité des blueprints",
           "update_interval": "Intervalle de mise à jour (heures)",
           "filter_mode": "Mode de filtrage",
           "selected_blueprints": "Blueprints sélectionnés",
