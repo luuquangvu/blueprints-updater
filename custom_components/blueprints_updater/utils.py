@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import ipaddress
 import logging
@@ -15,6 +16,7 @@ from typing import ParamSpec, TypeVar
 from urllib.parse import quote
 
 import httpx
+import orjson
 from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.script import scripts_with_blueprint
 from homeassistant.components.template.helpers import templates_with_blueprint
@@ -29,12 +31,14 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     DEFAULT_MAX_BACKUPS,
     DEFAULT_UPDATE_INTERVAL_HOURS,
+    DOMAIN,
     ERROR_SEPARATOR,
     MAX_BACKUPS,
     MAX_UPDATE_INTERVAL_HOURS,
     MIN_BACKUPS,
     MIN_UPDATE_INTERVAL,
     RE_URL_REDACTION,
+    UNKNOWN_VERSION,
     URL_BLUEPRINT_DASHBOARD,
     FilterMode,
     FunctionalDomain,
@@ -680,6 +684,60 @@ def get_ha_version(hass: HomeAssistant | None = None) -> str:
         if version and isinstance(version, str):
             return version
     return __version__
+
+
+def _read_manifest_version(path: str) -> str:
+    """Read and extract the integration version from manifest.json.
+
+    Args:
+        path: Path to the manifest.json file.
+
+    Returns:
+        The version string or UNKNOWN_VERSION if missing or invalid.
+
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = orjson.loads(f.read())
+            version = data.get("version")
+            if version is not None and (ver_str := str(version).strip()):
+                return ver_str
+            return UNKNOWN_VERSION
+    except Exception:
+        return UNKNOWN_VERSION
+
+
+async def get_integration_version(hass: HomeAssistant | None = None) -> str:
+    """Return the Blueprints Updater integration version string.
+
+    Uses Home Assistant's loaded integration metadata when available (the same
+    source Home Assistant displays in the UI), falling back to reading the
+    manifest if the integration is not yet loaded in hass.loader or during
+    standalone testing.
+
+    Args:
+        hass: Optional HomeAssistant instance.
+
+    Returns:
+        The version string defined in the integration manifest, or UNKNOWN_VERSION.
+
+    """
+    if hass is not None:
+        with contextlib.suppress(Exception):
+            from homeassistant.loader import async_get_loaded_integration
+
+            integration = async_get_loaded_integration(hass, DOMAIN)
+            if integration is not None:
+                version = getattr(integration, "version", None)
+                if version is not None and (ver_str := str(version).strip()):
+                    return ver_str
+
+    manifest_path = os.path.join(os.path.dirname(__file__), "manifest.json")
+    if hass is not None and hasattr(hass, "async_add_executor_job"):
+        return await hass.async_add_executor_job(_read_manifest_version, manifest_path)
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _read_manifest_version, manifest_path)
 
 
 def stringify_keys(

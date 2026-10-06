@@ -1,6 +1,7 @@
 """Unit and integration tests for Home Assistant update compatibility guard."""
 
 import asyncio
+import io
 import os
 import tempfile
 from contextlib import nullcontext
@@ -47,6 +48,8 @@ from custom_components.blueprints_updater.const import (
     CONF_CHECK_COMPATIBILITY,
     DOMAIN,
     STORAGE_KEY_LAST_HA_VERSION,
+    STORAGE_KEY_LAST_INTEGRATION_VERSION,
+    UNKNOWN_VERSION,
     FunctionalDomain,
     IncompatibilitySeverity,
     IntegrationService,
@@ -1106,6 +1109,7 @@ async def test_async_create_and_delete_incompatibility_issue(coordinator, hass):
         _, kwargs = mock_create.call_args
         assert kwargs["domain"] == DOMAIN
         assert kwargs["severity"] == ir.IssueSeverity.ERROR
+        assert kwargs["is_persistent"] is False
         assert kwargs["data"]["has_auto_fix"] == "true"
         assert kwargs["data"]["candidate_content"] == "new content"
         assert kwargs["data"]["diff_text"] == "diff content"
@@ -1120,6 +1124,7 @@ async def test_async_create_and_delete_incompatibility_issue(coordinator, hass):
         mock_create_depr.assert_called_once()
         _, kwargs = mock_create_depr.call_args
         assert kwargs["severity"] == ir.IssueSeverity.WARNING
+        assert kwargs["is_persistent"] is False
         assert kwargs["data"]["has_auto_fix"] == "false"
 
     # 3. None severity -> no-op
@@ -4507,3 +4512,682 @@ def test_ha_key_alignment_and_direct_imports() -> None:
     assert CONF_DESCRIPTION in TOP_LEVEL_SELECTOR_PRESENTATION_KEYS
     assert "label" in TOP_LEVEL_SELECTOR_PRESENTATION_KEYS
     assert "help" in TOP_LEVEL_SELECTOR_PRESENTATION_KEYS
+
+
+async def test_async_clear_incompatibility_issues(
+    coordinator: BlueprintUpdateCoordinator, hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test purging all incompatibility issues while preserving other issues."""
+    from custom_components.blueprints_updater.const import RepairIssueType
+    from custom_components.blueprints_updater.repairs import FunctionalDomain
+
+    hass.loop = asyncio.get_running_loop()
+    registry = ir.async_get(hass)
+    monkeypatch.setattr(registry, "async_schedule_save", MagicMock())
+
+    incompat_id1 = coordinator.get_incompatible_issue_id(
+        "automation/bp1.yaml", FunctionalDomain.AUTOMATION
+    )
+    incompat_id2 = coordinator.get_incompatible_issue_id("script/bp2.yaml", FunctionalDomain.SCRIPT)
+    withdrawn_id = coordinator.get_withdrawn_issue_id(
+        "automation/bp_old.yaml", FunctionalDomain.AUTOMATION
+    )
+
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        incompat_id1,
+        is_fixable=True,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=RepairIssueType.INCOMPATIBLE_BLUEPRINT,
+        data={
+            "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+            "relative_path": "automation/bp1.yaml",
+            "domain": "automation",
+        },
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        incompat_id2,
+        is_fixable=True,
+        is_persistent=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key=RepairIssueType.INCOMPATIBLE_BLUEPRINT,
+        data={
+            "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+            "relative_path": "script/bp2.yaml",
+            "domain": "script",
+        },
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        withdrawn_id,
+        is_fixable=True,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=RepairIssueType.WITHDRAWN_BLUEPRINT,
+        data={
+            "issue_type": RepairIssueType.WITHDRAWN_BLUEPRINT.value,
+            "relative_path": "automation/bp_old.yaml",
+        },
+    )
+
+    assert (DOMAIN, incompat_id1) in registry.issues
+    assert (DOMAIN, incompat_id2) in registry.issues
+    assert (DOMAIN, withdrawn_id) in registry.issues
+
+    coordinator.async_clear_incompatibility_issues()
+
+    assert (DOMAIN, incompat_id1) not in registry.issues
+    assert (DOMAIN, incompat_id2) not in registry.issues
+    assert (DOMAIN, withdrawn_id) in registry.issues
+
+
+async def test_async_update_options_clears_issues_when_check_compatibility_disabled(
+    coordinator: BlueprintUpdateCoordinator, hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test updating config entry options with check_compatibility=False clears issues."""
+    from custom_components.blueprints_updater import async_update_options
+    from custom_components.blueprints_updater.repairs import FunctionalDomain
+
+    hass.loop = asyncio.get_running_loop()
+    registry = ir.async_get(hass)
+    monkeypatch.setattr(registry, "async_schedule_save", MagicMock())
+
+    entry = coordinator.config_entry
+    entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: False})
+    hass.data.setdefault(DOMAIN, {}).setdefault("coordinators", {})[entry.entry_id] = coordinator
+
+    incompat_id = coordinator.get_incompatible_issue_id(
+        "automation/bp1.yaml", FunctionalDomain.AUTOMATION
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        incompat_id,
+        is_fixable=True,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=RepairIssueType.INCOMPATIBLE_BLUEPRINT,
+        data={
+            "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+            "relative_path": "automation/bp1.yaml",
+            "domain": "automation",
+        },
+    )
+    assert (DOMAIN, incompat_id) in ir.async_get(hass).issues
+
+    with patch.object(coordinator, "async_request_refresh", new_callable=AsyncMock):
+        await async_update_options(hass, entry)
+
+    assert (DOMAIN, incompat_id) not in ir.async_get(hass).issues
+
+
+async def test_async_remove_entry_purges_domain_issues(
+    hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test async_remove_entry purges entry issues and preserves unrelated domain issues."""
+    from custom_components.blueprints_updater import async_remove_entry
+    from custom_components.blueprints_updater.repairs import FunctionalDomain
+
+    hass.loop = asyncio.get_running_loop()
+    registry = ir.async_get(hass)
+    monkeypatch.setattr(registry, "async_schedule_save", MagicMock())
+
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+
+    incompat_id = BlueprintUpdateCoordinator.get_incompatible_issue_id(
+        "automation/bp_target.yaml", FunctionalDomain.AUTOMATION
+    )
+
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "entry_issue",
+        is_fixable=True,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="test",
+        data={"config_entry_id": "test_entry"},
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        incompat_id,
+        is_fixable=True,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=RepairIssueType.INCOMPATIBLE_BLUEPRINT,
+        data={
+            "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+            "relative_path": "automation/bp_target.yaml",
+            "domain": "automation",
+        },
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "unrelated_domain_issue",
+        is_fixable=True,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="unrelated",
+    )
+    ir.async_create_issue(
+        hass,
+        "other_domain",
+        "other_issue",
+        is_fixable=True,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="other",
+    )
+    assert (DOMAIN, "entry_issue") in registry.issues
+    assert (DOMAIN, incompat_id) in registry.issues
+    assert (DOMAIN, "unrelated_domain_issue") in registry.issues
+    assert ("other_domain", "other_issue") in registry.issues
+
+    await async_remove_entry(hass, entry)
+
+    assert (DOMAIN, "entry_issue") not in registry.issues
+    assert (DOMAIN, incompat_id) not in registry.issues
+    assert (DOMAIN, "unrelated_domain_issue") in registry.issues
+    assert ("other_domain", "other_issue") in registry.issues
+
+
+async def test_async_remove_entry_scoped_to_entry_issues_when_multiple_entries(
+    hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test async_remove_entry deletes issues for removed entry when others exist."""
+    from custom_components.blueprints_updater import async_remove_entry
+
+    hass.loop = asyncio.get_running_loop()
+    registry = ir.async_get(hass)
+    monkeypatch.setattr(registry, "async_schedule_save", MagicMock())
+
+    entry1 = MagicMock()
+    entry1.entry_id = "entry_1"
+    entry2 = MagicMock()
+    entry2.entry_id = "entry_2"
+
+    monkeypatch.setattr(
+        hass.config_entries,
+        "async_entries",
+        lambda domain: [entry1, entry2] if domain == DOMAIN else [],
+    )
+
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "issue_entry_1",
+        is_fixable=True,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="test",
+        data={"config_entry_id": "entry_1"},
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "issue_entry_2",
+        is_fixable=True,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="test",
+        data={"config_entry_id": "entry_2"},
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "issue_no_entry",
+        is_fixable=True,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="test",
+    )
+
+    await async_remove_entry(hass, entry1)
+
+    assert (DOMAIN, "issue_entry_1") not in registry.issues
+    assert (DOMAIN, "issue_entry_2") in registry.issues
+    assert (DOMAIN, "issue_no_entry") in registry.issues
+
+
+@pytest.mark.parametrize(
+    ("last_ha", "current_ha", "last_integ", "current_integ", "force", "expected"),
+    [
+        ("2026.10.0", "2026.10.0", "1.2.0", "1.2.0", False, False),
+        ("2026.9.0", "2026.10.0", "1.2.0", "1.2.0", False, True),
+        ("2026.10.0", "2026.10.0", "1.1.0", "1.2.0", False, True),
+        ("2026.9.0", "2026.10.0", "1.1.0", "1.2.0", False, True),
+        (None, "2026.10.0", "1.2.0", "1.2.0", False, True),
+        ("2026.10.0", "2026.10.0", None, "1.2.0", False, True),
+        (None, "2026.10.0", None, "1.2.0", False, True),
+        ("2026.10.0", "2026.10.0", "1.2.0", "1.2.0", True, True),
+        ("2026.10.0", "2026.10.0", "1.2.0", UNKNOWN_VERSION, False, False),
+        ("2026.9.0", "2026.10.0", "1.2.0", UNKNOWN_VERSION, False, True),
+        ("2026.10.0", "2026.10.0", None, UNKNOWN_VERSION, False, False),
+    ],
+)
+async def test_version_tracking_and_upgrade_detection_matrix(
+    coordinator: BlueprintUpdateCoordinator,
+    hass,
+    monkeypatch: pytest.MonkeyPatch,
+    last_ha: str | None,
+    current_ha: str,
+    last_integ: str | None,
+    current_integ: str,
+    force: bool,
+    expected: bool,
+) -> None:
+    """Test HA and integration version changes independently and combined."""
+    monkeypatch.setattr(
+        "custom_components.blueprints_updater.coordinator.get_ha_version",
+        lambda _hass: current_ha,
+    )
+    monkeypatch.setattr(
+        "custom_components.blueprints_updater.coordinator.get_integration_version",
+        AsyncMock(return_value=current_integ),
+    )
+
+    coordinator._last_ha_version = last_ha
+    coordinator._last_integration_version = last_integ
+
+    assert await coordinator.async_check_ha_version_update(force=force) is expected
+
+
+async def test_async_save_ha_version_updates_last_versions(
+    coordinator: BlueprintUpdateCoordinator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test async_save_ha_version updates both versions and suppresses update check."""
+    current_integ = "3.0.0"
+    monkeypatch.setattr(
+        "custom_components.blueprints_updater.coordinator.get_integration_version",
+        AsyncMock(return_value=current_integ),
+    )
+    monkeypatch.setattr(
+        "custom_components.blueprints_updater.coordinator.get_ha_version",
+        lambda _hass: "2026.10.0",
+    )
+
+    coordinator._last_ha_version = "2026.9.0"
+    coordinator._last_integration_version = "2.9.0"
+
+    assert await coordinator.async_check_ha_version_update() is True
+
+    await coordinator.async_save_ha_version("2026.10.0")
+
+    assert coordinator._last_ha_version == "2026.10.0"
+    assert coordinator._last_integration_version == current_integ
+    assert await coordinator.async_check_ha_version_update() is False
+
+
+async def test_async_save_ha_version_avoids_recording_unknown_version(
+    coordinator: BlueprintUpdateCoordinator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test async_save_ha_version does not record UNKNOWN_VERSION as integration version."""
+    monkeypatch.setattr(
+        "custom_components.blueprints_updater.coordinator.get_integration_version",
+        AsyncMock(return_value=UNKNOWN_VERSION),
+    )
+    monkeypatch.setattr(
+        "custom_components.blueprints_updater.coordinator.get_ha_version",
+        lambda _hass: "2026.10.0",
+    )
+
+    coordinator._last_ha_version = "2026.9.0"
+    coordinator._last_integration_version = "2.9.0"
+
+    await coordinator.async_save_ha_version("2026.10.0")
+
+    assert coordinator._last_ha_version == "2026.10.0"
+    assert coordinator._last_integration_version == "2.9.0"
+    assert await coordinator.async_check_ha_version_update() is False
+
+
+async def test_coordinator_preserves_persisted_empty_version(
+    coordinator: BlueprintUpdateCoordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that coordinator preserves explicitly persisted empty version string."""
+    mock_store = AsyncMock()
+    mock_store.async_load.return_value = {
+        STORAGE_KEY_LAST_HA_VERSION: "2026.10.0",
+        STORAGE_KEY_LAST_INTEGRATION_VERSION: "",
+    }
+    coordinator._store = mock_store
+
+    await coordinator.async_setup()
+
+    assert coordinator._last_integration_version == ""
+    assert coordinator._persisted_last_integration_version == ""
+    assert coordinator._last_ha_version == "2026.10.0"
+
+    monkeypatch.setattr(
+        "custom_components.blueprints_updater.coordinator.get_ha_version",
+        lambda _hass: "2026.10.0",
+    )
+    monkeypatch.setattr(
+        "custom_components.blueprints_updater.coordinator.get_integration_version",
+        AsyncMock(return_value=""),
+    )
+
+    # Empty string should match current empty string and return False, not treated as None/missing
+    assert await coordinator.async_check_ha_version_update() is False
+
+
+async def test_coordinator_treats_persisted_unknown_version_as_missing(
+    coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Test coordinator treats persisted unknown integration version as missing."""
+    mock_store = AsyncMock()
+    mock_store.async_load.return_value = {
+        STORAGE_KEY_LAST_HA_VERSION: "2026.10.0",
+        STORAGE_KEY_LAST_INTEGRATION_VERSION: UNKNOWN_VERSION,
+    }
+    coordinator._store = mock_store
+
+    await coordinator.async_setup()
+
+    assert coordinator._last_integration_version is None
+    assert coordinator._persisted_last_integration_version is None
+    assert coordinator._last_ha_version == "2026.10.0"
+
+
+async def test_get_integration_version_from_loaded_integration(
+    hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test get_integration_version retrieves version from duck-typed loaded integration."""
+    from custom_components.blueprints_updater.utils import get_integration_version
+
+    mock_integration = MagicMock()
+    mock_integration.version = "9.9.9"
+
+    monkeypatch.setattr(
+        "homeassistant.loader.async_get_loaded_integration",
+        lambda _hass, _domain: mock_integration,
+    )
+
+    assert await get_integration_version(hass) == "9.9.9"
+
+
+async def test_get_integration_version_loaded_integration_empty_version_falls_back(
+    hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test get_integration_version falls back to manifest if loaded version is empty."""
+    from custom_components.blueprints_updater.utils import get_integration_version
+
+    mock_integration = MagicMock()
+    mock_integration.version = ""
+
+    monkeypatch.setattr(
+        "homeassistant.loader.async_get_loaded_integration",
+        lambda _hass, _domain: mock_integration,
+    )
+
+    mock_file = io.StringIO('{"version": "1.2.3"}')
+    monkeypatch.setattr("builtins.open", lambda *args, **kwargs: mock_file)
+
+    assert await get_integration_version(hass) == "1.2.3"
+
+
+async def test_get_integration_version_fallback_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test get_integration_version falls back to reading manifest when loader fails."""
+    from custom_components.blueprints_updater.utils import get_integration_version
+
+    mock_file = io.StringIO('{"version": "1.2.3"}')
+    monkeypatch.setattr("builtins.open", lambda *args, **kwargs: mock_file)
+
+    assert await get_integration_version(None) == "1.2.3"
+
+
+async def test_get_integration_version_fallback_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test get_integration_version returns UNKNOWN_VERSION when manifest cannot be read."""
+    from custom_components.blueprints_updater.utils import get_integration_version
+
+    def _raise_io_error(*args: Any, **kwargs: Any) -> Any:
+        """Simulate an OSError when attempting to open a file."""
+        raise OSError("File not found")
+
+    monkeypatch.setattr("builtins.open", _raise_io_error)
+
+    assert await get_integration_version(None) == UNKNOWN_VERSION
+
+
+async def test_get_integration_version_missing_version_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test get_integration_version returns UNKNOWN_VERSION when version key is absent."""
+    from custom_components.blueprints_updater.utils import get_integration_version
+
+    mock_file = io.StringIO('{"domain": "blueprints_updater"}')
+    monkeypatch.setattr("builtins.open", lambda *args, **kwargs: mock_file)
+
+    assert await get_integration_version(None) == UNKNOWN_VERSION
+
+
+async def test_get_integration_version_uses_executor_on_fallback(
+    hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test get_integration_version delegates file read to executor on fallback path."""
+    from custom_components.blueprints_updater.utils import get_integration_version
+
+    monkeypatch.setattr(
+        "homeassistant.loader.async_get_loaded_integration",
+        lambda _hass, _domain: None,
+    )
+
+    executor_spy = AsyncMock(return_value="2.3.4")
+    hass.async_add_executor_job = executor_spy
+
+    version = await get_integration_version(hass)
+    assert version == "2.3.4"
+    assert executor_spy.await_count == 1
+
+
+async def test_async_setup_removes_persistent_issues(
+    coordinator: BlueprintUpdateCoordinator, hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test async_setup removes persistent incompatibility issues and preserves non-targets."""
+    from custom_components.blueprints_updater.repairs import FunctionalDomain
+
+    hass.loop = asyncio.get_running_loop()
+    registry = ir.async_get(hass)
+    monkeypatch.setattr(registry, "async_schedule_save", MagicMock())
+
+    incompat_id = coordinator.get_incompatible_issue_id(
+        "automation/bp_persisted.yaml", FunctionalDomain.AUTOMATION
+    )
+    malformed_id = coordinator.get_incompatible_issue_id(
+        "automation/bp_malformed.yaml", FunctionalDomain.AUTOMATION
+    )
+    non_persisted_id = coordinator.get_incompatible_issue_id(
+        "automation/bp_non_persisted.yaml", FunctionalDomain.AUTOMATION
+    )
+    withdrawn_id = coordinator.get_withdrawn_issue_id(
+        "automation/bp_withdrawn.yaml", FunctionalDomain.AUTOMATION
+    )
+
+    # 1. Target persistent incompatibility issue
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        incompat_id,
+        is_fixable=True,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=RepairIssueType.INCOMPATIBLE_BLUEPRINT,
+        data={
+            "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+            "relative_path": "automation/bp_persisted.yaml",
+            "domain": "automation",
+        },
+    )
+
+    # 2. Malformed target persistent issue (None translation_key / placeholders)
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        malformed_id,
+        is_fixable=True,
+        is_persistent=True,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="legacy_key",
+        data={
+            "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+            "relative_path": "automation/bp_malformed.yaml",
+            "domain": "automation",
+        },
+    )
+    object.__setattr__(registry.issues[(DOMAIN, malformed_id)], "translation_key", None)
+    object.__setattr__(registry.issues[(DOMAIN, malformed_id)], "severity", None)
+    object.__setattr__(registry.issues[(DOMAIN, malformed_id)], "translation_placeholders", None)
+
+    # 3. Non-target: Already non-persistent incompatibility issue
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        non_persisted_id,
+        is_fixable=True,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=RepairIssueType.INCOMPATIBLE_BLUEPRINT,
+        data={
+            "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+            "relative_path": "automation/bp_non_persisted.yaml",
+            "domain": "automation",
+        },
+    )
+
+    # 4. Non-target: Unrelated persistent issue under DOMAIN (withdrawn blueprint)
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        withdrawn_id,
+        is_fixable=True,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=RepairIssueType.WITHDRAWN_BLUEPRINT,
+        data={
+            "issue_type": RepairIssueType.WITHDRAWN_BLUEPRINT.value,
+            "relative_path": "automation/bp_withdrawn.yaml",
+            "domain": "automation",
+        },
+    )
+
+    # 5. Non-target: Unrelated persistent issue in another domain
+    ir.async_create_issue(
+        hass,
+        "other_domain",
+        "other_issue",
+        is_fixable=True,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="other",
+    )
+
+    assert registry.issues[(DOMAIN, incompat_id)].is_persistent is True
+    assert registry.issues[(DOMAIN, malformed_id)].is_persistent is True
+    assert registry.issues[(DOMAIN, non_persisted_id)].is_persistent is False
+    assert registry.issues[(DOMAIN, withdrawn_id)].is_persistent is True
+    assert registry.issues[("other_domain", "other_issue")].is_persistent is True
+
+    delete_spy = MagicMock(side_effect=ir.async_delete_issue)
+    monkeypatch.setattr("homeassistant.helpers.issue_registry.async_delete_issue", delete_spy)
+
+    await coordinator.async_setup()
+
+    assert delete_spy.call_count == 2
+    delete_spy.assert_any_call(hass, DOMAIN, incompat_id)
+    delete_spy.assert_any_call(hass, DOMAIN, malformed_id)
+
+    assert (DOMAIN, incompat_id) not in registry.issues
+    assert (DOMAIN, malformed_id) not in registry.issues
+
+    assert registry.issues[(DOMAIN, non_persisted_id)].is_persistent is False
+    assert registry.issues[(DOMAIN, withdrawn_id)].is_persistent is True
+    assert registry.issues[("other_domain", "other_issue")].is_persistent is True
+    assert await coordinator.async_check_ha_version_update() is True
+
+
+async def test_async_migrate_persistent_incompatibility_issues_helper_directly(
+    coordinator: BlueprintUpdateCoordinator, hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test _async_migrate_persistent_incompatibility_issues helper method directly."""
+    from custom_components.blueprints_updater.repairs import FunctionalDomain
+
+    hass.loop = asyncio.get_running_loop()
+    registry = ir.async_get(hass)
+    monkeypatch.setattr(registry, "async_schedule_save", MagicMock())
+
+    incompat_id = coordinator.get_incompatible_issue_id(
+        "automation/bp_direct.yaml", FunctionalDomain.AUTOMATION
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        incompat_id,
+        is_fixable=True,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=RepairIssueType.INCOMPATIBLE_BLUEPRINT,
+        data={
+            "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+            "relative_path": "automation/bp_direct.yaml",
+            "domain": "automation",
+        },
+    )
+
+    assert registry.issues[(DOMAIN, incompat_id)].is_persistent is True
+
+    removed = coordinator._async_migrate_persistent_incompatibility_issues()
+
+    assert removed == 1
+    assert (DOMAIN, incompat_id) not in registry.issues
+
+
+async def test_async_setup_skips_migration_when_integration_version_already_persisted(
+    coordinator: BlueprintUpdateCoordinator, hass, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test async_setup skips persistent issue migration when version is already persisted."""
+    from custom_components.blueprints_updater.repairs import FunctionalDomain
+
+    hass.loop = asyncio.get_running_loop()
+    registry = ir.async_get(hass)
+    monkeypatch.setattr(registry, "async_schedule_save", MagicMock())
+
+    incompat_id = coordinator.get_incompatible_issue_id(
+        "automation/bp_persisted.yaml", FunctionalDomain.AUTOMATION
+    )
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        incompat_id,
+        is_fixable=True,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=RepairIssueType.INCOMPATIBLE_BLUEPRINT,
+        data={
+            "issue_type": RepairIssueType.INCOMPATIBLE_BLUEPRINT.value,
+            "relative_path": "automation/bp_persisted.yaml",
+            "domain": "automation",
+        },
+    )
+
+    delete_spy = MagicMock(side_effect=ir.async_delete_issue)
+    monkeypatch.setattr("homeassistant.helpers.issue_registry.async_delete_issue", delete_spy)
+
+    mock_store = AsyncMock()
+    mock_store.async_load.return_value = {
+        STORAGE_KEY_LAST_HA_VERSION: "2026.10.0",
+        STORAGE_KEY_LAST_INTEGRATION_VERSION: "2.16.1",
+    }
+    coordinator._store = mock_store
+
+    await coordinator.async_setup()
+
+    assert delete_spy.call_count == 0
+    assert (DOMAIN, incompat_id) in registry.issues

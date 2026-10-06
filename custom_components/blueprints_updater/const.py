@@ -94,6 +94,9 @@ MAX_UPDATE_INTERVAL_HOURS = 720
 STORAGE_VERSION = 1
 STORAGE_KEY_DATA = f"{DOMAIN}_data"
 STORAGE_KEY_LAST_HA_VERSION = "last_ha_version"
+STORAGE_KEY_LAST_INTEGRATION_VERSION = "last_integration_version"
+UNKNOWN_VERSION: Final[str] = "unknown"
+"""Sentinel value representing an unavailable integration version."""
 METADATA_STORAGE_FIELDS = (
     "etag",
     "remote_hash",
