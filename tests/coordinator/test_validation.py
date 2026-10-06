@@ -190,6 +190,45 @@ variables:
 
 
 @pytest.mark.asyncio
+async def test_process_blueprint_content_uses_fresh_template_fallback(coordinator):
+    """Test that _process_blueprint_content uses _async_validate_blueprint_with_fresh_fallback."""
+    info: dict[str, Any] = {
+        "relative_path": "automation/fresh.yaml",
+        "name": "Fresh BP",
+        "local_hash": "old_hash",
+    }
+    path = "automation/fresh.yaml"
+    coordinator.data[path] = dict(info)
+    remote_content = """blueprint:
+  name: Fresh BP
+  domain: automation
+  input: {}
+action: []
+"""
+    with patch.object(
+        coordinator,
+        "_async_validate_blueprint_with_fresh_fallback",
+        new_callable=AsyncMock,
+        return_value=None,
+    ) as mock_validate:
+        await coordinator._process_blueprint_content(
+            path,
+            info,
+            remote_content,
+            "https://example.com/blueprint.yaml",
+            [],
+            set(),
+        )
+        mock_validate.assert_awaited_once()
+        assert mock_validate.await_args is not None
+        args, _kwargs = mock_validate.await_args
+        assert args[1] == "https://example.com/blueprint.yaml"
+        assert args[2] == "automation"
+        assert coordinator.data[path]["last_error"] is None
+        assert coordinator.data[path]["updatable"] is True
+
+
+@pytest.mark.asyncio
 async def test_async_validate_blueprint_consumers_unexpected_error(hass, coordinator):
     """Verify that unexpected errors during validation are caught and reported as SYSTEM_ERROR.
 

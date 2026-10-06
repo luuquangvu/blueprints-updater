@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import copy
 import difflib
@@ -11,7 +12,7 @@ import logging
 import math
 import os
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
@@ -79,6 +80,7 @@ else:
         from homeassistant.const import CONF_SERVICE_DATA_TEMPLATE
     except ImportError:
         CONF_SERVICE_DATA_TEMPLATE = "data_template"
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector as ha_selector
@@ -90,6 +92,7 @@ from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 from .const import (
     CONF_ACTIONS,
+    JINJA_EXPRESSION_MARKERS,
     PLURAL_CONFIG_KEYS,
     BlueprintRiskType,
     FunctionalDomain,
@@ -1316,6 +1319,11 @@ def is_invalid_for_input_default(value: object, cfg: Mapping[str, object]) -> bo
     """
     if value is None:
         return True
+    if value is False:
+        sel = cfg.get(_CONF_SELECTOR)
+        return bool(
+            isinstance(sel, Mapping) and sel and any(k in sel for k in _EMPTY_UNSAFE_SELECTORS)
+        )
     if value in ("", {}, []):
         sel = cfg.get(_CONF_SELECTOR)
         if isinstance(sel, Mapping) and sel:
@@ -1753,6 +1761,169 @@ def _flush_target_chunk(
         other_chunks.append(current_chunk)
 
 
+def _is_service_action_call(sep: str, clean_key: str, val: str) -> bool:
+    """Check if key-value pair denotes a Home Assistant service/action invocation.
+
+    Args:
+        sep: Key-value separator string (":" or "").
+        clean_key: Cleaned mapping key name.
+        val: Raw string value associated with key.
+
+    Returns:
+        True if the line defines an action calling a service or template.
+
+    """
+    if not (sep and clean_key == CONF_ACTION):
+        return False
+    tokens = val.strip().split("#", 1)[0].split()
+    if not tokens:
+        return False
+    action_call = tokens[0]
+    return "." in action_call or action_call.startswith(("{", *JINJA_EXPRESSION_MARKERS))
+
+
+def _collect_action_child_lines(
+    lines: list[str],
+    start_idx: int,
+    action_indent: int,
+    has_dash: bool,
+) -> tuple[list[str], int | None, int]:
+    """Collect indented child lines belonging to an action block.
+
+    Args:
+        lines: Full document lines.
+        start_idx: Starting index to inspect child lines (i + 1).
+        action_indent: Indentation level of the parent action line.
+        has_dash: Whether the parent action line started with a list bullet.
+
+    Returns:
+        Tuple of (child_lines, base_child_indent, next_index).
+
+    """
+    n = len(lines)
+    j = start_idx
+    child_lines: list[str] = []
+    base_child_indent: int | None = None
+
+    while j < n:
+        next_line = lines[j]
+        next_stripped = next_line.strip()
+        if not next_stripped or next_stripped.startswith("#"):
+            child_lines.append(next_line)
+            j += 1
+            continue
+
+        next_indent = len(next_line) - len(next_line.lstrip())
+        next_key_token = next_stripped.partition(":")[0].strip().strip("'\"")
+        if next_indent < action_indent:
+            break
+        if next_indent == action_indent and next_line.lstrip().startswith("- "):
+            break
+        if (
+            not has_dash
+            and next_indent == action_indent
+            and (
+                next_key_token in (CONF_ACTION, "service", "service_template")
+                or next_key_token in _ACTION_PATH_SEGMENTS
+            )
+        ):
+            break
+
+        if base_child_indent is None:
+            base_child_indent = next_indent
+
+        if next_indent < base_child_indent:
+            break
+
+        child_lines.append(next_line)
+        j += 1
+
+    return child_lines, base_child_indent, j
+
+
+def _partition_target_chunks(
+    child_lines: list[str],
+    start_line_idx: int,
+    base_child_indent: int,
+    target_keys: frozenset[str],
+    skipped_line_indices: frozenset[int] | set[int] | None = None,
+) -> tuple[bool, list[list[str]], list[list[str]]]:
+    """Partition child lines into target and non-target chunks.
+
+    Args:
+        child_lines: Child lines of the action block.
+        start_line_idx: Absolute 0-based index of the first child line.
+        base_child_indent: Base indentation level of child properties.
+        target_keys: Set of recognized target field names from HA Core.
+        skipped_line_indices: Optional set of 0-based line indices to preserve unchanged.
+
+    Returns:
+        Tuple of (has_target, target_chunks, other_chunks).
+
+    """
+    has_target = False
+    target_chunks: list[list[str]] = []
+    other_chunks: list[list[str]] = []
+    current_chunk: list[str] = []
+    current_key: str | None = None
+
+    for blk_offset, blk_line in enumerate(child_lines):
+        line_idx = start_line_idx + blk_offset
+        blk_stripped = blk_line.strip()
+        if (
+            not blk_stripped
+            or blk_stripped.startswith("#")
+            or (skipped_line_indices is not None and line_idx in skipped_line_indices)
+        ):
+            if current_chunk:
+                current_chunk.append(blk_line)
+            else:
+                other_chunks.append([blk_line])
+            continue
+
+        line_ind = len(blk_line) - len(blk_line.lstrip())
+        if line_ind == base_child_indent:
+            _flush_target_chunk(
+                current_chunk, current_key, target_keys, target_chunks, other_chunks
+            )
+            current_chunk = []
+            current_key = None
+            k = blk_stripped.split(":", 1)[0].strip().strip("'\"")
+            if k == CONF_TARGET:
+                has_target = True
+            current_key = k
+        current_chunk.append(blk_line)
+    _flush_target_chunk(current_chunk, current_key, target_keys, target_chunks, other_chunks)
+
+    return has_target, target_chunks, other_chunks
+
+
+def _format_wrapped_target_block(
+    base_child_indent: int,
+    target_chunks: list[list[str]],
+    other_chunks: list[list[str]],
+) -> list[str]:
+    """Construct replacement lines with target fields nested under a 'target:' mapping.
+
+    Args:
+        base_child_indent: Indentation level for the 'target:' key.
+        target_chunks: Property chunks to be indented under 'target:'.
+        other_chunks: Non-target property chunks retained as-is.
+
+    Returns:
+        List of formatted lines containing other properties followed by target block.
+
+    """
+    indent_str = " " * base_child_indent
+    extra_indent = "  "
+    target_lines_flattened: list[str] = []
+    for chunk in target_chunks:
+        target_lines_flattened.extend(f"{extra_indent}{item}" for item in chunk)
+    new_target_block = [f"{indent_str}{CONF_TARGET}:\n", *target_lines_flattened]
+    other_lines_flattened = [item for chunk in other_chunks for item in chunk]
+    return [*other_lines_flattened, *new_target_block]
+
+
 def _wrap_action_target_blocks(
     lines: list[str],
     target_keys: frozenset[str],
@@ -1812,95 +1983,24 @@ def _wrap_action_target_blocks(
         if sep and not val.split("#", 1)[0].strip():
             ancestor_indents.append((key_indent, clean_key))
 
-        action_call = ""
-        if sep and clean_key == CONF_ACTION and (tokens := val.strip().split("#", 1)[0].split()):
-            action_call = tokens[0]
-
-        is_service_action = bool(action_call) and (
-            "." in action_call or action_call.startswith(("{", "{{", "{%"))
-        )
-
-        if not is_service_action or in_payload:
+        if not _is_service_action_call(sep, clean_key, val) or in_payload:
             result.append(line)
             i += 1
             continue
 
         action_indent = len(line) - len(raw_l)
-        j = i + 1
-        child_lines: list[str] = []
-        base_child_indent: int | None = None
-
-        while j < n:
-            next_line = lines[j]
-            next_stripped = next_line.strip()
-            if not next_stripped or next_stripped.startswith("#"):
-                child_lines.append(next_line)
-                j += 1
-                continue
-
-            next_indent = len(next_line) - len(next_line.lstrip())
-            next_key_token = next_stripped.partition(":")[0].strip().strip("'\"")
-            if next_indent < action_indent:
-                break
-            if next_indent == action_indent and next_line.lstrip().startswith("- "):
-                break
-            if (
-                not has_dash
-                and next_indent == action_indent
-                and (
-                    next_key_token in (CONF_ACTION, "service", "service_template")
-                    or next_key_token in _ACTION_PATH_SEGMENTS
-                )
-            ):
-                break
-
-            if base_child_indent is None:
-                base_child_indent = next_indent if has_dash else action_indent
-
-            if next_indent < base_child_indent:
-                break
-
-            child_lines.append(next_line)
-            j += 1
+        child_lines, base_child_indent, j = _collect_action_child_lines(
+            lines, i + 1, action_indent, has_dash
+        )
 
         if base_child_indent is None:
             result.append(line)
             i += 1
             continue
 
-        has_target = False
-        target_chunks: list[list[str]] = []
-        other_chunks: list[list[str]] = []
-        current_chunk: list[str] = []
-        current_key: str | None = None
-
-        for blk_offset, blk_line in enumerate(child_lines):
-            line_idx = i + 1 + blk_offset
-            blk_stripped = blk_line.strip()
-            if (
-                not blk_stripped
-                or blk_stripped.startswith("#")
-                or (skipped_line_indices is not None and line_idx in skipped_line_indices)
-            ):
-                if current_chunk:
-                    current_chunk.append(blk_line)
-                else:
-                    other_chunks.append([blk_line])
-                continue
-
-            line_ind = len(blk_line) - len(blk_line.lstrip())
-            if line_ind == base_child_indent:
-                _flush_target_chunk(
-                    current_chunk, current_key, target_keys, target_chunks, other_chunks
-                )
-                current_chunk = []
-                current_key = None
-                k = blk_stripped.split(":", 1)[0].strip().strip("'\"")
-                if k == CONF_TARGET:
-                    has_target = True
-                current_key = k
-            current_chunk.append(blk_line)
-        _flush_target_chunk(current_chunk, current_key, target_keys, target_chunks, other_chunks)
+        has_target, target_chunks, other_chunks = _partition_target_chunks(
+            child_lines, i + 1, base_child_indent, target_keys, skipped_line_indices
+        )
 
         if has_target or not target_chunks:
             result.append(line)
@@ -1908,17 +2008,8 @@ def _wrap_action_target_blocks(
             i = j
             continue
 
-        indent_str = " " * base_child_indent
-        extra_indent = "  "
-        target_lines_flattened: list[str] = []
-        for chunk in target_chunks:
-            target_lines_flattened.extend(f"{extra_indent}{item}" for item in chunk)
-        new_target_block = [f"{indent_str}{CONF_TARGET}:\n", *target_lines_flattened]
-        other_lines_flattened = [item for chunk in other_chunks for item in chunk]
-
         result.append(line)
-        result.extend(other_lines_flattened)
-        result.extend(new_target_block)
+        result.extend(_format_wrapped_target_block(base_child_indent, target_chunks, other_chunks))
         i = j
 
     return result
@@ -1937,7 +2028,7 @@ def _modernize_jinja_expressions(text: str) -> str:
         ValueError: If safe conversion is not possible.
 
     """
-    if "{{" not in text and "{%" not in text:
+    if all(marker not in text for marker in JINJA_EXPRESSION_MARKERS):
         return text
 
     def _sub_math(m: re.Match[str]) -> str:
@@ -2432,11 +2523,14 @@ class SyntheticDummyValues(set[str]):
 
 def extract_synthetic_dummy_values(
     blueprint_dict: Mapping[str, object],
+    include_empty_defaults: bool = False,
 ) -> SyntheticDummyValues:
     """Extract synthetic dummy values and null defaults retaining input metadata.
 
     Args:
         blueprint_dict: Parsed blueprint dictionary.
+        include_empty_defaults: Whether to also derive synthetic dummy entries for
+            inputs with empty or invalid default values.
 
     Returns:
         SyntheticDummyValues collection retaining each generated dummy's originating
@@ -2470,7 +2564,11 @@ def extract_synthetic_dummy_values(
                         ordinary_strings=frozenset(),
                     )
                 )
-            continue
+                continue
+            if not include_empty_defaults or not is_invalid_for_input_default(
+                input_cfg[CONF_DEFAULT], input_cfg
+            ):
+                continue
         dummy_val = derive_dummy_input_value(input_name, input_cfg, blueprint_dict)
         if dummy_val is None:
             continue
@@ -2700,6 +2798,146 @@ def _is_failing_path_dummy_error(
     return False
 
 
+def _extract_failed_device_automation_domains(err: Exception) -> set[str]:
+    """Extract candidate integration domains from a device automation exception.
+
+    Inspects structured exception attributes (domain, translation_placeholders,
+    cause module name) and traceback execution frames without relying on fragile
+    localized error string regexes.
+
+    Args:
+        err: Exception raised during device automation validation.
+
+    Returns:
+        Set of candidate integration domain names referenced by the error.
+
+    """
+    domains: set[str] = set()
+
+    # 1. Direct structured domain attribute
+    if isinstance(domain_attr := getattr(err, "domain", None), str) and domain_attr:
+        domains.add(domain_attr)
+
+    # 2. Translation placeholders (Home Assistant localized exceptions)
+    placeholders = getattr(err, "translation_placeholders", None)
+    if isinstance(placeholders, Mapping):
+        for key in ("domain", "integration"):
+            val = placeholders.get(key)
+            if isinstance(val, str) and val:
+                domains.add(val)
+
+    # 3. Cause module name on ImportError / ModuleNotFoundError
+    cause = getattr(err, "__cause__", None)
+    if cause is not None:
+        cause_name = getattr(cause, "name", None)
+        if not cause_name and isinstance(cause, ImportError):
+            msg = str(cause)
+            if msg.startswith("No module named '") and msg.endswith("'"):
+                cause_name = msg[len("No module named '") : -1]
+        if isinstance(cause_name, str) and cause_name:
+            parts = cause_name.split(".")
+            if len(parts) >= 3 and parts[0] == "homeassistant" and parts[1] == "components":
+                domains.add(parts[2])
+            else:
+                domains.add(parts[0])
+
+    # 4. Traceback frame inspection on err and cause (extract domain from HA frames/locals)
+    for candidate in (err, cause):
+        if candidate is None:
+            continue
+        tb = getattr(candidate, "__traceback__", None)
+        while tb:
+            mod_name = tb.tb_frame.f_globals.get("__name__", "")
+            if mod_name.startswith("homeassistant.components."):
+                parts = mod_name.split(".")
+                if len(parts) >= 3:
+                    domains.add(parts[2])
+            frame_locals = tb.tb_frame.f_locals
+            if (integ := frame_locals.get("integration")) and (
+                isinstance(d := getattr(integ, "domain", None), str) and d
+            ):
+                domains.add(d)
+            tb = tb.tb_next
+
+    return domains
+
+
+def _is_device_automation_domain_tied_to_dummy(
+    err: Exception,
+    synthetic_values: SyntheticDummyValues | set[str] | None = None,
+    substituted_config: Mapping[str, object] | None = None,
+) -> bool:
+    """Determine if a device automation integration error is tied to synthetic dummy inputs.
+
+    When Home Assistant cannot import a device automation platform for an integration
+    (raising an InvalidDeviceAutomationConfig caused by ImportError), check if the
+    failing integration domain is either a synthetic identifier itself or is used in
+    a substituted device automation block configured with synthetic dummy inputs.
+
+    Args:
+        err: Validation exception raised during baseline validation.
+        synthetic_values: Optional set or SyntheticDummyValues collection.
+        substituted_config: Optional fully substituted blueprint configuration dictionary.
+
+    Returns:
+        True if the device automation failure is tied to a synthetic dummy input.
+
+    """
+    active_synthetic = (
+        (set(synthetic_values) | STANDARD_DUMMY_IDS)
+        if synthetic_values is not None
+        else STANDARD_DUMMY_IDS
+    )
+
+    candidate_domains = _extract_failed_device_automation_domains(err)
+    if any(d in active_synthetic or is_synthetic_identifier(d) for d in candidate_domains):
+        return True
+
+    # Scan message tokens exclusively for synthetic identifier matches; never use them
+    # to select candidate domain mappings in substituted_config.
+    cause = getattr(err, "__cause__", None)
+    for candidate in (err, cause):
+        if candidate is None:
+            continue
+        err_str = str(candidate).partition(" @ data")[0]
+        for token in _RE_IDENTIFIER_TOKEN.findall(err_str):
+            if (clean := token.rstrip(".-").strip("'\"")) and (
+                clean in active_synthetic or is_synthetic_identifier(clean)
+            ):
+                return True
+
+    if not candidate_domains:
+        return False
+
+    if substituted_config is not None:
+
+        def _iter_mappings(obj: object) -> Iterator[Mapping[str, object]]:
+            """Recursively yield all mapping dictionaries in a nested structure."""
+            if isinstance(obj, Mapping):
+                yield obj
+                for v in obj.values():
+                    yield from _iter_mappings(v)
+            elif isinstance(obj, (list, tuple)):
+                for item in obj:
+                    yield from _iter_mappings(item)
+
+        for mapping in _iter_mappings(substituted_config):
+            domain_val = mapping.get("domain")
+            if isinstance(domain_val, str) and domain_val in candidate_domains:
+                for k, v in mapping.items():
+                    if k == "domain":
+                        continue
+                    if isinstance(v, str) and (v in active_synthetic or is_synthetic_identifier(v)):
+                        return True
+                    leaf_strings = extract_leaf_strings(v)
+                    if any(
+                        s in active_synthetic or is_synthetic_identifier(s) for s in leaf_strings
+                    ):
+                        return True
+
+    return False
+
+
 def is_dummy_validation_error(
     err: Exception,
     synthetic_values: SyntheticDummyValues | set[str] | None = None,
@@ -2756,6 +2994,30 @@ def is_dummy_validation_error(
 
     # 3. Device automation exception type:
     if _DEVICE_AUTOMATION_EXCEPTIONS and isinstance(err, _DEVICE_AUTOMATION_EXCEPTIONS):
+        cause = getattr(err, "__cause__", None)
+        if isinstance(cause, ImportError):
+            active_synthetic = (
+                (set(synthetic_values) | STANDARD_DUMMY_IDS)
+                if synthetic_values is not None
+                else STANDARD_DUMMY_IDS
+            )
+            synthetic_tokens = (
+                (set(synthetic_values) | STANDARD_DUMMY_IDS)
+                if isinstance(synthetic_values, SyntheticDummyValues)
+                else {s for s in active_synthetic if is_synthetic_identifier(s)}
+            )
+            if any(
+                _exception_identifies_synthetic_id(err, val)
+                or _exception_identifies_synthetic_id(cause, val)
+                for val in synthetic_tokens
+            ):
+                return True
+            if _is_failing_path_dummy_error(err, synthetic_values, substituted_config):
+                return True
+            return _is_device_automation_domain_tied_to_dummy(
+                err, synthetic_values, substituted_config
+            )
+
         device_ids = (
             {v for v in synthetic_values if "device" in v.lower() or v in STANDARD_DUMMY_IDS}
             if synthetic_values is not None
@@ -2767,7 +3029,11 @@ def is_dummy_validation_error(
 
     # 4. Entity not found exception type:
     if _ENTITY_NOT_FOUND_EXCEPTIONS and isinstance(err, _ENTITY_NOT_FOUND_EXCEPTIONS):
-        active_synthetic = synthetic_values if synthetic_values is not None else STANDARD_DUMMY_IDS
+        active_synthetic = (
+            (set(synthetic_values) | STANDARD_DUMMY_IDS)
+            if synthetic_values is not None
+            else STANDARD_DUMMY_IDS
+        )
         synthetic_tokens = (
             synthetic_values
             if isinstance(synthetic_values, SyntheticDummyValues)
@@ -3195,20 +3461,40 @@ def _is_jinja_template_name(tmpl_name: str) -> bool:
     )
 
 
+def _scan_custom_template_paths(jinja_path: str | Path) -> set[str]:
+    """Scan the custom templates directory for valid Jinja template paths.
+
+    Args:
+        jinja_path: Path to the custom_templates directory.
+
+    Returns:
+        Set of relative POSIX template paths within the custom_templates directory.
+
+    """
+    if not os.path.isdir(jinja_path):
+        return set()
+    jinja_root = Path(jinja_path)
+    return {
+        item.relative_to(jinja_root).as_posix()
+        for item in jinja_root.rglob(f"*{_ALLOWED_TEMPLATE_EXTENSION}")
+        if item.is_file() and item.stat().st_size <= MAX_CUSTOM_TEMPLATE_SIZE
+    }
+
+
 def _extract_custom_template_paths(env: TemplateEnvironment | None) -> set[str] | None:
     """Extract valid custom template paths recognized by Home Assistant.
 
     Home Assistant populates custom templates into an in-memory loader dictionary
     (result[path] = content) by scanning custom_templates/**/*.jinja. This helper
     extracts the exact set of relative template paths known to the loader or
-    present on disk.
+    present on disk when outside an event loop.
 
     Args:
         env: The template environment, potentially containing a loader or hass instance.
 
     Returns:
         A set of valid relative template paths, or None if no environment/hass context
-        is available to inspect template availability.
+        is available or if running in an event loop without pre-cached loader sources.
 
     """
     if env is None:
@@ -3228,19 +3514,79 @@ def _extract_custom_template_paths(env: TemplateEnvironment | None) -> set[str] 
         if isinstance(mapping, Mapping) and len(mapping) > 0:
             return set(mapping)
 
-    # 2. If loader sources are empty or absent, extract paths using Home Assistant's logic
-    if hass is not None and hasattr(hass, "config") and hasattr(hass.config, "path"):
-        jinja_path = hass.config.path(_CUSTOM_TEMPLATES_FOLDER)
-        if os.path.isdir(jinja_path):
-            jinja_root = Path(jinja_path)
-            return {
-                item.relative_to(jinja_root).as_posix()
-                for item in jinja_root.rglob(f"*{_ALLOWED_TEMPLATE_EXTENSION}")
-                if item.is_file() and item.stat().st_size <= MAX_CUSTOM_TEMPLATE_SIZE
-            }
-        return set()
+    if loader is None:
+        hass_data = getattr(hass, "data", None)
+        if isinstance(hass_data, Mapping):
+            hass_loader = hass_data.get("template.hass_loader")
+            if hass_loader is not None:
+                sources = getattr(hass_loader, "sources", None)
+                if isinstance(sources, Mapping) and len(sources) > 0:
+                    return set(sources)
 
-    return set() if loader is not None else None
+    # 2. Check if running inside an asyncio event loop
+    try:
+        asyncio.get_running_loop()
+        in_event_loop = True
+    except RuntimeError:
+        in_event_loop = False
+
+    # Do not execute blocking disk I/O if running inside an asyncio event loop.
+    # Return None so callers do not falsely conclude that zero custom templates exist.
+    if in_event_loop:
+        return None
+
+    if hass is not None and hasattr(hass, "config") and hasattr(hass.config, "path"):
+        return _scan_custom_template_paths(hass.config.path(_CUSTOM_TEMPLATES_FOLDER))
+
+    return None
+
+
+async def async_extract_custom_template_paths(
+    env: TemplateEnvironment | None = None,
+    hass: HomeAssistant | None = None,
+) -> set[str] | None:
+    """Asynchronously extract custom template paths without blocking the event loop.
+
+    Inspects loader sources first, then falls back to an executor-backed filesystem
+    scan of custom_templates if a HomeAssistant instance is available.
+
+    Args:
+        env: Optional TemplateEnvironment instance.
+        hass: Optional HomeAssistant instance.
+
+    Returns:
+        Set of valid relative template paths, or None if context is unavailable.
+
+    """
+    if env is not None:
+        loader = getattr(env, "loader", None)
+        if loader is not None:
+            sources = getattr(loader, "sources", None)
+            if isinstance(sources, Mapping) and len(sources) > 0:
+                return set(sources)
+            mapping = getattr(loader, "mapping", None)
+            if isinstance(mapping, Mapping) and len(mapping) > 0:
+                return set(mapping)
+
+    target_hass = hass or (getattr(env, "hass", None) if env is not None else None)
+    if target_hass is None:
+        return None
+
+    hass_data = getattr(target_hass, "data", None)
+    if isinstance(hass_data, Mapping):
+        hass_loader = hass_data.get("template.hass_loader")
+        if hass_loader is not None:
+            sources = getattr(hass_loader, "sources", None)
+            if isinstance(sources, Mapping) and len(sources) > 0:
+                return set(sources)
+
+    if hasattr(target_hass, "config") and hasattr(target_hass.config, "path"):
+        jinja_path = target_hass.config.path(_CUSTOM_TEMPLATES_FOLDER)
+        if hasattr(target_hass, "async_add_executor_job"):
+            return await target_hass.async_add_executor_job(_scan_custom_template_paths, jinja_path)
+        return await asyncio.to_thread(_scan_custom_template_paths, jinja_path)
+
+    return None
 
 
 def _is_custom_template_present(
@@ -3274,21 +3620,27 @@ def _is_custom_template_present(
 def _check_template_imports(
     ast: nodes.Node,
     env: TemplateEnvironment | None = None,
+    available_paths: set[str] | None = None,
 ) -> list[str]:
     """Flag invalid template imports and verify custom template existence.
 
     Args:
         ast: Root Jinja AST node.
         env: Optional template environment for loader and registry inspection.
+        available_paths: Optional pre-extracted set of available custom template paths.
 
     Returns:
         List of error strings.
 
     """
     errors: list[str] = []
-    available_paths = _extract_custom_template_paths(env)
+    import_nodes = tuple(ast.find_all((nodes.Import, nodes.FromImport)))
+    if not import_nodes:
+        return errors
 
-    for node in ast.find_all((nodes.Import, nodes.FromImport)):
+    paths = available_paths if available_paths is not None else _extract_custom_template_paths(env)
+
+    for node in import_nodes:
         template_node = getattr(node, "template", None)
         if isinstance(template_node, nodes.Const) and isinstance(template_node.value, str):
             tmpl_name = template_node.value
@@ -3306,24 +3658,37 @@ def _check_template_imports(
             )
             continue
 
-        if not _is_custom_template_present(tmpl_name, env, available_paths):
+        if paths is None:
+            pure_path = PurePosixPath(tmpl_name)
+            if (
+                pure_path.is_absolute()
+                or tmpl_name.startswith(("/", f"{_CUSTOM_TEMPLATES_FOLDER}/"))
+                or ".." in pure_path.parts
+            ):
+                errors.append(
+                    f"line {node.lineno}: custom template '{tmpl_name}' does not exist in "
+                    f"'{_CUSTOM_TEMPLATES_FOLDER}'."
+                )
+
+        elif not _is_custom_template_present(tmpl_name, env, available_paths=paths):
             errors.append(
                 f"line {node.lineno}: custom template '{tmpl_name}' does not exist in "
                 f"'{_CUSTOM_TEMPLATES_FOLDER}'."
             )
-
     return errors
 
 
 def check_ha_template_ast_compatibility(
     ast: nodes.Node,
     env: TemplateEnvironment,
+    available_paths: set[str] | None = None,
 ) -> list[str]:
     """Inspect Jinja2 AST for structures and math expressions incompatible with Home Assistant.
 
     Args:
         ast: Root Jinja AST node.
         env: Template environment.
+        available_paths: Optional pre-extracted set of available custom template paths.
 
     Returns:
         List of compatibility error strings.
@@ -3332,7 +3697,7 @@ def check_ha_template_ast_compatibility(
     errors: list[str] = []
     errors.extend(_check_math_module_usages(ast, env))
     errors.extend(_check_mutating_method_calls(ast))
-    errors.extend(_check_template_imports(ast, env))
+    errors.extend(_check_template_imports(ast, env, available_paths=available_paths))
     return errors
 
 

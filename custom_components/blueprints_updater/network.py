@@ -8,7 +8,7 @@ import ipaddress
 import socket
 import ssl
 import time
-from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator
+from collections.abc import AsyncIterable, AsyncIterator, Generator, Iterable
 
 import httpcore
 import httpx
@@ -38,7 +38,7 @@ _MIN_CONNECT_ATTEMPT_TIMEOUT = 0.5
 
 
 @contextlib.contextmanager
-def _map_httpcore_exceptions() -> Iterator[None]:
+def _map_httpcore_exceptions() -> Generator[None]:
     """Map an httpcore error to the nearest public httpx transport error."""
     try:
         yield

@@ -20,6 +20,9 @@ from custom_components.blueprints_updater.utils import is_ip_safe
 
 from .compat import patch_service_call_compat
 
+# Capture the real getaddrinfo before the test harness patches it.
+_real_getaddrinfo = socket.getaddrinfo
+
 patch_service_call_compat()
 
 
@@ -123,6 +126,12 @@ def mock_getaddrinfo(request, monkeypatch):
     Can be bypassed using @pytest.mark.real_network.
     """
     if "real_network" in request.keywords:
+        import pytest_socket
+
+        monkeypatch.setattr(socket, "getaddrinfo", _real_getaddrinfo)
+        monkeypatch.setattr(pytest_socket._true_socket, "connect", pytest_socket._true_connect)
+        monkeypatch.setattr(socket, "socket", pytest_socket._true_socket)
+        yield
         return
 
     real_getaddrinfo = socket.getaddrinfo
@@ -174,4 +183,4 @@ def mock_getaddrinfo(request, monkeypatch):
         return results
 
     monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
-    return
+    yield

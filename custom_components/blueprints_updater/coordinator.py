@@ -10,12 +10,12 @@ import random
 import socket
 import time
 import warnings
-from collections.abc import AsyncIterator, Iterable, Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Generator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from difflib import unified_diff
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, TypedDict, TypeVar
 from urllib.parse import urlparse
 from warnings import WarningMessage
 
@@ -50,6 +50,8 @@ from homeassistant.components.template.config import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    ATTR_DOMAIN,
+    ATTR_SERVICE,
     CONF_ACTION,
     CONF_CHOOSE,
     CONF_CONDITION,
@@ -63,8 +65,9 @@ from homeassistant.const import (
     CONF_SERVICE,
     CONF_TRIGGER,
     CONF_VARIABLES,
+    EVENT_CALL_SERVICE,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError, TemplateError
 from homeassistant.helpers import frame
 from homeassistant.helpers import issue_registry as ir
@@ -96,6 +99,7 @@ from .blueprint_validation import (
     PAYLOAD_ANCESTOR_KEYS,
     TRIGGER_PATH_SEGMENTS,
     StructuredRisk,
+    async_extract_custom_template_paths,
     build_template_path,
     check_ha_template_ast_compatibility,
     dedupe_risks,
@@ -145,6 +149,7 @@ from .const import (
     HA_CONDITION_SHORTHAND_KEYS,
     HA_RESHAPED_KEYS,
     HA_TRANSIENT_CONFIG_KEYS,
+    JINJA_EXPRESSION_MARKERS,
     MAX_CONCURRENT_REQUESTS,
     MAX_RESPONSE_BYTES,
     MAX_RETRIES,
@@ -221,6 +226,7 @@ _LOGGER = logging.getLogger(__name__)
 JSONDict = Mapping[str, "JSONValue"]
 JSONList = Sequence["JSONValue"]
 JSONValue = None | bool | int | float | str | JSONDict | JSONList
+_T = TypeVar("_T")
 
 
 class BlueprintUpdateEventPayload(TypedDict):
@@ -411,7 +417,7 @@ _DIAGNOSTICS_CAPTURE_LOCK: Final[asyncio.Lock] = asyncio.Lock()
 
 
 @contextlib.contextmanager
-def _patch_attribute(target: object, name: str, replacement: object) -> Iterator[None]:
+def _patch_attribute(target: object, name: str, replacement: object) -> Generator[None]:
     """Temporarily replace an attribute on a target object for runtime instrumentation.
 
     Args:
@@ -434,7 +440,7 @@ def _patch_attribute(target: object, name: str, replacement: object) -> Iterator
 @contextlib.asynccontextmanager
 async def capture_structural_validation_diagnostics(
     hass: HomeAssistant,
-) -> AsyncIterator[ValidationDiagnostics]:
+) -> AsyncGenerator[ValidationDiagnostics]:
     """Capture typed report_usage, IssueRegistry, warnings and structural diffs during validation.
 
     Args:
@@ -865,6 +871,41 @@ def _is_expanded_condition_shorthand(
     )
 
 
+def _values_match(a: object, b: object) -> bool:
+    """Check if two configuration values match, handling template representations.
+
+    Args:
+        a: First configuration value.
+        b: Second configuration value.
+
+    Returns:
+        True if the values are equal or have matching string/template representations.
+
+    """
+    if a == b:
+        return True
+    if str(a) == str(b):
+        return True
+    a_tmpl = getattr(a, "template", None)
+    if isinstance(a_tmpl, str) and a_tmpl == b:
+        return True
+    b_tmpl = getattr(b, "template", None)
+    return isinstance(b_tmpl, str) and b_tmpl == a
+
+
+def _is_templated_key(key: object) -> bool:
+    """Check if a configuration key contains Jinja expression or statement delimiters.
+
+    Args:
+        key: Configuration key object to inspect.
+
+    Returns:
+        True if key is a string containing Jinja expression delimiters.
+
+    """
+    return isinstance(key, str) and any(marker in key for marker in JINJA_EXPRESSION_MARKERS)
+
+
 def _detect_rename_or_deprecation(
     k: object,
     v: object,
@@ -887,15 +928,19 @@ def _detect_rename_or_deprecation(
 
     """
     src_key = str(k)
+    if _is_templated_key(k):
+        return
     if _is_transient_schema_key(k, path, input_cfg):
         return
     found_rename = False
     is_generic_scalar = v is None or isinstance(v, bool) or v in ("", 0, 1, {}, [])
     if not is_generic_scalar:
         for val_k, val_v in validated_cfg.items():
+            if _is_templated_key(val_k):
+                continue
             if _is_transient_schema_key(val_k, path, validated_cfg):
                 continue
-            if val_k not in input_cfg and (val_v == v or str(val_v) == str(v)):
+            if val_k not in input_cfg and _values_match(val_v, v):
                 target_key = str(val_k)
                 if src_key in colliding_keys:
                     _LOGGER.warning(
@@ -1011,6 +1056,8 @@ def diff_structural_configs(
         )
 
         for k, v in input_cfg.items():
+            if _is_templated_key(k):
+                continue
             current_path = (*path, k)
             if k not in validated_cfg:
                 if _is_transient_schema_key(k, path, input_cfg):
@@ -1062,6 +1109,50 @@ def format_validation_error(err: Exception, config: object = None) -> str:
             path_str = ""
         return f"{path_str}{err.error_message}"
     return str(err)
+
+
+class _TemplatePathTracker(set[str]):
+    """Track queries to available custom template paths to detect missing template dependencies."""
+
+    def __init__(self, elements: Iterable[str] = ()) -> None:
+        """Initialize the path tracking set."""
+        super().__init__(elements)
+        self.had_miss: bool = False
+
+    def __contains__(self, item: object) -> bool:
+        """Check membership and record a miss if item is not present."""
+        present = super().__contains__(item)
+        if not present:
+            self.had_miss = True
+        return present
+
+    def __eq__(self, other: object) -> bool:
+        """Check equality and record a miss if not equal."""
+        equal = super().__eq__(other)
+        if not equal:
+            self.had_miss = True
+        return equal
+
+    def __ne__(self, other: object) -> bool:
+        """Check inequality and record a miss if not equal."""
+        not_equal = super().__ne__(other)
+        if not_equal:
+            self.had_miss = True
+        return not_equal
+
+    def issubset(self, other: Iterable[object]) -> bool:
+        """Check subset relationship and record a miss if not subset."""
+        res = super().issubset(other)
+        if not res:
+            self.had_miss = True
+        return res
+
+    def issuperset(self, other: Iterable[object]) -> bool:
+        """Check superset relationship and record a miss if not superset."""
+        res = super().issuperset(other)
+        if not res:
+            self.had_miss = True
+        return res
 
 
 class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, object]]]):
@@ -1178,8 +1269,32 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         self._persisted_last_integration_version: str | None = None
         self._post_ha_update_task: asyncio.Task | None = None
         self._post_ha_update_lock = asyncio.Lock()
+        self._custom_template_paths_cache: set[str] | None = None
+        self._custom_template_paths_lock = asyncio.Lock()
+        self._custom_template_paths_generation: int = 0
+        if self.hass and hasattr(self.hass, "bus") and hasattr(self.hass.bus, "async_listen"):
+            unsub_service = self.hass.bus.async_listen(
+                EVENT_CALL_SERVICE, self._async_handle_template_service_call
+            )
+            if self.config_entry and hasattr(self.config_entry, "async_on_unload"):
+                self.config_entry.async_on_unload(unsub_service)
         if self.config_entry:
             self.config_entry.async_on_unload(self._async_cancel_background_task)
+
+    @callback
+    def _async_handle_template_service_call(self, event: Event[Any]) -> None:
+        """Invalidate template paths cache when custom templates are reloaded.
+
+        Args:
+            event: The service call event.
+
+        """
+        if event.data.get(ATTR_DOMAIN) == "homeassistant" and event.data.get(ATTR_SERVICE) in (
+            "reload_custom_templates",
+            "reload_all",
+        ):
+            _LOGGER.debug("Custom templates reload detected; invalidating template paths cache")
+            self.invalidate_custom_template_paths_cache()
 
     async def async_wait_until_done(self) -> None:
         """Wait for any pending background refresh tasks to complete."""
@@ -1200,6 +1315,140 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         self._translations = {}
         self._translation_index = {}
         self._indexed_translation_keys = set()
+        self.invalidate_custom_template_paths_cache()
+
+    def invalidate_custom_template_paths_cache(self) -> None:
+        """Invalidate the cached custom template paths."""
+        self._custom_template_paths_cache = None
+        self._custom_template_paths_generation += 1
+
+    async def async_get_custom_template_paths(
+        self, *, force_refresh: bool = False
+    ) -> set[str] | None:
+        """Get available custom template paths, caching results to avoid repeated filesystem scans.
+
+        Args:
+            force_refresh: Whether to force a rescan of custom template paths.
+
+        Returns:
+            Set of valid relative template paths, or None if context is unavailable.
+
+        """
+        hass = getattr(self, "hass", None)
+        if hass is not None:
+            hass_data = getattr(hass, "data", None)
+            if isinstance(hass_data, Mapping):
+                hass_loader = hass_data.get("template.hass_loader")
+                if hass_loader is not None:
+                    sources = getattr(hass_loader, "sources", None)
+                    if isinstance(sources, Mapping) and len(sources) > 0:
+                        self._custom_template_paths_cache = set(sources)
+                        return self._custom_template_paths_cache
+
+        if not force_refresh and self._custom_template_paths_cache is not None:
+            return self._custom_template_paths_cache
+
+        async with self._custom_template_paths_lock:
+            if not force_refresh and self._custom_template_paths_cache is not None:
+                return self._custom_template_paths_cache
+
+            if force_refresh:
+                self.invalidate_custom_template_paths_cache()
+
+            scan_generation = self._custom_template_paths_generation
+            scanned = await async_extract_custom_template_paths(hass=getattr(self, "hass", None))
+
+            if scan_generation == self._custom_template_paths_generation:
+                self._custom_template_paths_cache = scanned
+                return self._custom_template_paths_cache
+
+            if self._custom_template_paths_cache is not None:
+                return self._custom_template_paths_cache
+
+            return scanned
+
+    async def _async_validate_with_fresh_template_fallback(
+        self,
+        validate_fn: Callable[[set[str] | None], _T],
+    ) -> _T:
+        """Execute validation with cached custom template paths, retrying with fresh paths on error.
+
+        Force-refreshes custom template paths and retries only when validation reports a
+        missing custom template. Other validation errors are returned immediately without
+        rescanning.
+
+        Args:
+            validate_fn: Callback taking available template paths and returning a validation result
+                (where a truthy value represents a validation error).
+
+        Returns:
+            Validation result from the initial run or the fresh-path retry.
+
+        """
+        try:
+            available_paths = await self.async_get_custom_template_paths()
+        except OSError:
+            available_paths = None
+        tracker: _TemplatePathTracker | None = (
+            _TemplatePathTracker(available_paths) if available_paths is not None else None
+        )
+        result = validate_fn(tracker)
+        if result and tracker is not None and tracker.had_miss:
+            try:
+                fresh_paths = await self.async_get_custom_template_paths(force_refresh=True)
+            except OSError:
+                return result
+            if fresh_paths != available_paths:
+                result = validate_fn(fresh_paths)
+        return result
+
+    async def _async_validate_blueprint_with_fresh_fallback(
+        self,
+        blueprint_data: dict[str, object],
+        source_url: str,
+        expected_domain: str,
+    ) -> str | None:
+        """Validate blueprint content against schema with automatic fresh template path retry.
+
+        Args:
+            blueprint_data: Raw parsed blueprint YAML dictionary.
+            source_url: Canonical blueprint source URL or file path.
+            expected_domain: Expected functional domain.
+
+        Returns:
+            Validation error string if invalid, or None if validation succeeded.
+
+        """
+        return await self._async_validate_with_fresh_template_fallback(
+            lambda paths: self._validate_blueprint(
+                blueprint_data,
+                source_url,
+                expected_domain,
+                available_template_paths=paths,
+            )
+        )
+
+    async def _async_validate_templates_with_fresh_fallback(
+        self,
+        blueprint_dict: object,
+    ) -> tuple[str, str] | None:
+        """Validate blueprint Jinja templates with automatic fresh template path retry.
+
+        Args:
+            blueprint_dict: Blueprint dictionary or YAML structure to scan for template expressions.
+
+        Returns:
+            Tuple of (config_path, error_message) if invalid, or None if valid.
+
+        """
+        return await self._async_validate_with_fresh_template_fallback(
+            lambda paths: self._validate_template_value(
+                blueprint_dict,
+                "",
+                skip_blueprint_metadata=True,
+                available_template_paths=paths,
+            )
+        )
 
     @staticmethod
     def _build_translation_index(loaded: dict[str, str], language: str) -> dict[str, str]:
@@ -1660,6 +1909,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         """
         filter_mode, selected = self._get_scan_config()
+        self.invalidate_custom_template_paths_cache()
 
         _LOGGER.debug(
             "Starting fast local blueprint scan (filter_mode=%s)",
@@ -1972,6 +2222,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     return
                 async with self._safe_hostname_lock:
                     self._safe_hostname_cache.clear()
+                self.invalidate_custom_template_paths_cache()
                 results_to_notify: list[str] = []
                 updated_domains: set[str] = set()
                 queue: asyncio.Queue[
@@ -2414,6 +2665,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         data: dict[str, object],
         source_url: str,
         expected_domain: str,
+        *,
+        available_template_paths: set[str] | None = None,
     ) -> str | None:
         """Validate blueprint data using HA Core's Blueprint class.
 
@@ -2424,6 +2677,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             data: Parsed YAML dictionary of the blueprint.
             source_url: The URL the blueprint was loaded from (for logging).
             expected_domain: The expected domain (automation/script/template) based on folder.
+            available_template_paths: Optional pre-extracted set of available custom template paths.
 
         Returns:
             An error string key if validation fails, or None if valid.
@@ -2485,7 +2739,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 err,
             )
 
-        if template_error := self._validate_template_value(data, "", skip_blueprint_metadata=True):
+        if template_error := self._validate_template_value(
+            data,
+            "",
+            skip_blueprint_metadata=True,
+            available_template_paths=available_template_paths,
+        ):
             path, error = template_error
             return self._format_validation_failure(
                 "blueprint_validation_error",
@@ -2502,6 +2761,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         path: str,
         *,
         skip_blueprint_metadata: bool = False,
+        available_template_paths: set[str] | None = None,
     ) -> tuple[str, str] | None:
         """Validate one value and recursively inspect nested YAML structures.
 
@@ -2509,6 +2769,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             value: The object or YAML structure to validate.
             path: Dot-notation or indexed YAML path for reporting.
             skip_blueprint_metadata: Whether to skip inspecting the 'blueprint' metadata mapping.
+            available_template_paths: Optional pre-extracted set of available custom template paths.
 
         Returns:
             A tuple of (path, error_message) if invalid, or None if valid.
@@ -2528,7 +2789,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 if env is None or not isinstance(env, TemplateEnvironment):
                     env = TemplateEnvironment(self.hass)
                 ast = env.parse(value)
-                if ast_errors := check_ha_template_ast_compatibility(ast, env):
+                if ast_errors := check_ha_template_ast_compatibility(
+                    ast, env, available_paths=available_template_paths
+                ):
                     return path, "; ".join(ast_errors)
             except TemplateError as err:
                 return path, str(err)
@@ -2548,16 +2811,22 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     continue
                 child_path = build_template_path(path, key)
                 if isinstance(key, str) and (
-                    template_error := self._validate_template_value(key, child_path)
+                    template_error := self._validate_template_value(
+                        key, child_path, available_template_paths=available_template_paths
+                    )
                 ):
                     return template_error
-                if template_error := self._validate_template_value(child, child_path):
+                if template_error := self._validate_template_value(
+                    child, child_path, available_template_paths=available_template_paths
+                ):
                     return template_error
             return None
 
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
             for index, child in enumerate(value):
-                if template_error := self._validate_template_value(child, f"{path}[{index}]"):
+                if template_error := self._validate_template_value(
+                    child, f"{path}[{index}]", available_template_paths=available_template_paths
+                ):
                     return template_error
 
         return None
@@ -2839,7 +3108,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             canonical_url,
         )
 
-        if validation_error := self._validate_blueprint(parsed, canonical_url, domain):
+        validation_error = await self._async_validate_blueprint_with_fresh_fallback(
+            parsed,
+            canonical_url,
+            domain,
+        )
+
+        if validation_error:
             error_parts = split_error_message(validation_error)
             error_key, error_detail = error_parts or (validation_error, validation_error)
             raise ServiceValidationError(
@@ -3597,11 +3872,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         bp_dict: dict[str, object] = (
             {str(k): v for k, v in parsed_backup.items()} if isinstance(parsed_backup, dict) else {}
         )
-        if validation_error := self._validate_blueprint(
+        validation_error = await self._async_validate_blueprint_with_fresh_fallback(
             bp_dict,
             src_url_str,
             domain,
-        ):
+        )
+
+        if validation_error:
             error_parts = split_error_message(validation_error)
             raise BlueprintRestoreValidationError(
                 "blueprint_validation_error",
@@ -4094,9 +4371,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         input_meta = blueprint_meta.get("input") if isinstance(blueprint_meta, Mapping) else None
         optional_keys = extract_inputs_with_default(input_meta)
 
-        if template_error := self._validate_template_value(
-            blueprint_dict, "", skip_blueprint_metadata=True
-        ):
+        template_error = await self._async_validate_templates_with_fresh_fallback(blueprint_dict)
+
+        if template_error:
             path_err, err_msg = template_error
             return [
                 {
@@ -4530,8 +4807,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 else {}
             )
             expected_domain = self._get_functional_domain(path)
+            try:
+                available_template_paths = await self.async_get_custom_template_paths(
+                    force_refresh=True
+                )
+            except OSError:
+                available_template_paths = None
             last_error = self._validate_blueprint(
-                blueprint_dict, source_url, expected_domain=expected_domain
+                blueprint_dict,
+                source_url,
+                expected_domain=expected_domain,
+                available_template_paths=available_template_paths,
             )
         except (HomeAssistantError, InvalidBlueprint) as err:
             last_error = format_error_message("yaml_syntax_error", err)
@@ -4991,9 +5277,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 if isinstance(remote_parsed, dict)
                 else {}
             )
-            if validation_error := self._validate_blueprint(
-                blueprint_dict, source_url_str, expected_domain=expected_domain
-            ):
+            validation_error = await self._async_validate_blueprint_with_fresh_fallback(
+                blueprint_dict,
+                source_url_str,
+                expected_domain,
+            )
+            if validation_error:
                 updatable = False
                 remote_hash = None
                 last_error = validation_error
@@ -6128,12 +6417,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         """
         substituted_baseline = self._derive_substituted_baseline_config(
-            blueprint_dict, blueprint_obj, relative_path, domain
+            blueprint_dict, blueprint_obj, relative_path, domain, derive_for_empty_defaults=True
         )
         if substituted_baseline is None:
             return
         input_cfg = copy.deepcopy(substituted_baseline)
-        synthetic_values = extract_synthetic_dummy_values(blueprint_dict)
+        synthetic_values = extract_synthetic_dummy_values(
+            blueprint_dict, include_empty_defaults=True
+        )
         try:
             validated_cfg = await self._async_run_domain_validator(
                 domain, relative_path, substituted_baseline
@@ -6156,6 +6447,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         blueprint_obj: Blueprint,
         relative_path: str,
         domain: FunctionalDomain,
+        derive_for_empty_defaults: bool = False,
     ) -> dict[str, object] | None:
         """Construct dummy inputs and generate substituted baseline configuration.
 
@@ -6164,6 +6456,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             blueprint_obj: Instantiated Blueprint object.
             relative_path: Relative blueprint path.
             domain: Functional domain of the blueprint.
+            derive_for_empty_defaults: Whether to derive dummy values for inputs
+                having empty or invalid default values.
 
         Returns:
             Substituted baseline configuration dictionary, or None if the blueprint
@@ -6197,9 +6491,16 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         dummy_inputs: dict[str, object] = {}
         for input_name, input_cfg in input_configs.items():
             if CONF_DEFAULT in input_cfg:
-                continue
+                if not derive_for_empty_defaults:
+                    continue
+                if input_cfg[CONF_DEFAULT] is None or not is_invalid_for_input_default(
+                    input_cfg[CONF_DEFAULT], input_cfg
+                ):
+                    continue
             dummy_val = derive_dummy_input_value(input_name, input_cfg, blueprint_dict)
             if dummy_val is None:
+                if CONF_DEFAULT in input_cfg:
+                    continue
                 return None
             dummy_inputs[input_name] = dummy_val
         baseline_config: dict[str, object] = {
@@ -6529,9 +6830,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             return report
 
         # Template AST & Jinja2 sandbox check
-        if tmpl_err := self._validate_template_value(
-            blueprint_dict, "", skip_blueprint_metadata=True
-        ):
+        tmpl_err = await self._async_validate_templates_with_fresh_fallback(blueprint_dict)
+
+        if tmpl_err:
             report.errors.append(f"Template compatibility error at {tmpl_err[0]}: {tmpl_err[1]}")
 
         schema = get_blueprint_schema(domain)
@@ -6578,9 +6879,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                             blueprint_dict, blueprint_obj, rel_path, domain, diagnostics
                         )
                     except (vol.Invalid, HomeAssistantError) as err:
-                        synthetic_values = extract_synthetic_dummy_values(blueprint_dict)
+                        synthetic_values = extract_synthetic_dummy_values(
+                            blueprint_dict, include_empty_defaults=True
+                        )
                         substituted_baseline = self._derive_substituted_baseline_config(
-                            blueprint_dict, blueprint_obj, rel_path, domain
+                            blueprint_dict,
+                            blueprint_obj,
+                            rel_path,
+                            domain,
+                            derive_for_empty_defaults=True,
                         )
                         if is_dummy_validation_error(err, synthetic_values, substituted_baseline):
                             _LOGGER.debug(
