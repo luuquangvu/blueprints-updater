@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         CONF_ACTIONS,
         CONF_CONDITIONS,
         CONF_NOTE,
+        CONF_OPTIONS,
         CONF_TRIGGERS,
     )
 else:
@@ -36,6 +37,11 @@ else:
         from homeassistant.const import CONF_NOTE
     except ImportError:
         CONF_NOTE = "note"
+
+    try:
+        from homeassistant.const import CONF_OPTIONS
+    except ImportError:
+        CONF_OPTIONS = "options"
 
     try:
         from homeassistant.const import CONF_TRIGGERS
@@ -125,6 +131,13 @@ PLURAL_CONFIG_KEYS: Final[dict[str, str]] = {
 
 HA_RESHAPED_KEYS: Final[frozenset[str]] = frozenset({CONF_VARIABLES, CONF_TRIGGER_VARIABLES})
 """Configuration keys reshaped or relocated into child entities by Home Assistant Core."""
+
+HA_CONDITION_SHORTHAND_KEYS: Final[frozenset[str]] = frozenset({"and", "or", "not"})
+"""Boolean condition shorthand keys that Home Assistant Core expands during validation.
+
+Note:
+    ``- and: [...]`` is validated into ``{condition: and, conditions: [...]}``.
+"""
 
 HA_TRANSIENT_CONFIG_KEYS: Final[frozenset[str]] = frozenset({"metadata", CONF_NOTE})
 """Configuration keys stripped by Home Assistant Core schemas (UI metadata and notes).

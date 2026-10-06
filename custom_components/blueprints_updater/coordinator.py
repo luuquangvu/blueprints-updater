@@ -132,7 +132,9 @@ from .const import (
     BLUEPRINTS_DATA_DIR,
     CONF_AUTO_UPDATE,
     CONF_CHECK_COMPATIBILITY,
+    CONF_CONDITIONS,
     CONF_FILTER_MODE,
+    CONF_OPTIONS,
     CONF_SELECTED_BLUEPRINTS,
     CONF_TRIGGERS,
     DEFAULT_AUTO_UPDATE,
@@ -140,6 +142,7 @@ from .const import (
     DEFAULT_MAX_BACKUPS,
     DOMAIN,
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
+    HA_CONDITION_SHORTHAND_KEYS,
     HA_RESHAPED_KEYS,
     HA_TRANSIENT_CONFIG_KEYS,
     MAX_CONCURRENT_REQUESTS,
@@ -780,6 +783,82 @@ def _is_transient_schema_key(
     )
 
 
+def _is_parallel_sequence_wrapper(
+    input_cfg: dict[object, object],
+    validated_cfg: dict[object, object],
+) -> bool:
+    """Check if Core wrapped a shorthand ``parallel`` item as ``{sequence: [item]}``.
+
+    Home Assistant Core validates each ``parallel`` entry that is not already a
+    ``sequence`` action into a single-item ``sequence`` wrapper, so the keys of the
+    original item only exist one level deeper in the validated configuration.
+
+    Args:
+        input_cfg: Input configuration dictionary prior to validation.
+        validated_cfg: Post-validation configuration dictionary.
+
+    Returns:
+        True if validated_cfg is a Core-generated single-item sequence wrapper.
+
+    """
+    sequence = validated_cfg.get(CONF_SEQUENCE)
+    return (
+        CONF_SEQUENCE not in input_cfg
+        and len(validated_cfg) == 1
+        and isinstance(sequence, list)
+        and len(sequence) == 1
+    )
+
+
+def _is_relocated_to_options(
+    k: object,
+    input_cfg: dict[object, object],
+    validated_cfg: dict[object, object],
+) -> bool:
+    """Check if Core moved a legacy top-level field of a trigger or condition under options.
+
+    New-style Home Assistant triggers and conditions (for example ``sun`` conditions with
+    ``before``/``after`` or ``calendar`` triggers with ``event``/``offset``) validate
+    legacy top-level fields into an ``options`` mapping.
+
+    Args:
+        k: Input configuration key missing from the validated configuration.
+        input_cfg: Input configuration dictionary prior to validation.
+        validated_cfg: Post-validation configuration dictionary.
+
+    Returns:
+        True if the key now lives under the validated ``options`` mapping.
+
+    """
+    options = validated_cfg.get(CONF_OPTIONS)
+    return CONF_OPTIONS not in input_cfg and isinstance(options, dict) and k in options
+
+
+def _is_expanded_condition_shorthand(
+    k: object,
+    validated_cfg: dict[object, object],
+) -> bool:
+    """Check if Core expanded a boolean condition shorthand key.
+
+    Home Assistant Core validates ``{and: [...]}`` (and ``or``/``not``) into
+    ``{condition: and, conditions: [...]}``.
+
+    Args:
+        k: Input configuration key missing from the validated configuration.
+        validated_cfg: Post-validation configuration dictionary.
+
+    Returns:
+        True if k is a shorthand key that was expanded into condition/conditions.
+
+    """
+    return (
+        isinstance(k, str)
+        and k in HA_CONDITION_SHORTHAND_KEYS
+        and validated_cfg.get(CONF_CONDITION) == k
+        and CONF_CONDITIONS in validated_cfg
+    )
+
+
 def _detect_rename_or_deprecation(
     k: object,
     v: object,
@@ -887,7 +966,10 @@ def diff_structural_configs(
 ) -> None:
     """Compare input configuration AST with post-validation configuration AST.
 
-    Detects renamed keys (e.g. 'service' -> 'action') and deprecated keys.
+    Detects renamed keys (e.g. 'service' -> 'action') and deprecated keys. Keys that Core
+    only reshapes during validation (single-item ``parallel`` sequence wrappers, legacy
+    trigger/condition fields moved under ``options``, and expanded ``and``/``or``/``not``
+    condition shorthand) are not reported as deprecated.
 
     Args:
         input_cfg: Input configuration dictionary or list prior to validation.
@@ -903,6 +985,11 @@ def diff_structural_configs(
     if isinstance(validated_vars, dict):
         validated_cfg = validated_vars
     if isinstance(input_cfg, dict) and isinstance(validated_cfg, dict):
+        if _is_parallel_sequence_wrapper(input_cfg, validated_cfg):
+            diff_structural_configs(
+                input_cfg, validated_cfg[CONF_SEQUENCE][0], diagnostics, (*path, CONF_SEQUENCE, 0)
+            )
+            return
         colliding_keys = _detect_colliding_keys(input_cfg, "input") | _detect_colliding_keys(
             validated_cfg, "validated"
         )
@@ -911,6 +998,13 @@ def diff_structural_configs(
             current_path = (*path, k)
             if k not in validated_cfg:
                 if _is_transient_schema_key(k, path, input_cfg):
+                    continue
+                if _is_relocated_to_options(k, input_cfg, validated_cfg):
+                    continue
+                if _is_expanded_condition_shorthand(k, validated_cfg):
+                    _diff_nested_values(
+                        v, validated_cfg[CONF_CONDITIONS], diagnostics, current_path
+                    )
                     continue
                 if _diff_plural_alias(
                     k, v, input_cfg, validated_cfg, diagnostics, path, current_path
