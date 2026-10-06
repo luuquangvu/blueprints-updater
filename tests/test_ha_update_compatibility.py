@@ -21,6 +21,7 @@ from homeassistant.components.device_automation.exceptions import (
 from homeassistant.const import CONF_VARIABLES, __version__
 from homeassistant.core import CoreState
 from homeassistant.exceptions import HomeAssistantError, TemplateError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import frame
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import yaml as yaml_util
@@ -3586,6 +3587,196 @@ def test_diff_structural_configs_deprecated_keys_detected() -> None:
     assert "legacy_root_key" in diagnostics.deprecated_keys
     assert "deprecated_inner_key" in diagnostics.deprecated_keys
     assert not diagnostics.renamed_keys
+
+
+def test_diff_structural_configs_parallel_shorthand_not_deprecated() -> None:
+    """Test shorthand parallel items wrapped by Core into sequences are not deprecated."""
+    input_cfg = {
+        "actions": [
+            {
+                "parallel": [
+                    {"action": "light.turn_on", "target": {"entity_id": "light.a"}},
+                    {"action": "tts.speak", "data": {"message": "hi"}},
+                ]
+            }
+        ]
+    }
+    validated_cfg = {"actions": cv.SCRIPT_SCHEMA(input_cfg["actions"])}
+    assert "sequence" in validated_cfg["actions"][0]["parallel"][0]
+
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == []
+    assert not diagnostics.renamed_keys
+
+
+def test_diff_structural_configs_parallel_wrapper_keeps_genuine_removals() -> None:
+    """Test unwrapping a parallel sequence wrapper still reports genuinely removed keys."""
+    input_cfg = {
+        "actions": [
+            {"parallel": [{"action": "light.turn_on", "legacy_inner_key": "old", "alias": "x"}]}
+        ]
+    }
+    validated_cfg = {
+        "actions": [
+            {"parallel": [{"sequence": [{"action": "light.turn_on", "alias": "x"}]}]},
+        ]
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == ["legacy_inner_key"]
+
+
+def test_diff_structural_configs_explicit_sequence_not_unwrapped() -> None:
+    """Test an input item that already has a sequence key is compared as written."""
+    input_cfg = {"parallel": [{"sequence": [{"action": "light.turn_on"}], "legacy": "x"}]}
+    validated_cfg = {"parallel": [{"sequence": [{"action": "light.turn_on"}]}]}
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == ["legacy"]
+
+
+def test_diff_structural_configs_condition_shorthand_not_deprecated() -> None:
+    """Test and/or/not shorthand expanded by Core into condition/conditions is not deprecated."""
+    input_cfg = {
+        "conditions": [
+            {
+                "and": [
+                    {"alias": "a", "condition": "template", "value_template": "{{ 1 }}"},
+                    {"or": [{"condition": "template", "value_template": "{{ 2 }}"}]},
+                ]
+            },
+            {"not": [{"condition": "template", "value_template": "{{ 3 }}"}]},
+        ]
+    }
+    # Shape produced by cv.CONDITIONS_SCHEMA + async_validate_conditions_config.
+    validated_cfg = {
+        "conditions": [
+            {
+                "condition": "and",
+                "conditions": [
+                    {"alias": "a", "condition": "template", "value_template": object()},
+                    {
+                        "condition": "or",
+                        "conditions": [{"condition": "template", "value_template": object()}],
+                    },
+                ],
+            },
+            {
+                "condition": "not",
+                "conditions": [{"condition": "template", "value_template": object()}],
+            },
+        ]
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == []
+    assert not diagnostics.renamed_keys
+
+
+def test_diff_structural_configs_condition_shorthand_inner_removal_detected() -> None:
+    """Test a genuinely removed key inside an expanded shorthand condition is still reported."""
+    input_cfg = {
+        "conditions": [
+            {"and": [{"condition": "template", "value_template": "{{ 1 }}", "legacy": "x"}]}
+        ]
+    }
+    validated_cfg = {
+        "conditions": [
+            {
+                "condition": "and",
+                "conditions": [{"condition": "template", "value_template": object()}],
+            }
+        ]
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == ["legacy"]
+
+
+def test_diff_structural_configs_unexpanded_shorthand_key_still_deprecated() -> None:
+    """Test a missing and/or/not key is reported when Core did not expand it."""
+    input_cfg = {"conditions": [{"and": [{"condition": "template"}]}]}
+    validated_cfg = {"conditions": [{"condition": "state"}]}
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == ["and"]
+
+
+def test_diff_structural_configs_options_relocation_not_deprecated() -> None:
+    """Test legacy trigger/condition fields moved under options by Core are not deprecated."""
+    input_cfg = {
+        "conditions": [
+            {"condition": "sun", "before": "sunset", "before_offset": "-00:30:00"},
+            {"condition": "sun", "after": "sunrise", "after_offset": "01:00:00"},
+        ],
+        "triggers": [
+            {
+                "trigger": "calendar",
+                "event": "start",
+                "entity_id": "calendar.personal",
+                "offset": "-0:5:0",
+            }
+        ],
+    }
+    # Shapes produced by Core's sun condition and calendar trigger validation.
+    validated_cfg = {
+        "conditions": [
+            {
+                "condition": "sun",
+                "options": {"before": "sunset", "before_offset": timedelta(minutes=-30)},
+            },
+            {
+                "condition": "sun",
+                "options": {"after": "sunrise", "after_offset": timedelta(hours=1)},
+            },
+        ],
+        "triggers": [
+            {
+                "trigger": "calendar",
+                "options": {
+                    "event": "start",
+                    "entity_id": "calendar.personal",
+                    "offset": timedelta(minutes=-5),
+                },
+            }
+        ],
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == []
+    assert not diagnostics.renamed_keys
+
+
+def test_diff_structural_configs_options_relocation_keeps_unrelated_removals() -> None:
+    """Test keys absent from the validated options mapping are still reported."""
+    input_cfg = {
+        "conditions": [{"condition": "sun", "before": "sunset", "legacy_flag": True}],
+    }
+    validated_cfg = {
+        "conditions": [{"condition": "sun", "options": {"before": "sunset"}}],
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == ["legacy_flag"]
+
+
+def test_diff_structural_configs_user_options_key_not_treated_as_relocation() -> None:
+    """Test a user-supplied options key disables the relocation shortcut."""
+    input_cfg = {"options": {"mode": "x"}, "before": "sunset"}
+    validated_cfg = {"options": {"before": "sunset"}}
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert "before" in diagnostics.deprecated_keys
 
 
 def test_diff_structural_configs_unrelated_variables_still_deprecated() -> None:
