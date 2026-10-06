@@ -153,7 +153,9 @@ from .const import (
     RISK_TYPE_TRANSLATIONS,
     STORAGE_KEY_DATA,
     STORAGE_KEY_LAST_HA_VERSION,
+    STORAGE_KEY_LAST_INTEGRATION_VERSION,
     STORAGE_VERSION,
+    UNKNOWN_VERSION,
     URL_HA_DOCS_ACTIONS,
     URL_HA_DOCS_BLUEPRINT_DEFAULT,
     URL_HA_DOCS_TARGETING,
@@ -194,6 +196,7 @@ from .utils import (
     get_blueprint_usage_entities,
     get_config_bool,
     get_ha_version,
+    get_integration_version,
     get_max_backups,
     get_validated_filter_mode,
     get_validated_selected_blueprints,
@@ -1050,6 +1053,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         self._first_update_done = False
         self._last_ha_version: str | None = None
         self._persisted_last_ha_version: str | None = None
+        self._last_integration_version: str | None = None
+        self._persisted_last_integration_version: str | None = None
         self._post_ha_update_task: asyncio.Task | None = None
         self._post_ha_update_lock = asyncio.Lock()
         if self.config_entry:
@@ -1134,36 +1139,55 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         storage_data = await self._store.async_load()
         self.setup_complete = True
 
-        if not storage_data or not isinstance(storage_data, dict):
-            return
+        if isinstance(storage_data, dict) and storage_data:
+            metadata = storage_data.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                _LOGGER.warning("Malformed metadata storage found, starting fresh")
+                metadata = {}
 
-        metadata = storage_data.get("metadata") or {}
-        if not isinstance(metadata, dict):
-            _LOGGER.warning("Malformed metadata storage found, starting fresh")
-            metadata = {}
+            validated_metadata: dict[str, dict[str, object]] = {}
+            for relative_path, entry in metadata.items():
+                if isinstance(relative_path, str) and (
+                    validated := BlueprintUpdateCoordinator._validate_metadata_entry(entry)
+                ):
+                    validated_metadata[relative_path] = validated
+                else:
+                    _LOGGER.warning("Skipping malformed metadata entry for %s", relative_path)
 
-        validated_metadata: dict[str, dict[str, object]] = {}
-        for relative_path, entry in metadata.items():
-            if isinstance(relative_path, str) and (
-                validated := BlueprintUpdateCoordinator._validate_metadata_entry(entry)
-            ):
-                validated_metadata[relative_path] = validated
-            else:
-                _LOGGER.warning("Skipping malformed metadata entry for %s", relative_path)
+            self._persisted_metadata = validated_metadata
+            pending_reload_domains = storage_data.get("pending_reload_domains") or []
+            if isinstance(pending_reload_domains, list):
+                self._pending_reload_domains = {
+                    domain
+                    for domain in pending_reload_domains
+                    if isinstance(domain, str) and domain in ALLOWED_RELOAD_DOMAINS
+                }
+                self._persisted_pending_reload_domains = set(self._pending_reload_domains)
 
-        self._persisted_metadata = validated_metadata
-        pending_reload_domains = storage_data.get("pending_reload_domains") or []
-        if isinstance(pending_reload_domains, list):
-            self._pending_reload_domains = {
-                domain
-                for domain in pending_reload_domains
-                if isinstance(domain, str) and domain in ALLOWED_RELOAD_DOMAINS
-            }
-            self._persisted_pending_reload_domains = set(self._pending_reload_domains)
+            if STORAGE_KEY_LAST_HA_VERSION in storage_data:
+                version_data = storage_data[STORAGE_KEY_LAST_HA_VERSION]
+                if isinstance(version_data, str):
+                    self._last_ha_version = version_data
+                    self._persisted_last_ha_version = version_data
+                elif version_data is not None:
+                    self._last_ha_version = str(version_data)
+                    self._persisted_last_ha_version = self._last_ha_version
 
-        if version_data := storage_data.get(STORAGE_KEY_LAST_HA_VERSION):
-            self._last_ha_version = str(version_data)
-            self._persisted_last_ha_version = self._last_ha_version
+            if STORAGE_KEY_LAST_INTEGRATION_VERSION in storage_data:
+                integ_version_data = storage_data[STORAGE_KEY_LAST_INTEGRATION_VERSION]
+                if isinstance(integ_version_data, str) and integ_version_data != UNKNOWN_VERSION:
+                    self._last_integration_version = integ_version_data
+                    self._persisted_last_integration_version = integ_version_data
+                elif integ_version_data is not None and str(integ_version_data) != UNKNOWN_VERSION:
+                    self._last_integration_version = str(integ_version_data)
+                    self._persisted_last_integration_version = self._last_integration_version
+
+        # Remove any previously persisted incompatibility issues once when updating from <= 2.16
+        if self._persisted_last_integration_version is None:
+            self._async_migrate_persistent_incompatibility_issues()
+
+        if not self.check_compatibility:
+            self.async_clear_incompatibility_issues()
 
         _LOGGER.debug(
             "Loaded metadata for %d blueprints from storage",
@@ -1983,6 +2007,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             and final_metadata == self._persisted_metadata
             and self._pending_reload_domains == self._persisted_pending_reload_domains
             and self._last_ha_version == self._persisted_last_ha_version
+            and self._last_integration_version == self._persisted_last_integration_version
         ):
             return
 
@@ -1996,12 +2021,18 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         }
         if self._last_ha_version is not None:
             save_payload[STORAGE_KEY_LAST_HA_VERSION] = self._last_ha_version
+        if (
+            self._last_integration_version is not None
+            and self._last_integration_version != UNKNOWN_VERSION
+        ):
+            save_payload[STORAGE_KEY_LAST_INTEGRATION_VERSION] = self._last_integration_version
 
         try:
             await self._store.async_save(save_payload)
             self._persisted_metadata = final_metadata
             self._persisted_pending_reload_domains = set(self._pending_reload_domains)
             self._persisted_last_ha_version = self._last_ha_version
+            self._persisted_last_integration_version = self._last_integration_version
         except Exception:
             _LOGGER.exception("Failed to save metadata to storage")
 
@@ -5329,30 +5360,46 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         )
 
     async def async_check_ha_version_update(self, force: bool = False) -> bool:
-        """Check if Home Assistant version has changed since last recorded version.
+        """Check if Home Assistant or integration version has changed since last recorded version.
 
         Args:
             force: If True, bypass version check and return True.
 
         Returns:
-            True if Home Assistant was updated or force is True, False otherwise.
+            True if Home Assistant or integration was updated or force is True, False otherwise.
 
         """
         current_version = get_ha_version(self.hass)
+        current_integ_version = await get_integration_version(self.hass)
         if force:
             return True
         if self._last_ha_version is None:
             return True
-        return self._last_ha_version != current_version
+        if current_integ_version == UNKNOWN_VERSION:
+            return self._last_ha_version != current_version
+        if (
+            self._last_integration_version is None
+            or self._last_integration_version == UNKNOWN_VERSION
+        ):
+            return True
+        return (
+            self._last_ha_version != current_version
+            or self._last_integration_version != current_integ_version
+        )
 
     async def async_save_ha_version(self, version: str) -> None:
-        """Persist the validated Home Assistant version to storage.
+        """Persist the validated Home Assistant and integration version to storage.
 
         Args:
             version: Home Assistant version string to store.
 
         """
         self._last_ha_version = version
+        integ_version = await get_integration_version(self.hass)
+        if integ_version != UNKNOWN_VERSION:
+            self._last_integration_version = integ_version
+        elif self._last_integration_version == UNKNOWN_VERSION:
+            self._last_integration_version = None
         await self._async_save_persisted_metadata()
 
     async def _apply_request_pacing(self, url: str) -> None:
@@ -6226,7 +6273,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             domain=DOMAIN,
             issue_id=issue_id,
             is_fixable=True,
-            is_persistent=True,
+            is_persistent=False,
             learn_more_url=report.learn_more_url,
             severity=(
                 ir.IssueSeverity.ERROR
@@ -6294,6 +6341,37 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if relative_path:
             issue_id = self.get_incompatible_issue_id(relative_path, domain)
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
+    @callback
+    def _async_migrate_persistent_incompatibility_issues(self) -> int:
+        """Remove previously persisted incompatibility issues so they are rechecked fresh.
+
+        Returns:
+            The number of persistent incompatibility issues removed.
+
+        """
+        issue_registry = ir.async_get(self.hass)
+        removed_count = 0
+        for (iss_domain, iss_id), issue_entry in list(issue_registry.issues.items()):
+            if (
+                iss_domain == DOMAIN
+                and self._is_incompatible_blueprint_issue(iss_domain, iss_id, issue_entry)
+                and getattr(issue_entry, "is_persistent", False) is True
+            ):
+                ir.async_delete_issue(self.hass, DOMAIN, iss_id)
+                removed_count += 1
+
+        return removed_count
+
+    @callback
+    def async_clear_incompatibility_issues(self) -> None:
+        """Purge all blueprint incompatibility repair issues from the issue registry."""
+        issue_registry = ir.async_get(self.hass)
+        for (iss_domain, iss_id), issue_entry in list(issue_registry.issues.items()):
+            if iss_domain == DOMAIN and self._is_incompatible_blueprint_issue(
+                iss_domain, iss_id, issue_entry
+            ):
+                ir.async_delete_issue(self.hass, DOMAIN, iss_id)
 
     async def async_validate_local_blueprint_compatibility(
         self,

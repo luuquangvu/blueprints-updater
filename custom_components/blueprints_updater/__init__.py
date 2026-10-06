@@ -23,6 +23,7 @@ from homeassistant.core import Event, HomeAssistant, ServiceCall, SupportsRespon
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import translation
 from homeassistant.helpers.entity_registry import EntityRegistry
 from homeassistant.helpers.selector import (
@@ -500,6 +501,9 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     blueprint_coordinator.config_entry = entry
     blueprint_coordinator.update_interval = timedelta(hours=interval_hours)
 
+    if not blueprint_coordinator.check_compatibility:
+        blueprint_coordinator.async_clear_incompatibility_issues()
+
     await blueprint_coordinator.async_request_refresh()
 
 
@@ -536,3 +540,33 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     )
 
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clean up issues and resources when config entry is removed.
+
+    Args:
+        hass: HomeAssistant instance.
+        entry: Configuration entry.
+
+    """
+    _LOGGER.debug("Removing Blueprints Updater entry: %s", entry.entry_id)
+    issue_registry = ir.async_get(hass)
+    other_entries = [
+        e.entry_id
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if getattr(e, "entry_id", None) != entry.entry_id
+    ]
+    for (iss_domain, iss_id), issue_entry in list(issue_registry.issues.items()):
+        if iss_domain != DOMAIN:
+            continue
+        data = getattr(issue_entry, "data", None)
+        issue_entry_id = data.get("config_entry_id") if isinstance(data, dict) else None
+        if issue_entry_id == entry.entry_id or (
+            not other_entries
+            and issue_entry_id is None
+            and BlueprintUpdateCoordinator._is_incompatible_blueprint_issue(
+                iss_domain, iss_id, issue_entry
+            )
+        ):
+            ir.async_delete_issue(hass, DOMAIN, iss_id)
