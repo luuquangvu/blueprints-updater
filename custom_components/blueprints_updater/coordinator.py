@@ -36,7 +36,6 @@ from homeassistant.components.automation.config import (
 from homeassistant.components.automation.config import (
     async_validate_config_item as async_validate_automation_config,
 )
-from homeassistant.components.automation.const import CONF_TRIGGER_VARIABLES
 from homeassistant.components.blueprint.const import CONF_BLUEPRINT, CONF_INPUT
 from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
@@ -51,8 +50,18 @@ from homeassistant.components.template.config import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    CONF_ACTION,
+    CONF_CHOOSE,
+    CONF_CONDITION,
     CONF_DEFAULT,
+    CONF_DESCRIPTION,
+    CONF_NAME,
+    CONF_PLATFORM,
+    CONF_REPEAT,
+    CONF_SELECTOR,
     CONF_SEQUENCE,
+    CONF_SERVICE,
+    CONF_TRIGGER,
     CONF_VARIABLES,
 )
 from homeassistant.core import HomeAssistant, callback
@@ -82,7 +91,9 @@ except ImportError:
 
 from .blueprint_validation import (
     ACTION_PATH_SEGMENTS,
+    CONDITION_PATH_SEGMENTS,
     DEFAULT_SELECTOR_FILTER_PATHS,
+    PAYLOAD_ANCESTOR_KEYS,
     TRIGGER_PATH_SEGMENTS,
     StructuredRisk,
     build_template_path,
@@ -122,11 +133,14 @@ from .const import (
     CONF_CHECK_COMPATIBILITY,
     CONF_FILTER_MODE,
     CONF_SELECTED_BLUEPRINTS,
+    CONF_TRIGGERS,
     DEFAULT_AUTO_UPDATE,
     DEFAULT_CHECK_COMPATIBILITY,
     DEFAULT_MAX_BACKUPS,
     DOMAIN,
     EVENT_BLUEPRINTS_UPDATER_UPDATED,
+    HA_RESHAPED_KEYS,
+    HA_TRANSIENT_CONFIG_KEYS,
     MAX_CONCURRENT_REQUESTS,
     MAX_RESPONSE_BYTES,
     MAX_RETRIES,
@@ -351,11 +365,8 @@ class PreparedBlueprintRestore:
 MAX_HOSTNAME_CACHE_SIZE = 1024
 """Maximum number of entries in the safe hostname cache per refresh cycle."""
 
-TOP_LEVEL_SELECTOR_PRESENTATION_KEYS = frozenset({"name", "description", "label", "help"})
+TOP_LEVEL_SELECTOR_PRESENTATION_KEYS = frozenset({CONF_NAME, CONF_DESCRIPTION, "label", "help"})
 """Selector presentation keys excluded from compatibility comparisons."""
-
-_HA_RESHAPED_KEYS: Final[frozenset[str]] = frozenset({CONF_VARIABLES, CONF_TRIGGER_VARIABLES})
-"""Configuration keys reshaped or relocated into child entities by Home Assistant Core."""
 
 _LOCAL_REVISION_MISMATCH_ERROR = "Local blueprint changed; refresh and retry the update"
 _RESTORE_REVISION_MISMATCH = "revision_mismatch"
@@ -684,7 +695,7 @@ def _is_relocated_ha_key(
         True if the key was relocated into a nested section, False otherwise.
 
     """
-    if path or not isinstance(k, str) or k not in _HA_RESHAPED_KEYS:
+    if path or not isinstance(k, str) or k not in HA_RESHAPED_KEYS:
         return False
 
     for domain_k, val_sub in validated_cfg.items():
@@ -699,6 +710,72 @@ def _is_relocated_ha_key(
     return False
 
 
+def _is_transient_schema_key(
+    k: object,
+    path: tuple[str | int, ...],
+    config_obj: dict[object, object],
+) -> bool:
+    """Check if a key is transient Home Assistant schema metadata stripped by Core.
+
+    Distinguishes transient schema keys ('metadata', 'note') stripped by Core schemas
+    at action, trigger, condition, or selector levels from genuine user configuration
+    or payload fields within service data, targets, or blueprint inputs.
+
+    Args:
+        k: Configuration key being inspected.
+        path: Breadcrumb path leading to config_obj.
+        config_obj: Configuration dictionary containing k.
+
+    Returns:
+        True if k is transient schema metadata at an HA schema level, False otherwise.
+
+    """
+    if str(k) not in HA_TRANSIENT_CONFIG_KEYS:
+        return False
+
+    str_path = [p for p in path if isinstance(p, str)]
+
+    # Legitimate user payloads inside service data, target, event_data, variables
+    if any(p in PAYLOAD_ANCESTOR_KEYS for p in str_path):
+        return False
+
+    # Legitimate user blueprint inputs or metadata (unless scoped under a selector)
+    if any(p in ("input", "inputs", "blueprint") for p in str_path) and (
+        CONF_SELECTOR not in str_path
+    ):
+        return False
+
+    # Within a selector schema container
+    if CONF_SELECTOR in str_path:
+        return True
+
+    # Check if immediate parent string segment is an HA schema container
+    if str_path:
+        last_seg = str_path[-1]
+        if (
+            last_seg in ACTION_PATH_SEGMENTS
+            or last_seg in TRIGGER_PATH_SEGMENTS
+            or last_seg in CONDITION_PATH_SEGMENTS
+        ):
+            return True
+
+    # Standalone schema container evaluated without path context (empty or int-only path)
+    return any(
+        ident in config_obj
+        for ident in (
+            CONF_ACTION,
+            CONF_SERVICE,
+            CONF_PLATFORM,
+            CONF_TRIGGER,
+            CONF_CONDITION,
+            CONF_SELECTOR,
+            CONF_SEQUENCE,
+            CONF_CHOOSE,
+            CONF_REPEAT,
+        )
+    )
+
+
 def _detect_rename_or_deprecation(
     k: object,
     v: object,
@@ -706,6 +783,7 @@ def _detect_rename_or_deprecation(
     validated_cfg: dict[object, object],
     colliding_keys: set[str],
     diagnostics: ValidationDiagnostics,
+    path: tuple[str | int, ...] = (),
 ) -> None:
     """Detect renamed key or record deprecation diagnostic for missing key.
 
@@ -716,13 +794,18 @@ def _detect_rename_or_deprecation(
         validated_cfg: Full post-validation configuration dictionary.
         colliding_keys: Set of stringified keys that had collisions.
         diagnostics: ValidationDiagnostics to record discovered migrations or deprecations.
+        path: Traversal path within the configuration hierarchy.
 
     """
     src_key = str(k)
+    if _is_transient_schema_key(k, path, input_cfg):
+        return
     found_rename = False
     is_generic_scalar = v is None or isinstance(v, bool) or v in ("", 0, 1, {}, [])
     if not is_generic_scalar:
         for val_k, val_v in validated_cfg.items():
+            if _is_transient_schema_key(val_k, path, validated_cfg):
+                continue
             if val_k not in input_cfg and (val_v == v or str(val_v) == str(v)):
                 target_key = str(val_k)
                 if src_key in colliding_keys:
@@ -772,11 +855,13 @@ def _diff_nested_values(
     if (
         isinstance(v, dict)
         and len(v) == 1
-        and "triggers" in v
-        and isinstance(v["triggers"], list)
+        and CONF_TRIGGERS in v
+        and isinstance(v[CONF_TRIGGERS], list)
         and isinstance(val_target, list)
     ):
-        diff_structural_configs(v["triggers"], val_target, diagnostics, (*current_path, "triggers"))
+        diff_structural_configs(
+            v[CONF_TRIGGERS], val_target, diagnostics, (*current_path, CONF_TRIGGERS)
+        )
     elif (
         isinstance(v, dict)
         and isinstance(val_target, list)
@@ -807,10 +892,10 @@ def diff_structural_configs(
         path: Current traversal path within the configuration hierarchy.
 
     """
-    input_vars = getattr(input_cfg, "variables", None)
+    input_vars = getattr(input_cfg, CONF_VARIABLES, None)
     if isinstance(input_vars, dict):
         input_cfg = input_vars
-    validated_vars = getattr(validated_cfg, "variables", None)
+    validated_vars = getattr(validated_cfg, CONF_VARIABLES, None)
     if isinstance(validated_vars, dict):
         validated_cfg = validated_vars
     if isinstance(input_cfg, dict) and isinstance(validated_cfg, dict):
@@ -821,6 +906,8 @@ def diff_structural_configs(
         for k, v in input_cfg.items():
             current_path = (*path, k)
             if k not in validated_cfg:
+                if _is_transient_schema_key(k, path, input_cfg):
+                    continue
                 if _diff_plural_alias(
                     k, v, input_cfg, validated_cfg, diagnostics, path, current_path
                 ):
@@ -828,7 +915,7 @@ def diff_structural_configs(
                 if _is_relocated_ha_key(k, v, input_cfg, validated_cfg, path):
                     continue
                 _detect_rename_or_deprecation(
-                    k, v, input_cfg, validated_cfg, colliding_keys, diagnostics
+                    k, v, input_cfg, validated_cfg, colliding_keys, diagnostics, path
                 )
             else:
                 _diff_nested_values(v, validated_cfg[k], diagnostics, current_path)

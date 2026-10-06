@@ -4175,3 +4175,335 @@ def test_diff_structural_configs_script_variables_automation_root() -> None:
     diag_dropped = ValidationDiagnostics()
     diff_structural_configs(input_cfg_dropped, validated_cfg_dropped, diag_dropped)
     assert diag_dropped.deprecated_keys == ["legacy_var"]
+
+
+def test_diff_structural_configs_transient_metadata_and_note_ignored() -> None:
+    """Test diff_structural_configs ignores transient HA metadata and note keys."""
+    from custom_components.blueprints_updater.const import CONF_NOTE
+
+    input_cfg = {
+        "action": [
+            {
+                "action": "light.turn_on",
+                "target": {"entity_id": "light.test"},
+                "metadata": {"secondary": False},
+                CONF_NOTE: "Turn on kitchen lights",
+            }
+        ],
+        "trigger": [
+            {
+                "platform": "state",
+                "entity_id": "binary_sensor.motion",
+                "metadata": {},
+                CONF_NOTE: "Motion trigger note",
+            }
+        ],
+        "condition": [
+            {
+                "condition": "state",
+                "entity_id": "binary_sensor.motion",
+                "state": "on",
+                "metadata": {},
+                CONF_NOTE: "Motion condition note",
+            }
+        ],
+        "selector": {
+            "entity": {"domain": "binary_sensor"},
+            "metadata": {},
+            CONF_NOTE: "Select motion entity",
+        },
+    }
+    validated_cfg = {
+        "actions": [
+            {
+                "action": "light.turn_on",
+                "target": {"entity_id": "light.test"},
+            }
+        ],
+        "triggers": [
+            {
+                "platform": "state",
+                "entity_id": "binary_sensor.motion",
+            }
+        ],
+        "conditions": [
+            {
+                "condition": "state",
+                "entity_id": "binary_sensor.motion",
+                "state": "on",
+            }
+        ],
+        "selector": {
+            "entity": {"domain": "binary_sensor"},
+        },
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert "metadata" not in diagnostics.deprecated_keys
+    assert CONF_NOTE not in diagnostics.deprecated_keys
+    assert diagnostics.deprecated_keys == []
+    assert diagnostics.renamed_keys == {}
+
+
+def test_diff_structural_configs_transient_keys_preserve_genuine_deprecated_keys() -> None:
+    """Test diff_structural_configs ignores transient keys while detecting genuine deprecations."""
+    from custom_components.blueprints_updater.const import CONF_NOTE
+
+    input_cfg = {
+        "action": [
+            {
+                "action": "light.turn_on",
+                "target": {"entity_id": "light.test"},
+                "metadata": {},
+                CONF_NOTE: "Schema note",
+                "legacy_custom_key": "some_value",
+                "data": {
+                    "metadata": "user_payload_metadata",
+                    CONF_NOTE: "user_payload_note",
+                },
+            }
+        ],
+    }
+    validated_cfg = {
+        "actions": [
+            {
+                "action": "light.turn_on",
+                "target": {"entity_id": "light.test"},
+                "data": {},
+            }
+        ],
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == ["legacy_custom_key", "metadata", CONF_NOTE]
+
+
+def test_diff_structural_configs_transient_keys_preserve_data_template_payload() -> None:
+    """Test user payload fields named metadata or note under data_template are preserved."""
+    from custom_components.blueprints_updater.blueprint_validation import (
+        CONF_SERVICE_DATA_TEMPLATE,
+    )
+    from custom_components.blueprints_updater.const import CONF_NOTE
+
+    input_cfg = {
+        "action": [
+            {
+                "service": "notify.notify",
+                "target": {"entity_id": "notify.admin"},
+                "metadata": {},
+                CONF_NOTE: "Schema action note",
+                CONF_SERVICE_DATA_TEMPLATE: {
+                    "metadata": "user_payload_metadata",
+                    CONF_NOTE: "user_payload_note",
+                },
+            }
+        ],
+    }
+    validated_cfg = {
+        "actions": [
+            {
+                "action": "notify.notify",
+                "target": {"entity_id": "notify.admin"},
+                CONF_SERVICE_DATA_TEMPLATE: {},
+            }
+        ],
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == ["metadata", CONF_NOTE]
+
+
+def test_diff_structural_configs_transient_nested_control_flows() -> None:
+    """Test transient metadata and notes are ignored in nested choose, if-then, and repeat."""
+    from custom_components.blueprints_updater.const import CONF_NOTE
+
+    input_cfg = {
+        "action": [
+            {
+                "choose": [
+                    {
+                        "conditions": [
+                            {
+                                "condition": "state",
+                                "entity_id": "binary_sensor.motion",
+                                "state": "on",
+                                "metadata": {},
+                                CONF_NOTE: "Condition note",
+                            }
+                        ],
+                        "sequence": [
+                            {
+                                "action": "light.turn_on",
+                                "target": {"entity_id": "light.test"},
+                                "metadata": {},
+                                CONF_NOTE: "Sequence note",
+                            }
+                        ],
+                    }
+                ],
+                "default": [
+                    {
+                        "action": "light.turn_off",
+                        "target": {"entity_id": "light.test"},
+                        "metadata": {},
+                        CONF_NOTE: "Default note",
+                    }
+                ],
+            }
+        ]
+    }
+    validated_cfg = {
+        "actions": [
+            {
+                "choose": [
+                    {
+                        "conditions": [
+                            {
+                                "condition": "state",
+                                "entity_id": "binary_sensor.motion",
+                                "state": "on",
+                            }
+                        ],
+                        "sequence": [
+                            {
+                                "action": "light.turn_on",
+                                "target": {"entity_id": "light.test"},
+                            }
+                        ],
+                    }
+                ],
+                "default": [
+                    {
+                        "action": "light.turn_off",
+                        "target": {"entity_id": "light.test"},
+                    }
+                ],
+            }
+        ]
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == []
+    assert diagnostics.renamed_keys == {}
+
+
+def test_diff_structural_configs_user_payload_rename_detected() -> None:
+    """Test user payload field named note or metadata is correctly detected when renamed."""
+    from custom_components.blueprints_updater.const import CONF_NOTE
+
+    input_cfg = {
+        "action": [
+            {
+                "action": "notify.persistent_notification",
+                "metadata": {},
+                CONF_NOTE: "Transient action note",
+                "data": {
+                    CONF_NOTE: "Important user message",
+                },
+            }
+        ]
+    }
+    validated_cfg = {
+        "actions": [
+            {
+                "action": "notify.persistent_notification",
+                "data": {
+                    "message": "Important user message",
+                },
+            }
+        ]
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert diagnostics.deprecated_keys == []
+    assert diagnostics.renamed_keys == {CONF_NOTE: "message"}
+
+
+async def test_async_validate_local_blueprint_compatibility_metadata_not_deprecated(
+    coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Test blueprint compatibility check does not warn for HA metadata or note on actions."""
+    bp_content = """blueprint:
+  name: "Motion Activated Light"
+  domain: automation
+  input:
+    motion_entity:
+      name: Motion Sensor
+      selector:
+        entity:
+          domain: binary_sensor
+    light_target:
+      name: Light Target
+      selector:
+        target:
+          entity:
+            domain: light
+
+trigger:
+  - platform: state
+    entity_id: !input motion_entity
+    to: "on"
+    metadata: {}
+    note: "Trigger motion note"
+
+action:
+  - action: light.turn_on
+    target: !input light_target
+    metadata: {}
+    note: "Action turn on light note"
+"""
+    with patch.object(coordinator, "_get_blueprint_consumers", return_value=[]):
+        report = await coordinator.async_validate_local_blueprint_compatibility(
+            "automation/test_metadata.yaml",
+            "/config/blueprints/automation/test_metadata.yaml",
+            bp_content,
+        )
+
+    assert all("metadata" not in w for w in report.warnings)
+    assert all("note" not in w for w in report.warnings)
+    assert all("Deprecated key used: 'metadata'" not in w for w in report.warnings)
+    assert all("Deprecated key used: 'note'" not in w for w in report.warnings)
+    assert report.severity != IncompatibilitySeverity.DEPRECATION or not report.warnings
+
+
+def test_ha_key_alignment_and_direct_imports() -> None:
+    """Verify that configuration keys align with Home Assistant constants."""
+    from homeassistant.components.automation.const import CONF_TRIGGER_VARIABLES
+    from homeassistant.const import (
+        CONF_ACTION,
+        CONF_CONDITION,
+        CONF_DESCRIPTION,
+        CONF_NAME,
+        CONF_TRIGGER,
+        CONF_VARIABLES,
+    )
+
+    from custom_components.blueprints_updater.const import (
+        CONF_ACTIONS,
+        CONF_CONDITIONS,
+        CONF_NOTE,
+        CONF_TRIGGERS,
+        HA_RESHAPED_KEYS,
+        HA_TRANSIENT_CONFIG_KEYS,
+        PLURAL_CONFIG_KEYS,
+    )
+    from custom_components.blueprints_updater.coordinator import (
+        TOP_LEVEL_SELECTOR_PRESENTATION_KEYS,
+    )
+
+    assert PLURAL_CONFIG_KEYS == {
+        CONF_TRIGGER: CONF_TRIGGERS,
+        CONF_CONDITION: CONF_CONDITIONS,
+        CONF_ACTION: CONF_ACTIONS,
+    }
+    assert {"metadata", CONF_NOTE} == HA_TRANSIENT_CONFIG_KEYS
+    assert {CONF_VARIABLES, CONF_TRIGGER_VARIABLES} == HA_RESHAPED_KEYS
+    assert CONF_NAME in TOP_LEVEL_SELECTOR_PRESENTATION_KEYS
+    assert CONF_DESCRIPTION in TOP_LEVEL_SELECTOR_PRESENTATION_KEYS
+    assert "label" in TOP_LEVEL_SELECTOR_PRESENTATION_KEYS
+    assert "help" in TOP_LEVEL_SELECTOR_PRESENTATION_KEYS
