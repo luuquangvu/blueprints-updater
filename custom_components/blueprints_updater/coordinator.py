@@ -830,6 +830,12 @@ def _is_relocated_to_options(
         True if the key now lives under the validated ``options`` mapping.
 
     """
+    if (
+        CONF_TRIGGER not in input_cfg
+        and CONF_CONDITION not in input_cfg
+        and CONF_PLATFORM not in input_cfg
+    ):
+        return False
     options = validated_cfg.get(CONF_OPTIONS)
     return CONF_OPTIONS not in input_cfg and isinstance(options, dict) and k in options
 
@@ -984,6 +990,16 @@ def diff_structural_configs(
     validated_vars = getattr(validated_cfg, CONF_VARIABLES, None)
     if isinstance(validated_vars, dict):
         validated_cfg = validated_vars
+    if (
+        isinstance(input_cfg, list)
+        and isinstance(validated_cfg, dict)
+        and len(validated_cfg) == 1
+        and isinstance(validated_cfg.get(CONF_SEQUENCE), list)
+    ):
+        diff_structural_configs(
+            input_cfg, validated_cfg[CONF_SEQUENCE], diagnostics, (*path, CONF_SEQUENCE)
+        )
+        return
     if isinstance(input_cfg, dict) and isinstance(validated_cfg, dict):
         if _is_parallel_sequence_wrapper(input_cfg, validated_cfg):
             diff_structural_configs(
@@ -1000,6 +1016,11 @@ def diff_structural_configs(
                 if _is_transient_schema_key(k, path, input_cfg):
                     continue
                 if _is_relocated_to_options(k, input_cfg, validated_cfg):
+                    options_dict = validated_cfg.get(CONF_OPTIONS)
+                    if isinstance(options_dict, dict) and k in options_dict:
+                        _diff_nested_values(
+                            v, options_dict[k], diagnostics, (*current_path, CONF_OPTIONS, k)
+                        )
                     continue
                 if _is_expanded_condition_shorthand(k, validated_cfg):
                     _diff_nested_values(
