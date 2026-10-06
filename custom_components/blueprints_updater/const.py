@@ -2,11 +2,45 @@
 
 import re
 from enum import StrEnum
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from homeassistant.components.automation.const import CONF_TRIGGER_VARIABLES
-from homeassistant.const import CONF_MODE, CONF_VARIABLES
+from homeassistant.const import (
+    CONF_ACTION,
+    CONF_CONDITION,
+    CONF_MODE,
+    CONF_TRIGGER,
+    CONF_VARIABLES,
+)
 from homeassistant.helpers.script import CONF_MAX, CONF_MAX_EXCEEDED
+
+if TYPE_CHECKING:
+    from homeassistant.const import (
+        CONF_ACTIONS,
+        CONF_CONDITIONS,
+        CONF_NOTE,
+        CONF_TRIGGERS,
+    )
+else:
+    try:
+        from homeassistant.const import CONF_ACTIONS
+    except ImportError:
+        CONF_ACTIONS = "actions"
+
+    try:
+        from homeassistant.const import CONF_CONDITIONS
+    except ImportError:
+        CONF_CONDITIONS = "conditions"
+
+    try:
+        from homeassistant.const import CONF_NOTE
+    except ImportError:
+        CONF_NOTE = "note"
+
+    try:
+        from homeassistant.const import CONF_TRIGGERS
+    except ImportError:
+        CONF_TRIGGERS = "triggers"
 
 DOMAIN = "blueprints_updater"
 BLUEPRINTS_DATA_DIR = "blueprints"
@@ -80,11 +114,23 @@ BLUEPRINT_ROUNDTRIP_INVARIANT_KEYS: Final[tuple[str, ...]] = (
 )
 
 PLURAL_CONFIG_KEYS: Final[dict[str, str]] = {
-    "trigger": "triggers",
-    "condition": "conditions",
-    "action": "actions",
+    CONF_TRIGGER: CONF_TRIGGERS,
+    CONF_CONDITION: CONF_CONDITIONS,
+    CONF_ACTION: CONF_ACTIONS,
 }
 """Mapping of top-level singular configuration keys to their plural counterparts."""
+
+HA_RESHAPED_KEYS: Final[frozenset[str]] = frozenset({CONF_VARIABLES, CONF_TRIGGER_VARIABLES})
+"""Configuration keys reshaped or relocated into child entities by Home Assistant Core."""
+
+HA_TRANSIENT_CONFIG_KEYS: Final[frozenset[str]] = frozenset({"metadata", CONF_NOTE})
+"""Configuration keys stripped by Home Assistant Core schemas (UI metadata and notes).
+
+Note:
+    Home Assistant Core does not define a CONF_METADATA constant in homeassistant.const;
+    HA Core hardcodes the literal "metadata" across all action, trigger, condition,
+    and selector schemas (e.g. vol.Remove("metadata"): dict).
+"""
 
 
 class SourceDomain(StrEnum):

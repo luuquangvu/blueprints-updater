@@ -30,7 +30,11 @@ else:
         import voluptuous as vol
 from homeassistant.components.automation.config import AUTOMATION_BLUEPRINT_SCHEMA
 from homeassistant.components.automation.const import CONF_TRIGGER_VARIABLES
-from homeassistant.components.blueprint.const import CONF_BLUEPRINT, CONF_INPUT
+from homeassistant.components.blueprint.const import (
+    CONF_BLUEPRINT,
+    CONF_INPUT,
+    CONF_SOURCE_URL,
+)
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.const import (
     ATTR_AREA_ID,
@@ -43,9 +47,17 @@ from homeassistant.const import (
     CONF_CONDITIONS,
     CONF_DEFAULT,
     CONF_DOMAIN,
+    CONF_ELSE,
+    CONF_EVENT_DATA,
     CONF_IF,
+    CONF_PLATFORM,
+    CONF_SELECTOR,
+    CONF_SEQUENCE,
     CONF_SERVICE,
+    CONF_SERVICE_DATA,
+    CONF_SERVICE_TEMPLATE,
     CONF_TARGET,
+    CONF_THEN,
     CONF_TRIGGER,
     CONF_TRIGGERS,
     CONF_UNTIL,
@@ -55,12 +67,17 @@ from homeassistant.const import (
 )
 
 if TYPE_CHECKING:
-    from homeassistant.const import ATTR_CONFIG_ENTRY_ID
+    from homeassistant.const import ATTR_CONFIG_ENTRY_ID, CONF_SERVICE_DATA_TEMPLATE
 else:
     try:
         from homeassistant.const import ATTR_CONFIG_ENTRY_ID
     except ImportError:
         ATTR_CONFIG_ENTRY_ID = "config_entry_id"
+
+    try:
+        from homeassistant.const import CONF_SERVICE_DATA_TEMPLATE
+    except ImportError:
+        CONF_SERVICE_DATA_TEMPLATE = "data_template"
 from homeassistant.exceptions import HomeAssistantError, TemplateError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector as ha_selector
@@ -71,6 +88,7 @@ from jinja2 import nodes
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 from .const import (
+    CONF_ACTIONS,
     PLURAL_CONFIG_KEYS,
     BlueprintRiskType,
     FunctionalDomain,
@@ -198,8 +216,8 @@ _ALLOWED_TEMPLATE_EXTENSION: Final[str] = ".jinja"
 _CUSTOM_TEMPLATES_FOLDER: Final[str] = "custom_templates"
 _DEFAULT_DUMMY_VALUE: Final[str] = "test.dummy"
 _DEFAULT_SELECT_OPTION: Final[str] = "option1"
-_CONF_SELECTOR: Final[str] = "selector"
-_CONF_SOURCE_URL: Final[str] = "source_url"
+_CONF_SELECTOR: Final[str] = CONF_SELECTOR
+_CONF_SOURCE_URL: Final[str] = CONF_SOURCE_URL
 _CONF_MANDATORY: Final[str] = "mandatory"
 _UTF8_ENCODING: Final[str] = "utf-8"
 _ROOT_PATH: Final[str] = "root"
@@ -1354,15 +1372,31 @@ _CONDITION_PATH_SEGMENTS: Final[frozenset[str]] = frozenset(
     {CONF_CONDITION, CONF_CONDITIONS, CONF_IF, CONF_WHILE, CONF_UNTIL}
 )
 _ACTION_PATH_SEGMENTS: Final[frozenset[str]] = frozenset(
-    {CONF_ACTION, "actions", "sequence", "then", "else", CONF_DEFAULT}
+    {CONF_ACTION, CONF_ACTIONS, CONF_SEQUENCE, CONF_THEN, CONF_ELSE, CONF_DEFAULT}
 )
 ACTION_PATH_SEGMENTS: Final[frozenset[str]] = _ACTION_PATH_SEGMENTS
 TRIGGER_PATH_SEGMENTS: Final[frozenset[str]] = _TRIGGER_PATH_SEGMENTS
+CONDITION_PATH_SEGMENTS: Final[frozenset[str]] = _CONDITION_PATH_SEGMENTS
 _PAYLOAD_ANCESTOR_KEYS: Final[frozenset[str]] = frozenset(
-    {"data", "event_data", CONF_VARIABLES, CONF_TARGET}
+    {
+        CONF_SERVICE_DATA,
+        CONF_SERVICE_DATA_TEMPLATE,
+        CONF_SERVICE_TEMPLATE,
+        CONF_EVENT_DATA,
+        CONF_VARIABLES,
+        CONF_TARGET,
+        "data",
+        "data_template",
+        "service_data",
+        "service_template",
+        "event_data",
+        "variables",
+        "target",
+    }
 )
+PAYLOAD_ANCESTOR_KEYS: Final[frozenset[str]] = _PAYLOAD_ANCESTOR_KEYS
 _FIXED_MODERNIZATION_KEYS: Final[frozenset[str]] = frozenset(
-    {CONF_SERVICE, "service_template", "data_template", "platform"}
+    {CONF_SERVICE, CONF_SERVICE_TEMPLATE, CONF_SERVICE_DATA_TEMPLATE, CONF_PLATFORM}
 )
 
 
