@@ -50,6 +50,7 @@ from homeassistant.const import (
     CONF_ELSE,
     CONF_EVENT_DATA,
     CONF_IF,
+    CONF_PARALLEL,
     CONF_PLATFORM,
     CONF_SELECTOR,
     CONF_SEQUENCE,
@@ -2179,23 +2180,137 @@ def _path_segments_match(seg1: str | int, seg2: str | int) -> bool:
     return isinstance(seg1, str) and isinstance(seg2, str) and _get_path_segment_alias(seg1) == seg2
 
 
+def _traverse_config_path(config: object, path: Sequence[object]) -> object | None:
+    """Traverse a path through config without path normalization.
+
+    Args:
+        config: Nested configuration object to traverse.
+        path: Sequence of key strings or integer indices.
+
+    Returns:
+        Resolved value at path, or None if path cannot be traversed.
+
+    """
+    current = config
+    for seg in path:
+        if isinstance(current, Mapping):
+            if seg in current:
+                current = current[seg]
+            elif (
+                isinstance(seg, str)
+                and (alias := _get_path_segment_alias(seg)) is not None
+                and alias in current
+            ):
+                current = current[alias]
+            else:
+                return None
+        elif isinstance(current, (list, tuple)):
+            idx: int | None = None
+            if isinstance(seg, int):
+                idx = seg
+            elif isinstance(seg, str) and seg.isdigit():
+                idx = int(seg)
+            if idx is not None and 0 <= idx < len(current):
+                current = current[idx]
+            else:
+                return None
+        else:
+            return None
+    return current
+
+
+def normalize_config_path(
+    path: Sequence[object],
+    config: object = None,
+) -> tuple[str | int, ...]:
+    """Normalize validation error path by removing artificial schema fallback indices.
+
+    Home Assistant validates parallel actions using:
+        vol.Any(_SCRIPT_SEQUENCE_SCHEMA, _parallel_sequence_action)
+    where _parallel_sequence_action is:
+        vol.All(SCRIPT_SCHEMA, lambda config: {CONF_SEQUENCE: config})
+    When validation fails inside an action within an explicit parallel sequence,
+    Voluptuous falls back to _parallel_sequence_action, which wraps the sequence dictionary
+    into a 1-element list, inserting an artificial index '0' directly after the parallel index
+    (e.g. ('parallel', 0, 0, 'sequence', ...) instead of ('parallel', 0, 'sequence', ...)).
+
+    When config is provided, this helper confirms against the surrounding configuration
+    structure: it removes the artificial index 0 only if the node at `parallel -> index`
+    is a Mapping containing 'sequence'. If the node is a Sequence (list/tuple), the index
+    is preserved as a legitimate nested list index.
+
+    Args:
+        path: Path sequence of dictionary keys and list indices.
+        config: Optional nested configuration object to validate surrounding structure.
+
+    Returns:
+        Normalized path tuple matching configuration data structure.
+
+    """
+    if not path:
+        return ()
+
+    result: list[str | int] = []
+    i = 0
+    path_len = len(path)
+    while i < path_len:
+        seg = path[i]
+        # Detect artificial Voluptuous wrapper from _parallel_sequence_action fallback:
+        # seg is 'parallel' (or alias), followed by an item index (int or digit str),
+        # followed by artificial index 0 (or "0"), followed specifically by 'sequence'
+        # (CONF_SEQUENCE).
+        if seg in (CONF_PARALLEL, "parallel") and i + 3 < path_len:
+            cand_zero = path[i + 2]
+            key_seg = path[i + 3]
+            if cand_zero in (0, "0") and key_seg in (CONF_SEQUENCE, "sequence"):
+                next_seg = path[i + 1]
+                idx_val: int | None = (
+                    next_seg
+                    if isinstance(next_seg, int)
+                    else (
+                        int(next_seg) if isinstance(next_seg, str) and next_seg.isdigit() else None
+                    )
+                )
+                if idx_val is not None:
+                    seg_val: str | int = seg if isinstance(seg, (str, int)) else str(seg)
+                    if config is not None:
+                        prefix = (*result, seg_val, idx_val)
+                        target_node = _traverse_config_path(config, prefix)
+                        if isinstance(target_node, Mapping) and (
+                            CONF_SEQUENCE in target_node or "sequence" in target_node
+                        ):
+                            result.extend((seg_val, idx_val))
+                            # Skip the artificial index 0 (path[i + 2])
+                            i += 3
+                            continue
+
+        result.append(seg if isinstance(seg, (str, int)) else str(seg))
+        i += 1
+
+    return tuple(result)
+
+
 def _path_starts_with(
-    full_path: Sequence[str | int],
-    prefix_path: Sequence[str | int],
+    full_path: Sequence[object],
+    prefix_path: Sequence[object],
+    config: object = None,
 ) -> bool:
     """Check if full_path begins with prefix_path, allowing plural/singular aliases.
 
     Args:
         full_path: Traversal path to test.
         prefix_path: Prefix path to match against.
+        config: Optional configuration object to validate surrounding structure.
 
     Returns:
         True if full_path begins with prefix_path.
 
     """
-    if len(full_path) < len(prefix_path):
+    norm_full = normalize_config_path(full_path, config=config)
+    norm_prefix = normalize_config_path(prefix_path, config=config)
+    if len(norm_full) < len(norm_prefix):
         return False
-    return all(_path_segments_match(full_path[i], prefix_path[i]) for i in range(len(prefix_path)))
+    return all(_path_segments_match(norm_full[i], norm_prefix[i]) for i in range(len(norm_prefix)))
 
 
 @dataclass(frozen=True)
@@ -2205,7 +2320,7 @@ class SyntheticDummyEntry:
     Attributes:
         input_name: Blueprint input configuration name.
         paths: Tuple of parsed YAML path tuples where the input is referenced.
-        raw_value: The derived dummy value.
+        raw_value: The derived dummy value or None for inputs with an explicit None default.
         synthetic_ids: Frozenset of synthetic identifier tokens.
         ordinary_strings: Frozenset of ordinary string values generated for this input.
 
@@ -2219,11 +2334,11 @@ class SyntheticDummyEntry:
 
 
 class SyntheticDummyValues(set[str]):
-    """Collection of synthetic dummy identifiers retaining originating input and path metadata.
+    """Collection of dummy identifiers and null defaults retaining input metadata.
 
     Inherits from set[str] for backward compatibility with callers and tests expecting
     a set of synthetic dummy string identifiers, while retaining input names, substituted
-    paths, and ordinary value mappings.
+    paths, ordinary value mappings, and inputs with explicit null defaults.
     """
 
     def __init__(
@@ -2235,7 +2350,7 @@ class SyntheticDummyValues(set[str]):
 
         Args:
             synthetic_ids: Iterable of synthetic dummy string identifiers.
-            entries: Iterable of SyntheticDummyEntry records for required inputs.
+            entries: Iterable of SyntheticDummyEntry records for required or null-default inputs.
 
         """
         super().__init__(synthetic_ids)
@@ -2256,11 +2371,11 @@ class SyntheticDummyValues(set[str]):
 
     def maps_failing_path_to_input(
         self,
-        failing_path: Sequence[str | int],
+        failing_path: Sequence[object],
         resolved_val: object = None,
         config: Mapping[str, object] | None = None,
     ) -> bool:
-        """Check if a failing configuration path maps to an input that produced the dummy value.
+        """Check if a failing path maps to a dummy or null-default input.
 
         Args:
             failing_path: Path tuple extracted from the validation error.
@@ -2268,17 +2383,32 @@ class SyntheticDummyValues(set[str]):
             config: Optional substituted configuration mapping to resolve failing_path.
 
         Returns:
-            True if failing_path maps to an input whose dummy value produced this error.
+            True if failing_path maps to an input whose dummy value or null default
+            produced this error.
 
         """
+        norm_failing = normalize_config_path(failing_path, config=config)
         if resolved_val is None and config is not None:
-            resolved_val = _resolve_config_path(config, failing_path)
+            resolved_val = _resolve_config_path(config, norm_failing)
 
         if resolved_val is None:
+            for entry in self.entries:
+                paths = entry.paths
+                if entry.raw_value is None:
+                    for inp_path in paths:
+                        norm_inp = normalize_config_path(inp_path, config=config)
+                        if (
+                            len(norm_failing) == len(norm_inp)
+                            and _path_starts_with(norm_failing, norm_inp, config=config)
+                            and (config is None or _resolve_config_path(config, norm_inp) is None)
+                        ):
+                            return True
             return False
 
         for entry in self.entries:
-            if not any(_path_starts_with(failing_path, inp_path) for inp_path in entry.paths):
+            if not any(
+                _path_starts_with(norm_failing, inp_path, config=config) for inp_path in entry.paths
+            ):
                 continue
             if isinstance(resolved_val, str):
                 if (
@@ -2303,14 +2433,15 @@ class SyntheticDummyValues(set[str]):
 def extract_synthetic_dummy_values(
     blueprint_dict: Mapping[str, object],
 ) -> SyntheticDummyValues:
-    """Extract synthetic dummy values for a blueprint, retaining input and path metadata.
+    """Extract synthetic dummy values and null defaults retaining input metadata.
 
     Args:
         blueprint_dict: Parsed blueprint dictionary.
 
     Returns:
         SyntheticDummyValues collection retaining each generated dummy's originating
-        input name, substituted paths, synthetic identifier tokens, and ordinary values.
+        input name, substituted paths, synthetic identifier tokens, ordinary values,
+        and entries for inputs with explicit null defaults.
 
     """
     bp_meta = blueprint_dict.get("blueprint")
@@ -2328,6 +2459,17 @@ def extract_synthetic_dummy_values(
 
     for input_name, input_cfg in input_configs.items():
         if CONF_DEFAULT in input_cfg:
+            if input_cfg[CONF_DEFAULT] is None:
+                paths = tuple(input_paths_map.get(input_name, ()))
+                entries.append(
+                    SyntheticDummyEntry(
+                        input_name=input_name,
+                        paths=paths,
+                        raw_value=None,
+                        synthetic_ids=frozenset(),
+                        ordinary_strings=frozenset(),
+                    )
+                )
             continue
         dummy_val = derive_dummy_input_value(input_name, input_cfg, blueprint_dict)
         if dummy_val is None:
@@ -2390,11 +2532,15 @@ def _error_identifies_synthetic_id(
     )
 
 
-def _extract_config_path_from_error(err: Exception) -> tuple[str | int, ...] | None:
+def _extract_config_path_from_error(
+    err: Exception,
+    config: object = None,
+) -> tuple[str | int, ...] | None:
     """Extract configuration path from structured exception attributes.
 
     Args:
         err: Validation exception to inspect.
+        config: Optional configuration object to validate structure against.
 
     Returns:
         Tuple of path segments if a structured path was identified, or None.
@@ -2409,16 +2555,16 @@ def _extract_config_path_from_error(err: Exception) -> tuple[str | int, ...] | N
             continue
         path = getattr(candidate, "path", None)
         if isinstance(path, (list, tuple)) and path:
-            return tuple(path)
+            return normalize_config_path(tuple(path), config=config)
         errors = getattr(candidate, "errors", None)
         if isinstance(errors, (list, tuple)) and errors:
             first_path = getattr(errors[0], "path", None)
             if isinstance(first_path, (list, tuple)) and first_path:
-                return tuple(first_path)
+                return normalize_config_path(tuple(first_path), config=config)
     return None
 
 
-def _resolve_config_path(config: object, path: Sequence[str | int]) -> object | None:
+def _resolve_config_path(config: object, path: Sequence[object]) -> object | None:
     """Resolve a path of keys and indices within a nested configuration object.
 
     Args:
@@ -2429,32 +2575,8 @@ def _resolve_config_path(config: object, path: Sequence[str | int]) -> object | 
         Resolved value at path, or None if path cannot be traversed.
 
     """
-    current = config
-    for seg in path:
-        if isinstance(current, Mapping):
-            if seg in current:
-                current = current[seg]
-            elif (
-                isinstance(seg, str)
-                and (alias := _get_path_segment_alias(seg)) is not None
-                and alias in current
-            ):
-                current = current[alias]
-            else:
-                return None
-        elif isinstance(current, (list, tuple)):
-            idx: int | None = None
-            if isinstance(seg, int):
-                idx = seg
-            elif isinstance(seg, str) and seg.isdigit():
-                idx = int(seg)
-            if idx is not None and 0 <= idx < len(current):
-                current = current[idx]
-            else:
-                return None
-        else:
-            return None
-    return current
+    norm_path = normalize_config_path(path, config=config)
+    return _traverse_config_path(config, norm_path)
 
 
 def _exception_identifies_synthetic_id(
@@ -2551,7 +2673,7 @@ def _is_failing_path_dummy_error(
     synthetic_values: SyntheticDummyValues | set[str] | None = None,
     substituted_config: Mapping[str, object] | None = None,
 ) -> bool:
-    """Determine if a failing configuration path maps to a synthetic dummy input.
+    """Determine if a failing configuration path maps to a synthetic dummy or null-default input.
 
     Args:
         err: Exception raised during baseline validation.
@@ -2559,10 +2681,12 @@ def _is_failing_path_dummy_error(
         substituted_config: Optional fully substituted blueprint configuration dictionary.
 
     Returns:
-        True if the failing path resolves to a dummy device or entity input.
+        True if the failing path resolves to a dummy device/entity or null-default input.
 
     """
-    if substituted_config is not None and (failing_path := _extract_config_path_from_error(err)):
+    if substituted_config is not None and (
+        failing_path := _extract_config_path_from_error(err, config=substituted_config)
+    ):
         resolved = _resolve_config_path(substituted_config, failing_path)
         if isinstance(synthetic_values, SyntheticDummyValues):
             return synthetic_values.maps_failing_path_to_input(
@@ -2581,11 +2705,11 @@ def is_dummy_validation_error(
     synthetic_values: SyntheticDummyValues | set[str] | None = None,
     substituted_config: Mapping[str, object] | None = None,
 ) -> bool:
-    """Determine if a validation failure was caused by synthetic dummy inputs.
+    """Determine if a validation failure was caused by synthetic dummy inputs or null defaults.
 
     Identifies errors caused by synthetic dummy inputs (such as devices or entities
-    that do not exist in the Home Assistant registry) without relying on fragile
-    localized English error string regexes.
+    that do not exist in the Home Assistant registry) or inputs with explicit null defaults
+    without relying on fragile localized English error string regexes.
 
     Args:
         err: Exception raised during baseline validation.
@@ -2593,7 +2717,8 @@ def is_dummy_validation_error(
         substituted_config: Optional fully substituted blueprint configuration dictionary.
 
     Returns:
-        True if the failure is attributable to dummy device/entity inputs.
+        True if the failure is attributable to dummy device/entity inputs
+        or null-default inputs.
 
     """
     # 0. Template rendering errors are never synthetic dummy input validation failures:

@@ -43,6 +43,7 @@ from custom_components.blueprints_updater.blueprint_validation import (
     is_dummy_validation_error,
     is_synthetic_identifier,
     modernize_legacy_blueprint_yaml,
+    normalize_config_path,
 )
 from custom_components.blueprints_updater.const import (
     CONF_CHECK_COMPATIBILITY,
@@ -64,6 +65,7 @@ from custom_components.blueprints_updater.coordinator import (
     ValidationDiagnostics,
     capture_structural_validation_diagnostics,
     diff_structural_configs,
+    format_validation_error,
 )
 from custom_components.blueprints_updater.file_store import (
     BlueprintFileStore,
@@ -5191,3 +5193,548 @@ async def test_async_setup_skips_migration_when_integration_version_already_pers
 
     assert delete_spy.call_count == 0
     assert (DOMAIN, incompat_id) in registry.issues
+
+
+def test_normalize_config_path() -> None:
+    """Test normalize_config_path collapses Voluptuous parallel schema fallback indices."""
+    bp_config: dict[str, object] = {
+        "actions": [
+            {
+                "choose": [
+                    {
+                        "sequence": [
+                            {
+                                "choose": [
+                                    {
+                                        "sequence": [
+                                            None,
+                                            None,
+                                            {"parallel": [{"sequence": [{"target": None}]}]},
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+
+    # 1. Standard Voluptuous fallback path for parallel explicit sequence:
+    raw_path = (
+        "actions",
+        0,
+        "choose",
+        0,
+        "sequence",
+        0,
+        "choose",
+        0,
+        "sequence",
+        2,
+        "parallel",
+        0,
+        0,
+        "sequence",
+        0,
+        "target",
+    )
+    expected = (
+        "actions",
+        0,
+        "choose",
+        0,
+        "sequence",
+        0,
+        "choose",
+        0,
+        "sequence",
+        2,
+        "parallel",
+        0,
+        "sequence",
+        0,
+        "target",
+    )
+    # When confirmed by configuration structure (mapping with sequence), index 0 is removed:
+    assert normalize_config_path(raw_path, config=bp_config) == expected
+
+    # 2. Parallel sequence action with string digit indices:
+    raw_str_indices = ["parallel", "1", "0", "sequence", 0, "service"]
+    str_config: dict[str, object] = {"parallel": [None, {"sequence": [{"service": None}]}]}
+    assert normalize_config_path(raw_str_indices, config=str_config) == (
+        "parallel",
+        1,
+        "sequence",
+        0,
+        "service",
+    )
+
+    # 3. Legitimate nested lists inside parallel preserve list indices:
+    nested_config: dict[str, object] = {
+        "actions": [{"parallel": [[{"sequence": [{"target": None}]}]]}]
+    }
+    raw_nested_path = ("actions", 0, "parallel", 0, 0, "sequence", 0, "target")
+    assert normalize_config_path(raw_nested_path, config=nested_config) == raw_nested_path
+
+    # 4. Without config or unconfirmed structure, index is preserved:
+    assert normalize_config_path(raw_path) == raw_path
+
+    # 5. Shorthand parallel actions preserve indices:
+    raw_shorthand = ("parallel", 0, 0, "target")
+    assert normalize_config_path(raw_shorthand, config=bp_config) == ("parallel", 0, 0, "target")
+
+    # 6. Already normalized path remains unchanged:
+    already_norm = ("parallel", 0, "sequence", 0, "target")
+    assert normalize_config_path(already_norm, config=bp_config) == already_norm
+
+    # 7. Empty path returns empty tuple:
+    assert normalize_config_path(()) == ()
+
+    # 8. Non-parallel paths untouched:
+    non_parallel = ("choose", 0, "sequence", 0, "action")
+    assert normalize_config_path(non_parallel) == non_parallel
+
+
+def test_format_validation_error_normalizes_parallel_fallback_paths() -> None:
+    """Test format_validation_error normalizes artificial schema indices in Voluptuous errors."""
+    bp_config: dict[str, object] = {
+        "actions": [
+            {
+                "choose": [
+                    {
+                        "sequence": [
+                            {
+                                "choose": [
+                                    {
+                                        "sequence": [
+                                            None,
+                                            None,
+                                            {"parallel": [{"sequence": [{"target": None}]}]},
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    err = vol.Invalid(
+        "expected a mapping",
+        path=[
+            "actions",
+            0,
+            "choose",
+            0,
+            "sequence",
+            0,
+            "choose",
+            0,
+            "sequence",
+            2,
+            "parallel",
+            0,
+            0,
+            "sequence",
+            0,
+            "target",
+        ],
+    )
+    formatted = format_validation_error(err, config=bp_config)
+    expected_msg = (
+        "At actions -> 0 -> choose -> 0 -> sequence -> 0 -> choose -> 0 -> sequence "
+        "-> 2 -> parallel -> 0 -> sequence -> 0 -> target: expected a mapping"
+    )
+    assert formatted == expected_msg
+
+    # Legitimate nested list preserves original path:
+    nested_config: dict[str, object] = {
+        "actions": [{"parallel": [[{"sequence": [{"target": None}]}]]}]
+    }
+    nested_err = vol.Invalid(
+        "expected a mapping",
+        path=["actions", 0, "parallel", 0, 0, "sequence", 0, "target"],
+    )
+    formatted_nested = format_validation_error(nested_err, config=nested_config)
+    assert (
+        formatted_nested
+        == "At actions -> 0 -> parallel -> 0 -> 0 -> sequence -> 0 -> target: expected a mapping"
+    )
+
+    # Without config, path is preserved as-is:
+    formatted_unconfirmed = format_validation_error(err)
+    assert "parallel -> 0 -> 0 -> sequence" in formatted_unconfirmed
+
+
+def test_derive_substituted_baseline_config_with_target_selector(hass) -> None:
+    """Test _derive_substituted_baseline_config synthesizes dummy values for target inputs."""
+    from homeassistant.components.blueprint.models import Blueprint
+
+    from custom_components.blueprints_updater.blueprint_validation import get_blueprint_schema
+
+    schema = get_blueprint_schema("automation")
+    bp_dict: dict[str, object] = {
+        "blueprint": {
+            "name": "Target Selector Test",
+            "domain": "automation",
+            "input": {
+                "target_input": {
+                    "name": "Target Input",
+                    "selector": {"target": {}},
+                },
+                "safe_default_input": {
+                    "name": "Safe Input",
+                    "default": "light.living_room",
+                    "selector": {"entity": {}},
+                },
+            },
+        },
+        "trigger": [{"platform": "state", "entity_id": "binary_sensor.motion"}],
+        "action": [
+            {
+                "service": "light.turn_on",
+                "target": Input("target_input"),
+                "data": {"entity_id": Input("safe_default_input")},
+            }
+        ],
+    }
+
+    bp_obj = Blueprint(bp_dict, schema=schema)
+    res = BlueprintUpdateCoordinator._derive_substituted_baseline_config(
+        bp_dict, bp_obj, "automation/target_test.yaml", FunctionalDomain.AUTOMATION
+    )
+    assert res is not None
+    # Required target must have been synthesized into a valid mapping to satisfy SERVICE_SCHEMA
+    actions = res.get("action") or res.get("actions")
+    assert isinstance(actions, list)
+    assert len(actions) == 1
+    assert isinstance(actions[0], dict)
+    assert isinstance(actions[0].get("target"), dict)
+    assert actions[0]["target"].get("entity_id") == "test.dummy"
+    # Safe default must be preserved as defined by author
+    assert actions[0].get("data", {}).get("entity_id") == "light.living_room"
+
+
+async def test_baseline_validation_nested_choose_parallel_sequence_suppressed(
+    coordinator: BlueprintUpdateCoordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test baseline validation suppresses dummy target errors in nested parallel actions."""
+    from homeassistant.components.blueprint.models import Blueprint
+
+    from custom_components.blueprints_updater.blueprint_validation import get_blueprint_schema
+
+    schema = get_blueprint_schema("automation")
+    bp_dict: dict[str, object] = {
+        "blueprint": {
+            "name": "Complex Choose Parallel Automation",
+            "domain": "automation",
+            "input": {
+                "target_device": {
+                    "name": "Target Device",
+                    "default": None,
+                    "selector": {"target": {}},
+                },
+            },
+        },
+        "triggers": [{"platform": "homeassistant", "event": "start"}],
+        "actions": [
+            {
+                "choose": [
+                    {
+                        "conditions": [],
+                        "sequence": [
+                            {
+                                "choose": [
+                                    {
+                                        "conditions": [],
+                                        "sequence": [
+                                            {"action": "test.step_1"},
+                                            {"action": "test.step_2"},
+                                            {
+                                                "parallel": [
+                                                    {
+                                                        "sequence": [
+                                                            {
+                                                                "action": "light.turn_on",
+                                                                "target": Input("target_device"),
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                        ],
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ]
+            }
+        ],
+    }
+
+    bp_obj = Blueprint(bp_dict, schema=schema)
+    diagnostics = ValidationDiagnostics()
+
+    # Simulate domain validator failing on synthetic entity under parallel fallback path
+    async def _mock_run_domain_validator(
+        domain: FunctionalDomain, rel_path: str, substituted: dict[str, object]
+    ) -> None:
+        """Simulate domain validation failure under parallel Voluptuous fallback path."""
+        raise vol.Invalid(
+            "expected a mapping",
+            path=[
+                "actions",
+                0,
+                "choose",
+                0,
+                "sequence",
+                0,
+                "choose",
+                0,
+                "sequence",
+                2,
+                "parallel",
+                0,
+                0,
+                "sequence",
+                0,
+                "target",
+            ],
+        )
+
+    monkeypatch.setattr(coordinator, "_async_run_domain_validator", _mock_run_domain_validator)
+
+    # Must complete without raising schema validation errors
+    await coordinator._async_run_baseline_validation(
+        bp_dict,
+        bp_obj,
+        "automation/nested_choose_parallel.yaml",
+        FunctionalDomain.AUTOMATION,
+        diagnostics,
+    )
+    assert not diagnostics.deprecated_keys
+    assert not diagnostics.renamed_keys
+    assert not diagnostics.reports
+    assert not diagnostics.new_issues
+
+    # Non-dummy validation error on real action must not be suppressed
+    async def _mock_run_domain_validator_real_err(*args: object, **kwargs: object) -> None:
+        """Simulate real action validation failure."""
+        raise vol.Invalid(
+            "Service not found: light.nonexistent",
+            path=["actions", 0, "choose", 0, "sequence", 0, "action"],
+        )
+
+    monkeypatch.setattr(
+        coordinator,
+        "_async_run_domain_validator",
+        _mock_run_domain_validator_real_err,
+    )
+    with pytest.raises(vol.Invalid, match=r"Service not found: light\.nonexistent"):
+        await coordinator._async_run_baseline_validation(
+            bp_dict,
+            bp_obj,
+            "automation/nested_choose_parallel.yaml",
+            FunctionalDomain.AUTOMATION,
+            diagnostics,
+        )
+
+
+async def test_baseline_compatibility_nested_choose_parallel_live_ha_core(
+    coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Test baseline compatibility on nested choose-parallel blueprint with live HA Core."""
+    rel_path = "automation/nested_choose_parallel.yaml"
+    path = "/config/blueprints/automation/nested_choose_parallel.yaml"
+    content = (
+        "blueprint:\n"
+        "  name: Complex Choose Parallel Automation\n"
+        "  domain: automation\n"
+        "  input:\n"
+        "    target_device:\n"
+        "      name: Target Device\n"
+        "      default: null\n"
+        "      selector:\n"
+        "        target: {}\n"
+        "triggers:\n"
+        "  - platform: homeassistant\n"
+        "    event: start\n"
+        "actions:\n"
+        "  - choose:\n"
+        "      - conditions: []\n"
+        "        sequence:\n"
+        "          - choose:\n"
+        "              - conditions: []\n"
+        "                sequence:\n"
+        "                  - parallel:\n"
+        "                      - sequence:\n"
+        "                          - action: light.turn_on\n"
+        "                            target: !input target_device\n"
+    )
+
+    report = await coordinator.async_validate_local_blueprint_compatibility(rel_path, path, content)
+    assert report.errors == []
+    assert report.severity is None
+
+
+def test_is_dummy_validation_error_with_parallel_fallback_path() -> None:
+    """Test is_dummy_validation_error suppresses errors with artificial parallel indices."""
+    bp_dict: dict[str, object] = {
+        "blueprint": {
+            "name": "Dummy Parallel Test",
+            "domain": "automation",
+            "input": {
+                "parallel_target": {
+                    "name": "Parallel Target",
+                    "selector": {"target": {}},
+                }
+            },
+        },
+        "actions": [
+            {
+                "parallel": [
+                    {
+                        "sequence": [
+                            {
+                                "action": "light.turn_on",
+                                "target": Input("parallel_target"),
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
+    }
+
+    synthetic = extract_synthetic_dummy_values(bp_dict)
+    assert "test.dummy" in synthetic
+
+    substituted_config: dict[str, object] = {
+        "actions": [
+            {
+                "parallel": [
+                    {
+                        "sequence": [
+                            {
+                                "action": "light.turn_on",
+                                "target": {"entity_id": "test.dummy"},
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+
+    # Error path produced by Home Assistant's Voluptuous fallback contains extra index 0:
+    err = vol.Invalid(
+        "Invalid target entity test.dummy",
+        path=["actions", 0, "parallel", 0, 0, "sequence", 0, "target"],
+    )
+
+    assert is_dummy_validation_error(
+        err,
+        synthetic,
+        substituted_config=substituted_config,
+    )
+
+    # Error when optional input defaulted to None (expected a mapping error):
+    bp_dict_none: dict[str, object] = {
+        "blueprint": {
+            "name": "Dummy Parallel None Test",
+            "domain": "automation",
+            "input": {
+                "parallel_target": {
+                    "name": "Parallel Target",
+                    "default": None,
+                    "selector": {"target": {}},
+                }
+            },
+        },
+        "actions": [
+            {
+                "parallel": [
+                    {
+                        "sequence": [
+                            {
+                                "action": "light.turn_on",
+                                "target": Input("parallel_target"),
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
+    }
+    synthetic_none = extract_synthetic_dummy_values(bp_dict_none)
+    assert len(synthetic_none.entries) == 1
+    assert synthetic_none.entries[0].input_name == "parallel_target"
+    assert synthetic_none.entries[0].raw_value is None
+
+    err_mapping = vol.Invalid(
+        "expected a mapping",
+        path=["actions", 0, "parallel", 0, 0, "sequence", 0, "target"],
+    )
+    substituted_none: dict[str, object] = {
+        "actions": [
+            {
+                "parallel": [
+                    {
+                        "sequence": [
+                            {
+                                "action": "light.turn_on",
+                                "target": None,
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    assert is_dummy_validation_error(
+        err_mapping,
+        synthetic_none,
+        substituted_config=substituted_none,
+    )
+
+    # Negative test case 1: Real entity validation error must not be suppressed
+    err_real = vol.Invalid(
+        "Invalid target entity light.living_room",
+        path=["actions", 0, "parallel", 0, 0, "sequence", 0, "target"],
+    )
+    substituted_real: dict[str, object] = {
+        "actions": [
+            {
+                "parallel": [
+                    {
+                        "sequence": [
+                            {
+                                "action": "light.turn_on",
+                                "target": {"entity_id": "light.living_room"},
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    assert not is_dummy_validation_error(
+        err_real,
+        synthetic,
+        substituted_config=substituted_real,
+    )
+
+    # Negative test case 2: Unrelated field error must not be suppressed
+    err_unrelated = vol.Invalid(
+        "extra keys not allowed",
+        path=["actions", 0, "parallel", 0, 0, "sequence", 0, "invalid_option"],
+    )
+    assert not is_dummy_validation_error(
+        err_unrelated,
+        synthetic,
+        substituted_config=substituted_config,
+    )
