@@ -119,6 +119,7 @@ from .blueprint_validation import (
     is_dummy_validation_error,
     is_invalid_for_input_default,
     modernize_legacy_blueprint_yaml,
+    normalize_config_path,
     normalize_content,
     read_and_diff,
     validate_input_references,
@@ -927,18 +928,23 @@ def diff_structural_configs(
             diff_structural_configs(input_cfg[idx], validated_cfg[idx], diagnostics, (*path, idx))
 
 
-def format_validation_error(err: Exception) -> str:
+def format_validation_error(err: Exception, config: object = None) -> str:
     """Format a validation exception or vol.Invalid path into a readable string.
 
     Args:
         err: Exception raised during schema or domain validation.
+        config: Optional configuration object to validate surrounding path structure against.
 
     Returns:
         Formatted error message including path if applicable.
 
     """
     if isinstance(err, vol.Invalid):
-        path_str = f"At {' -> '.join(str(p) for p in err.path)}: " if err.path else ""
+        if err.path:
+            norm_path = normalize_config_path(err.path, config=config)
+            path_str = f"At {' -> '.join(str(p) for p in norm_path)}: "
+        else:
+            path_str = ""
         return f"{path_str}{err.error_message}"
     return str(err)
 
@@ -6417,7 +6423,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         try:
             schema(blueprint_dict)
         except (vol.Invalid, HomeAssistantError) as err:
-            report.errors.append(format_validation_error(err))
+            report.errors.append(format_validation_error(err, config=blueprint_dict))
 
         # Instantiate Blueprint object
         try:
@@ -6436,6 +6442,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             async with capture_structural_validation_diagnostics(self.hass) as diagnostics:
                 if full_configs:
                     for eid, cfg in full_configs.items():
+                        input_cfg: dict[str, object] | None = None
                         try:
                             raw_sub = BlueprintInputs(blueprint_obj, cfg).async_substitute()
                             input_cfg = copy.deepcopy(raw_sub)
@@ -6445,7 +6452,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                             if validated_cfg:
                                 diff_structural_configs(input_cfg, validated_cfg, diagnostics)
                         except (vol.Invalid, HomeAssistantError) as err:
-                            report.errors.append(f"{eid}: {format_validation_error(err)}")
+                            report.errors.append(
+                                f"{eid}: {format_validation_error(err, config=input_cfg)}"
+                            )
                         except Exception as err:
                             report.errors.append(f"{eid}: Validation error: {err}")
                 else:
@@ -6467,7 +6476,8 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                             )
                         else:
                             report.errors.append(
-                                f"Baseline validation failed: {format_validation_error(err)}"
+                                "Baseline validation failed: "
+                                f"{format_validation_error(err, config=substituted_baseline)}"
                             )
                     except Exception as err:
                         report.errors.append(f"Baseline validation error: {err}")
