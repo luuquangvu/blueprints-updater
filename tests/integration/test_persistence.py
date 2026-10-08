@@ -1,12 +1,15 @@
 """Test persistence across real Home Assistant entry restarts."""
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from homeassistant.core import HomeAssistant, ServiceCall
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_mock_service,
+    flush_store,
+)
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
@@ -55,20 +58,14 @@ async def test_pending_reload_persists_and_retries_after_restart(hass: HomeAssis
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
 
-    reload_called = asyncio.Event()
-
-    async def _handle_reload(_: ServiceCall) -> None:
-        """Record the persisted reload retry."""
-        reload_called.set()
-
-    hass.services.async_register(FunctionalDomain.AUTOMATION, "reload", _handle_reload)
+    reload_calls = async_mock_service(hass, FunctionalDomain.AUTOMATION, "reload")
     with patch(remote_refresh, new_callable=AsyncMock):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         restarted = hass.data[DOMAIN]["coordinators"][entry.entry_id]
         await restarted.async_wait_until_done()
 
-    assert reload_called.is_set()
+    assert len(reload_calls) == 1
     assert restarted._pending_reload_domains == set()
     assert restarted._persisted_pending_reload_domains == set()
     assert relative_path in restarted._persisted_metadata
@@ -76,7 +73,6 @@ async def test_pending_reload_persists_and_retries_after_restart(hass: HomeAssis
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    hass.services.async_remove(FunctionalDomain.AUTOMATION, "reload")
 
 
 async def _setup_unmocked_store_coordinator(
@@ -103,8 +99,6 @@ async def _setup_unmocked_store_coordinator(
 @pytest.mark.asyncio
 async def test_unmocked_storage_persistence_lifecycle(hass: HomeAssistant) -> None:
     """Ensure metadata survives a Store round-trip and validators are cleared on mismatch."""
-    from homeassistant.helpers.storage import Store
-
     relative_path = "automation/unmocked_store.yaml"
     content = (
         "blueprint:\n"
@@ -116,13 +110,10 @@ async def test_unmocked_storage_persistence_lifecycle(hass: HomeAssistant) -> No
         hass, relative_path, content, "unmocked_store_entry"
     )
 
-    with (
-        patch("custom_components.blueprints_updater.coordinator.Store", side_effect=Store),
-        patch(
-            "custom_components.blueprints_updater.coordinator."
-            "BlueprintUpdateCoordinator._async_update_blueprint_in_place",
-            new_callable=AsyncMock,
-        ),
+    with patch(
+        "custom_components.blueprints_updater.coordinator."
+        "BlueprintUpdateCoordinator._async_update_blueprint_in_place",
+        new_callable=AsyncMock,
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -144,6 +135,7 @@ async def test_unmocked_storage_persistence_lifecycle(hass: HomeAssistant) -> No
         )
 
         await coordinator._async_save_metadata()
+        await flush_store(coordinator._store)
 
         # Assert persisted metadata contains the non-None values before unloading
         assert relative_path in coordinator._persisted_metadata

@@ -1,6 +1,5 @@
 """Test the initialization of the integration."""
 
-import socket
 from datetime import timedelta
 from http import HTTPStatus
 from pathlib import Path
@@ -32,14 +31,8 @@ async def test_setup_integration(hass: HomeAssistant) -> None:
     )
     entry.add_to_hass(hass)
 
-    with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
-        ),
-        patch(
-            "socket.getaddrinfo",
-            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
-        ),
+    with patch(
+        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -64,6 +57,7 @@ async def test_setup_integration(hass: HomeAssistant) -> None:
 @pytest.mark.asyncio
 async def test_full_update_lifecycle(
     hass: HomeAssistant,
+    entity_registry: er.EntityRegistry,
     respx_mock,
     blueprint_domain: str,
 ) -> None:
@@ -98,19 +92,13 @@ async def test_full_update_lifecycle(
         entry_id="lifecycle_entry",
     )
     entry.add_to_hass(hass)
-    with patch(
-        "socket.getaddrinfo",
-        return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
-    ):
-        assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
     coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
     await coordinator.async_wait_until_done()
 
-    ent_reg = er.async_get(hass)
-
     unique_id = BlueprintUpdateCoordinator.generate_unique_id(entry.entry_id, relative_path)
-    entity_id = ent_reg.async_get_entity_id("update", DOMAIN, unique_id)
+    entity_id = entity_registry.async_get_entity_id("update", DOMAIN, unique_id)
 
     assert entity_id is not None
     state = hass.states.get(entity_id)
@@ -165,12 +153,8 @@ async def test_auto_update_lifecycle(hass: HomeAssistant, respx_mock) -> None:
         entry_id="auto_update_entry",
     )
     entry.add_to_hass(hass)
-    with patch(
-        "socket.getaddrinfo",
-        return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
-    ):
-        assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
 
     coordinator = hass.data[DOMAIN]["coordinators"][entry.entry_id]
     await coordinator.async_wait_until_done()
@@ -193,14 +177,8 @@ async def test_config_migration_and_options_update(hass: HomeAssistant) -> None:
     )
     entry.add_to_hass(hass)
 
-    with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
-        ),
-        patch(
-            "socket.getaddrinfo",
-            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
-        ),
+    with patch(
+        "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
     ):
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -243,8 +221,9 @@ async def test_setup_failure_rollback_cleans_up_coordinator(hass: HomeAssistant)
         patch(
             "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
         ),
-        patch(
-            "homeassistant.config_entries.ConfigEntries.async_forward_entry_setups",
+        patch.object(
+            hass.config_entries,
+            "async_forward_entry_setups",
             side_effect=RuntimeError("Platform setup failed"),
         ),
     ):
