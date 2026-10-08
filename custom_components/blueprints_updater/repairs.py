@@ -9,17 +9,24 @@ from typing import TYPE_CHECKING
 import httpx
 
 if TYPE_CHECKING:
-    import voluptuous as vol
+    import probatio as vol
+    from homeassistant.components.repairs import RepairsFlow, RepairsFlowResult
 else:
     try:
         import probatio as vol
     except ImportError:
         import voluptuous as vol
 
+    from homeassistant.components.repairs import RepairsFlow
+
+    try:
+        from homeassistant.components.repairs import RepairsFlowResult
+    except ImportError:
+        from homeassistant.data_entry_flow import FlowResult as RepairsFlowResult
+
 from difflib import unified_diff
 
 from homeassistant import data_entry_flow
-from homeassistant.components.repairs import RepairsFlow
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
@@ -95,7 +102,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, object] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Handle the initial menu step."""
         if not self.relative_path or not self.path:
             return self.async_abort(reason="missing_issue_data")
@@ -116,11 +123,11 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
 
     async def async_step_stop_tracking(
         self, user_input: dict[str, object] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Stop tracking the blueprint by updating config entry filter options."""
         return await self._async_execute_stop_tracking()
 
-    async def _async_execute_stop_tracking(self) -> data_entry_flow.FlowResult:
+    async def _async_execute_stop_tracking(self) -> RepairsFlowResult:
         """Update filter mode options to exclude this blueprint."""
         if config_entry := self.coordinator.config_entry:
             filter_mode = get_validated_filter_mode(
@@ -150,7 +157,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
         self,
         user_input: dict[str, object] | None = None,
         errors: dict[str, str] | None = None,
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Handle URL input and validation step."""
         flow_errors: dict[str, str] = dict(errors) if errors else {}
         if user_input is not None:
@@ -250,7 +257,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
 
     async def async_step_confirm_risks(
         self, user_input: dict[str, object] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Handle compatibility risk confirmation step."""
         if user_input is not None:
             action = user_input.get("risk_action")
@@ -315,9 +322,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
             },
         )
 
-    async def _async_apply_new_url(
-        self, content: str, canonical_url: str
-    ) -> data_entry_flow.FlowResult:
+    async def _async_apply_new_url(self, content: str, canonical_url: str) -> RepairsFlowResult:
         """Atomically install updated blueprint content with new URL."""
         if self._pending_precondition is None:
             return await self.async_step_change_url(errors={"url": RepairError.INVALID_URL})
@@ -338,7 +343,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
 
     async def async_step_delete_blueprint(
         self, user_input: dict[str, object] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Handle blueprint deletion step."""
         bp_id = (
             self.relative_path.split("/", 1)[-1]
@@ -390,7 +395,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
             },
         )
 
-    async def _async_execute_delete(self) -> data_entry_flow.FlowResult:
+    async def _async_execute_delete(self) -> RepairsFlowResult:
         """Atomically delete blueprint file and backups, reload domains and purge entity."""
         await self.hass.async_add_executor_job(
             BlueprintFileStore.remove_blueprint_and_backups, self.path
@@ -478,7 +483,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, object] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Handle the initial menu step.
 
         Args:
@@ -533,7 +538,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
 
     async def async_step_auto_fix(
         self, user_input: dict[str, object] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Handle the auto-fix review and apply step.
 
         Args:
@@ -572,7 +577,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
             },
         )
 
-    async def _async_execute_auto_fix(self) -> data_entry_flow.FlowResult:
+    async def _async_execute_auto_fix(self) -> RepairsFlowResult:
         """Apply candidate patch, create backup, and pin blueprint.
 
         Returns:
@@ -672,7 +677,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
 
     async def async_step_acknowledge(
         self, user_input: dict[str, object] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Handle acknowledging and dismissing a deprecation warning.
 
         Args:
@@ -723,7 +728,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
         self,
         user_input: dict[str, object] | None = None,
         errors: dict[str, str] | None = None,
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Handle switching tracking to a community fork.
 
         Args:
@@ -827,7 +832,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
 
     async def async_step_confirm_fork(
         self, user_input: dict[str, object] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Handle confirmation of switching tracking to a community fork.
 
         Args:
@@ -934,7 +939,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
             },
         )
 
-    async def _async_execute_fork_switch(self) -> data_entry_flow.FlowResult:
+    async def _async_execute_fork_switch(self) -> RepairsFlowResult:
         """Execute fork update in-place preserving filesystem path.
 
         Returns:
@@ -1012,7 +1017,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
 
     async def async_step_unpin(
         self, user_input: dict[str, object] | None = None
-    ) -> data_entry_flow.FlowResult:
+    ) -> RepairsFlowResult:
         """Handle unpinning a blueprint.
 
         Args:

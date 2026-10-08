@@ -1,52 +1,19 @@
 """Tests for the import_blueprint service."""
 
-import socket
-from collections.abc import AsyncIterator
 from http import HTTPStatus
 from pathlib import Path
-from unittest.mock import patch
 
 import httpx
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
     IntegrationService,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
-
-
-@pytest.fixture
-async def setup_integration(hass: HomeAssistant) -> AsyncIterator[None]:
-    """Set up the integration for tests."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        data={},
-        options={"update_interval": 24},
-        entry_id="test_entry",
-    )
-    entry.add_to_hass(hass)
-
-    with (
-        patch(
-            "custom_components.blueprints_updater.coordinator.BlueprintUpdateCoordinator._async_background_refresh"
-        ),
-        patch(
-            "socket.getaddrinfo",
-            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))],
-        ),
-    ):
-        assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
-
-        yield
-
-    assert await hass.config_entries.async_unload(entry.entry_id)
-    await hass.async_block_till_done()
 
 
 def _assert_imported_blueprint(

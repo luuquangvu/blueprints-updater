@@ -3,7 +3,7 @@
 import inspect
 from typing import Any, cast
 
-from homeassistant.core import ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall
 
 
 def patch_service_call_compat():
@@ -30,9 +30,45 @@ def patch_service_call_compat():
     cast(Any, ServiceCall)._compat_patched = True
 
 
-def create_service_call(hass, domain, service, data=None):
+def create_service_call(
+    hass: HomeAssistant,
+    domain: str,
+    service: str,
+    data: dict[str, Any] | None = None,
+) -> ServiceCall:
     """Version-aware ServiceCall instantiation.
 
     Relies on ServiceCall monkeypatch in conftest.py for backward compatibility.
     """
     return ServiceCall(hass, domain, service, data or {})
+
+
+async def async_call_service_compat(
+    hass: HomeAssistant,
+    domain: str,
+    service: str,
+    service_data: dict[str, Any] | None = None,
+    *,
+    blocking: bool = True,
+    return_response: bool = False,
+) -> Any:
+    """Call a Home Assistant service with version-aware response handling."""
+    from homeassistant.helpers.service import async_register_admin_service
+
+    admin_svc_sig = inspect.signature(async_register_admin_service)
+    supports_response_available = "supports_response" in admin_svc_sig.parameters
+
+    if return_response and supports_response_available:
+        return await hass.services.async_call(
+            domain,
+            service,
+            service_data or {},
+            blocking=blocking,
+            return_response=True,
+        )
+    return await hass.services.async_call(
+        domain,
+        service,
+        service_data or {},
+        blocking=blocking,
+    )
