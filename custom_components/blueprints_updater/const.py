@@ -148,6 +148,9 @@ Note:
     and selector schemas (e.g. vol.Remove("metadata"): dict).
 """
 
+JINJA_EXPRESSION_MARKERS: Final[tuple[str, ...]] = ("{{", "{%")
+"""Jinja expression and statement start markers indicating dynamic template content."""
+
 
 class SourceDomain(StrEnum):
     """Domains for blueprint source providers."""

@@ -57,6 +57,12 @@ def bind_coordinator_fetch_methods(coordinator: MagicMock) -> None:
     coordinator._update_error_state = BlueprintUpdateCoordinator._update_error_state.__get__(
         coordinator, BlueprintUpdateCoordinator
     )
+    coordinator._custom_template_paths_cache = None
+    coordinator.async_get_custom_template_paths = (
+        BlueprintUpdateCoordinator.async_get_custom_template_paths.__get__(
+            coordinator, BlueprintUpdateCoordinator
+        )
+    )
 
 
 @pytest.mark.asyncio
@@ -162,6 +168,7 @@ def coordinator():
     comp.async_install_blueprint = AsyncMock()
     comp.async_fetch_blueprint = AsyncMock()
     comp.async_refresh = AsyncMock()
+    comp.async_get_custom_template_paths = AsyncMock(return_value=None)
     comp.async_translate = AsyncMock(
         side_effect=lambda key, **kwargs: {
             "up_to_date": "Up to date",

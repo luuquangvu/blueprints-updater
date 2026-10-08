@@ -10,7 +10,7 @@ import os
 import shutil
 import stat
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import ClassVar
@@ -61,7 +61,7 @@ class BlueprintFileStore:
 
     @classmethod
     @asynccontextmanager
-    async def transaction(cls, path: str) -> AsyncIterator[None]:
+    async def transaction(cls, path: str) -> AsyncGenerator[None]:
         """Serialize every mutation of one canonical blueprint path."""
         canonical_path = os.path.realpath(path)
         lock = cls._path_locks.setdefault(canonical_path, asyncio.Lock())

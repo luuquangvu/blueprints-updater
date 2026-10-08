@@ -1,11 +1,14 @@
 """Unit and integration tests for Home Assistant update compatibility guard."""
 
 import asyncio
+import hashlib
 import io
 import os
 import tempfile
+from collections.abc import AsyncGenerator
 from contextlib import nullcontext
 from datetime import timedelta
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,6 +29,7 @@ from homeassistant.helpers import frame
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import yaml as yaml_util
 from homeassistant.util.yaml.objects import Input
+from pytest_homeassistant_custom_component.common import async_test_home_assistant
 
 from custom_components.blueprints_updater import (
     async_setup_entry,
@@ -34,6 +38,7 @@ from custom_components.blueprints_updater import (
 from custom_components.blueprints_updater.blueprint_validation import (
     _DEFAULT_MATH_FILTER_METHODS,
     _DEFAULT_MATH_GLOBALS,
+    SyntheticDummyEntry,
     SyntheticDummyValues,
     _derive_value_for_path,
     _discover_ha_math_capabilities,
@@ -42,6 +47,7 @@ from custom_components.blueprints_updater.blueprint_validation import (
     detect_unsupported_yaml_constructs,
     extract_synthetic_dummy_values,
     is_dummy_validation_error,
+    is_invalid_for_input_default,
     is_synthetic_identifier,
     modernize_legacy_blueprint_yaml,
     normalize_config_path,
@@ -3360,6 +3366,92 @@ def test_is_dummy_validation_error_matching() -> None:
     assert not is_dummy_validation_error(
         exc_with_path, synthetic, substituted_config=cfg_with_author
     )
+
+    # Device automation exception caused by ImportError:
+    # 1. Unrelated to synthetic dummy inputs: must NOT be suppressed
+    unrelated_import_err = InvalidDeviceAutomationConfig(
+        "Integration 'broken_domain' does not support device automation triggers"
+    )
+    unrelated_import_err.__cause__ = ImportError("No module named 'broken_domain'")
+    assert not is_dummy_validation_error(unrelated_import_err, synthetic)
+    cfg_with_device_domain = {"action": [{"domain": "device", "device_id": "dummy_device_id"}]}
+    assert not is_dummy_validation_error(
+        unrelated_import_err, synthetic, substituted_config=cfg_with_device_domain
+    )
+
+    # 2. Tied to synthetic dummy identifier: must be classified as dummy validation error
+    dummy_import_err = InvalidDeviceAutomationConfig(
+        "Integration 'test.dummy' does not support device automation triggers"
+    )
+    dummy_import_err.__cause__ = ImportError("No module named 'test.dummy'")
+    assert is_dummy_validation_error(dummy_import_err, synthetic)
+
+    # 3. Tied to synthetic dummy input via failing config path: must be classified as dummy
+    path_import_err = _MockDeviceAutomationException(
+        "Integration 'broken_domain' does not support device automation triggers"
+    )
+    path_import_err.__cause__ = ImportError("No module named 'broken_domain'")
+    path_import_err.path = ["trigger", 0, "device_id"]
+    assert is_dummy_validation_error(path_import_err, synthetic, substituted_config=cfg_with_dummy)
+
+    # 4. Device automation import error with localized/changed wording or structured placeholders:
+    # Tied to dummy input in substituted_config -> must be classified as dummy
+    cfg_with_mobile_app_dummy = {
+        "action": [{"domain": "mobile_app", "device_id": "dummy_device_id"}]
+    }
+    # Localized / rephrased error string without English "does not support device automation"
+    localized_err = InvalidDeviceAutomationConfig("L'intégration 'mobile_app' n'est pas disponible")
+    localized_err.__cause__ = ImportError(
+        "No module named 'homeassistant.components.mobile_app.device_action'"
+    )
+    assert is_dummy_validation_error(
+        localized_err, synthetic, substituted_config=cfg_with_mobile_app_dummy
+    )
+
+    # Structured placeholders support
+    placeholder_err = InvalidDeviceAutomationConfig(
+        "Platform load error", translation_placeholders={"domain": "mobile_app"}
+    )
+    placeholder_err.__cause__ = ImportError("cannot import")
+    assert is_dummy_validation_error(
+        placeholder_err, synthetic, substituted_config=cfg_with_mobile_app_dummy
+    )
+
+    # When substituted_config has author's hardcoded device id for mobile_app:
+    # must NOT be suppressed
+    cfg_with_mobile_app_author = {
+        "action": [{"domain": "mobile_app", "device_id": "real_author_phone_456"}]
+    }
+    assert not is_dummy_validation_error(
+        localized_err, synthetic, substituted_config=cfg_with_mobile_app_author
+    )
+
+    # Substring matching fallback must not classify author config as dummy error
+    # even when SyntheticDummyValues entries have input names, raw values, synthetic IDs,
+    # or ordinary strings that appear as substrings in the author configuration
+    synthetic_with_entries = SyntheticDummyValues(
+        synthetic_ids={"dummy_device_id"},
+        entries=(
+            SyntheticDummyEntry(
+                input_name="phone",
+                paths=(("action", 0, "device_id"),),
+                raw_value="author",
+                synthetic_ids=frozenset({"phone"}),
+                ordinary_strings=frozenset({"456"}),
+            ),
+        ),
+    )
+    assert not is_dummy_validation_error(
+        localized_err,
+        synthetic_with_entries,
+        substituted_config=cfg_with_mobile_app_author,
+    )
+    cfg_with_exact_dummy = {"action": [{"domain": "mobile_app", "device_id": "dummy_device_id"}]}
+    assert is_dummy_validation_error(
+        localized_err,
+        synthetic_with_entries,
+        substituted_config=cfg_with_exact_dummy,
+    )
     assert is_dummy_validation_error(EntityNotFound("Unknown entity 'test.dummy'"))
     assert is_dummy_validation_error(EntityNotFound("Unknown entity 'person.dummy'"), synthetic)
     assert not is_dummy_validation_error(
@@ -5929,3 +6021,287 @@ def test_is_dummy_validation_error_with_parallel_fallback_path() -> None:
         synthetic,
         substituted_config=substituted_config,
     )
+
+
+def test_diff_structural_configs_parallel_sublist_actions_not_deprecated() -> None:
+    """Test parallel action branches written as sublists of actions are diffed."""
+    input_cfg = {
+        "actions": [
+            {
+                "parallel": [
+                    [
+                        {"service": "light.turn_on", "target": {"entity_id": "light.a"}},
+                        {"service": "light.turn_off", "target": {"entity_id": "light.b"}},
+                    ],
+                    {"action": "tts.speak", "data": {"message": "hi"}},
+                ]
+            }
+        ]
+    }
+    validated_cfg = {
+        "actions": [
+            {
+                "parallel": [
+                    {
+                        "sequence": [
+                            {"action": "light.turn_on", "target": {"entity_id": ["light.a"]}},
+                            {"action": "light.turn_off", "target": {"entity_id": ["light.b"]}},
+                        ]
+                    },
+                    {"sequence": [{"action": "tts.speak", "data": {"message": "hi"}}]},
+                ]
+            }
+        ]
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+    assert diagnostics.renamed_keys == {"service": "action"}
+    assert diagnostics.deprecated_keys == []
+
+
+def test_diff_structural_configs_options_relocation_scoped_to_triggers_conditions() -> None:
+    """Test options relocation is not applied to arbitrary dicts lacking trigger/condition keys."""
+    input_cfg = {"name": "Test", "timeout": 30}
+    validated_cfg = {"name": "Test", "options": {"timeout": 30}}
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+    assert "timeout" in diagnostics.deprecated_keys
+
+
+def test_diff_structural_configs_options_relocation_nested_removal_detected() -> None:
+    """Test nested keys inside relocated options are still inspected for removals."""
+    input_cfg = {
+        "condition": "sun",
+        "custom_block": {"subfield": "val", "legacy_subfield": "old"},
+    }
+    validated_cfg = {
+        "condition": "sun",
+        "options": {"custom_block": {"subfield": "val"}},
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+    assert diagnostics.deprecated_keys == ["legacy_subfield"]
+
+
+@pytest.fixture
+async def real_world_coordinator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncGenerator[BlueprintUpdateCoordinator]:
+    """Coordinator fixture backed by a real Home Assistant instance.
+
+    The file-level ``hass`` fixture is a ``MagicMock``, which bypasses
+    ``HomeAssistant.__new__`` and therefore never populates the
+    ``homeassistant.core._hass`` thread-local.  Schema validators such as
+    ``cv.template`` and ``cv.dynamic_template`` call
+    ``_async_get_hass_or_none()``, which reads that thread-local; when it
+    returns ``None`` they raise
+    ``vol.Invalid("Validates schema outside the event loop")`` — a false
+    positive in tests.
+
+    Using ``async_test_home_assistant`` constructs a genuine
+    ``HomeAssistant`` object (triggering ``__new__`` and populating the
+    thread-local) so that all HA validators work exactly as they do at
+    runtime.
+    """
+    async with async_test_home_assistant(load_registries=True) as hass:
+        entry = MagicMock()
+        entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
+        entry.data = {}
+        entry.entry_id = "real_world_test_entry_id"
+        coord = BlueprintUpdateCoordinator(
+            hass,
+            entry,
+            timedelta(hours=24),
+        )
+
+        def _mock_set_data(data: dict) -> None:
+            """Mock async_set_updated_data."""
+            coord.data = data
+
+        monkeypatch.setattr(coord, "async_set_updated_data", MagicMock(side_effect=_mock_set_data))
+        monkeypatch.setattr(coord, "async_update_listeners", MagicMock())
+        monkeypatch.setattr(coord, "async_request_refresh", AsyncMock())
+        monkeypatch.setattr(coord, "async_reconcile_reload_services", AsyncMock())
+        coord.setup_complete = True
+        coord.last_update_success = True
+        monkeypatch.setattr(coord, "_filter_existing_metadata", lambda root, meta: meta)
+        monkeypatch.setattr(coord, "_is_safe_path", MagicMock(return_value=True))
+        monkeypatch.setattr(coord, "_is_safe_url", AsyncMock(return_value=True))
+        hass.data[DOMAIN] = {"coordinators": {entry.entry_id: coord}}
+        try:
+            yield coord
+        finally:
+            await hass.async_stop(force=True)
+
+
+REAL_WORLD_BLUEPRINT_URLS = [
+    "https://gist.github.com/Blackshome/6edfec0ff6a25c5da0d07b88dc908238",
+    "https://gist.github.com/Blackshome/4010fb83bb8c19b5fa1425526c6ff0e2",
+    "https://gist.github.com/Blackshome/42586b567d243d432887cadf54e18906",
+    "https://gist.github.com/Blackshome/8e09a8213b834f1be4ab49ba880abed8",
+    "https://gist.github.com/Blackshome/e6c8f1bf846bab2fa4431934a0a85770",
+    "https://gist.github.com/Blackshome/40bfd92fb1fe6a9a9189325704a3c81b",
+    "https://gist.github.com/Blackshome/180ca4a24af81cd5d843acfc039039bc",
+    "https://gist.github.com/Blackshome/0a34870755762bcb9fab159d5b94fd25",
+    "https://gist.github.com/Blackshome/06f6f28e76299267b813dac48608f549",
+    "https://gist.github.com/Blackshome/85d6e7dbfa3390afbcf3e801b8be6294",
+    "https://gist.github.com/Blackshome/9f9785d7aa0ba7978fa6515a2d73d192",
+    "https://github.com/hvorragend/ha-blueprints/blob/main/blueprints/automation/cover_control_automation.yaml",
+    "https://github.com/panhans/HomeAssistant/blob/main/blueprints/automation/panhans/advanced_heating_control.yaml",
+    "https://github.com/SgtBatten/HA_blueprints/blob/main/Frigate_Camera_Notifications/Stable.yaml",
+    "https://github.com/Blackymas/NSPanel_HA_Blueprint/blob/main/nspanel_blueprint.yaml",
+    "https://github.com/SirGoodenough/HA_Blueprints/blob/master/Automations/ZHA-Xiaomi_Cube_Controller.yaml",
+    "https://github.com/Skaronator/home-assistant-blueprints/blob/main/automation/ikea-bilresa-dual-button.yaml",
+]
+"""This list features real-world blueprints used to check the compatibility of the update process.
+
+They are popular among home assistant users and showcase a variety of features like triggers,
+conditions, actions, and other advanced YAML elements. The authors actively maintain and
+update them, making these blueprints a reliable way to test the update process.
+
+Note: These blueprints should not cause any compatibility errors, but they might trigger a
+compatibility warning if the HA core or the author updates them in the future.
+"""
+
+
+REPRESENTATIVE_BLUEPRINT_FIXTURE = """
+blueprint:
+  name: Representative Compatibility Test Automation
+  description: Deterministic offline fixture validating HA Core blueprint schema and template rules
+  domain: automation
+  input:
+    motion_sensor:
+      name: Motion Sensor
+      selector:
+        entity:
+          domain: binary_sensor
+    light_target:
+      name: Light
+      selector:
+        target:
+          entity:
+            domain: light
+    use_override:
+      name: Use Override
+      default: false
+      selector:
+        boolean: {}
+    delay_seconds:
+      name: Delay
+      default: 120
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: seconds
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensor
+    to: "on"
+
+condition:
+  - condition: template
+    value_template: "{{ trigger.to_state.state == 'on' }}"
+
+action:
+  - action: light.turn_on
+    target: !input light_target
+    data:
+      brightness: 255
+  - delay: !input delay_seconds
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ not bool(use_override) }}"
+        sequence:
+          - action: light.turn_off
+            target: !input light_target
+"""
+
+
+async def test_representative_blueprint_compatibility_validation(
+    real_world_coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Validate compatibility of a representative blueprint fixture deterministically offline."""
+    rel_path = "automation/representative_test_blueprint.yaml"
+    full_path = f"/config/blueprints/{rel_path}"
+
+    report = await real_world_coordinator.async_validate_local_blueprint_compatibility(
+        rel_path, full_path, REPRESENTATIVE_BLUEPRINT_FIXTURE
+    )
+
+    assert isinstance(report, CompatibilityReport)
+    assert report.errors == []
+    assert report.warnings == []
+
+
+@pytest.mark.real_network
+@pytest.mark.parametrize("url", REAL_WORLD_BLUEPRINT_URLS)
+async def test_real_world_blueprint_compatibility_validation(
+    real_world_coordinator: BlueprintUpdateCoordinator, url: str
+) -> None:
+    """Validate compatibility of complex real-world blueprints against Home Assistant Core."""
+    blueprint_filename = f"{hashlib.sha256(url.encode('utf-8')).hexdigest()[:32]}.yaml"
+    cache_path = Path(tempfile.gettempdir()) / "bp_cache" / blueprint_filename
+    if cache_path.exists():
+        content = cache_path.read_text(encoding="utf-8")
+    else:
+        content, _, _, _, _ = await real_world_coordinator.async_fetch_import_data(url)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(content, encoding="utf-8")
+
+    assert len(content) > 0
+
+    rel_path = f"automation/{blueprint_filename}"
+    full_path = f"/config/blueprints/{rel_path}"
+
+    report = await real_world_coordinator.async_validate_local_blueprint_compatibility(
+        rel_path, full_path, content
+    )
+
+    assert isinstance(report, CompatibilityReport)
+    assert report.errors == []
+    assert report.warnings == []
+
+
+def test_is_invalid_for_input_default_edge_cases() -> None:
+    """Test is_invalid_for_input_default with False, None, and empty structures."""
+    # False on device selector is invalid/unsafe
+    assert is_invalid_for_input_default(False, {"selector": {"device": {}}}) is True
+    # False on entity selector is invalid/unsafe
+    assert is_invalid_for_input_default(False, {"selector": {"entity": {}}}) is True
+    # False on target selector is invalid/unsafe
+    assert is_invalid_for_input_default(False, {"selector": {"target": {}}}) is True
+    # False on boolean selector is valid
+    assert is_invalid_for_input_default(False, {"selector": {"boolean": {}}}) is False
+    # Empty dict or list on target/entity is invalid
+    assert is_invalid_for_input_default({}, {"selector": {"entity": {}}}) is True
+    assert is_invalid_for_input_default([], {"selector": {"target": {}}}) is True
+    # None is always invalid
+    assert is_invalid_for_input_default(None, {"selector": {"boolean": {}}}) is True
+
+
+def test_diff_structural_configs_ignores_jinja_template_keys() -> None:
+    """Test diff_structural_configs ignores keys containing Jinja templates."""
+    diagnostics = ValidationDiagnostics()
+    input_cfg = {
+        "service": "notify.send_message",
+        "data": {
+            "{{ nspanel_event.key }}": "{{ nspanel_event.value }}",
+            "{% if true %}k{% endif %}": "v",
+            "normal_key": "val",
+        },
+    }
+    validated_cfg = {
+        "action": "notify.send_message",
+        "data": {
+            "normal_key": "val",
+        },
+    }
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+    # The template keys should not be marked as deprecated
+    assert "{{ nspanel_event.key }}" not in diagnostics.deprecated_keys
+    assert "{% if true %}k{% endif %}" not in diagnostics.deprecated_keys
+    # The renamed action key should be detected
+    assert diagnostics.renamed_keys.get("service") == "action"

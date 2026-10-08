@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import functools
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import voluptuous as vol
@@ -24,9 +25,13 @@ from custom_components.blueprints_updater.blueprint_validation import (
     SelectorRegistryQuickSig,
     SelectorType,
     StructuredRisk,
+    _check_template_imports,
+    _collect_action_child_lines,
     _extract_custom_template_paths,
     _inspect_scoped_math,
     _is_dummy_value_valid_for_selector,
+    _scan_custom_template_paths,
+    async_extract_custom_template_paths,
     canonicalize_source_url,
     check_ha_template_ast_compatibility,
     coerce_empty_selectors,
@@ -1211,13 +1216,26 @@ def test_extract_custom_template_paths(tmp_path: Path):
     mock_env.loader = mock_loader
     assert _extract_custom_template_paths(mock_env) == {"my_macro.jinja"}
 
+    # Loader with empty sources and no hass context
+    mock_loader.sources = {}
+    mock_env.hass = None
+    assert _extract_custom_template_paths(mock_env) is None
+
     # Loader with mapping
     mock_loader.sources = None
     mock_loader.mapping = {"nested/macro.jinja": "content"}
     assert _extract_custom_template_paths(mock_env) == {"nested/macro.jinja"}
 
-    # Filesystem fallback with hass.config.path
+    # Loader None with hass.data["template.hass_loader"] fallback
     mock_env.loader = None
+    mock_hass = MagicMock()
+    mock_hass.data = {"template.hass_loader": mock_loader}
+    mock_env.hass = mock_hass
+    mock_loader.sources = {"from_hass_loader.jinja": "content"}
+    assert _extract_custom_template_paths(mock_env) == {"from_hass_loader.jinja"}
+    mock_hass.data = {}
+
+    # Filesystem fallback with hass.config.path (outside event loop)
     templates_dir = tmp_path / "custom_templates"
     sub_dir = templates_dir / "subdir"
     sub_dir.mkdir(parents=True)
@@ -1226,7 +1244,6 @@ def test_extract_custom_template_paths(tmp_path: Path):
     non_jinja_file = sub_dir / "ignored.txt"
     non_jinja_file.write_text("ignored")
 
-    mock_hass = MagicMock()
     mock_hass.config.path.return_value = str(templates_dir)
     mock_env.hass = mock_hass
 
@@ -1239,6 +1256,110 @@ def test_extract_custom_template_paths(tmp_path: Path):
     paths_with_large = _extract_custom_template_paths(mock_env)
     assert paths_with_large is not None
     assert "subdir/large.jinja" not in paths_with_large
+
+
+async def test_extract_custom_template_paths_guards_event_loop(tmp_path: Path) -> None:
+    """Verify _extract_custom_template_paths does not perform blocking I/O in the event loop."""
+    mock_env = MagicMock()
+    mock_env.loader = None
+    mock_hass = MagicMock()
+    mock_hass.data = {}
+    mock_hass.config.path.return_value = str(tmp_path / "custom_templates")
+    mock_env.hass = mock_hass
+
+    with patch("os.path.isdir") as mock_isdir:
+        result = _extract_custom_template_paths(mock_env)
+        assert result is None
+        mock_isdir.assert_not_called()
+        mock_hass.config.path.assert_not_called()
+
+    # Also verify with empty loader in event loop: does not scan disk and returns None
+    mock_loader = MagicMock()
+    mock_loader.sources = {}
+    mock_env.loader = mock_loader
+    with patch("os.path.isdir") as mock_isdir:
+        assert _extract_custom_template_paths(mock_env) is None
+        mock_isdir.assert_not_called()
+        mock_hass.config.path.assert_not_called()
+
+
+async def test_async_extract_custom_template_paths(tmp_path: Path) -> None:
+    """Verify async_extract_custom_template_paths extracts paths without blocking."""
+    templates_dir = tmp_path / "custom_templates"
+    sub_dir = templates_dir / "subdir"
+    sub_dir.mkdir(parents=True)
+    valid_file = sub_dir / "async_macro.jinja"
+    valid_file.write_text("{% macro async_foo() %}bar{% endmacro %}")
+
+    mock_hass = MagicMock()
+    mock_hass.data = {}
+    mock_hass.config.path.return_value = str(templates_dir)
+    mock_hass.async_add_executor_job = AsyncMock(side_effect=lambda func, *args: func(*args))
+
+    mock_env = MagicMock()
+    mock_env.loader = MagicMock(sources={})
+    mock_env.hass = mock_hass
+
+    paths = await async_extract_custom_template_paths(mock_env, mock_hass)
+    assert paths == {"subdir/async_macro.jinja"}
+    mock_hass.async_add_executor_job.assert_awaited_once_with(
+        _scan_custom_template_paths, str(templates_dir)
+    )
+
+    # Fallback to asyncio.to_thread when async_add_executor_job is unavailable
+    mock_hass_no_executor = MagicMock(spec=["config", "data"])
+    mock_hass_no_executor.data = {}
+    mock_hass_no_executor.config.path.return_value = str(templates_dir)
+    with patch("asyncio.to_thread", wraps=asyncio.to_thread) as mock_to_thread:
+        thread_paths = await async_extract_custom_template_paths(None, mock_hass_no_executor)
+        assert thread_paths == {"subdir/async_macro.jinja"}
+        mock_to_thread.assert_awaited_once_with(_scan_custom_template_paths, str(templates_dir))
+
+    # Sources already in loader: returns immediately without calling executor
+    mock_env.loader.sources = {"cached.jinja": "..."}
+    cached_paths = await async_extract_custom_template_paths(mock_env, mock_hass)
+    assert cached_paths == {"cached.jinja"}
+
+    # Sources in hass.data["template.hass_loader"]
+    mock_env.loader = None
+    mock_hass.data = {"template.hass_loader": MagicMock(sources={"hass_cached.jinja": "..."})}
+    hass_cached_paths = await async_extract_custom_template_paths(mock_env, mock_hass)
+    assert hass_cached_paths == {"hass_cached.jinja"}
+
+    # No hass context available
+    assert await async_extract_custom_template_paths(None, None) is None
+
+
+async def test_check_template_imports_in_event_loop_with_available_paths() -> None:
+    """Verify _check_template_imports does not flag valid imports when available_paths provided."""
+    env = TemplateEnvironment(None)
+    ast = env.parse("{% from 'sub/my_macro.jinja' import my_macro %}")
+
+    # Without available_paths in event loop, _extract_custom_template_paths returns None,
+    # so syntactic fallback accepts valid relative path
+    errors_fallback = _check_template_imports(ast, env)
+    assert errors_fallback == []
+
+    # With pre-extracted paths containing the template, succeeds
+    errors_with_paths = _check_template_imports(ast, env, available_paths={"sub/my_macro.jinja"})
+    assert errors_with_paths == []
+
+    # With pre-extracted paths NOT containing the template, flags as missing
+    errors_missing = _check_template_imports(ast, env, available_paths={"other.jinja"})
+    assert any("custom template 'sub/my_macro.jinja' does not exist" in e for e in errors_missing)
+
+
+def test_check_template_imports_short_circuits_without_imports() -> None:
+    """Verify _check_template_imports returns immediately when AST has no import nodes."""
+    env = TemplateEnvironment(None)
+    ast = env.parse("{{ states('sensor.temperature') }}")
+
+    with patch(
+        "custom_components.blueprints_updater.blueprint_validation._extract_custom_template_paths"
+    ) as mock_extract:
+        errors = _check_template_imports(ast, env)
+        assert errors == []
+        mock_extract.assert_not_called()
 
 
 def test_inspect_scoped_math_subtree():
@@ -1333,3 +1454,326 @@ def test_generate_dummy_input_value_defensive_copying() -> None:
     fresh_duration = generate_dummy_input_value({SelectorType.DURATION.value: {}})
     assert isinstance(fresh_duration, dict)
     assert fresh_duration["hours"] == 0
+
+
+def test_collect_action_child_lines_non_list_deep_indent() -> None:
+    """Verify non-list action does not collect parent properties at action indentation."""
+    lines = [
+        "  action: light.turn_on",
+        "    target:",
+        "      entity_id: light.kitchen",
+        "  alias: Turn on kitchen lights",
+    ]
+    child_lines, base_child_indent, next_idx = _collect_action_child_lines(
+        lines, start_idx=1, action_indent=2, has_dash=False
+    )
+    assert base_child_indent == 4
+    assert next_idx == 3
+    assert child_lines == [
+        "    target:",
+        "      entity_id: light.kitchen",
+    ]
+
+
+def test_check_template_imports_empty_sources_unknown_availability() -> None:
+    """Verify imports are not flagged missing when loader sources are empty and context unknown."""
+    env = TemplateEnvironment(None)
+    mock_loader = MagicMock()
+    mock_loader.sources = {}
+    env.loader = mock_loader
+    ast = env.parse("{% from 'sub/my_macro.jinja' import my_macro %}")
+
+    errors = _check_template_imports(ast, env)
+    assert errors == []
+
+
+async def test_coordinator_custom_template_paths_cache(tmp_path: Path) -> None:
+    """Verify BlueprintUpdateCoordinator caches template paths and force_refresh rescans."""
+    from datetime import timedelta
+
+    from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+
+    templates_dir = tmp_path / "custom_templates"
+    templates_dir.mkdir(parents=True)
+    tmpl_file = templates_dir / "test.jinja"
+    tmpl_file.write_text("{% macro hello() %}world{% endmacro %}")
+
+    mock_hass = MagicMock()
+    mock_hass.data = {}
+    mock_hass.config.path.return_value = str(templates_dir)
+    mock_hass.async_add_executor_job = AsyncMock(side_effect=lambda func, *args: func(*args))
+
+    mock_entry = MagicMock()
+    mock_entry.entry_id = "test_entry"
+    mock_entry.data = {}
+    mock_entry.options = {}
+
+    coord = BlueprintUpdateCoordinator(mock_hass, mock_entry, timedelta(seconds=60))
+    paths_first = await coord.async_get_custom_template_paths()
+    assert paths_first == {"test.jinja"}
+    assert mock_hass.async_add_executor_job.await_count == 1
+
+    # Second call uses cache without awaiting executor
+    paths_second = await coord.async_get_custom_template_paths()
+    assert paths_second == {"test.jinja"}
+    assert mock_hass.async_add_executor_job.await_count == 1
+
+    # Force refresh rescans
+    paths_refreshed = await coord.async_get_custom_template_paths(force_refresh=True)
+    assert paths_refreshed == {"test.jinja"}
+    assert mock_hass.async_add_executor_job.await_count == 2
+
+
+async def test_coordinator_custom_template_in_flight_scan_does_not_overwrite_invalidation(
+    tmp_path: Path,
+) -> None:
+    """Verify an in-flight scan finishing after cache invalidation does not overwrite the cache."""
+    from datetime import timedelta
+
+    from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+
+    mock_hass = MagicMock()
+    mock_hass.data = {}
+    mock_hass.config.path.return_value = str(tmp_path)
+
+    scan_started = asyncio.Event()
+    scan_event = asyncio.Event()
+
+    async def _slow_extract(*args: object, **kwargs: object) -> set[str]:
+        """Simulate a delayed custom template extraction."""
+        scan_started.set()
+        await scan_event.wait()
+        return {"stale_template.jinja"}
+
+    mock_entry = MagicMock()
+    mock_entry.entry_id = "test_entry"
+    mock_entry.data = {}
+    mock_entry.options = {}
+
+    coord = BlueprintUpdateCoordinator(mock_hass, mock_entry, timedelta(seconds=60))
+
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_extract_custom_template_paths",
+        side_effect=_slow_extract,
+    ):
+        # Start in-flight scan
+        task = asyncio.create_task(coord.async_get_custom_template_paths())
+        await scan_started.wait()
+
+        # Invalidation occurs while scan is in-flight (e.g. at line 1730 or line 2043)
+        coord.invalidate_custom_template_paths_cache()
+        assert coord._custom_template_paths_cache is None
+
+        # Allow in-flight scan to finish
+        scan_event.set()
+        await task
+
+        # In-flight scan result must NOT have overwritten the invalidated cache
+        assert coord._custom_template_paths_cache is None
+
+
+async def test_coordinator_custom_template_service_reload_invalidates_cache(
+    tmp_path: Path,
+) -> None:
+    """Verify custom template reload service calls invalidate the cached template paths."""
+    from datetime import timedelta
+
+    from homeassistant.const import ATTR_DOMAIN, ATTR_SERVICE, EVENT_CALL_SERVICE
+    from homeassistant.core import Event
+
+    from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+
+    mock_hass = MagicMock()
+    mock_hass.data = {}
+    mock_hass.config.path.return_value = str(tmp_path)
+    mock_hass.async_add_executor_job = AsyncMock(return_value={"template1.jinja"})
+
+    mock_entry = MagicMock()
+    mock_entry.entry_id = "test_entry"
+    mock_entry.data = {}
+    mock_entry.options = {}
+
+    coord = BlueprintUpdateCoordinator(mock_hass, mock_entry, timedelta(seconds=60))
+    paths = await coord.async_get_custom_template_paths()
+    assert paths == {"template1.jinja"}
+    assert coord._custom_template_paths_cache == {"template1.jinja"}
+
+    # Simulate reload_custom_templates service call
+    event = Event(
+        EVENT_CALL_SERVICE,
+        data={ATTR_DOMAIN: "homeassistant", ATTR_SERVICE: "reload_custom_templates"},
+    )
+    coord._async_handle_template_service_call(event)
+    assert coord._custom_template_paths_cache is None
+
+    # Simulate reload_all service call
+    coord._custom_template_paths_cache = {"template1.jinja"}
+    event_all = Event(
+        EVENT_CALL_SERVICE,
+        data={ATTR_DOMAIN: "homeassistant", ATTR_SERVICE: "reload_all"},
+    )
+    coord._async_handle_template_service_call(event_all)
+    assert coord._custom_template_paths_cache is None
+
+
+async def test_coordinator_custom_template_loader_sources_change(
+    tmp_path: Path,
+) -> None:
+    """Verify changes to hass_loader.sources immediately update the cached paths."""
+    from datetime import timedelta
+
+    from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+
+    mock_loader = MagicMock()
+    mock_loader.sources = {"initial.jinja": "content"}
+    mock_hass = MagicMock()
+    mock_hass.data = {"template.hass_loader": mock_loader}
+    mock_hass.config.path.return_value = str(tmp_path)
+
+    mock_entry = MagicMock()
+    mock_entry.entry_id = "test_entry"
+    mock_entry.data = {}
+    mock_entry.options = {}
+
+    coord = BlueprintUpdateCoordinator(mock_hass, mock_entry, timedelta(seconds=60))
+    paths1 = await coord.async_get_custom_template_paths()
+    assert paths1 == {"initial.jinja"}
+
+    # Update loader sources in memory (as happens on HA template reload)
+    mock_loader.sources = {"initial.jinja": "content", "added.jinja": "content2"}
+    paths2 = await coord.async_get_custom_template_paths()
+    assert paths2 == {"initial.jinja", "added.jinja"}
+
+    # Repeated calls (including with force_refresh=True) return sources without filesystem scan
+    with patch(
+        "custom_components.blueprints_updater.coordinator.async_extract_custom_template_paths"
+    ) as mock_extract:
+        paths3 = await coord.async_get_custom_template_paths()
+        assert paths3 == {"initial.jinja", "added.jinja"}
+        paths4 = await coord.async_get_custom_template_paths(force_refresh=True)
+        assert paths4 == {"initial.jinja", "added.jinja"}
+        mock_extract.assert_not_called()
+
+
+async def test_coordinator_validate_with_fresh_template_fallback(tmp_path: Path) -> None:
+    """Verify fresh template fallback retries only when error occurs and paths change."""
+    from datetime import timedelta
+
+    from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+
+    mock_hass = MagicMock()
+    mock_hass.data = {}
+    mock_hass.config.path.return_value = str(tmp_path)
+
+    mock_entry = MagicMock()
+    mock_entry.entry_id = "test_entry"
+    mock_entry.data = {}
+    mock_entry.options = {}
+
+    coord = BlueprintUpdateCoordinator(mock_hass, mock_entry, timedelta(seconds=60))
+
+    # Case 1: Validation succeeds initially (returns None). No force_refresh triggered.
+    coord._custom_template_paths_cache = {"t1.jinja"}
+    call_counts = {"validate": 0}
+
+    def _validate_success(paths: set[str] | None) -> str | None:
+        """Simulate a successful validation callback."""
+        call_counts["validate"] += 1
+        return None
+
+    with patch.object(
+        coord, "async_get_custom_template_paths", wraps=coord.async_get_custom_template_paths
+    ) as mock_get_paths:
+        res = await coord._async_validate_with_fresh_template_fallback(_validate_success)
+        assert res is None
+        assert call_counts["validate"] == 1
+        assert mock_get_paths.await_count == 1
+        mock_get_paths.assert_awaited_once_with()
+
+    # Case 2: Validation fails initially, but succeeds on retry with fresh paths.
+    coord._custom_template_paths_cache = {"t1.jinja"}
+
+    def _validate_with_retry(paths: set[str] | None) -> str | None:
+        """Simulate a validation callback succeeding only with fresh paths."""
+        return None if paths == {"t1.jinja", "t2.jinja"} else "template_not_found"
+
+    async def _mock_paths(force_refresh: bool = False) -> set[str]:
+        """Simulate returning fresh paths on force_refresh."""
+        return {"t1.jinja", "t2.jinja"} if force_refresh else {"t1.jinja"}
+
+    with patch.object(coord, "async_get_custom_template_paths", side_effect=_mock_paths):
+        res2 = await coord._async_validate_with_fresh_template_fallback(_validate_with_retry)
+        assert res2 is None
+
+    # Case 3: Validation fails with non-template error; returns without rescan.
+    calls_case3: list[bool] = []
+
+    def _validate_syntax_error(paths: set[str] | None) -> str | None:
+        """Simulate a validation callback that fails with a syntax error."""
+        return "syntax_error"
+
+    async def _mock_paths_case3(force_refresh: bool = False) -> set[str]:
+        """Track calls to get_custom_template_paths."""
+        calls_case3.append(force_refresh)
+        return {"t1.jinja"}
+
+    with patch.object(coord, "async_get_custom_template_paths", side_effect=_mock_paths_case3):
+        res3 = await coord._async_validate_with_fresh_template_fallback(_validate_syntax_error)
+        assert res3 == "syntax_error"
+        assert calls_case3 == [False]
+
+    # Case 4: Validation fails with template error, and fresh paths are identical (no retry re-run).
+    calls_case4: list[bool] = []
+    validate_case4_count = 0
+
+    def _validate_template_not_found_always(paths: set[str] | None) -> str | None:
+        """Simulate a missing template error that fails even after refresh."""
+        nonlocal validate_case4_count
+        validate_case4_count += 1
+        if paths is not None and "missing.jinja" in paths:
+            return None
+        return "template_not_found"
+
+    async def _mock_same_paths(force_refresh: bool = False) -> set[str]:
+        """Simulate returning identical paths even on force_refresh."""
+        calls_case4.append(force_refresh)
+        return {"t1.jinja"}
+
+    with patch.object(coord, "async_get_custom_template_paths", side_effect=_mock_same_paths):
+        res4 = await coord._async_validate_with_fresh_template_fallback(
+            _validate_template_not_found_always
+        )
+        assert res4 == "template_not_found"
+        assert calls_case4 == [False, True]
+        assert validate_case4_count == 1
+
+
+def test_template_path_tracker_queries() -> None:
+    """Test _TemplatePathTracker query recording for hits, misses, and comparisons."""
+    from custom_components.blueprints_updater.coordinator import _TemplatePathTracker
+
+    tracker = _TemplatePathTracker({"existing.jinja", "sub/macro.jinja"})
+    assert tracker.had_miss is False
+
+    # Positive membership check does not mark a miss
+    assert "existing.jinja" in tracker
+    assert tracker.had_miss is False
+
+    # Negative membership check marks a miss
+    assert "missing.jinja" not in tracker
+    assert tracker.had_miss is True
+
+    # Comparison checks
+    t2 = _TemplatePathTracker({"t1.jinja"})
+    assert t2 == {"t1.jinja"}
+    assert t2.had_miss is False
+
+    assert t2 != {"t1.jinja", "t2.jinja"}
+    assert t2.had_miss is True
+
+    # Subset / superset checks
+    t3 = _TemplatePathTracker({"t1.jinja"})
+    assert t3.issubset({"t1.jinja", "t2.jinja"})
+    assert t3.had_miss is False
+    assert not t3.issuperset({"t1.jinja", "t2.jinja"})
+    assert t3.had_miss is True
