@@ -72,6 +72,7 @@ _REQUIRED_TEST_DEPS = (
     _TEST_HARNESS_PACKAGE,
     "pytest-timeout",
     "pytest-xdist",
+    "tomlkit",
 )
 
 _COMPATIBILITY_PYTEST_ARGS = ["--no-cov"]
@@ -81,6 +82,8 @@ _INSTALL_TIMEOUT_SECONDS = 300
 _CLEANUP_TIMEOUT_SECONDS = 30
 _CLEANUP_ISSUE_LIMIT = 10
 _COMPATIBILITY_PYTEST_TIMEOUT_SECONDS = 300
+_STATIC_ANALYSIS_TIMEOUT_SECONDS = 180
+_MAX_HARNESS_CANDIDATES = 25
 
 _ALNUM_CHARS = ascii_letters + digits
 _ALLOWED_VERSION_CHARS = f"{_ALNUM_CHARS}."
@@ -98,6 +101,9 @@ _HACS_FILE = os.path.join(_REPO_ROOT, "hacs.json")
 
 _PYPI_HA_JSON_URL = "https://pypi.org/pypi/homeassistant/json"
 _PYPI_TEST_HARNESS_JSON_URL = "https://pypi.org/pypi/pytest-homeassistant-custom-component/json"
+_PYPI_TEST_HARNESS_VERSION_JSON_URL_TEMPLATE = (
+    "https://pypi.org/pypi/pytest-homeassistant-custom-component/{version}/json"
+)
 
 _HA_CONSTRAINTS_GITHUB_URL_TEMPLATE = "https://raw.githubusercontent.com/home-assistant/core/{ha_version}/homeassistant/package_constraints.txt"
 
@@ -674,8 +680,8 @@ def _format_cmd_str(cmd: object) -> str:
     return str(cmd)
 
 
-def _newest_published_version(payload: object, package_name: str) -> str:
-    """Return the newest valid version with at least one published artifact."""
+def _published_versions_descending(payload: object, package_name: str) -> list[str]:
+    """Return all valid published versions sorted in descending order."""
     if not isinstance(payload, dict) or not isinstance(
         (releases := payload.get("releases")),
         dict,
@@ -691,10 +697,24 @@ def _newest_published_version(payload: object, package_name: str) -> str:
             continue
     if not published_versions:
         raise ValueError(f"PyPI returned no published {package_name} releases")
-    return _validate_version_label(
-        f"{normalize_package_name(package_name)}_version",
-        max(published_versions)[1],
-    )
+    # Sort strictly by parsed PEP 440 Version object in descending order (e.g. 0.13.100 > 0.13.99)
+    published_versions.sort(key=lambda item: item[0], reverse=True)
+    valid_versions: list[str] = []
+    for _, ver_str in published_versions:
+        try:
+            valid_versions.append(
+                _validate_version_label(f"{normalize_package_name(package_name)}_version", ver_str)
+            )
+        except ValueError:
+            continue
+    if not valid_versions:
+        raise ValueError(f"PyPI returned no published {package_name} releases")
+    return valid_versions
+
+
+def _newest_published_version(payload: object, package_name: str) -> str:
+    """Return the newest valid version with at least one published artifact."""
+    return _published_versions_descending(payload, package_name)[0]
 
 
 def _get_latest_matched_pair() -> LatestMatchedPair:
@@ -706,37 +726,62 @@ def _get_latest_matched_pair() -> LatestMatchedPair:
             raise ValueError("Home Assistant PyPI metadata is not a JSON object")
         if not isinstance(harness_payload, dict):
             raise ValueError("Test harness PyPI metadata is not a JSON object")
+        if not isinstance((releases := ha_payload.get("releases")), dict):
+            raise ValueError("Home Assistant PyPI metadata has no releases object")
+
         absolute_latest = _newest_published_version(ha_payload, "homeassistant")
-        harness_version = _newest_published_version(
+        harness_versions = _published_versions_descending(
             harness_payload,
             _TEST_HARNESS_PACKAGE,
         )
-        if not isinstance((harness_info := harness_payload.get("info")), dict):
-            raise ValueError("Test harness PyPI metadata has no info object")
-        matched_ha = _validate_version_label(
-            "harness_homeassistant_version",
-            exact_homeassistant_requirement(
-                harness_info.get("requires_dist"),
-                f"{_TEST_HARNESS_PACKAGE} {harness_version}",
-            ),
-        )
-        if not isinstance((releases := ha_payload.get("releases")), dict):
-            raise ValueError("Home Assistant PyPI metadata has no releases object")
-        matched_artifacts = next(
-            (
-                rel_artifacts
-                for rel_ver, rel_artifacts in releases.items()
-                if isinstance(rel_ver, str)
+
+        matched_pair: tuple[str, str] | None = None
+        for harness_version in harness_versions[:_MAX_HARNESS_CANDIDATES]:
+            harness_info = harness_payload.get("info")
+            if not isinstance(harness_info, dict):
+                raise ValueError("Test harness PyPI metadata has no info object")
+            if "version" in harness_info and harness_info.get("version") != harness_version:
+                version_url = _PYPI_TEST_HARNESS_VERSION_JSON_URL_TEMPLATE.format(
+                    version=harness_version,
+                )
+                version_payload = orjson.loads(_fetch_remote_text(version_url))
+                if not isinstance(version_payload, dict):
+                    raise ValueError(
+                        f"Test harness {harness_version} PyPI metadata is not a JSON object"
+                    )
+                version_info = version_payload.get("info")
+                if not isinstance(version_info, dict):
+                    raise ValueError(
+                        f"Test harness {harness_version} PyPI metadata has no info object"
+                    )
+                harness_info = version_info
+
+            try:
+                candidate_ha = _validate_version_label(
+                    "harness_homeassistant_version",
+                    exact_homeassistant_requirement(
+                        harness_info.get("requires_dist"),
+                        f"{_TEST_HARNESS_PACKAGE} {harness_version}",
+                    ),
+                )
+            except ValueError:
+                continue
+
+            if any(
+                isinstance(rel_ver, str)
                 and isinstance(rel_artifacts, list)
                 and rel_artifacts
-                and not versions_differ(rel_ver, matched_ha)
-            ),
-            None,
-        )
-        if not matched_artifacts:
-            raise ValueError(
-                f"Test harness {harness_version} targets unpublished Home Assistant {matched_ha}"
-            )
+                and not versions_differ(rel_ver, candidate_ha)
+                for rel_ver, rel_artifacts in releases.items()
+            ):
+                matched_pair = (candidate_ha, harness_version)
+                break
+
+        if not matched_pair:
+            checked = min(len(harness_versions), _MAX_HARNESS_CANDIDATES)
+            raise ValueError(f"No matching test harness found among {checked} checked releases")
+
+        matched_ha, matched_harness = matched_pair
     except (
         OSError,
         KeyError,
@@ -748,7 +793,7 @@ def _get_latest_matched_pair() -> LatestMatchedPair:
         ) from err
     return LatestMatchedPair(
         ha_ver=matched_ha,
-        harness_ver=harness_version,
+        harness_ver=matched_harness,
         absolute_latest_ha_ver=absolute_latest,
     )
 
@@ -1303,6 +1348,57 @@ def _run_pytest(python_bin: Path, ha_ver_display: str, pytest_args: Sequence[str
     print(f"STEP_OK: uv run pytest (Home Assistant {ha_ver_display})", flush=True)
 
 
+def _run_ty(python_bin: Path, ha_ver_display: str) -> None:
+    """Run ty type check against the compatibility virtual environment."""
+    safe_python_bin = _validate_python_bin(python_bin)
+    uv_executable_path = resolve_global_uv_path()
+    env = os.environ.copy()
+    env["UV_MANAGED_PYTHON"] = "1"
+    print(f"STEP_START: uv run ty check (Home Assistant {ha_ver_display})", flush=True)
+    subprocess.run(
+        [
+            uv_executable_path,
+            "run",
+            "--locked",
+            "--no-sync",
+            "ty",
+            "check",
+            "--python",
+            str(safe_python_bin),
+        ],
+        env=env,
+        check=True,
+        cwd=_REPO_ROOT,
+        timeout=_STATIC_ANALYSIS_TIMEOUT_SECONDS,
+    )
+    print(f"STEP_OK: uv run ty check (Home Assistant {ha_ver_display})", flush=True)
+
+
+def _run_pyright(python_bin: Path, ha_ver_display: str) -> None:
+    """Run pyright type check against the compatibility virtual environment."""
+    safe_python_bin = _validate_python_bin(python_bin)
+    uv_executable_path = resolve_global_uv_path()
+    env = os.environ.copy()
+    env["UV_MANAGED_PYTHON"] = "1"
+    print(f"STEP_START: uv run pyright (Home Assistant {ha_ver_display})", flush=True)
+    subprocess.run(
+        [
+            uv_executable_path,
+            "run",
+            "--locked",
+            "--no-sync",
+            "pyright",
+            "--pythonpath",
+            str(safe_python_bin),
+        ],
+        env=env,
+        check=True,
+        cwd=_REPO_ROOT,
+        timeout=_STATIC_ANALYSIS_TIMEOUT_SECONDS,
+    )
+    print(f"STEP_OK: uv run pyright (Home Assistant {ha_ver_display})", flush=True)
+
+
 def _prepare_version_and_deps(
     ha_ver: str,
     harness_ver: str,
@@ -1536,8 +1632,16 @@ def _verify_and_run_tests(
     pytest_bin: Path,
     ha_ver_to_install: str,
     harness_ver_to_install: str,
+    *,
+    is_latest: bool = False,
 ) -> tuple[bool, str]:
     """Verify virtual environment completeness and run the test suite.
+
+    Note:
+        This is used for local matrix validation runs (`_run_tests_for_version`).
+        In CI matrix workflows, pair verification (`--verify-pair-python`), Pyright
+        type checking (`Run Pyright`), and Pytest (`Run Pytest`) are organized as
+        distinct steps to provide fine-grained reporting and avoid redundant runs.
 
     Returns:
         tuple[bool, str]: (Success status, Installed HA version)
@@ -1562,6 +1666,9 @@ def _verify_and_run_tests(
     ):
         return False, ha_ver_display
 
+    if is_latest:
+        _run_ty(python_bin, ha_ver_display)
+        _run_pyright(python_bin, ha_ver_display)
     _run_pytest(python_bin, ha_ver_display, _COMPATIBILITY_PYTEST_ARGS)
     return True, ha_ver_display
 
@@ -1612,6 +1719,7 @@ def _run_tests_for_version(
             pytest_bin=pytest_bin,
             ha_ver_to_install=ha_ver_to_install,
             harness_ver_to_install=harness_ver_to_install,
+            is_latest=(ha_ver == "latest"),
         )
 
     except (ValueError, RuntimeError) as err:
@@ -1684,6 +1792,11 @@ def main() -> None:
         "--verify-pair-python",
         type=Path,
         help="Verify an installed harness pair using this Python executable",
+    )
+    parser.add_argument(
+        "--check-types",
+        action="store_true",
+        help="Run ty and pyright type checks against the target Python environment",
     )
     parser.add_argument("--expected-ha", help="Expected Home Assistant version")
     parser.add_argument("--expected-harness", help="Expected test harness version")
@@ -1761,6 +1874,13 @@ def main() -> None:
             _validate_version_label("expected_harness", args.expected_harness),
         ):
             sys.exit(1)
+        if args.check_types:
+            try:
+                _run_ty(validated_python_bin, args.expected_ha)
+                _run_pyright(validated_python_bin, args.expected_ha)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as err:
+                print(f"VALIDATION_ERROR: static type check failed: {err}", flush=True)
+                sys.exit(1)
         return
 
     try:

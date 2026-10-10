@@ -145,12 +145,14 @@ jobs:
                 . + {
                   ha_version: ("latest matched (" + $latest_ha + ")"),
                   ha_real_version: $latest_ha,
-                  harness_real_version: $latest_harness
+                  harness_real_version: $latest_harness,
+                  is_latest: true
                 }
               else
                 . + {
                   ha_real_version: .ha_version,
-                  harness_real_version: .harness_version
+                  harness_real_version: .harness_version,
+                  is_latest: false
                 }
               end
             )
@@ -305,6 +307,15 @@ jobs:
           --verify-pair-python .venv/bin/python
           --expected-ha "$MATRIX_HA_REAL_VERSION"
           --expected-harness "$MATRIX_HARNESS_REAL_VERSION"
+
+      # Run Ty and Pyright as standalone CI steps for the latest matrix row.
+      - name: Run Ty Check
+        if: matrix.is_latest
+        run: uv run --locked ty check --python .venv/bin/python
+
+      - name: Run Pyright
+        if: matrix.is_latest
+        run: uv run --locked pyright --pythonpath .venv/bin/python
 
       - name: Run Pytest
         run: uv --no-config run --no-project --python .venv/bin/python pytest --no-cov

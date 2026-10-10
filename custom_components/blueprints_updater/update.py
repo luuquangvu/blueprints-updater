@@ -329,8 +329,8 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         l_hash = data.get("local_hash")
         return str(l_hash)[:8] if l_hash else None
 
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:  # pyright: ignore[reportIncompatibleVariableOverride]
+    @cached_property
+    def extra_state_attributes(self) -> dict[str, object]:
         """Return the extra state attributes like last_error.
 
         Returns:
@@ -362,6 +362,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         "blueprint_id",
         "installed_version",
         "latest_version",
+        "extra_state_attributes",
     )
 
     @callback
@@ -430,6 +431,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
                 blocking, name=name_str
             )
 
+        self._clear_cached_properties()
         if self.hass:
             super()._handle_coordinator_update()
 
