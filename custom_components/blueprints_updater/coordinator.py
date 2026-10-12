@@ -15,12 +15,13 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from difflib import unified_diff
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, TypedDict, TypeGuard, TypeVar
 from urllib.parse import urlparse
 from warnings import WarningMessage
 
 import httpx
 import orjson
+from awesomeversion import AwesomeVersion, AwesomeVersionException
 
 if TYPE_CHECKING:
     import probatio as vol
@@ -36,7 +37,12 @@ from homeassistant.components.automation.config import (
 from homeassistant.components.automation.config import (
     async_validate_config_item as async_validate_automation_config,
 )
-from homeassistant.components.blueprint.const import CONF_BLUEPRINT, CONF_INPUT
+from homeassistant.components.blueprint.const import (
+    CONF_BLUEPRINT,
+    CONF_HOMEASSISTANT,
+    CONF_INPUT,
+    CONF_MIN_VERSION,
+)
 from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
 from homeassistant.components.script.config import (
@@ -986,15 +992,10 @@ def _diff_nested_values(
         current_path: Traversal path for the current key.
 
     """
-    if (
-        isinstance(v, dict)
-        and len(v) == 1
-        and CONF_TRIGGERS in v
-        and isinstance(v[CONF_TRIGGERS], list)
-        and isinstance(val_target, list)
-    ):
+    if _is_nested_trigger_group(v) and isinstance(val_target, list):
+        trigger_key = CONF_TRIGGERS if CONF_TRIGGERS in v else CONF_TRIGGER
         diff_structural_configs(
-            v[CONF_TRIGGERS], val_target, diagnostics, (*current_path, CONF_TRIGGERS)
+            v[trigger_key], val_target, diagnostics, (*current_path, trigger_key)
         )
     elif (
         isinstance(v, dict)
@@ -1007,6 +1008,50 @@ def _diff_nested_values(
         diff_structural_configs(v[0], val_target, diagnostics, (*current_path, 0))
     else:
         diff_structural_configs(v, val_target, diagnostics, current_path)
+
+
+def _is_nested_trigger_group(item: object) -> TypeGuard[Mapping[str, list[object]]]:
+    """Check if item is a single-key dictionary containing a list under trigger or triggers.
+
+    Args:
+        item: Configuration item being checked.
+
+    Returns:
+        True if item is a single-key dict wrapping a list of triggers, False otherwise.
+
+    """
+    if not isinstance(item, Mapping) or len(item) != 1:
+        return False
+    if CONF_TRIGGERS in item:
+        return isinstance(item[CONF_TRIGGERS], list)
+    return CONF_TRIGGER in item and isinstance(item[CONF_TRIGGER], list)
+
+
+def _flatten_trigger_list(items: Sequence[object]) -> list[object]:
+    """Flatten trigger lists containing nested trigger groups.
+
+    Matches Home Assistant Core's ``_base_trigger_list_flatten`` behavior where
+    trigger definitions wrapped in single-key ``{'triggers': [...]}`` mappings
+    are unpacked into a single flat list before per-trigger validation.
+
+    Args:
+        items: List of trigger definitions which may contain nested trigger groups.
+
+    Returns:
+        Flattened list of trigger configuration dictionaries.
+
+    """
+    flat: list[object] = []
+    for item in items:
+        if isinstance(item, Mapping) and len(item) == 1:
+            if CONF_TRIGGERS in item and isinstance(item[CONF_TRIGGERS], list):
+                flat.extend(_flatten_trigger_list(item[CONF_TRIGGERS]))
+                continue
+            if CONF_TRIGGER in item and isinstance(item[CONF_TRIGGER], list):
+                flat.extend(_flatten_trigger_list(item[CONF_TRIGGER]))
+                continue
+        flat.append(item)
+    return flat
 
 
 def diff_structural_configs(
@@ -1086,6 +1131,12 @@ def diff_structural_configs(
             else:
                 _diff_nested_values(v, validated_cfg[k], diagnostics, current_path)
     elif isinstance(input_cfg, list) and isinstance(validated_cfg, list):
+        str_path = [p for p in path if isinstance(p, str)]
+        if str_path and str_path[-1] in TRIGGER_PATH_SEGMENTS:
+            if any(_is_nested_trigger_group(item) for item in input_cfg):
+                input_cfg = _flatten_trigger_list(input_cfg)
+            if any(_is_nested_trigger_group(item) for item in validated_cfg):
+                validated_cfg = _flatten_trigger_list(validated_cfg)
         for idx in range(min(len(input_cfg), len(validated_cfg))):
             diff_structural_configs(input_cfg[idx], validated_cfg[idx], diagnostics, (*path, idx))
 
@@ -1109,6 +1160,46 @@ def format_validation_error(err: Exception, config: object = None) -> str:
             path_str = ""
         return f"{path_str}{err.error_message}"
     return str(err)
+
+
+def extract_blueprint_min_version(blueprint_dict: Mapping[object, object]) -> object | None:
+    """Extract homeassistant.min_version from blueprint metadata if present.
+
+    Args:
+        blueprint_dict: Parsed blueprint dictionary.
+
+    Returns:
+        The min_version object if present, None otherwise.
+
+    """
+    bp_meta = blueprint_dict.get(CONF_BLUEPRINT)
+    if isinstance(bp_meta, Mapping):
+        ha_meta = bp_meta.get(CONF_HOMEASSISTANT)
+        if isinstance(ha_meta, Mapping):
+            return ha_meta.get(CONF_MIN_VERSION)
+    return None
+
+
+def check_min_ha_version(current_ha: str, min_version: object) -> tuple[bool, str | None]:
+    """Compare current Home Assistant version against a blueprint minimum version requirement.
+
+    Args:
+        current_ha: Current Home Assistant version string.
+        min_version: Blueprint minimum required version object/string.
+
+    Returns:
+        Tuple of (is_supported, error_message). When supported or unspecified,
+        returns (True, None). When unsupported or malformed, returns (False, error_message).
+
+    """
+    if min_version is None:
+        return True, None
+    try:
+        if AwesomeVersion(current_ha) < AwesomeVersion(str(min_version)):
+            return False, f"Requires at least Home Assistant {min_version}"
+        return True, None
+    except (AwesomeVersionException, TypeError, ValueError) as err:
+        return False, f"Invalid Home Assistant minimum version '{min_version}': {err}"
 
 
 class _TemplatePathTracker(set[str]):
@@ -6835,6 +6926,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if tmpl_err:
             report.errors.append(f"Template compatibility error at {tmpl_err[0]}: {tmpl_err[1]}")
 
+        # Check minimum Home Assistant version requirement
+        min_version = extract_blueprint_min_version(blueprint_dict)
+        if min_version is not None:
+            current_ha = get_ha_version(self.hass)
+            _, version_err = check_min_ha_version(current_ha, min_version)
+            if version_err:
+                report.errors.append(version_err)
+
         schema = get_blueprint_schema(domain)
         try:
             schema(blueprint_dict)
@@ -6848,6 +6947,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             report.errors.append(f"Failed to instantiate Blueprint: {err}")
             report.severity = IncompatibilitySeverity.BREAKING
             return report
+
+        if bp_errors := blueprint_obj.validate():
+            for bp_err in bp_errors:
+                if bp_err not in report.errors:
+                    report.errors.append(bp_err)
 
         # Step C & D: Consumer validation & Structural diagnostics
         consumers = self._get_blueprint_consumers(rel_path) or []

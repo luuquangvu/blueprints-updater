@@ -71,7 +71,9 @@ from custom_components.blueprints_updater.coordinator import (
     CompatibilityReport,
     ValidationDiagnostics,
     capture_structural_validation_diagnostics,
+    check_min_ha_version,
     diff_structural_configs,
+    extract_blueprint_min_version,
     format_validation_error,
 )
 from custom_components.blueprints_updater.file_store import (
@@ -1258,6 +1260,117 @@ async def test_async_validate_local_blueprint_compatibility_deep(coordinator, mo
     assert report_valid.ha_docs_url is not None
 
 
+async def test_async_validate_local_blueprint_compatibility_min_version(
+    coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Test async_validate_local_blueprint_compatibility reports error on low HA version."""
+    rel_path = "automation/future.yaml"
+    path = f"/config/blueprints/{rel_path}"
+    future_content = (
+        "blueprint:\n"
+        "  name: Future Version Blueprint\n"
+        "  domain: automation\n"
+        "  homeassistant:\n"
+        '    min_version: "2099.1.0"\n'
+        "trigger:\n"
+        "  - platform: state\n"
+        "    entity_id: binary_sensor.motion\n"
+        "action:\n"
+        "  - action: light.turn_on\n"
+        "    target:\n"
+        "      entity_id: light.living_room\n"
+    )
+    report = await coordinator.async_validate_local_blueprint_compatibility(
+        rel_path, path, future_content
+    )
+    assert report.severity == IncompatibilitySeverity.BREAKING
+    assert any("Requires at least Home Assistant 2099.1.0" in e for e in report.errors)
+
+
+async def test_async_validate_local_blueprint_compatibility_min_version_supported(
+    coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Test async_validate_local_blueprint_compatibility passes on supported HA version."""
+    rel_path = "automation/supported.yaml"
+    path = f"/config/blueprints/{rel_path}"
+    supported_content = (
+        "blueprint:\n"
+        "  name: Supported Version Blueprint\n"
+        "  domain: automation\n"
+        "  homeassistant:\n"
+        '    min_version: "2020.1.0"\n'
+        "trigger:\n"
+        "  - platform: state\n"
+        "    entity_id: binary_sensor.motion\n"
+        "action:\n"
+        "  - action: light.turn_on\n"
+        "    target:\n"
+        "      entity_id: light.living_room\n"
+    )
+    report = await coordinator.async_validate_local_blueprint_compatibility(
+        rel_path, path, supported_content
+    )
+    assert all("Requires at least Home Assistant" not in e for e in report.errors)
+    assert all("Invalid Home Assistant minimum version" not in e for e in report.errors)
+
+
+async def test_async_validate_local_blueprint_compatibility_min_version_invalid(
+    coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Test async_validate_local_blueprint_compatibility fails on invalid min_version."""
+    rel_path = "automation/invalid_version.yaml"
+    path = f"/config/blueprints/{rel_path}"
+    invalid_content = (
+        "blueprint:\n"
+        "  name: Invalid Version Blueprint\n"
+        "  domain: automation\n"
+        "  homeassistant:\n"
+        '    min_version: "invalid.ha.version"\n'
+        "trigger:\n"
+        "  - platform: state\n"
+        "    entity_id: binary_sensor.motion\n"
+        "action:\n"
+        "  - action: light.turn_on\n"
+        "    target:\n"
+        "      entity_id: light.living_room\n"
+    )
+    report = await coordinator.async_validate_local_blueprint_compatibility(
+        rel_path, path, invalid_content
+    )
+    assert report.severity == IncompatibilitySeverity.BREAKING
+    assert any(
+        e.startswith("Invalid Home Assistant minimum version 'invalid.ha.version':")
+        for e in report.errors
+    )
+
+
+def test_extract_blueprint_min_version() -> None:
+    """Test extract_blueprint_min_version retrieves min_version or returns None."""
+    assert extract_blueprint_min_version({}) is None
+    assert extract_blueprint_min_version({"blueprint": "invalid"}) is None
+    assert extract_blueprint_min_version({"blueprint": {"homeassistant": "invalid"}}) is None
+    assert (
+        extract_blueprint_min_version({"blueprint": {"homeassistant": {"min_version": "2024.1.0"}}})
+        == "2024.1.0"
+    )
+
+
+def test_check_min_ha_version() -> None:
+    """Test check_min_ha_version handles supported, unsupported, and invalid versions."""
+    assert check_min_ha_version("2024.12.0", None) == (True, None)
+    assert check_min_ha_version("2024.12.0", "2024.1.0") == (True, None)
+    assert check_min_ha_version("2024.12.0", "2024.12.0") == (True, None)
+
+    is_supported, err = check_min_ha_version("2024.1.0", "2099.1.0")
+    assert not is_supported
+    assert err == "Requires at least Home Assistant 2099.1.0"
+
+    is_supported, err = check_min_ha_version("2024.1.0", "not_a_version")
+    assert not is_supported
+    assert err is not None
+    assert err.startswith("Invalid Home Assistant minimum version 'not_a_version':")
+
+
 async def test_async_validate_local_blueprint_compatibility_consumers(coordinator, monkeypatch):
     """Test consumer substitution and validation handling in compatibility inspection."""
     path = "/config/blueprints/automation/test.yaml"
@@ -1933,6 +2046,125 @@ def test_diff_structural_configs_top_level_plural_keys() -> None:
     assert "action" not in diagnostics.renamed_keys
     # Nested service -> action must be detected
     assert diagnostics.renamed_keys.get("service") == "action"
+
+
+def test_diff_structural_configs_nested_trigger_groups_not_deprecated() -> None:
+    """Test diff_structural_configs unwraps nested triggers and avoids deprecated warnings."""
+    input_cfg = {
+        "triggers": [
+            {
+                "triggers": [
+                    {"platform": "state", "entity_id": "binary_sensor.test1"},
+                    {"platform": "state", "entity_id": "binary_sensor.test2"},
+                ]
+            },
+            {"platform": "state", "entity_id": "binary_sensor.test3"},
+        ]
+    }
+    validated_cfg = {
+        "triggers": [
+            {"platform": "state", "entity_id": "binary_sensor.test1"},
+            {"platform": "state", "entity_id": "binary_sensor.test2"},
+            {"platform": "state", "entity_id": "binary_sensor.test3"},
+        ]
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+
+    assert "triggers" not in diagnostics.deprecated_keys
+    assert diagnostics.deprecated_keys == []
+
+
+def test_flatten_trigger_list() -> None:
+    """Test _flatten_trigger_list recursively flattens single-key trigger/triggers dicts."""
+    from custom_components.blueprints_updater.coordinator import (
+        _flatten_trigger_list,
+        _is_nested_trigger_group,
+    )
+
+    nested = [
+        {"triggers": [{"platform": "state", "entity_id": "binary_sensor.a"}]},
+        {"trigger": [{"platform": "event", "event_type": "b"}]},
+        {"platform": "time", "at": "12:00:00"},
+    ]
+    flattened = _flatten_trigger_list(nested)
+    assert len(flattened) == 3
+    assert flattened[0] == {"platform": "state", "entity_id": "binary_sensor.a"}
+    assert flattened[1] == {"platform": "event", "event_type": "b"}
+    assert flattened[2] == {"platform": "time", "at": "12:00:00"}
+
+    # Multi-key mappings remain unflattened
+    multi_key = [{"triggers": [{"platform": "state"}], "id": "my_group"}]
+    assert _flatten_trigger_list(multi_key) == multi_key
+    assert not _is_nested_trigger_group(multi_key[0])
+
+    # Empty groups are handled
+    empty_triggers = [{"triggers": []}]
+    empty_trigger = [{"trigger": []}]
+    assert _flatten_trigger_list(empty_triggers) == []
+    assert _flatten_trigger_list(empty_trigger) == []
+    assert _is_nested_trigger_group(empty_triggers[0])
+    assert _is_nested_trigger_group(empty_trigger[0])
+
+    # Nested groups recurse through both trigger and triggers wrappers
+    deep_nested = [
+        {
+            "triggers": [
+                {
+                    "trigger": [
+                        {"platform": "state", "entity_id": "binary_sensor.deep"},
+                    ]
+                }
+            ]
+        }
+    ]
+    assert _flatten_trigger_list(deep_nested) == [
+        {"platform": "state", "entity_id": "binary_sensor.deep"}
+    ]
+
+    # Non-list mappings remain unflattened
+    non_list_val = [{"triggers": "invalid_string"}]
+    assert _flatten_trigger_list(non_list_val) == non_list_val
+    assert not _is_nested_trigger_group(non_list_val[0])
+
+
+def test_diff_structural_configs_trigger_flattening_restricted_to_trigger_paths() -> None:
+    """Test trigger list flattening is restricted to known trigger configuration paths."""
+    input_actions = {
+        "actions": [
+            {"trigger": [{"platform": "state", "entity_id": "binary_sensor.test"}]},
+            {"action": "light.turn_on", "target": {"entity_id": "light.a"}},
+        ]
+    }
+    validated_actions = {
+        "actions": [
+            {"trigger": [{"platform": "state", "entity_id": "binary_sensor.test"}]},
+            {"action": "light.turn_on", "target": {"entity_id": "light.a"}},
+        ]
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_actions, validated_actions, diagnostics)
+    assert diagnostics.deprecated_keys == []
+    assert diagnostics.renamed_keys == {}
+
+
+def test_diff_structural_configs_empty_nested_trigger_group() -> None:
+    """Test diff_structural_configs handles empty nested trigger groups cleanly."""
+    input_cfg = {
+        "triggers": [
+            {"triggers": []},
+            {"platform": "state", "entity_id": "binary_sensor.test"},
+        ]
+    }
+    validated_cfg = {
+        "triggers": [
+            {"platform": "state", "entity_id": "binary_sensor.test"},
+        ]
+    }
+    diagnostics = ValidationDiagnostics()
+    diff_structural_configs(input_cfg, validated_cfg, diagnostics)
+    assert "triggers" not in diagnostics.deprecated_keys
+    assert diagnostics.deprecated_keys == []
 
 
 def test_derive_substituted_baseline_config(hass) -> None:
@@ -6152,6 +6384,7 @@ REAL_WORLD_BLUEPRINT_URLS = [
     "https://github.com/Blackymas/NSPanel_HA_Blueprint/blob/main/nspanel_blueprint.yaml",
     "https://github.com/SirGoodenough/HA_Blueprints/blob/master/Automations/ZHA-Xiaomi_Cube_Controller.yaml",
     "https://github.com/Skaronator/home-assistant-blueprints/blob/main/automation/ikea-bilresa-dual-button.yaml",
+    "https://github.com/edwardtfn/NSPanel-Easy/blob/main/nspanel_easy_blueprint.yaml",
 ]
 """This list features real-world blueprints used to check the compatibility of the update process.
 
@@ -6253,6 +6486,23 @@ async def test_real_world_blueprint_compatibility_validation(
 
     assert len(content) > 0
 
+    try:
+        parsed_blueprint = yaml_util.parse_yaml(content)
+        if isinstance(parsed_blueprint, dict):
+            min_version = extract_blueprint_min_version(parsed_blueprint)
+            if min_version is not None:
+                current_ha = get_ha_version(real_world_coordinator.hass)
+                is_supported, version_err = check_min_ha_version(current_ha, min_version)
+                if not is_supported and version_err and version_err.startswith("Requires at least"):
+                    pytest.skip(
+                        f"Blueprint requires Home Assistant >= {min_version}, "
+                        f"currently running {current_ha}"
+                    )
+    except pytest.skip.Exception:
+        raise
+    except Exception:
+        pass
+
     rel_path = f"automation/{blueprint_filename}"
     full_path = f"/config/blueprints/{rel_path}"
 
@@ -6263,6 +6513,35 @@ async def test_real_world_blueprint_compatibility_validation(
     assert isinstance(report, CompatibilityReport)
     assert report.errors == []
     assert report.warnings == []
+
+
+async def test_real_world_blueprint_compatibility_validation_skips_when_ha_version_below_min(
+    real_world_coordinator: BlueprintUpdateCoordinator, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that real-world blueprint validation skips when HA version is below min_version."""
+    future_blueprint = """
+blueprint:
+  name: Future Version Blueprint
+  domain: automation
+  homeassistant:
+    min_version: "2099.1.0"
+  input: {}
+trigger: []
+action: []
+"""
+    test_url = "https://example.com/test_future_blueprint.yaml"
+    monkeypatch.setattr(
+        real_world_coordinator,
+        "async_fetch_import_data",
+        AsyncMock(return_value=(future_blueprint, "2099.1.0", None, None, None)),
+    )
+    blueprint_filename = f"{hashlib.sha256(test_url.encode('utf-8')).hexdigest()[:32]}.yaml"
+    cache_path = Path(tempfile.gettempdir()) / "bp_cache" / blueprint_filename
+    if cache_path.exists():
+        cache_path.unlink()
+
+    with pytest.raises(pytest.skip.Exception):
+        await test_real_world_blueprint_compatibility_validation(real_world_coordinator, test_url)
 
 
 def test_is_invalid_for_input_default_edge_cases() -> None:
