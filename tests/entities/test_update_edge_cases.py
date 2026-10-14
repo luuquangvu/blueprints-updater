@@ -150,6 +150,7 @@ async def test_extra_state_attributes(mock_coordinator):
     entity._localized_blocking_reason = "Translated Block"
 
     attrs = entity.extra_state_attributes
+    assert attrs is not None
     assert attrs["last_error"] == "Translated Error"
     assert attrs["breaking_risks"] == ["risk1"]
     assert attrs["update_blocking_reason"] == "Translated Block"

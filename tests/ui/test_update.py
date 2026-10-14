@@ -80,5 +80,6 @@ def test_update_entity_properties():
     assert entity.latest_version == "remot123"
 
     attrs = entity.extra_state_attributes
+    assert attrs is not None
     assert attrs["domain"] == FunctionalDomain.AUTOMATION
     assert attrs["relative_path"] == "automation/test.yaml"

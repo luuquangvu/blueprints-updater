@@ -330,7 +330,7 @@ class BlueprintUpdateEntity(CoordinatorEntity[BlueprintUpdateCoordinator], Updat
         return str(l_hash)[:8] if l_hash else None
 
     @cached_property
-    def extra_state_attributes(self) -> dict[str, object]:
+    def extra_state_attributes(self) -> Mapping[str, object] | None:
         """Return the extra state attributes like last_error.
 
         Returns:

@@ -461,6 +461,7 @@ async def test_entity_extra_state_attributes_includes_backups_count(coordinator)
     entity.entity_id = "update.test"
 
     attrs = entity.extra_state_attributes
+    assert attrs is not None
     assert attrs["backups_count"] == 3
 
 
