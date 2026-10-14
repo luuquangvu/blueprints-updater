@@ -12,6 +12,12 @@ import orjson
 VERSION_CORE_PATTERN = r"\d+\.\d+\.\d+"
 VERSION_PRERELEASE_PATTERN = r"-rc\.\d+"
 VERSION_PATTERN = rf"({VERSION_CORE_PATTERN}(?:{VERSION_PRERELEASE_PATTERN})?)"
+INTEGRATION_NAME_PATTERN = r"[A-Za-z0-9 ]+"
+
+_VERSION_RE = re.compile(VERSION_PATTERN, flags=re.ASCII)
+_INTEGRATION_NAME_RE = re.compile(INTEGRATION_NAME_PATTERN, flags=re.ASCII)
+_RELEASE_BRANCH_RE = re.compile(rf"release/{VERSION_PATTERN}", flags=re.ASCII)
+_PRERELEASE_RE = re.compile(VERSION_PRERELEASE_PATTERN, flags=re.ASCII)
 
 
 @dataclass(frozen=True)
@@ -23,21 +29,34 @@ class ReleaseGateResult:
     version: str = ""
     tag: str = ""
     prerelease: bool = False
+    integration_name: str = ""
 
 
 def _normalized_version(value: object) -> str | None:
     """Return a valid release version string or None."""
     if not isinstance(value, str):
         return None
-    match = re.fullmatch(VERSION_PATTERN, value, flags=re.ASCII)
+    match = _VERSION_RE.fullmatch(value)
     return match[1] if match else None
 
 
-def _read_manifest_version(manifest_path: Path) -> tuple[str, str | None]:
-    """Read and validate the integration manifest version."""
+def _normalized_integration_name(value: object) -> str | None:
+    """Return a valid integration name with ASCII alphanumeric and spaces or None."""
+    if not isinstance(value, str):
+        return None
+    name = value.strip()
+    if len(name) > 100 or not _INTEGRATION_NAME_RE.fullmatch(name):
+        return None
+    return name
+
+
+def _read_manifest_metadata(manifest_path: Path) -> tuple[str | None, str, str | None]:
+    """Read and validate the integration manifest name and version."""
     manifest = orjson.loads(manifest_path.read_bytes())
+    raw_name = manifest.get("name")
     raw_version = manifest.get("version", "")
-    return str(raw_version), _normalized_version(raw_version)
+    integration_name = _normalized_integration_name(raw_name)
+    return integration_name, str(raw_version), _normalized_version(raw_version)
 
 
 def _read_pyproject_version(pyproject_path: Path) -> tuple[str, str | None]:
@@ -55,39 +74,39 @@ def _evaluate_release_gate(
     pyproject_path: Path,
 ) -> ReleaseGateResult:
     """Evaluate release PR labels, branch name, and metadata versions."""
-    branch_match = re.fullmatch(rf"release/{VERSION_PATTERN}", branch, flags=re.ASCII)
+    branch_match = _RELEASE_BRANCH_RE.fullmatch(branch)
     branch_version = branch_match[1] if branch_match else None
 
-    manifest_version, manifest_version_full = _read_manifest_version(manifest_path)
+    manifest_name, manifest_version, manifest_version_full = _read_manifest_metadata(manifest_path)
     pyproject_version, pyproject_version_full = _read_pyproject_version(pyproject_path)
 
     version_matches = (
         branch_version is not None
         and manifest_version_full is not None
         and pyproject_version_full is not None
+        and manifest_name is not None
         and branch_version == manifest_version_full == pyproject_version_full
     )
     should_publish = "release" in labels and version_matches
 
-    if should_publish:
+    if should_publish and manifest_name is not None:
         message = f"Release publishing enabled for branch {branch} with version {manifest_version}"
         return ReleaseGateResult(
             should_publish=True,
             message=message,
             version=manifest_version,
             tag=manifest_version,
-            prerelease=bool(
-                re.search(VERSION_PRERELEASE_PATTERN, manifest_version, flags=re.ASCII)
-            ),
+            prerelease=bool(_PRERELEASE_RE.search(manifest_version)),
+            integration_name=manifest_name,
         )
 
     message = (
         "Skipping publish because PR must have label 'release', "
-        "branch release/X.Y.Z or release/X.Y.Z-rc.N, and matching "
-        "manifest.json and pyproject.toml versions; got branch "
-        f"{branch!r}, branch version {branch_version!r}, manifest "
-        f"version {manifest_version!r}, and pyproject version "
-        f"{pyproject_version!r}"
+        "branch release/X.Y.Z or release/X.Y.Z-rc.N, valid single-line "
+        "manifest 'name', and matching manifest.json and pyproject.toml "
+        f"versions; got branch {branch!r}, branch version {branch_version!r}, "
+        f"manifest version {manifest_version!r}, pyproject version "
+        f"{pyproject_version!r}, and manifest name {manifest_name!r}"
     )
     return ReleaseGateResult(should_publish=False, message=message)
 
@@ -96,11 +115,16 @@ def _format_github_outputs(result: ReleaseGateResult) -> str:
     """Format release gate outputs for downstream GitHub Actions steps."""
     lines = [f"should_publish={str(result.should_publish).lower()}"]
     if result.should_publish:
+        if not (integration_name := _normalized_integration_name(result.integration_name)):
+            raise ValueError(
+                "integration_name must be a non-empty string of ASCII letters, digits, and spaces"
+            )
         lines.extend(
             [
                 f"version={result.version}",
                 f"tag={result.tag}",
                 f"prerelease={str(result.prerelease).lower()}",
+                f"integration_name={integration_name}",
             ]
         )
     return "\n".join(lines) + "\n"

@@ -169,7 +169,9 @@ async def test_entity_localized_blueprint_validation_error(hass, coordinator):
     ):
         await entity._async_localize_strings()
 
-    assert entity.extra_state_attributes["last_error"] == f"Template: {detail}"
+    attrs = entity.extra_state_attributes
+    assert attrs is not None
+    assert attrs["last_error"] == f"Template: {detail}"
 
 
 @pytest.mark.asyncio
