@@ -37,13 +37,10 @@ blueprint:
       selector:
         select:
           options:
-            - label: Admin
-              value: admin
-            - label: User
-              value: user
-          multiple: false
-          custom_value: false
-          sort: false
+            - value: admin
+              label: Admin
+            - value: user
+              label: User
 """
 
 
@@ -61,9 +58,9 @@ async def test_semantic_normalization_parity(hass: HomeAssistant) -> None:
     assert remote_dict == local_dict
 
     selector = remote_dict["blueprint"]["input"]["target_notification"]["selector"]["select"]
-    assert selector["multiple"] is False
-    assert selector["custom_value"] is False
-    assert selector["sort"] is False
+    assert "multiple" not in selector
+    assert "custom_value" not in selector
+    assert "sort" not in selector
 
 
 @pytest.mark.asyncio

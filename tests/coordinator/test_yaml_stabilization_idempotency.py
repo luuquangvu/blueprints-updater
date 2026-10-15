@@ -1,12 +1,13 @@
 """Tests for YAML stabilization idempotency, ghost update elimination, and list scoping."""
 
+import copy
 import hashlib
 import inspect
 import os
 from collections.abc import ItemsView, Iterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,13 +22,18 @@ else:
 import yaml
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import selector
 from homeassistant.util import yaml as yaml_util
+from homeassistant.util.yaml.objects import Input
 
 from custom_components.blueprints_updater.blueprint_validation import (
+    BlueprintSchemaAdapter,
+    _order_blueprint_metadata,
+    _safe_deepcopy,
+    _stabilize_dict_structure,
     canonicalize_source_url,
     ensure_source_url,
     ensure_source_url_cached,
+    get_blueprint_canonical_keys,
     hash_content,
     normalize_content,
     set_cached_selector_filter_paths,
@@ -570,7 +576,6 @@ def test_selector_mapping_to_list_coerced_and_sorted() -> None:
             "entity": {
                 "filter": [{"device_class": ["illuminance"], "domain": ["sensor"]}],
                 "multiple": False,
-                "reorder": False,
             }
         }
     }
@@ -612,7 +617,6 @@ def test_selector_mapping_to_list_coerced_and_sorted() -> None:
                 "selector": {
                     "entity": {
                         "filter": [{"device_class": ["illuminance"], "domain": ["sensor"]}],
-                        "multiple": False,
                     }
                 },
             }
@@ -699,14 +703,11 @@ def test_select_selector_options_stabilization() -> None:
     stabilized = stabilize_yaml_structure(raw_select, norm_select, selector_path=())
     assert stabilized == {
         "select": {
-            "custom_value": False,
             "mode": "dropdown",
-            "multiple": False,
             "options": [
                 {"label": "Label 2", "value": "val2"},
                 {"label": "Label 1", "value": "val1"},
             ],
-            "sort": False,
         }
     }
 
@@ -1664,9 +1665,8 @@ async def test_prepare_blueprint_install_hash_validation(
     assert prepared.functional_domain == "automation"
     assert prepared.name == "Sensor Light"
     assert prepared.content.count("source_url:") == 1
-    if "reorder" in selector.EntitySelector.CONFIG_SCHEMA({}):
-        assert "reorder: false" in prepared.content
-    assert "multiple: false" in prepared.content
+    assert "reorder: false" not in prepared.content
+    assert "multiple: false" not in prepared.content
 
     expected_hash = hash_content(prepared.content, source_url)
     assert remote_hash == expected_hash
@@ -1969,3 +1969,971 @@ async def test_coordinator_install_failure_propagation(
         )
 
     assert coordinator.data[path] == existing_entry
+
+
+def test_multi_input_disambiguation_no_cross_wiping() -> None:
+    """Verify that multiple inputs with the same selector type do not cause cross-wiping."""
+    source_url = "https://github.com/user/test_multi_input"
+    raw_content = """blueprint:
+  name: Multi Input Test
+  domain: automation
+  input:
+    input_empty:
+      name: Empty Text
+      selector:
+        text: {}
+    input_multiline:
+      name: Multiline Text
+      selector:
+        text:
+          multiline: true
+"""
+    normalized = ensure_source_url(raw_content, source_url)
+    assert "multiline: true" in normalized
+    assert "input_empty" in normalized
+    # input_empty selector should be clean text: without braces
+    assert "text: {}" not in normalized
+    parsed = yaml_util.parse_yaml(normalized)
+    assert isinstance(parsed, dict)
+    bp_data = parsed.get("blueprint")
+    assert isinstance(bp_data, dict)
+    inputs = bp_data.get("input")
+    assert isinstance(inputs, dict)
+    assert inputs["input_empty"]["selector"]["text"] is None
+    assert inputs["input_multiline"]["selector"]["text"] == {"multiline": True}
+
+
+def test_clean_empty_selectors_no_braces() -> None:
+    """Verify that empty selectors serialize cleanly without mapping braces."""
+    source_url = "https://github.com/user/test_clean_empty"
+    raw_content = """blueprint:
+  name: Clean Selectors Test
+  domain: automation
+  input:
+    bool_in:
+      name: Boolean Input
+      selector:
+        boolean: {}
+    text_in:
+      name: Text Input
+      selector:
+        text: {}
+    entity_in:
+      name: Entity Input
+      selector:
+        entity: {}
+"""
+    normalized = ensure_source_url(raw_content, source_url)
+    assert "{}" not in normalized
+    assert "boolean:" in normalized
+    assert "text:" in normalized
+    assert "entity:" in normalized
+    parsed = yaml_util.parse_yaml(normalized)
+    assert isinstance(parsed, dict)
+    bp_data = parsed.get("blueprint")
+    assert isinstance(bp_data, dict)
+    inputs = bp_data.get("input")
+    assert isinstance(inputs, dict)
+    assert inputs["bool_in"]["selector"]["boolean"] is None
+    assert inputs["text_in"]["selector"]["text"] is None
+    assert inputs["entity_in"]["selector"]["entity"] is None
+
+
+def test_pruned_voluptuous_defaults() -> None:
+    """Verify that synthetic voluptuous defaults are pruned from serialized output."""
+    source_url = "https://github.com/user/test_prune_defaults"
+    raw_content = """blueprint:
+  name: Prune Defaults Test
+  domain: automation
+  input:
+    num_in:
+      name: Number Input
+      selector:
+        number:
+          min: 1
+          max: 100
+    sel_in:
+      name: Select Input
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - "Option A"
+            - "Option B"
+    txt_in:
+      name: Text Input
+      selector:
+        text:
+          multiline: true
+"""
+    normalized = ensure_source_url(raw_content, source_url)
+    assert "step:" not in normalized
+    assert "mode: slider" not in normalized
+    assert "custom_value:" not in normalized
+    assert "sort:" not in normalized
+    assert "multiple:" not in normalized
+    assert "min: 1" in normalized
+    assert "max: 100" in normalized
+    assert "mode: dropdown" in normalized
+    assert "multiline: true" in normalized
+
+
+def test_author_numeric_scalar_representation() -> None:
+    """Verify that integer and float scalar representations are preserved."""
+    source_url = "https://github.com/user/test_numeric_scalars"
+    raw_content = """blueprint:
+  name: Numeric Scalars Test
+  domain: automation
+  input:
+    slider_input:
+      name: Slider
+      selector:
+        number:
+          min: 5
+          max: 50
+          step: 0.5
+"""
+    normalized = ensure_source_url(raw_content, source_url)
+    assert "min: 5" in normalized
+    assert "max: 50" in normalized
+    assert "step: 0.5" in normalized
+    assert "min: 5.0" not in normalized
+    assert "max: 50.0" not in normalized
+
+    parsed = yaml_util.parse_yaml(normalized)
+    assert isinstance(parsed, dict)
+    bp_data = parsed.get("blueprint")
+    assert isinstance(bp_data, dict)
+    inputs = bp_data.get("input")
+    assert isinstance(inputs, dict)
+    num_selector = inputs["slider_input"]["selector"]["number"]
+    assert isinstance(num_selector["min"], int)
+    assert num_selector["min"] == 5
+    assert isinstance(num_selector["max"], int)
+    assert num_selector["max"] == 50
+    assert isinstance(num_selector["step"], float)
+    assert num_selector["step"] == 0.5
+
+
+def test_metadata_ordering_invariance() -> None:
+    """Verify that altering source_url line position produces identical SHA-256 hashes."""
+    source_url = "https://github.com/user/test_ordering"
+    content_url_top = f"""blueprint:
+  source_url: {source_url}
+  name: Ordering Test
+  domain: automation
+  author: Test Author
+  description: Ordering test blueprint
+"""
+    content_url_bottom = f"""blueprint:
+  name: Ordering Test
+  author: Test Author
+  description: Ordering test blueprint
+  domain: automation
+  source_url: {source_url}
+"""
+    content_no_url = """blueprint:
+  name: Ordering Test
+  author: Test Author
+  description: Ordering test blueprint
+  domain: automation
+"""
+
+    hash_top = hash_content(content_url_top, source_url)
+    hash_bottom = hash_content(content_url_bottom, source_url)
+    hash_injected = hash_content(content_no_url, source_url)
+
+    assert hash_top == hash_bottom == hash_injected
+
+    # Custom/future keys reordering invariance (e.g. version, icon)
+    content_custom_ordered = f"""blueprint:
+  name: Ordering Test
+  domain: automation
+  author: Test Author
+  description: Ordering test blueprint
+  icon: mdi:bell
+  version: 2.1.0
+  source_url: {source_url}
+"""
+    content_custom_scrambled = f"""blueprint:
+  version: 2.1.0
+  source_url: {source_url}
+  icon: mdi:bell
+  description: Ordering test blueprint
+  author: Test Author
+  domain: automation
+  name: Ordering Test
+"""
+    norm_custom_1 = ensure_source_url(content_custom_ordered, source_url)
+    norm_custom_2 = ensure_source_url(content_custom_scrambled, source_url)
+    assert norm_custom_1 == norm_custom_2
+
+    hash_custom_1 = hash_content(content_custom_ordered, source_url)
+    hash_custom_2 = hash_content(content_custom_scrambled, source_url)
+    assert hash_custom_1 == hash_custom_2
+
+
+def test_fallback_resilience_description_input() -> None:
+    """Verify that blueprints with description: !input fallback safely without exception."""
+    source_url = "https://github.com/user/test_fallback"
+    raw_content = """blueprint:
+  name: Fallback Test
+  domain: automation
+  input:
+    prompt:
+      name: Prompt
+      selector:
+        text: {}
+      description: !input prompt_var
+"""
+    normalized = ensure_source_url(raw_content, source_url)
+    assert source_url in normalized
+    assert "Fallback Test" in normalized
+    assert "{}" not in normalized
+    parsed = yaml_util.parse_yaml(normalized)
+    assert isinstance(parsed, dict)
+    bp_data = parsed.get("blueprint")
+    assert isinstance(bp_data, dict)
+    inputs = bp_data.get("input")
+    assert isinstance(inputs, dict)
+    assert inputs["prompt"]["description"] == Input("prompt_var")
+    assert inputs["prompt"]["selector"]["text"] is None
+
+
+def test_fallback_resilience_schema_exception_forced() -> None:
+    """Verify fallback cleans empty selectors and preserves metadata on failure."""
+    source_url = "https://github.com/user/test_forced_fallback"
+    raw_content = """blueprint:
+  name: Forced Fallback Test
+  domain: automation
+  custom_tag: author_metadata
+  extra_info:
+    category: lighting
+    priority: 1
+  input:
+    forced_in:
+      name: Forced Input
+      selector:
+        boolean: {}
+"""
+    with patch(
+        "custom_components.blueprints_updater.blueprint_validation.get_blueprint_schema",
+        side_effect=vol.Invalid("forced validation error"),
+    ):
+        normalized = ensure_source_url(raw_content, source_url)
+
+    assert source_url in normalized
+    assert "{}" not in normalized
+    parsed = yaml_util.parse_yaml(normalized)
+    assert isinstance(parsed, dict)
+    bp_data = parsed.get("blueprint")
+    assert isinstance(bp_data, dict)
+    assert bp_data["name"] == "Forced Fallback Test"
+    assert bp_data["domain"] == "automation"
+    assert bp_data["custom_tag"] == "author_metadata"
+    assert bp_data["extra_info"] == {"category": "lighting", "priority": 1}
+    assert bp_data["source_url"] == source_url
+    inputs = bp_data.get("input")
+    assert isinstance(inputs, dict)
+    assert inputs["forced_in"]["selector"]["boolean"] is None
+
+
+def test_normalization_idempotency_multi_pass() -> None:
+    """Verify that multi-pass normalization is fully idempotent across multiple passes."""
+    source_url = "https://github.com/user/test_idempotency"
+    raw_content = """blueprint:
+  name: Idempotency Test
+  domain: automation
+  input:
+    my_num:
+      name: Number
+      selector:
+        number:
+          max: 100
+          min: 1
+    my_text:
+      name: Text
+      selector:
+        text: {}
+"""
+    pass1 = ensure_source_url(raw_content, source_url)
+    pass2 = ensure_source_url(pass1, source_url)
+    pass3 = ensure_source_url(pass2, source_url)
+
+    assert pass1 == pass2 == pass3
+    hash1 = hash_content(pass1, source_url)
+    hash2 = hash_content(pass2, source_url)
+    hash3 = hash_content(pass3, source_url)
+    assert hash1 == hash2 == hash3
+
+
+def test_get_blueprint_canonical_keys_discovery() -> None:
+    """Verify get_blueprint_canonical_keys discovers canonical keys and excludes source_url."""
+    keys = get_blueprint_canonical_keys()
+    assert isinstance(keys, tuple)
+    assert len(keys) >= 4
+    assert "name" in keys
+    assert "domain" in keys
+    assert "input" in keys
+    assert "source_url" not in keys
+
+
+def test_order_blueprint_metadata_future_keys_pinned_before_source_url() -> None:
+    """Verify that future or custom metadata keys are sorted deterministically before source_url."""
+    raw_bp: dict[object, object] = {
+        "source_url": "https://github.com/user/test",
+        "version": "2.1.0",
+        "name": "Future Blueprint",
+        "icon": "mdi:rocket",
+        "author": "Alice",
+        "domain": "automation",
+        "input": {"btn": {"name": "Button"}},
+    }
+    ordered = _order_blueprint_metadata(raw_bp)
+    ordered_keys = list(ordered.keys())
+
+    # source_url must always be the final element at the tail
+    assert ordered_keys[-1] == "source_url"
+
+    # Future/custom keys (icon, version) must precede source_url
+    icon_idx = ordered_keys.index("icon")
+    version_idx = ordered_keys.index("version")
+    source_url_idx = ordered_keys.index("source_url")
+    assert icon_idx < source_url_idx
+    assert version_idx < source_url_idx
+    # Custom keys must be sorted alphabetically
+    assert icon_idx < version_idx
+
+
+def test_order_blueprint_metadata_without_source_url() -> None:
+    """Verify that metadata without source_url does not have source_url injected."""
+    raw_bp: dict[object, object] = {
+        "domain": "automation",
+        "name": "No Source URL",
+        "custom_tag": "blueprints",
+    }
+    ordered = _order_blueprint_metadata(raw_bp)
+    assert "source_url" not in ordered
+    assert list(ordered.keys()) == ["name", "domain", "custom_tag"]
+
+
+def test_order_blueprint_metadata_non_string_keys() -> None:
+    """Verify non-string metadata keys are deterministically ordered with tie-breaking."""
+    raw_bp: dict[object, object] = {
+        123: "numeric_key",
+        "source_url": "https://example.com/bp",
+        "domain": "automation",
+        "name": "Non-String Keys",
+        "custom": "val",
+    }
+    ordered = _order_blueprint_metadata(raw_bp)
+    assert "source_url" in ordered
+    assert list(ordered.keys()) == ["name", "domain", 123, "custom", "source_url"]
+
+    # Verify tie-breaker determinism for distinct keys with identical str() representations
+    bp_int_first: dict[object, object] = {
+        123: "int_key",
+        "123": "str_key",
+        "name": "Tie Breaker",
+    }
+    bp_str_first: dict[object, object] = {
+        "123": "str_key",
+        123: "int_key",
+        "name": "Tie Breaker",
+    }
+    ordered_int_first = _order_blueprint_metadata(bp_int_first)
+    ordered_str_first = _order_blueprint_metadata(bp_str_first)
+    assert list(ordered_int_first.keys()) == ["name", 123, "123"]
+    assert list(ordered_str_first.keys()) == ["name", 123, "123"]
+
+
+def test_order_blueprint_metadata_static_canonical_ordering_independent_of_dynamic_schema() -> None:
+    """Verify metadata ordering remains pinned to static keys regardless of dynamic schema order."""
+    raw_bp: dict[object, object] = {
+        "input": {},
+        "name": "Test",
+        "author": "Alice",
+        "domain": "automation",
+        "description": "Desc",
+        "source_url": "https://example.com/bp",
+    }
+    with patch.object(
+        BlueprintSchemaAdapter,
+        "get_canonical_keys",
+        return_value=("input", "author", "domain", "description", "name"),
+    ):
+        ordered = _order_blueprint_metadata(raw_bp)
+
+    assert list(ordered.keys()) == [
+        "name",
+        "description",
+        "domain",
+        "author",
+        "input",
+        "source_url",
+    ]
+
+
+def test_ensure_source_url_non_string_metadata_key() -> None:
+    """Verify non-string metadata keys serialize stably and produce invariant hashes."""
+    source_url = "https://github.com/user/test_numeric_meta"
+    raw_content = f"""blueprint:
+  name: Non-String Key Test
+  domain: automation
+  123: numeric_metadata
+  source_url: {source_url}
+"""
+    normalized = ensure_source_url(raw_content, source_url)
+    assert "123: numeric_metadata" in normalized
+    parsed = yaml_util.parse_yaml(normalized)
+    assert isinstance(parsed, dict)
+    bp_data = parsed.get("blueprint")
+    assert isinstance(bp_data, dict)
+    assert bp_data[123] == "numeric_metadata"
+    assert bp_data["source_url"] == source_url
+
+    h1 = hash_content(raw_content, source_url)
+    h2 = hash_content(normalized, source_url)
+    assert h1 == h2
+
+
+def test_ensure_source_url_future_keys_invariance() -> None:
+    """Verify blueprints with future metadata keys produce invariant hashes."""
+    source_url = "https://github.com/user/test_future_keys"
+    content_top = f"""blueprint:
+  source_url: {source_url}
+  name: Future Keys Invariance
+  domain: automation
+  icon: mdi:home
+  version: 1.0.0
+  input:
+    test_in:
+      name: Test Input
+      selector:
+        text: {{}}
+"""
+    content_bottom = f"""blueprint:
+  name: Future Keys Invariance
+  domain: automation
+  icon: mdi:home
+  version: 1.0.0
+  input:
+    test_in:
+      name: Test Input
+      selector:
+        text: {{}}
+  source_url: {source_url}
+"""
+    content_no_url = """blueprint:
+  name: Future Keys Invariance
+  domain: automation
+  icon: mdi:home
+  version: 1.0.0
+  input:
+    test_in:
+      name: Test Input
+      selector:
+        text: {}
+"""
+    hash_top = hash_content(content_top, source_url)
+    hash_bottom = hash_content(content_bottom, source_url)
+    hash_no_url = hash_content(content_no_url, source_url)
+
+    assert hash_top == hash_bottom == hash_no_url
+    normalized = ensure_source_url(content_top, source_url)
+    # Ensure source_url is at the bottom after version and icon
+    assert "icon: mdi:home" in normalized
+    assert "version: 1.0.0" in normalized
+    assert "{}" not in normalized
+
+
+def test_get_blueprint_canonical_keys_mocked_schema() -> None:
+    """Verify get_blueprint_canonical_keys orders custom schema keys and excludes source_url."""
+    from unittest.mock import MagicMock
+
+    from homeassistant.components.blueprint.const import CONF_BLUEPRINT, CONF_SOURCE_URL
+
+    mock_schema = MagicMock()
+    mock_inner = MagicMock()
+    mock_inner.schema = {
+        "custom_first": str,
+        "name": str,
+        CONF_SOURCE_URL: str,
+        "input": dict,
+        "domain": str,
+    }
+    mock_schema.schema = {CONF_BLUEPRINT: mock_inner}
+
+    get_blueprint_canonical_keys.cache_clear()
+    try:
+        with patch(
+            "custom_components.blueprints_updater.blueprint_validation.BLUEPRINT_SCHEMA",
+            mock_schema,
+        ):
+            keys = get_blueprint_canonical_keys()
+            assert keys == ("custom_first", "name", "input", "domain")
+            assert CONF_SOURCE_URL not in keys
+    finally:
+        get_blueprint_canonical_keys.cache_clear()
+
+
+def test_get_blueprint_canonical_keys_fallback_on_corrupt_schema() -> None:
+    """Verify get_blueprint_canonical_keys falls back to static sequence on corrupt schema."""
+    get_blueprint_canonical_keys.cache_clear()
+    try:
+        with patch(
+            "custom_components.blueprints_updater.blueprint_validation.BLUEPRINT_SCHEMA",
+            None,
+        ):
+            keys = get_blueprint_canonical_keys()
+            assert keys == (
+                "name",
+                "description",
+                "domain",
+                "author",
+                "homeassistant",
+                "input",
+            )
+    finally:
+        get_blueprint_canonical_keys.cache_clear()
+
+
+def test_ensure_source_url_deepcopy_failure_fallback() -> None:
+    """Verify ensure_source_url gracefully falls back to canonical YAML on deepcopy failure."""
+    source_url = "https://github.com/user/test_deepcopy_failure"
+    raw_content = """blueprint:
+  name: Deepcopy Fallback Test
+  domain: automation
+  input:
+    field:
+      name: Field
+      selector:
+        text: {}
+trigger:
+  - platform: state
+"""
+    with (
+        patch(
+            "custom_components.blueprints_updater.blueprint_validation._safe_deepcopy",
+            side_effect=copy.Error("mock deepcopy failure"),
+        ),
+        patch(
+            "custom_components.blueprints_updater.blueprint_validation._LOGGER.debug"
+        ) as mock_debug,
+    ):
+        normalized = ensure_source_url(raw_content, source_url)
+
+    assert source_url in normalized
+    assert "Deepcopy Fallback Test" in normalized
+    assert "{}" not in normalized
+    assert "trigger:" in normalized
+    assert "triggers:" not in normalized
+    assert any("falling back to canonical YAML" in str(c) for c in mock_debug.call_args_list)
+
+
+def test_ensure_source_url_fallback_preserves_non_automation_keys() -> None:
+    """Verify fallback does not rewrite root keys for non-automation blueprints."""
+    source_url = "https://github.com/user/test_script_fallback"
+    raw_content = """blueprint:
+  name: Script Fallback Test
+  domain: script
+action:
+  - custom_field: test
+"""
+    with patch(
+        "custom_components.blueprints_updater.blueprint_validation._safe_deepcopy",
+        side_effect=copy.Error("mock deepcopy failure"),
+    ):
+        normalized = ensure_source_url(raw_content, source_url)
+
+    assert source_url in normalized
+    assert "action:" in normalized
+    assert "actions:" not in normalized
+
+
+def test_blueprint_schema_adapter_with_marker_keys() -> None:
+    """Verify BlueprintSchemaAdapter correctly extracts keys from marker-wrapped schemas."""
+    from unittest.mock import MagicMock
+
+    from homeassistant.components.blueprint.const import CONF_BLUEPRINT, CONF_SOURCE_URL
+
+    marker_bp = vol.Required(CONF_BLUEPRINT)
+    marker_name = vol.Required("name")
+    marker_domain = vol.Required("domain")
+    marker_desc = vol.Optional("description")
+    marker_source = vol.Optional(CONF_SOURCE_URL)
+    marker_input = vol.Optional("input")
+
+    mock_inner = MagicMock()
+    mock_inner.schema = {
+        marker_name: str,
+        marker_desc: str,
+        marker_domain: str,
+        marker_source: str,
+        marker_input: dict,
+    }
+
+    mock_schema = MagicMock()
+    mock_schema.schema = {marker_bp: mock_inner}
+
+    keys = BlueprintSchemaAdapter.get_canonical_keys(mock_schema)
+    assert keys == ("name", "description", "domain", "input")
+    assert CONF_SOURCE_URL not in keys
+
+
+def test_blueprint_schema_adapter_preserves_input_declaration_order() -> None:
+    """Verify BlueprintSchemaAdapter preserves schema order when input precedes other keys."""
+    schema_with_early_input: dict[object, object] = {
+        "input": dict,
+        "name": str,
+        "domain": str,
+        "author": str,
+    }
+    keys = BlueprintSchemaAdapter.get_canonical_keys(schema_with_early_input)
+    assert keys == ("input", "name", "domain", "author")
+
+
+def test_blueprint_schema_adapter_direct_mapping() -> None:
+    """Verify BlueprintSchemaAdapter recognizes directly supplied blueprint schema mappings."""
+    direct_schema: dict[object, object] = {
+        "name": str,
+        "domain": str,
+        "author": str,
+        "description": str,
+        "input": dict,
+    }
+    keys = BlueprintSchemaAdapter.get_canonical_keys(direct_schema)
+    assert keys == ("name", "domain", "author", "description", "input")
+
+
+def test_blueprint_schema_adapter_invalid_object_fallback() -> None:
+    """Verify BlueprintSchemaAdapter falls back on corrupt schemas with logging."""
+    with patch(
+        "custom_components.blueprints_updater.blueprint_validation._LOGGER.debug"
+    ) as mock_debug:
+        keys = BlueprintSchemaAdapter.get_canonical_keys(object())
+
+    assert keys == (
+        "name",
+        "description",
+        "domain",
+        "author",
+        "homeassistant",
+        "input",
+    )
+    assert any(
+        "falling back to default canonical keys" in str(c) for c in mock_debug.call_args_list
+    )
+
+
+def test_safe_deepcopy_unsupported_leaf() -> None:
+    """Verify _safe_deepcopy isolates dictionaries while gracefully retaining uncopyable leaves."""
+
+    class UncopyableLeaf:
+        """Leaf type that raises copy.Error when deepcopied."""
+
+        def __deepcopy__(self, memo: dict[int, object]) -> "UncopyableLeaf":
+            """Simulate deepcopy failure on unsupported leaf object.
+
+            Args:
+                memo: Memoization dictionary.
+
+            Returns:
+                Never returns; raises copy.Error.
+
+            """
+            raise copy.Error("leaf cannot be deepcopied")
+
+    leaf = UncopyableLeaf()
+    data: dict[str, object] = {
+        "nested": {"key": "val", "leaf": leaf},
+        "items": [1, 2, leaf],
+    }
+
+    copied = _safe_deepcopy(data)
+    assert isinstance(copied, dict)
+    assert copied is not data
+    nested_copied = copied["nested"]
+    assert isinstance(nested_copied, dict)
+    assert nested_copied is not data["nested"]
+    assert nested_copied["leaf"] is leaf
+    assert copied["items"] is not data["items"]
+    assert copied["items"][2] is leaf
+
+
+def test_safe_deepcopy_arbitrary_leaf_exception() -> None:
+    """Verify _safe_deepcopy handles arbitrary exceptions from custom leaf __deepcopy__."""
+
+    class FailingLeaf:
+        """Leaf type that raises arbitrary exception when deepcopied."""
+
+        def __deepcopy__(self, memo: dict[int, object]) -> "FailingLeaf":
+            """Simulate unexpected runtime failure on unsupported leaf object.
+
+            Args:
+                memo: Memoization dictionary.
+
+            Returns:
+                Never returns; raises RuntimeError.
+
+            """
+            raise RuntimeError("unexpected deepcopy failure in custom leaf")
+
+    leaf = FailingLeaf()
+    data: dict[str, object] = {"custom": leaf, "nested": {"leaf": leaf}}
+    copied = _safe_deepcopy(data)
+
+    assert isinstance(copied, dict)
+    assert copied is not data
+    assert copied["custom"] is leaf
+    assert isinstance(copied["nested"], dict)
+    assert copied["nested"]["leaf"] is leaf
+
+
+def test_ensure_source_url_keeps_parsed_data_pristine() -> None:
+    """Verify ensure_source_url does not mutate parsed structure during validation or fallback."""
+    from homeassistant.util import yaml as yaml_util
+
+    source_url = "https://github.com/user/test_pristine_parsed"
+    raw_content = """blueprint:
+  name: Pristine Parsed Test
+  domain: automation
+  custom_tag: original_value
+trigger:
+  - platform: state
+"""
+    parsed_before = yaml_util.parse_yaml(raw_content)
+    assert isinstance(parsed_before, dict)
+
+    with (
+        patch(
+            "custom_components.blueprints_updater.blueprint_validation._safe_deepcopy",
+            side_effect=copy.Error("simulate deepcopy crash"),
+        ),
+        patch(
+            "homeassistant.util.yaml.parse_yaml",
+            return_value=parsed_before,
+        ),
+    ):
+        normalized = ensure_source_url(raw_content, source_url)
+
+    assert source_url in normalized
+    assert "Pristine Parsed Test" in normalized
+    # Verify parsed blueprint dict was not modified with source_url
+    assert "source_url" not in parsed_before["blueprint"]
+
+
+def test_ensure_source_url_unexpected_exception_surfaces() -> None:
+    """Verify ensure_source_url does not swallow unexpected runtime/programming errors."""
+    source_url = "https://github.com/user/test_unexpected_exception"
+    raw_content = """blueprint:
+  name: Unexpected Error Test
+  domain: automation
+"""
+    with (
+        patch(
+            "custom_components.blueprints_updater.blueprint_validation.get_blueprint_schema",
+            side_effect=RuntimeError("unexpected programming bug"),
+        ),
+        pytest.raises(RuntimeError, match="unexpected programming bug"),
+    ):
+        ensure_source_url(raw_content, source_url)
+
+
+def test_stabilize_dict_structure_empty_orig_dict_selector_level2() -> None:
+    """Verify Level 2 selector stabilization prunes defaults when orig_dict is empty."""
+    orig_empty: dict[object, object] = {}
+    norm_defaults: dict[object, object] = {
+        "min": 0,
+        "max": 100,
+        "step": 1.0,
+        "mode": "slider",
+    }
+    stabilized = _stabilize_dict_structure(
+        orig_empty,
+        norm_defaults,
+        selector_path=("number",),
+        filter_paths=frozenset(),
+    )
+    assert stabilized == {}
+
+
+def test_stabilize_dict_structure_unmatched_key_passes_none() -> None:
+    """Verify unmatched norm keys pass None as original value to stabilize_yaml_structure."""
+    with patch(
+        "custom_components.blueprints_updater.blueprint_validation.stabilize_yaml_structure",
+        wraps=stabilize_yaml_structure,
+    ) as mock_stabilize:
+        _stabilize_dict_structure(
+            {"matched": "val"},
+            {"matched": "val", "unmatched": "default"},
+            selector_path=None,
+            filter_paths=frozenset(),
+        )
+        unmatched_calls = [c for c in mock_stabilize.call_args_list if c[0][1] == "default"]
+        assert len(unmatched_calls) == 1
+        assert unmatched_calls[0][0][0] is None
+
+
+def test_clean_empty_selectors_post_processing_success_path() -> None:
+    """Verify _clean_empty_selectors cleans empty selector mapping in successful normalization."""
+    source_url = "https://github.com/user/test_clean_empty"
+    raw_content = """blueprint:
+  name: Clean Success Test
+  domain: automation
+  input:
+    txt:
+      name: Text Input
+      selector:
+        text: {}
+"""
+    normalized = ensure_source_url(raw_content, source_url)
+    assert "text: {}" not in normalized
+    parsed = yaml_util.parse_yaml(normalized)
+    assert isinstance(parsed, dict)
+    bp_data = parsed.get("blueprint")
+    assert isinstance(bp_data, dict)
+    inputs = bp_data.get("input")
+    assert isinstance(inputs, dict)
+    assert inputs["txt"]["selector"]["text"] is None
+
+
+def test_clean_empty_selectors_does_not_mutate_service_payloads() -> None:
+    """Verify empty-selector cleanup is restricted to blueprint inputs.
+
+    Service payloads containing selector mappings with empty values must be left intact.
+    """
+    source_url = "https://github.com/user/test_service_selector"
+    raw_content = """blueprint:
+  name: Service Payload Test
+  domain: automation
+  input:
+    my_in:
+      name: Input
+      selector:
+        text: {}
+action:
+  - action: test.service
+    data:
+      selector:
+        text: {}
+"""
+    normalized = ensure_source_url(raw_content, source_url)
+    parsed = yaml_util.parse_yaml(normalized)
+    assert isinstance(parsed, dict)
+    # Input selector is cleaned to None
+    assert parsed["blueprint"]["input"]["my_in"]["selector"]["text"] is None
+    # Action payload selector with empty dict is preserved as empty dict, not None
+    action_list = parsed.get("actions") or parsed.get("action")
+    assert isinstance(action_list, list)
+    assert action_list[0]["data"]["selector"]["text"] == {}
+
+
+def test_ensure_source_url_fallback_preserves_singular_spelling() -> None:
+    """Verify fallback preserves singular key spellings and does not canonicalize to plural."""
+    source_url = "https://github.com/user/test_fallback_singular"
+    raw_content = """blueprint:
+  name: Singular Fallback Test
+  domain: automation
+trigger:
+  - platform: state
+"""
+    with patch(
+        "custom_components.blueprints_updater.blueprint_validation._safe_deepcopy",
+        side_effect=copy.Error("mock deepcopy failure"),
+    ):
+        normalized = ensure_source_url(raw_content, source_url)
+
+    assert source_url in normalized
+    assert "trigger:" in normalized
+    assert "triggers:" not in normalized
+
+
+def test_ensure_source_url_fallback_preserves_colliding_aliases() -> None:
+    """Verify fallback preserves both values when conflicting singular and plural aliases exist."""
+    source_url = "https://github.com/user/test_fallback_colliding"
+    raw_content = """blueprint:
+  name: Colliding Fallback Test
+  domain: automation
+trigger:
+  - platform: state
+    entity_id: sensor.singular
+triggers:
+  - platform: state
+    entity_id: sensor.plural
+"""
+    with patch(
+        "custom_components.blueprints_updater.blueprint_validation._safe_deepcopy",
+        side_effect=copy.Error("mock deepcopy failure"),
+    ):
+        normalized = ensure_source_url(raw_content, source_url)
+
+    parsed = yaml_util.parse_yaml(normalized)
+    assert isinstance(parsed, dict)
+    assert "trigger" in parsed
+    assert "triggers" in parsed
+    assert parsed["trigger"][0]["entity_id"] == "sensor.singular"
+    assert parsed["triggers"][0]["entity_id"] == "sensor.plural"
+
+
+def test_conflicting_aliases_rejected_and_handled_by_fallback() -> None:
+    """Verify conflicting aliases are rejected before normalization.
+
+    Both values are safely preserved via the fallback path.
+    """
+    source_url = "https://github.com/user/test_conflicting_aliases"
+    raw_content = """blueprint:
+  name: Conflicting Aliases Test
+  domain: automation
+trigger:
+  - platform: state
+    entity_id: sensor.sing
+triggers:
+  - platform: state
+    entity_id: sensor.plur
+"""
+    normalized = ensure_source_url(raw_content, source_url)
+    parsed = yaml_util.parse_yaml(normalized)
+    assert isinstance(parsed, dict)
+    assert "trigger" in parsed
+    assert "triggers" in parsed
+    assert parsed["trigger"][0]["entity_id"] == "sensor.sing"
+    assert parsed["triggers"][0]["entity_id"] == "sensor.plur"
+
+
+def test_bidirectional_alias_matching_without_duplicate_serialization() -> None:
+    """Verify schema normalizing plural to singular alias preserves orig_val.
+
+    The duplicate alias key must not be serialized.
+    """
+    source_url = "https://github.com/user/test_bidirectional_alias"
+    raw_content = """blueprint:
+  name: Bidirectional Alias Test
+  domain: automation
+triggers:
+  - platform: state
+    entity_id: sensor.test
+"""
+    mock_schema = MagicMock()
+    # Schema normalizes plural triggers to singular trigger
+    mock_schema.return_value = {
+        "blueprint": {
+            "name": "Bidirectional Alias Test",
+            "domain": "automation",
+        },
+        "trigger": [{"platform": "state", "entity_id": "sensor.test"}],
+    }
+
+    with patch(
+        "custom_components.blueprints_updater.blueprint_validation.get_blueprint_schema",
+        return_value=mock_schema,
+    ):
+        normalized = ensure_source_url(raw_content, source_url)
+
+    parsed = yaml_util.parse_yaml(normalized)
+    assert isinstance(parsed, dict)
+    # The normalized singular key is present with the original value
+    assert "trigger" in parsed
+    assert parsed["trigger"] == [{"platform": "state", "entity_id": "sensor.test"}]
+    # The duplicate input key "triggers" is NOT appended
+    assert "triggers" not in parsed
