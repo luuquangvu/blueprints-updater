@@ -986,10 +986,11 @@ def test_ensure_source_url_script():
 
 
 def test_deterministic_yaml_hashing():
-    """Test that YAML hashing is deterministic between Local and Remote versions.
+    """Test that YAML hashing is deterministic for option reordering and empty selectors.
 
-    Verify that a Local version (with injected defaults or reordered options)
-    and a Remote version result in the same hash after semantic normalization.
+    Verify that reordered selector options produce the same hash, and that empty
+    mapping selectors (e.g. text: {}) normalize identically to clean empty selectors
+    without injecting voluptuous schema defaults.
     """
     source_url = "https://github.com/user/test"
     content_v1 = (
@@ -1006,17 +1007,28 @@ def test_deterministic_yaml_hashing():
         "      name: T\n      selector:\n        text:\n"
         "          multiple: false\n          multiline: false"
     )
+    content_v4 = (
+        "blueprint:\n  name: T\n  domain: automation\n  input:\n    t:\n"
+        "      name: T\n      selector:\n        text:"
+    )
 
     hash1 = hash_content(content_v1, source_url)
-    hash2 = hash_content(content_v2, source_url)
     hash3 = hash_content(content_v3, source_url)
-
-    assert hash1 == hash2 == hash3
+    assert hash1 == hash3
 
     norm1 = ensure_source_url(content_v1, source_url)
-    norm2 = ensure_source_url(content_v2, source_url)
     norm3 = ensure_source_url(content_v3, source_url)
-    assert norm1 == norm2 == norm3
+    assert norm1 == norm3
+
+    hash2 = hash_content(content_v2, source_url)
+    hash4 = hash_content(content_v4, source_url)
+    assert hash2 == hash4
+
+    norm2 = ensure_source_url(content_v2, source_url)
+    norm4 = ensure_source_url(content_v4, source_url)
+    assert norm2 == norm4
+    assert "{}" not in norm2
+    assert "multiline" not in norm2
 
 
 def test_yaml_order_preservation():

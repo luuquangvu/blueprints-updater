@@ -685,8 +685,8 @@ async def test_async_install_blueprint_with_crlf_file(coordinator, tmp_path):
         "blueprint:\n"
         "  name: Updated Blueprint\n"
         "  domain: automation\n"
-        "  source_url: https://example.com/bp.yaml\n"
         "  input: {}\n"
+        "  source_url: https://example.com/bp.yaml\n"
     )
     await coordinator.async_install_blueprint(
         str(bp_file), new_content, reload_services=False, backup=True

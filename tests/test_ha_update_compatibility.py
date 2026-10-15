@@ -38,6 +38,7 @@ from custom_components.blueprints_updater import (
 from custom_components.blueprints_updater.blueprint_validation import (
     _DEFAULT_MATH_FILTER_METHODS,
     _DEFAULT_MATH_GLOBALS,
+    BlueprintSchemaAdapter,
     SyntheticDummyEntry,
     SyntheticDummyValues,
     _derive_value_for_path,
@@ -6584,3 +6585,20 @@ def test_diff_structural_configs_ignores_jinja_template_keys() -> None:
     assert "{% if true %}k{% endif %}" not in diagnostics.deprecated_keys
     # The renamed action key should be detected
     assert diagnostics.renamed_keys.get("service") == "action"
+
+
+def test_blueprint_schema_keys_alignment() -> None:
+    """Verify blueprints_updater canonical keys cover all HA Core BLUEPRINT_SCHEMA keys."""
+    from homeassistant.components.blueprint.const import CONF_BLUEPRINT, CONF_SOURCE_URL
+    from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
+
+    bp_schema = BLUEPRINT_SCHEMA.schema[CONF_BLUEPRINT]
+    ha_keys: set[str] = {
+        str(getattr(k, "schema", k))
+        for k in bp_schema.schema
+        if isinstance(getattr(k, "schema", k), str)
+    }
+    canonical = set(BlueprintSchemaAdapter._DEFAULT_CANONICAL_KEYS) | {CONF_SOURCE_URL}
+    assert ha_keys.issubset(canonical), (
+        f"HA Core added new blueprint keys not tracked in canonical keys: {ha_keys - canonical}"
+    )
