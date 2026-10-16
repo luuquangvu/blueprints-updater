@@ -115,6 +115,7 @@ from .blueprint_validation import (
     detect_new_mandatory_inputs,
     detect_unsupported_yaml_constructs,
     ensure_source_url,
+    ensure_source_url_ha_core,
     extract_blueprint_text,
     extract_input_configs,
     extract_inputs_with_default,
@@ -3440,14 +3441,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         )
         final_source_url_val = metadata.get("source_url")
         final_source_url = (
-            str(final_source_url_val) if isinstance(final_source_url_val, str) else None
+            str(final_source_url_val).strip()
+            if isinstance(final_source_url_val, str) and final_source_url_val.strip()
+            else None
         )
         filter_paths = self.get_selector_filter_paths()
-        content = (
-            ensure_source_url(remote_content, final_source_url, filter_paths=filter_paths)
-            if final_source_url
-            else normalize_content(remote_content)
-        )
+        if final_source_url:
+            content = ensure_source_url_ha_core(
+                remote_content,
+                final_source_url,
+                expected_domain=functional_domain,
+            )
+        else:
+            content = normalize_content(remote_content)
         expected_hash = hash_content(content, final_source_url, filter_paths=filter_paths)
         if remote_hash is not None and remote_hash != expected_hash:
             raise HomeAssistantError("Remote hash does not match validated install content")

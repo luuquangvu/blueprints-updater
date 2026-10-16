@@ -33,6 +33,7 @@ from custom_components.blueprints_updater.blueprint_validation import (
     canonicalize_source_url,
     ensure_source_url,
     ensure_source_url_cached,
+    ensure_source_url_ha_core,
     get_blueprint_canonical_keys,
     hash_content,
     normalize_content,
@@ -1670,6 +1671,152 @@ async def test_prepare_blueprint_install_hash_validation(
 
     expected_hash = hash_content(prepared.content, source_url)
     assert remote_hash == expected_hash
+
+
+@pytest.mark.asyncio
+async def test_prepare_blueprint_install_without_source_url_normalizes_content(
+    coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Test that _prepare_blueprint_install applies normalize_content when source_url is absent."""
+    path = "/config/blueprints/automation/test/no-source-url.yaml"
+    # Content with UTF-8 BOM and CRLF line endings
+    raw_content = "\ufeffblueprint:\r\n  name: Test BOM\r\n  domain: automation\r\n"
+    valid_hash = hash_content(raw_content, None)
+
+    for empty_url in (None, "   "):
+        with patch("os.path.realpath", return_value=path):
+            prepared = coordinator._prepare_blueprint_install(
+                path,
+                raw_content,
+                remote_hash=valid_hash,
+                source_url=empty_url,
+            )
+
+        assert prepared.source_url is None
+        assert "\ufeff" not in prepared.content
+        assert "\r" not in prepared.content
+        assert prepared.content == normalize_content(raw_content)
+        assert hash_content(prepared.content, None) == valid_hash
+
+    # Mismatched hash raises HomeAssistantError
+    with (
+        patch("os.path.realpath", return_value=path),
+        pytest.raises(
+            HomeAssistantError, match="Remote hash does not match validated install content"
+        ),
+    ):
+        coordinator._prepare_blueprint_install(
+            path,
+            raw_content,
+            remote_hash="invalid_hash_abc",
+            source_url=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_prepare_blueprint_install_flow_mapping_formats_canonical_yaml(
+    coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Test that _prepare_blueprint_install formats flow mapping blueprint as canonical YAML."""
+    path = "/config/blueprints/automation/test/flow-mapping.yaml"
+    target_url = "https://example.com/flow-blueprint.yaml"
+    flow_content = "blueprint: {name: Flow Mapping, domain: automation}\n"
+    expected_hash = hash_content(flow_content, target_url)
+
+    with patch("os.path.realpath", return_value=path):
+        prepared = coordinator._prepare_blueprint_install(
+            path,
+            flow_content,
+            remote_hash=expected_hash,
+            source_url=target_url,
+        )
+
+    assert prepared.source_url == target_url
+    assert "source_url:" in prepared.content
+    parsed = yaml_util.parse_yaml(prepared.content)
+    assert isinstance(parsed, dict)
+    assert parsed.get("blueprint", {}).get("source_url") == target_url
+    assert hash_content(prepared.content, target_url) == expected_hash
+
+    # Verify that a mismatched remote_hash is rejected
+    with (
+        patch("os.path.realpath", return_value=path),
+        pytest.raises(
+            HomeAssistantError, match="Remote hash does not match validated install content"
+        ),
+    ):
+        coordinator._prepare_blueprint_install(
+            path,
+            flow_content,
+            remote_hash="mismatched_remote_hash_12345",
+            source_url=target_url,
+        )
+
+
+@pytest.mark.asyncio
+async def test_prepare_blueprint_install_formats_canonical_yaml_via_ha_core(
+    coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Test that _prepare_blueprint_install produces canonical YAML aligned with HA Core."""
+    path = "/config/blueprints/automation/test/preservation.yaml"
+    old_url = "https://example.com/old_source.yaml"
+    new_url = "https://example.com/new_source.yaml"
+    raw_content = (
+        "\ufeff# Top author comment\r\n"
+        "blueprint:\r\n"
+        "  name: Preserved Blueprint\r\n"
+        "  author: luuquangvu\r\n"
+        "  description: |-\r\n"
+        "    Multiline scalar\r\n"
+        "    preserved perfectly\r\n"
+        f"  source_url: {old_url}\r\n"
+        "  domain: automation\r\n"
+        "  # Mid-section comment\r\n"
+        "  input:\r\n"
+        "    sensor:\r\n"
+        "      name: Sensor\r\n"
+    )
+    expected_content = ensure_source_url_ha_core(raw_content, new_url)
+    expected_hash = hash_content(expected_content, new_url)
+
+    with patch("os.path.realpath", return_value=path):
+        prepared = coordinator._prepare_blueprint_install(
+            path,
+            raw_content,
+            remote_hash=expected_hash,
+            source_url=new_url,
+        )
+
+    assert prepared.source_url == new_url
+    assert prepared.content == expected_content
+    assert f"source_url: {new_url}" in prepared.content
+    assert "# Top author comment" not in prepared.content
+    assert "# Mid-section comment" not in prepared.content
+    assert "\ufeff" not in prepared.content
+    assert "\r\n" not in prepared.content
+    parsed = yaml_util.parse_yaml(prepared.content)
+    assert isinstance(parsed, dict)
+    assert parsed["blueprint"]["source_url"] == new_url
+    assert parsed["blueprint"]["name"] == "Preserved Blueprint"
+    assert parsed["blueprint"]["author"] == "luuquangvu"
+    assert "Multiline scalar\npreserved perfectly" in parsed["blueprint"]["description"]
+    assert parsed["blueprint"]["domain"] == "automation"
+    assert "sensor" in parsed["blueprint"]["input"]
+    assert hash_content(prepared.content, new_url) == expected_hash
+
+    # Verify rejection on mismatched remote hash
+    with (
+        patch("os.path.realpath", return_value=path),
+        pytest.raises(
+            HomeAssistantError, match="Remote hash does not match validated install content"
+        ),
+    ):
+        coordinator._prepare_blueprint_install(
+            path,
+            raw_content,
+            remote_hash="mismatched_preserved_hash_xyz",
+            source_url=new_url,
+        )
 
 
 def test_local_scan_matches_remote_hash_after_install() -> None:
