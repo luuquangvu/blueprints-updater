@@ -14,9 +14,11 @@ import voluptuous as vol
 from homeassistant.components.blueprint.const import CONF_INPUT
 from homeassistant.const import CONF_DEFAULT
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import selector as ha_selector
 from homeassistant.helpers.template import HassLoader, TemplateEnvironment
+from homeassistant.util import yaml as yaml_util
 from homeassistant.util.yaml.objects import Input
 
 from custom_components.blueprints_updater.blueprint_validation import (
@@ -44,6 +46,7 @@ from custom_components.blueprints_updater.blueprint_validation import (
     detect_new_mandatory_inputs,
     ensure_source_url,
     ensure_source_url_cached,
+    ensure_source_url_ha_core,
     extract_blueprint_text,
     extract_defined_inputs,
     extract_input_configs,
@@ -1179,6 +1182,141 @@ def test_ensure_source_url_and_cached():
     h1 = hash_content(raw_messy)
     h2 = hash_content(norm1, already_normalized=True)
     assert h1 == h2
+
+
+def test_ensure_source_url_ha_core() -> None:
+    """Test ensure_source_url_ha_core."""
+    target_url = "https://github.com/luuquangvu/tutorials/blob/main/memory_tool.yaml"
+    new_url = "https://example.com/new_path.yaml"
+
+    # 1. Non-string inputs
+    assert ensure_source_url_ha_core(123, "https://example.com") == ""
+    assert ensure_source_url_ha_core("not yaml", "") == "not yaml"
+    assert ensure_source_url_ha_core("not yaml", None) == "not yaml"
+
+    # 2. Unparseable YAML or non-dict structures
+    unparseable = "bad: yaml: [["
+    assert ensure_source_url_ha_core(unparseable, "https://example.com") == unparseable
+
+    no_bp = "other_key: val\n"
+    assert ensure_source_url_ha_core(no_bp, "https://example.com") == no_bp
+
+    non_dict_bp = "blueprint: string_val\n"
+    assert ensure_source_url_ha_core(non_dict_bp, "https://example.com") == non_dict_bp
+
+    # 3. Valid blueprint: source_url already present
+    matching_yaml = """blueprint:
+  name: Memory Tool
+  author: luuquangvu
+  domain: automation
+  source_url: https://github.com/luuquangvu/tutorials/blob/main/memory_tool.yaml
+  input:
+    max_days:
+      name: Max Days
+      selector:
+        number:
+          min: 0
+          max: 3650
+"""
+    res_match = ensure_source_url_ha_core(matching_yaml, target_url)
+    parsed_match = yaml_util.parse_yaml(res_match)
+    assert isinstance(parsed_match, dict)
+    assert parsed_match["blueprint"]["source_url"] == target_url
+    assert parsed_match["blueprint"]["name"] == "Memory Tool"
+
+    # 4. Valid blueprint: source_url missing (injected via HA core logic)
+    missing_url_yaml = """blueprint:
+  name: Memory Tool
+  author: luuquangvu
+  domain: automation
+  input:
+    max_days:
+      name: Max Days
+      selector:
+        number:
+          min: 0
+          max: 3650
+"""
+    res_inserted = ensure_source_url_ha_core(missing_url_yaml, target_url)
+    parsed_inserted = yaml_util.parse_yaml(res_inserted)
+    assert isinstance(parsed_inserted, dict)
+    assert parsed_inserted["blueprint"]["source_url"] == target_url
+    assert parsed_inserted["blueprint"]["name"] == "Memory Tool"
+
+    # 5. Existing URL updated in place
+    old_url_yaml = """blueprint:
+  name: Test
+  source_url: https://example.com/old_path.yaml
+  domain: automation
+  input: {}
+"""
+    res_updated = ensure_source_url_ha_core(old_url_yaml, new_url)
+    parsed_updated = yaml_util.parse_yaml(res_updated)
+    assert isinstance(parsed_updated, dict)
+    assert parsed_updated["blueprint"]["source_url"] == new_url
+    assert "old_path.yaml" not in res_updated
+
+    # 6. Permissive fallback when domain is missing from blueprint metadata
+    no_domain_yaml = """blueprint:
+  name: No Domain Test
+  input: {}
+"""
+    res_override = ensure_source_url_ha_core(
+        no_domain_yaml, target_url, expected_domain="automation"
+    )
+    parsed_override = yaml_util.parse_yaml(res_override)
+    assert isinstance(parsed_override, dict)
+    assert parsed_override["blueprint"]["source_url"] == target_url
+    assert "domain" not in parsed_override["blueprint"]
+
+    # 7. Blueprint with custom schema or conflicting domain is preserved
+    invalid_schema_yaml = """blueprint:
+  name: Invalid Schema Test
+  domain: non_existent_domain_xyz
+"""
+    res_fallback = ensure_source_url_ha_core(invalid_schema_yaml, target_url)
+    parsed_fallback = yaml_util.parse_yaml(res_fallback)
+    assert isinstance(parsed_fallback, dict)
+    assert parsed_fallback["blueprint"]["source_url"] == target_url
+    assert parsed_fallback["blueprint"]["name"] == "Invalid Schema Test"
+    assert parsed_fallback["blueprint"]["domain"] == "non_existent_domain_xyz"
+
+    conflicting_domain_yaml = """blueprint:
+  name: Conflicting Domain Test
+  domain: script
+  input: {}
+"""
+    res_conflict = ensure_source_url_ha_core(
+        conflicting_domain_yaml, target_url, expected_domain="automation"
+    )
+    parsed_conflict = yaml_util.parse_yaml(res_conflict)
+    assert isinstance(parsed_conflict, dict)
+    assert parsed_conflict["blueprint"]["source_url"] == target_url
+    assert parsed_conflict["blueprint"]["domain"] == "script"
+
+    # 8. Serialization failure raises HomeAssistantError
+    with (
+        patch(
+            "homeassistant.util.yaml.dump",
+            side_effect=Exception("mock yaml dump failure"),
+        ),
+        pytest.raises(HomeAssistantError, match="Failed to serialize blueprint YAML"),
+    ):
+        ensure_source_url_ha_core(matching_yaml, target_url)
+
+    # 9. Calling ensure_source_url_ha_core without clean_url leaves metadata untouched
+    res_no_url = ensure_source_url_ha_core(matching_yaml, "")
+    parsed_no_url = yaml_util.parse_yaml(res_no_url)
+    assert isinstance(parsed_no_url, dict)
+    assert parsed_no_url["blueprint"]["source_url"] == target_url
+
+    # 10. Flow mapping input is dumped cleanly as canonical block YAML
+    flow_yaml = "blueprint: {name: Flow Test, domain: automation}\n"
+    res_flow = ensure_source_url_ha_core(flow_yaml, target_url)
+    parsed_flow = yaml_util.parse_yaml(res_flow)
+    assert isinstance(parsed_flow, dict)
+    assert parsed_flow["blueprint"]["source_url"] == target_url
+    assert parsed_flow["blueprint"]["name"] == "Flow Test"
 
 
 def test_get_selector_filter_paths_caching():

@@ -2844,6 +2844,41 @@ async def test_fork_repair_restores_url_on_failure(coordinator: BlueprintUpdateC
     )
 
 
+async def test_async_execute_fork_switch_serialization_failure_restores_urls(
+    coordinator: BlueprintUpdateCoordinator,
+) -> None:
+    """Test that YAML serialization failure during fork switch restores source URLs."""
+    path = "/config/blueprints/automation/test/bp.yaml"
+    rel_path = "automation/test/bp.yaml"
+    coordinator.data[path] = {"source_url": "https://example.com/original.yaml"}
+    coordinator._persisted_metadata[rel_path] = {"source_url": "https://example.com/original.yaml"}
+
+    issue_data: dict[str, object] = {
+        "path": path,
+        "relative_path": rel_path,
+        "name": "Original Name",
+        "source_url": "https://example.com/original.yaml",
+    }
+    flow = IncompatibleBlueprintRepairFlow(coordinator, "test_issue", issue_data)
+    flow._pending_url = "https://example.com/fork.yaml"
+    flow._pending_content = "blueprint:\n  name: Fork\n  domain: automation\n"
+    flow._pending_precondition = FileRevisionPrecondition.existing("precondition_hash")
+
+    with patch(
+        "custom_components.blueprints_updater.repairs.ensure_source_url_ha_core",
+        side_effect=HomeAssistantError("Serialization failed"),
+    ):
+        result = await flow._async_execute_fork_switch()
+
+    assert result.get("type") == data_entry_flow.FlowResultType.FORM
+    assert result.get("errors") == {"base": "Serialization failed"}
+    # Source URLs must be restored
+    assert coordinator.data[path]["source_url"] == "https://example.com/original.yaml"
+    assert coordinator._persisted_metadata[rel_path]["source_url"] == (
+        "https://example.com/original.yaml"
+    )
+
+
 def test_modernize_preserves_payload_keys_under_data_target_variables() -> None:
     """Test modernize_legacy_blueprint_yaml preserves keys beneath data, target, and variables."""
     content = (

@@ -240,6 +240,11 @@ _CONF_MANDATORY: Final[str] = "mandatory"
 _UTF8_ENCODING: Final[str] = "utf-8"
 _ROOT_PATH: Final[str] = "root"
 
+_BOM_UTF8: Final[str] = "\ufeff"
+_EOL_LF: Final[str] = "\n"
+_EOL_CR: Final[str] = "\r"
+_EOL_CRLF: Final[str] = "\r\n"
+
 
 _PYTHON_MATH_NAMES: Final[frozenset[str]] = frozenset(
     name for name in dir(math) if not name.startswith("_") and callable(getattr(math, name, None))
@@ -1933,7 +1938,7 @@ def _format_wrapped_target_block(
     target_lines_flattened: list[str] = []
     for chunk in target_chunks:
         target_lines_flattened.extend(f"{extra_indent}{item}" for item in chunk)
-    new_target_block = [f"{indent_str}{CONF_TARGET}:\n", *target_lines_flattened]
+    new_target_block = [f"{indent_str}{CONF_TARGET}:{_EOL_LF}", *target_lines_flattened]
     other_lines_flattened = [item for chunk in other_chunks for item in chunk]
     return [*other_lines_flattened, *new_target_block]
 
@@ -2057,7 +2062,7 @@ def _modernize_jinja_expressions(text: str) -> str:
         s = m.group(0)
         start_pos = m.start()
         before_tag = text[:start_pos]
-        line_start = before_tag.rfind("\n") + 1
+        line_start = max(before_tag.rfind(_EOL_LF), before_tag.rfind(_EOL_CR)) + 1
         prefix_on_line = before_tag[line_start:]
         quote = "'" if prefix_on_line.count('"') % 2 == 1 else '"'
         if _HA_MATH_ROUND_METHODS and _RE_MATH_ROUND_FILTER.search(s):
@@ -3892,13 +3897,13 @@ def normalize_content(content: str) -> str:
         Normalized YAML content.
 
     """
-    if "\r" not in content and not content.startswith("\ufeff"):
+    if _EOL_CR not in content and not content.startswith(_BOM_UTF8):
         return content
 
-    if content.startswith("\ufeff"):
-        content = content[1:]
+    if content.startswith(_BOM_UTF8):
+        content = content.removeprefix(_BOM_UTF8)
 
-    return content.replace("\r\n", "\n").replace("\r", "\n")
+    return content.replace(_EOL_CRLF, _EOL_LF).replace(_EOL_CR, _EOL_LF)
 
 
 def canonicalize_source_url(source_url: str) -> str:
@@ -4368,6 +4373,58 @@ def ensure_source_url(
         dump_fn=dump_fn,
         filter_paths=filter_paths,
     )
+
+
+def ensure_source_url_ha_core(
+    content: object,
+    source_url: object = None,
+    *,
+    expected_domain: object = None,
+) -> str:
+    """Ensure source_url is set and format canonical YAML via Home Assistant Core helpers.
+
+    Replicates the storage format produced by Home Assistant Core's native
+    blueprint importer: parses YAML, injects or updates source_url, and
+    serializes using yaml_util.dump.
+
+    Args:
+        content: Raw YAML blueprint content string.
+        source_url: Canonical source URL string to ensure in metadata.
+        expected_domain: Optional functional domain string (reserved for compatibility).
+
+    Returns:
+        Canonical YAML string aligned with Home Assistant Core on disk.
+
+    Raises:
+        HomeAssistantError: If YAML serialization fails.
+
+    """
+    if not isinstance(content, str):
+        return ""
+    clean_url = source_url.strip() if isinstance(source_url, str) and source_url.strip() else None
+    try:
+        parsed = yaml_util.parse_yaml(content)
+    except HomeAssistantError:
+        return normalize_content(content)
+
+    if not isinstance(parsed, dict) or CONF_BLUEPRINT not in parsed:
+        return normalize_content(content)
+
+    bp_meta = parsed.get(CONF_BLUEPRINT)
+    if not isinstance(bp_meta, dict):
+        return normalize_content(content)
+
+    target_data = dict(parsed)
+    target_bp = dict(target_data.get(CONF_BLUEPRINT, {}))
+    if clean_url:
+        target_bp[CONF_SOURCE_URL] = clean_url
+    target_data[CONF_BLUEPRINT] = target_bp
+
+    try:
+        return yaml_util.dump(target_data)
+    except Exception as err:
+        _LOGGER.error("Failed to serialize blueprint YAML via Home Assistant Core: %s", err)
+        raise HomeAssistantError(f"Failed to serialize blueprint YAML: {err}") from err
 
 
 def hash_content(

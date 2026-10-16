@@ -41,7 +41,10 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
-from .blueprint_validation import ensure_source_url, read_and_diff
+from .blueprint_validation import (
+    ensure_source_url_ha_core,
+    read_and_diff,
+)
 from .const import (
     CONF_FILTER_MODE,
     CONF_SELECTED_BLUEPRINTS,
@@ -968,10 +971,8 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
             persisted = self.coordinator._persisted_metadata.setdefault(self.relative_path, {})
             persisted["source_url"] = url
 
-        filter_paths = self.coordinator.get_selector_filter_paths()
-        fork_content_with_url = ensure_source_url(raw_content, url, filter_paths=filter_paths)
-
         try:
+            fork_content_with_url = ensure_source_url_ha_core(raw_content, url)
             await self.coordinator.async_install_blueprint(
                 self.path,
                 fork_content_with_url,
