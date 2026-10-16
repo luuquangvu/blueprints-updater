@@ -28,7 +28,6 @@ from homeassistant.util import yaml as yaml_util
 
 from custom_components.blueprints_updater.blueprint_validation import (
     ensure_source_url,
-    normalize_content,
 )
 from custom_components.blueprints_updater.const import (
     ERROR_SEPARATOR,
@@ -132,7 +131,7 @@ async def test_process_blueprint_content_error_handling(coordinator):
     await coordinator._process_blueprint_content(
         path1, info, "only_non_blueprint_data: True", "etag", "url", [], set()
     )
-    assert coordinator.data[path1]["last_error"] == "invalid_blueprint"
+    assert coordinator.data[path1]["last_error"].startswith(f"invalid_blueprint{ERROR_SEPARATOR}")
 
     path2 = "automation/syntax.yaml"
     coordinator.data[path2] = dict(info)
@@ -430,7 +429,7 @@ def test_get_validated_selected_blueprints_hardening():
 
 
 def test_ensure_source_url_indented_key(coordinator):
-    """Test that indented blueprint keys do NOT trigger injection."""
+    """Test indented blueprint keys raise InvalidBlueprint when top blueprint is missing."""
     source_url = "https://url.com/blueprint.yaml"
     content = """
 not_blueprint:
@@ -438,8 +437,8 @@ not_blueprint:
   blueprint:
     nested: true
 """
-    expected = normalize_content(content)
-    assert ensure_source_url(content, source_url) == expected
+    with pytest.raises(InvalidBlueprint):
+        ensure_source_url(content, source_url)
 
 
 @pytest.mark.asyncio

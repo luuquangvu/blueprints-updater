@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.blueprints_updater.const import (
+    CURRENT_HASH_ALGORITHM_VERSION,
+    STORAGE_KEY_HASH_ALGORITHM_VERSION,
     FilterMode,
     FunctionalDomain,
 )
@@ -153,7 +155,13 @@ async def test_async_save_metadata_empty_data(coordinator, mock_makedirs):
     ):
         await coordinator._async_save_metadata()
 
-    mock_save.assert_called_once_with({"metadata": {}, "pending_reload_domains": []})
+    mock_save.assert_called_once_with(
+        {
+            "metadata": {},
+            "pending_reload_domains": [],
+            STORAGE_KEY_HASH_ALGORITHM_VERSION: CURRENT_HASH_ALGORITHM_VERSION,
+        }
+    )
     assert not coordinator._persisted_metadata
 
 
@@ -695,3 +703,97 @@ async def test_async_install_blueprint_with_crlf_file(coordinator, tmp_path):
     assert bp_file.read_bytes() == new_content.encode("utf-8")
     backup_file = bp_file.with_name(f"{bp_file.name}.bak.1")
     assert backup_file.read_bytes() == crlf_content.encode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_blueprint_data_store_migration_clears_stale_hashes(coordinator):
+    """Test that BlueprintDataStore migrates v1 data to v2 by clearing stale hashes."""
+    from custom_components.blueprints_updater.const import (
+        CURRENT_HASH_ALGORITHM_VERSION,
+        STORAGE_KEY_HASH_ALGORITHM_VERSION,
+    )
+    from custom_components.blueprints_updater.coordinator import BlueprintDataStore
+
+    store = BlueprintDataStore(coordinator.hass, 2, "test_store")
+    old_data: dict[str, object] = {
+        "metadata": {
+            "automation/test.yaml": {
+                "source_url": "https://example.com/test.yaml",
+                "remote_hash": "old_hash_123",
+                "etag": '"etag-old"',
+                "last_modified": "Thu, 01 Jan 2026 00:00:00 GMT",
+                "pinned": True,
+            }
+        },
+        "pending_reload_domains": ["automation"],
+    }
+
+    migrated = await store._async_migrate_func(1, 1, old_data)
+    metadata = migrated.get("metadata")
+    assert isinstance(metadata, dict)
+    entry = metadata["automation/test.yaml"]
+    assert isinstance(entry, dict)
+    assert "remote_hash" not in entry
+    assert "etag" not in entry
+    assert "last_modified" not in entry
+    assert entry["source_url"] == "https://example.com/test.yaml"
+    assert entry["pinned"] is True
+    assert migrated[STORAGE_KEY_HASH_ALGORITHM_VERSION] == CURRENT_HASH_ALGORITHM_VERSION
+
+
+@pytest.mark.asyncio
+async def test_async_setup_clears_stale_hashes_on_algorithm_mismatch(coordinator):
+    """Test that async_setup clears remote hashes and ETags on version mismatch."""
+    mock_store = AsyncMock()
+    mock_store.async_load.return_value = {
+        "metadata": {
+            "automation/test.yaml": {
+                "source_url": "https://example.com/test.yaml",
+                "remote_hash": "old_hash_456",
+                "etag": '"etag-456"',
+                "last_modified": "Thu, 01 Jan 2026 00:00:00 GMT",
+            }
+        },
+    }
+    coordinator._store = mock_store
+
+    await coordinator.async_setup()
+
+    assert "automation/test.yaml" in coordinator._persisted_metadata
+    persisted = coordinator._persisted_metadata["automation/test.yaml"]
+    assert "remote_hash" not in persisted
+    assert "etag" not in persisted
+    assert "last_modified" not in persisted
+    assert persisted["source_url"] == "https://example.com/test.yaml"
+
+
+@pytest.mark.asyncio
+async def test_async_initialize_results_does_not_restore_stale_hash_version(coordinator):
+    """Ensure results init cannot restore metadata computed by previous hash algorithm."""
+    coordinator._persisted_metadata = {
+        "automation/test.yaml": {
+            "source_url": "https://example.com/test.yaml",
+            "remote_hash": "old_stale_hash",
+            "etag": '"stale-etag"',
+            "last_modified": "Thu, 01 Jan 2026 00:00:00 GMT",
+        }
+    }
+    coordinator._persisted_hash_algorithm_version = 1
+
+    blueprints = {
+        "/config/blueprints/automation/test.yaml": {
+            "name": "Test BP",
+            "relative_path": "automation/test.yaml",
+            "domain": "automation",
+            "source_url": "https://example.com/test.yaml",
+            "local_hash": "new_algo_local_hash",
+        }
+    }
+
+    results = await coordinator._async_initialize_results(blueprints)
+    bp_result = results["/config/blueprints/automation/test.yaml"]
+
+    assert bp_result["remote_hash"] is None
+    assert bp_result["etag"] is None
+    assert bp_result["last_modified"] is None
+    assert bp_result["local_hash"] == "new_algo_local_hash"
