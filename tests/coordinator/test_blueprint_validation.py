@@ -3,28 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import voluptuous as vol
 from homeassistant.components.blueprint.const import CONF_INPUT
+from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.const import CONF_DEFAULT
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import selector as ha_selector
 from homeassistant.helpers.template import HassLoader, TemplateEnvironment
 from homeassistant.util import yaml as yaml_util
 from homeassistant.util.yaml.objects import Input
 
 from custom_components.blueprints_updater.blueprint_validation import (
-    DEFAULT_SELECTOR_FILTER_PATHS,
     MAX_CUSTOM_TEMPLATE_SIZE,
-    SelectorRegistryQuickSig,
     SelectorType,
     StructuredRisk,
     _check_template_imports,
@@ -36,17 +31,11 @@ from custom_components.blueprints_updater.blueprint_validation import (
     async_extract_custom_template_paths,
     canonicalize_source_url,
     check_ha_template_ast_compatibility,
-    coerce_empty_selectors,
-    compute_selector_registry_fingerprint,
-    compute_selector_schema_fingerprint,
     dedupe_risks,
     derive_dummy_input_value,
-    derive_selector_filter_paths,
     detect_missing_inputs,
     detect_new_mandatory_inputs,
     ensure_source_url,
-    ensure_source_url_cached,
-    ensure_source_url_ha_core,
     extract_blueprint_text,
     extract_defined_inputs,
     extract_input_configs,
@@ -57,312 +46,16 @@ from custom_components.blueprints_updater.blueprint_validation import (
     get_affected_entities,
     get_blueprint_block,
     get_blueprint_schema,
-    get_cached_selector_registry_quick_sig,
     get_ha_live_selectors,
-    get_selector_filter_paths,
     hash_content,
-    invalidate_selector_filter_paths_cache,
     is_input_mandatory,
     is_invalid_for_input_default,
     normalize_content,
     read_and_diff,
-    stabilize_yaml_structure,
     validate_input_references,
     validate_safe_input_usages,
 )
 from custom_components.blueprints_updater.const import BlueprintRiskType
-
-
-def test_compute_selector_schema_fingerprint_basic():
-    """Test schema fingerprint computation on various schema structures."""
-    schema = vol.Schema({"key": str, vol.Optional("opt", default="default_val"): int})
-    fp = compute_selector_schema_fingerprint(schema)
-    assert isinstance(fp, tuple)
-    assert fp[0] == "vol.Schema"
-
-    fp_dict = compute_selector_schema_fingerprint({"a": 1, "b": "str"})
-    assert fp_dict[0] == "dict"
-
-    fp_all = compute_selector_schema_fingerprint(vol.All(str, vol.Length(min=1)))
-    assert fp_all[0] == "vol.All"
-
-    fp_any = compute_selector_schema_fingerprint(vol.Any(int, float))
-    assert fp_any[0] == "vol.Any"
-
-    fp_set = compute_selector_schema_fingerprint({"val1", "val2"})
-    assert fp_set[0] in ("set", "frozenset")
-
-    fp_list = compute_selector_schema_fingerprint([1, 2, 3])
-    assert fp_list[0] == "list"
-
-    def dummy_func(*args: object, **kwargs: object) -> object:
-        """Dummy func for testing."""
-        return args
-
-    p_func = functools.partial(dummy_func, 1)
-    fp_partial = compute_selector_schema_fingerprint(p_func)
-    assert fp_partial[0] == "partial"
-
-    # Test closure state fingerprinting
-    def outer():
-        secret = 42
-
-        def inner():
-            """Inner func."""
-            return secret
-
-        return inner
-
-    closure_func = outer()
-    fp_closure = compute_selector_schema_fingerprint(closure_func)
-    assert fp_closure[0] == "callable"
-
-    # Test function with attributes in __dict__
-    def attr_func():
-        """Attr func."""
-
-    attr_func.__dict__["custom_attr"] = "hello"
-    fp_attr = compute_selector_schema_fingerprint(attr_func)
-    assert fp_attr[0] == "callable"
-
-    # Test class type
-    class CustomClass:
-        """Custom test class."""
-
-    fp_class = compute_selector_schema_fingerprint(CustomClass)
-    assert fp_class[0] == "type"
-
-    # Test arbitrary object
-    obj = object()
-    fp_obj = compute_selector_schema_fingerprint(obj)
-    assert fp_obj[0] == "opaque_obj"
-
-    # Reordered mappings compare equal
-    assert compute_selector_schema_fingerprint(
-        {"a": 1, "b": "str"}
-    ) == compute_selector_schema_fingerprint({"b": "str", "a": 1})
-    assert compute_selector_schema_fingerprint(
-        vol.Schema({"x": int, "y": str})
-    ) == compute_selector_schema_fingerprint(vol.Schema({"y": str, "x": int}))
-
-    # Changes to defaults produce different fingerprints
-    fp_def1 = compute_selector_schema_fingerprint(vol.Schema({vol.Optional("k", default=1): int}))
-    fp_def2 = compute_selector_schema_fingerprint(vol.Schema({vol.Optional("k", default=2): int}))
-    assert fp_def1 != fp_def2
-
-    # Changes to validator bounds produce different fingerprints
-    fp_len1 = compute_selector_schema_fingerprint(vol.Length(min=1, max=5))
-    fp_len2 = compute_selector_schema_fingerprint(vol.Length(min=1, max=10))
-    assert fp_len1 != fp_len2
-
-    fp_range1 = compute_selector_schema_fingerprint(vol.Range(min=0, max=100))
-    fp_range2 = compute_selector_schema_fingerprint(vol.Range(min=10, max=100))
-    assert fp_range1 != fp_range2
-
-    # Changes to closure state produce different fingerprints
-    def make_closure(secret: int):
-        def inner():
-            """Inner func."""
-            return secret
-
-        return inner
-
-    assert compute_selector_schema_fingerprint(
-        make_closure(42)
-    ) != compute_selector_schema_fingerprint(make_closure(99))
-
-    # Changes to partial arguments produce different fingerprints
-    assert compute_selector_schema_fingerprint(
-        functools.partial(dummy_func, 1)
-    ) != compute_selector_schema_fingerprint(functools.partial(dummy_func, 2))
-    assert compute_selector_schema_fingerprint(
-        functools.partial(dummy_func, opt=1)
-    ) != compute_selector_schema_fingerprint(functools.partial(dummy_func, opt=2))
-
-    # Changes to opaque object attributes produce different fingerprints
-    class OpaqueItem:
-        """Test opaque object."""
-
-        def __init__(self, val: int) -> None:
-            """Initialize test opaque object."""
-            self.val = val
-
-    assert compute_selector_schema_fingerprint(
-        OpaqueItem(1)
-    ) != compute_selector_schema_fingerprint(OpaqueItem(2))
-
-
-def test_compute_selector_schema_fingerprint_closure_cell_exception():
-    """Test fingerprinting handles cell unrepr exception gracefully."""
-    mock_cell = MagicMock()
-
-    def _raising_getter(s: object) -> None:
-        raise ValueError("boom")
-
-    type(mock_cell).cell_contents = property(_raising_getter)
-
-    class MockCallable:
-        """Mock callable object with closure."""
-
-        __closure__: tuple[Any, ...] | None = None
-
-        def __call__(self):
-            """Callable body."""
-
-    mock_obj = MockCallable()
-    mock_obj.__closure__ = (mock_cell,)
-    fp = compute_selector_schema_fingerprint(mock_obj)
-    assert fp[0] == "callable"
-    extra_items = fp[2]
-    assert isinstance(extra_items, tuple)
-    closure_items = [
-        item for item in extra_items if isinstance(item, tuple) and item[0] == "closure"
-    ]
-    assert len(closure_items) == 1
-    assert ("unrepr_cell",) in closure_items[0][1]
-
-
-def test_derive_selector_filter_paths_and_registry_fingerprint():
-    """Test deriving filter paths from Home Assistant selector registry."""
-    fallback = frozenset(
-        {(SelectorType.ENTITY, SelectorType.FILTER), (SelectorType.DEVICE, SelectorType.FILTER)}
-    )
-    assert derive_selector_filter_paths(None, fallback) == fallback
-    assert compute_selector_registry_fingerprint(None) is None
-
-    class MockSelector:
-        """Mock selector class with CONFIG_SCHEMA."""
-
-        CONFIG_SCHEMA = vol.Schema(
-            {
-                vol.Optional(SelectorType.FILTER.value): vol.All(
-                    lambda x: x,
-                    [vol.Schema({"domain": str})],
-                )
-            }
-        )
-
-    registry = {"test_sel": MockSelector}
-    paths = derive_selector_filter_paths(registry, fallback)
-    assert isinstance(paths, frozenset)
-
-    fp = compute_selector_registry_fingerprint(registry)
-    assert isinstance(fp, tuple)
-    assert len(fp) == 1
-
-    # Test controlled registry covering nested, vol.All, and vol.Any schemas
-    class MockComplexSelector:
-        """Mock selector with nested, vol.All, and vol.Any schemas."""
-
-        CONFIG_SCHEMA = vol.Schema(
-            {
-                vol.Optional("top_filter"): vol.All(
-                    cv.ensure_list,
-                    [vol.Schema({"domain": str})],
-                ),
-                vol.Optional("nested"): vol.Schema(
-                    {
-                        vol.Optional("any_filter"): vol.Any(
-                            str,
-                            vol.All(
-                                cv.ensure_list,
-                                [vol.Schema({"device": str})],
-                            ),
-                        )
-                    }
-                ),
-            }
-        )
-
-    complex_registry = {"complex_sel": MockComplexSelector}
-    complex_paths = derive_selector_filter_paths(complex_registry, default_paths=frozenset())
-    assert ("complex_sel", "top_filter") in complex_paths
-    assert ("complex_sel", "nested", "any_filter") in complex_paths
-
-
-def test_derive_selector_filter_paths_live_ha_selectors():
-    """Test dynamic discovery on live Home Assistant Core selectors.
-
-    Asserts invariant structural properties rather than static lists.
-    """
-    discovered = derive_selector_filter_paths(ha_selector.SELECTORS, default_paths=frozenset())
-    # Invariant: discovery discovers a frozenset of string-tuple paths from live registry
-    assert isinstance(discovered, frozenset)
-    assert len(discovered) > 0
-    assert all(isinstance(p, tuple) and all(isinstance(seg, str) for seg in p) for p in discovered)
-
-    # Invariant: with default paths, baseline paths are guaranteed to be present
-    with_defaults = derive_selector_filter_paths(ha_selector.SELECTORS)
-    assert DEFAULT_SELECTOR_FILTER_PATHS.issubset(with_defaults)
-
-
-def test_selector_filter_paths_caching_and_force_refresh():
-    """Test cache fingerprinting, force_refresh, and invalidation with mock registries."""
-
-    class MockSelA:
-        """Mock selector A."""
-
-        CONFIG_SCHEMA = vol.Schema(
-            {
-                vol.Optional(SelectorType.FILTER.value): vol.All(
-                    cv.ensure_list, [vol.Schema({"domain": str})]
-                )
-            }
-        )
-
-    class MockSelB:
-        """Mock selector B with different filter schema."""
-
-        CONFIG_SCHEMA = vol.Schema(
-            {vol.Optional("custom_filter"): vol.All(cv.ensure_list, [vol.Schema({"domain": str})])}
-        )
-
-    reg_a = {"sel_a": MockSelA}
-    reg_b = {"sel_b": MockSelB}
-
-    def _assert_selector_paths(
-        expected_in: tuple[str, str], expected_not_in: tuple[str, str]
-    ) -> frozenset[tuple[str, ...]]:
-        """Assert selector filter paths contain expected path and omit unexpected path."""
-        paths = get_selector_filter_paths()
-        assert expected_in in paths
-        assert expected_not_in not in paths
-        return paths
-
-    with patch.object(ha_selector, "SELECTORS", reg_a):
-        invalidate_selector_filter_paths_cache()
-        paths_a = _assert_selector_paths(("sel_a", SelectorType.FILTER), ("sel_b", "custom_filter"))
-
-        # Subsequent call hits cache
-        assert get_selector_filter_paths() is paths_a
-
-    # With registry B, fingerprint change triggers cache refresh even without force_refresh
-    with patch.object(ha_selector, "SELECTORS", reg_b):
-        _assert_selector_paths(("sel_b", "custom_filter"), ("sel_a", SelectorType.FILTER))
-
-        # Test force_refresh=True explicitly re-derives
-        paths_b_refresh = get_selector_filter_paths(force_refresh=True)
-        assert ("sel_b", "custom_filter") in paths_b_refresh
-
-    invalidate_selector_filter_paths_cache()
-
-
-def test_derive_selector_filter_paths_empty_or_no_paths():
-    """Test fallback and warnings when registry is empty or yields no paths."""
-    fallback = frozenset({("test", "path")})
-    # Empty registry
-    assert derive_selector_filter_paths({}, default_paths=fallback) == fallback
-
-    # Registry with selectors that yield no list paths
-    class NoListSelector:
-        """Selector without list schemas."""
-
-        CONFIG_SCHEMA = vol.Schema({"name": str})
-
-    assert (
-        derive_selector_filter_paths({"no_list": NoListSelector}, default_paths=fallback)
-        == fallback
-    )
 
 
 def test_generate_dummy_input_value_all_types():
@@ -1074,24 +767,11 @@ def test_normalization_and_yaml_stabilization():
     assert get_blueprint_schema("template") is not None
     assert get_blueprint_schema("unknown_domain") is not None
 
-    # coerce_empty_selectors
-    sel_data = {"selector": {"entity": None}, "list": [{"selector": {"text": None}}]}
-    coerce_empty_selectors(sel_data)
-    assert sel_data["selector"]["entity"] == {}
-    assert sel_data["list"][0]["selector"]["text"] == {}
-
     # hash_content
     raw = "blueprint:\n  name: Test\n"
     assert hash_content(raw, already_normalized=True) is not None
     assert hash_content(raw, source_url=None) is not None
     assert hash_content(raw, source_url="https://example.com/test.yaml") is not None
-
-    # stabilize_yaml_structure
-    orig = {"b": 2, "a": 1, "items": [{"x": 10}]}
-    norm_dict = {"a": 1, "b": 2, "items": [{"x": 10}]}
-    stabilized = stabilize_yaml_structure(orig, norm_dict)
-    assert isinstance(stabilized, dict)
-    assert list(stabilized.keys()) == ["b", "a", "items"]
 
     # extract_blueprint_text & get_blueprint_block
     bp_text = extract_blueprint_text("blueprint:\n  name: Test\naction: []\n")
@@ -1120,8 +800,8 @@ def test_read_and_diff(tmp_path: Path):
     assert "New" in diff
 
 
-def test_ensure_source_url_and_cached():
-    """Test ensure_source_url with custom normalize_fn and dump_fn."""
+def test_ensure_source_url_basic():
+    """Test ensure_source_url basic behavior and idempotence."""
     # Non-string content
     assert ensure_source_url(123, "https://example.com") == ""
 
@@ -1133,39 +813,6 @@ def test_ensure_source_url_and_cached():
     bp_yaml = "blueprint:\n  name: Test\n  domain: automation\naction: []\n"
     res = ensure_source_url(bp_yaml, "https://example.com/test.yaml")
     assert "source_url: https://example.com/test.yaml" in res
-
-    # ensure_source_url_cached with unparseable content
-    unparseable = "bad: yaml: [["
-    assert ensure_source_url_cached(unparseable, "https://example.com") == unparseable
-
-    # ensure_source_url_cached with missing blueprint key
-    no_bp = "other_key: val\n"
-    assert ensure_source_url_cached(no_bp, "https://example.com") == no_bp
-
-    # ensure_source_url_cached with non-dict blueprint
-    non_dict_bp = "blueprint: string_val\n"
-    assert ensure_source_url_cached(non_dict_bp, "https://example.com") == non_dict_bp
-
-    # Custom normalize_fn and dump_fn
-    custom_norm = MagicMock(return_value="custom_normalized")
-    custom_dump = MagicMock(return_value="custom_dumped")
-    res_custom = ensure_source_url(
-        bp_yaml,
-        "https://example.com/test.yaml",
-        normalize_fn=custom_norm,
-        dump_fn=custom_dump,
-    )
-    assert res_custom == "custom_dumped"
-
-    # Dump failure fallback
-    failing_dump = MagicMock(side_effect=ValueError("dump fail"))
-    res_fail = ensure_source_url(
-        bp_yaml,
-        "https://example.com/test.yaml",
-        normalize_fn=custom_norm,
-        dump_fn=failing_dump,
-    )
-    assert res_fail == "custom_normalized"
 
     # Idempotence: calling ensure_source_url repeatedly on its own output
     output1 = ensure_source_url(bp_yaml, "https://example.com/test.yaml")
@@ -1184,25 +831,28 @@ def test_ensure_source_url_and_cached():
     assert h1 == h2
 
 
-def test_ensure_source_url_ha_core() -> None:
-    """Test ensure_source_url_ha_core."""
+def test_ensure_source_url_core_behavior() -> None:
+    """Test ensure_source_url core behavior."""
     target_url = "https://github.com/luuquangvu/tutorials/blob/main/memory_tool.yaml"
     new_url = "https://example.com/new_path.yaml"
 
     # 1. Non-string inputs
-    assert ensure_source_url_ha_core(123, "https://example.com") == ""
-    assert ensure_source_url_ha_core("not yaml", "") == "not yaml"
-    assert ensure_source_url_ha_core("not yaml", None) == "not yaml"
+    assert ensure_source_url(123, "https://example.com") == ""
+    assert ensure_source_url("not yaml", "") == "not yaml"
+    assert ensure_source_url("not yaml", None) == "not yaml"
 
-    # 2. Unparseable YAML or non-dict structures
+    # 2. Unparseable YAML or non-dict structures raise instead of falling back
     unparseable = "bad: yaml: [["
-    assert ensure_source_url_ha_core(unparseable, "https://example.com") == unparseable
+    with pytest.raises(HomeAssistantError):
+        ensure_source_url(unparseable, "https://example.com")
 
     no_bp = "other_key: val\n"
-    assert ensure_source_url_ha_core(no_bp, "https://example.com") == no_bp
+    with pytest.raises(InvalidBlueprint):
+        ensure_source_url(no_bp, "https://example.com")
 
     non_dict_bp = "blueprint: string_val\n"
-    assert ensure_source_url_ha_core(non_dict_bp, "https://example.com") == non_dict_bp
+    with pytest.raises(InvalidBlueprint):
+        ensure_source_url(non_dict_bp, "https://example.com")
 
     # 3. Valid blueprint: source_url already present
     matching_yaml = """blueprint:
@@ -1218,7 +868,7 @@ def test_ensure_source_url_ha_core() -> None:
           min: 0
           max: 3650
 """
-    res_match = ensure_source_url_ha_core(matching_yaml, target_url)
+    res_match = ensure_source_url(matching_yaml, target_url)
     parsed_match = yaml_util.parse_yaml(res_match)
     assert isinstance(parsed_match, dict)
     assert parsed_match["blueprint"]["source_url"] == target_url
@@ -1237,7 +887,7 @@ def test_ensure_source_url_ha_core() -> None:
           min: 0
           max: 3650
 """
-    res_inserted = ensure_source_url_ha_core(missing_url_yaml, target_url)
+    res_inserted = ensure_source_url(missing_url_yaml, target_url)
     parsed_inserted = yaml_util.parse_yaml(res_inserted)
     assert isinstance(parsed_inserted, dict)
     assert parsed_inserted["blueprint"]["source_url"] == target_url
@@ -1250,7 +900,7 @@ def test_ensure_source_url_ha_core() -> None:
   domain: automation
   input: {}
 """
-    res_updated = ensure_source_url_ha_core(old_url_yaml, new_url)
+    res_updated = ensure_source_url(old_url_yaml, new_url)
     parsed_updated = yaml_util.parse_yaml(res_updated)
     assert isinstance(parsed_updated, dict)
     assert parsed_updated["blueprint"]["source_url"] == new_url
@@ -1261,9 +911,7 @@ def test_ensure_source_url_ha_core() -> None:
   name: No Domain Test
   input: {}
 """
-    res_override = ensure_source_url_ha_core(
-        no_domain_yaml, target_url, expected_domain="automation"
-    )
+    res_override = ensure_source_url(no_domain_yaml, target_url, expected_domain="automation")
     parsed_override = yaml_util.parse_yaml(res_override)
     assert isinstance(parsed_override, dict)
     assert parsed_override["blueprint"]["source_url"] == target_url
@@ -1274,7 +922,7 @@ def test_ensure_source_url_ha_core() -> None:
   name: Invalid Schema Test
   domain: non_existent_domain_xyz
 """
-    res_fallback = ensure_source_url_ha_core(invalid_schema_yaml, target_url)
+    res_fallback = ensure_source_url(invalid_schema_yaml, target_url)
     parsed_fallback = yaml_util.parse_yaml(res_fallback)
     assert isinstance(parsed_fallback, dict)
     assert parsed_fallback["blueprint"]["source_url"] == target_url
@@ -1286,7 +934,7 @@ def test_ensure_source_url_ha_core() -> None:
   domain: script
   input: {}
 """
-    res_conflict = ensure_source_url_ha_core(
+    res_conflict = ensure_source_url(
         conflicting_domain_yaml, target_url, expected_domain="automation"
     )
     parsed_conflict = yaml_util.parse_yaml(res_conflict)
@@ -1302,39 +950,21 @@ def test_ensure_source_url_ha_core() -> None:
         ),
         pytest.raises(HomeAssistantError, match="Failed to serialize blueprint YAML"),
     ):
-        ensure_source_url_ha_core(matching_yaml, target_url)
+        ensure_source_url(matching_yaml, target_url)
 
-    # 9. Calling ensure_source_url_ha_core without clean_url leaves metadata untouched
-    res_no_url = ensure_source_url_ha_core(matching_yaml, "")
+    # 9. Calling ensure_source_url without clean_url leaves metadata untouched
+    res_no_url = ensure_source_url(matching_yaml, "")
     parsed_no_url = yaml_util.parse_yaml(res_no_url)
     assert isinstance(parsed_no_url, dict)
     assert parsed_no_url["blueprint"]["source_url"] == target_url
 
     # 10. Flow mapping input is dumped cleanly as canonical block YAML
     flow_yaml = "blueprint: {name: Flow Test, domain: automation}\n"
-    res_flow = ensure_source_url_ha_core(flow_yaml, target_url)
+    res_flow = ensure_source_url(flow_yaml, target_url)
     parsed_flow = yaml_util.parse_yaml(res_flow)
     assert isinstance(parsed_flow, dict)
     assert parsed_flow["blueprint"]["source_url"] == target_url
     assert parsed_flow["blueprint"]["name"] == "Flow Test"
-
-
-def test_get_selector_filter_paths_caching():
-    """Verify get_selector_filter_paths returns cached paths without re-derivation."""
-    invalidate_selector_filter_paths_cache()
-    paths1 = get_selector_filter_paths()
-    assert paths1 is not None
-    quick_sig = get_cached_selector_registry_quick_sig()
-    assert isinstance(quick_sig, SelectorRegistryQuickSig)
-
-    with patch(
-        "custom_components.blueprints_updater.blueprint_validation.derive_selector_filter_paths"
-    ) as mock_derive:
-        paths2 = get_selector_filter_paths()
-        assert paths2 is paths1
-        mock_derive.assert_not_called()
-
-    invalidate_selector_filter_paths_cache()
 
 
 def test_extract_custom_template_paths(tmp_path: Path):

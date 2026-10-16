@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from difflib import unified_diff
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, TypedDict, TypeGuard, TypeVar
+from typing import TYPE_CHECKING, Any, Final, Self, TypedDict, TypeGuard, TypeVar
 from urllib.parse import urlparse
 from warnings import WarningMessage
 
@@ -79,7 +79,7 @@ from homeassistant.helpers import frame
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import async_get_platforms
 from homeassistant.helpers.selector import validate_selector
-from homeassistant.helpers.storage import Store
+from homeassistant.helpers.storage import Store as HAStore
 from homeassistant.helpers.template import Template, TemplateEnvironment, is_template_string
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -101,7 +101,6 @@ except ImportError:
 from .blueprint_validation import (
     ACTION_PATH_SEGMENTS,
     CONDITION_PATH_SEGMENTS,
-    DEFAULT_SELECTOR_FILTER_PATHS,
     PAYLOAD_ANCESTOR_KEYS,
     TRIGGER_PATH_SEGMENTS,
     StructuredRisk,
@@ -110,12 +109,10 @@ from .blueprint_validation import (
     check_ha_template_ast_compatibility,
     dedupe_risks,
     derive_dummy_input_value,
-    derive_selector_filter_paths,
     detect_missing_inputs,
     detect_new_mandatory_inputs,
     detect_unsupported_yaml_constructs,
     ensure_source_url,
-    ensure_source_url_ha_core,
     extract_blueprint_text,
     extract_input_configs,
     extract_inputs_with_default,
@@ -123,10 +120,7 @@ from .blueprint_validation import (
     get_affected_entities,
     get_blueprint_block,
     get_blueprint_schema,
-    get_cached_selector_registry_fingerprint,
-    get_selector_filter_paths,
     hash_content,
-    invalidate_selector_filter_paths_cache,
     is_dummy_validation_error,
     is_invalid_for_input_default,
     modernize_legacy_blueprint_yaml,
@@ -148,6 +142,7 @@ from .const import (
     CONF_OPTIONS,
     CONF_SELECTED_BLUEPRINTS,
     CONF_TRIGGERS,
+    CURRENT_HASH_ALGORITHM_VERSION,
     DEFAULT_AUTO_UPDATE,
     DEFAULT_CHECK_COMPATIBILITY,
     DEFAULT_MAX_BACKUPS,
@@ -168,6 +163,7 @@ from .const import (
     RETRY_BACKOFF,
     RISK_TYPE_TRANSLATIONS,
     STORAGE_KEY_DATA,
+    STORAGE_KEY_HASH_ALGORITHM_VERSION,
     STORAGE_KEY_LAST_HA_VERSION,
     STORAGE_KEY_LAST_INTEGRATION_VERSION,
     STORAGE_VERSION,
@@ -1247,47 +1243,45 @@ class _TemplatePathTracker(set[str]):
         return res
 
 
+class Store(HAStore[dict[str, object]]):
+    """Store with migration support for blueprint updater data."""
+
+    async def _async_migrate_func(
+        self,
+        old_major_version: int,
+        old_minor_version: int,
+        old_data: dict[str, object],
+    ) -> dict[str, object]:
+        """Migrate storage data to newer versions.
+
+        Args:
+            old_major_version: The major version of the stored data.
+            old_minor_version: The minor version of the stored data.
+            old_data: The stored data dictionary.
+
+        Returns:
+            The migrated storage data dictionary.
+
+        """
+        if old_major_version < 2:
+            metadata = old_data.get("metadata")
+            if isinstance(metadata, dict):
+                for entry in metadata.values():
+                    if isinstance(entry, dict):
+                        entry.pop("remote_hash", None)
+                        entry.pop("etag", None)
+                        entry.pop("last_modified", None)
+            old_data[STORAGE_KEY_HASH_ALGORITHM_VERSION] = CURRENT_HASH_ALGORITHM_VERSION
+        return old_data
+
+
+BlueprintDataStore = Store
+
+
 class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, object]]]):
     """Class to manage fetching blueprint updates."""
 
     _client_kwargs_cache: dict[str, tuple[str, ...] | None] | None = None
-    _DEFAULT_SELECTOR_FILTER_PATHS: ClassVar[frozenset[tuple[str, ...]]] = (
-        DEFAULT_SELECTOR_FILTER_PATHS
-    )
-    _selector_filter_paths: ClassVar[frozenset[tuple[str, ...]] | None] = None
-    _selector_registry_fingerprint: ClassVar[
-        tuple[tuple[str, str, tuple[object, ...]], ...] | None
-    ] = None
-
-    @classmethod
-    def _derive_selector_filter_paths(cls) -> frozenset[tuple[str, ...]]:
-        """Dynamically inspect registered Home Assistant selectors to discover filter paths."""
-        try:
-            from homeassistant.helpers import selector as ha_selector
-
-            selectors_registry = getattr(ha_selector, "SELECTORS", None)
-        except Exception:
-            _LOGGER.debug("Could not import Home Assistant selector registry", exc_info=True)
-            selectors_registry = None
-
-        return derive_selector_filter_paths(selectors_registry, cls._DEFAULT_SELECTOR_FILTER_PATHS)
-
-    @classmethod
-    def invalidate_selector_cache(cls) -> None:
-        """Invalidate the cached selector filter paths and registry fingerprints."""
-        cls._selector_filter_paths = None
-        cls._selector_registry_fingerprint = None
-        invalidate_selector_filter_paths_cache()
-
-    @classmethod
-    def get_selector_filter_paths(
-        cls, *, force_refresh: bool = False
-    ) -> frozenset[tuple[str, ...]]:
-        """Get the cached or dynamically derived set of selector filter paths."""
-        paths = get_selector_filter_paths(force_refresh=force_refresh)
-        cls._selector_filter_paths = paths
-        cls._selector_registry_fingerprint = get_cached_selector_registry_fingerprint()
-        return paths
 
     @staticmethod
     def generate_unique_id(entry_id: str, relative_path: str) -> str:
@@ -1346,6 +1340,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         self._pacing_lock = asyncio.Lock()
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY_DATA)
         self._persisted_metadata: dict[str, dict[str, object]] = {}
+        self._persisted_hash_algorithm_version: int | None = CURRENT_HASH_ALGORITHM_VERSION
         self._pending_reload_domains: set[str] = set()
         self._persisted_pending_reload_domains: set[str] = set()
         self._reload_lock = asyncio.Lock()
@@ -1602,6 +1597,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         self.setup_complete = True
 
         if isinstance(storage_data, dict) and storage_data:
+            persisted_hash_version = storage_data.get(STORAGE_KEY_HASH_ALGORITHM_VERSION)
+            self._persisted_hash_algorithm_version = (
+                persisted_hash_version if isinstance(persisted_hash_version, int) else None
+            )
+            hash_version_matches = (
+                self._persisted_hash_algorithm_version == CURRENT_HASH_ALGORITHM_VERSION
+            )
+
             metadata = storage_data.get("metadata") or {}
             if not isinstance(metadata, dict):
                 _LOGGER.warning("Malformed metadata storage found, starting fresh")
@@ -1612,9 +1615,21 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 if isinstance(relative_path, str) and (
                     validated := BlueprintUpdateCoordinator._validate_metadata_entry(entry)
                 ):
+                    if not hash_version_matches:
+                        validated.pop("remote_hash", None)
+                        validated.pop("etag", None)
+                        validated.pop("last_modified", None)
                     validated_metadata[relative_path] = validated
                 else:
                     _LOGGER.warning("Skipping malformed metadata entry for %s", relative_path)
+
+            if not hash_version_matches:
+                _LOGGER.info(
+                    "Migrated stored metadata to hash algorithm version %s: "
+                    "cleared remote hashes and ETags",
+                    CURRENT_HASH_ALGORITHM_VERSION,
+                )
+                self._persisted_hash_algorithm_version = CURRENT_HASH_ALGORITHM_VERSION
 
             self._persisted_metadata = validated_metadata
             pending_reload_domains = storage_data.get("pending_reload_domains") or []
@@ -1885,6 +1900,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         """
         await self._async_prune_stale_metadata(set(blueprints.keys()))
+        hash_version_matches = (
+            self._persisted_hash_algorithm_version == CURRENT_HASH_ALGORITHM_VERSION
+        )
         results = {}
         for path, info in blueprints.items():
             relative_path = info["relative_path"]
@@ -1898,14 +1916,24 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 "local_hash": info["local_hash"],
                 "local_file_hash": info.get("local_file_hash", info["local_hash"]),
                 "updatable": False,
-                "remote_hash": None if self._first_update_done else persisted.get("remote_hash"),
+                "remote_hash": (
+                    persisted.get("remote_hash")
+                    if (not self._first_update_done and hash_version_matches)
+                    else None
+                ),
                 "invalid_remote_hash": None,
                 "remote_content": None,
                 "last_error": None,
-                "etag": None if self._first_update_done else persisted.get("etag"),
-                "last_modified": self.data.get(path, {}).get("last_modified")
-                if self._first_update_done
-                else persisted.get("last_modified"),
+                "etag": (
+                    persisted.get("etag")
+                    if (not self._first_update_done and hash_version_matches)
+                    else None
+                ),
+                "last_modified": (
+                    self.data.get(path, {}).get("last_modified")
+                    if self._first_update_done
+                    else (persisted.get("last_modified") if hash_version_matches else None)
+                ),
                 "persisted_source_url": persisted.get("source_url"),
                 "backups_count": info.get("backups_count", 0),
                 "pinned": True if persisted.get("pinned") else None,
@@ -2034,13 +2062,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         _LOGGER.debug("Instant setup complete with %d blueprints", len(results))
         return results
 
-    def _is_semantically_equal(self, content: object, target_hash: object, source_url: str) -> bool:
+    def _is_semantically_equal(
+        self,
+        content: object,
+        target_hash: object,
+        source_url: str,
+        expected_domain: object = None,
+    ) -> bool:
         """Check if content is semantically equal to a target hash.
 
         Args:
             content: Raw or normalized YAML content to compare.
             target_hash: Hash of the target blueprint (from normalized YAML).
             source_url: The source URL to use for identity-aware hashing.
+            expected_domain: Optional functional domain string.
 
         Returns:
             True if the content matches the target hash, False otherwise.
@@ -2050,7 +2085,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             return False
 
         try:
-            content_hash = hash_content(content, source_url)
+            content_hash = hash_content(content, source_url, expected_domain=expected_domain)
         except (ValueError, TypeError, HomeAssistantError) as err:
             _LOGGER.debug("Semantic comparison failed: %s", err)
             return False
@@ -2240,7 +2275,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             or not isinstance(source_url, str)
         ):
             return False
-        return self._is_semantically_equal(remote_content, current_local_hash, source_url)
+        domain = prev_data.get("domain")
+        expected_domain = str(domain) if domain else None
+        return self._is_semantically_equal(
+            remote_content,
+            current_local_hash,
+            source_url,
+            expected_domain=expected_domain,
+        )
 
     def _start_background_refresh(
         self,
@@ -2472,6 +2514,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             and self._pending_reload_domains == self._persisted_pending_reload_domains
             and self._last_ha_version == self._persisted_last_ha_version
             and self._last_integration_version == self._persisted_last_integration_version
+            and self._persisted_hash_algorithm_version == CURRENT_HASH_ALGORITHM_VERSION
         ):
             return
 
@@ -2482,6 +2525,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         save_payload: dict[str, object] = {
             "metadata": final_metadata,
             "pending_reload_domains": sorted(self._pending_reload_domains),
+            STORAGE_KEY_HASH_ALGORITHM_VERSION: CURRENT_HASH_ALGORITHM_VERSION,
         }
         if self._last_ha_version is not None:
             save_payload[STORAGE_KEY_LAST_HA_VERSION] = self._last_ha_version
@@ -2497,6 +2541,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             self._persisted_pending_reload_domains = set(self._pending_reload_domains)
             self._persisted_last_ha_version = self._last_ha_version
             self._persisted_last_integration_version = self._last_integration_version
+            self._persisted_hash_algorithm_version = CURRENT_HASH_ALGORITHM_VERSION
         except Exception:
             _LOGGER.exception("Failed to save metadata to storage")
 
@@ -3445,16 +3490,19 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             if isinstance(final_source_url_val, str) and final_source_url_val.strip()
             else None
         )
-        filter_paths = self.get_selector_filter_paths()
         if final_source_url:
-            content = ensure_source_url_ha_core(
+            content = ensure_source_url(
                 remote_content,
                 final_source_url,
                 expected_domain=functional_domain,
             )
         else:
             content = normalize_content(remote_content)
-        expected_hash = hash_content(content, final_source_url, filter_paths=filter_paths)
+        expected_hash = hash_content(
+            content,
+            final_source_url,
+            expected_domain=functional_domain,
+        )
         if remote_hash is not None and remote_hash != expected_hash:
             raise HomeAssistantError("Remote hash does not match validated install content")
 
@@ -4892,18 +4940,20 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if not remote_content:
             return None
 
-        filter_paths = self.get_selector_filter_paths()
-        remote_content_with_url = ensure_source_url(
-            remote_content, source_url, filter_paths=filter_paths
-        )
+        remote_content_with_url = remote_content
+        expected_domain = self._get_functional_domain(path)
         try:
+            remote_content_with_url = ensure_source_url(
+                remote_content,
+                source_url,
+                expected_domain=expected_domain,
+            )
             remote_parsed = yaml_util.parse_yaml(remote_content_with_url)
             blueprint_dict: dict[str, object] = (
                 {str(k): v for k, v in remote_parsed.items()}
                 if isinstance(remote_parsed, dict)
                 else {}
             )
-            expected_domain = self._get_functional_domain(path)
             try:
                 available_template_paths = await self.async_get_custom_template_paths(
                     force_refresh=True
@@ -4917,7 +4967,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 available_template_paths=available_template_paths,
             )
         except (HomeAssistantError, InvalidBlueprint) as err:
-            last_error = format_error_message("yaml_syntax_error", err)
+            error_code = (
+                "invalid_blueprint" if isinstance(err, InvalidBlueprint) else "yaml_syntax_error"
+            )
+            last_error = format_error_message(error_code, err)
 
         if last_error:
             _LOGGER.warning("Remote content for diff at %s is invalid: %s", path, last_error)
@@ -4947,6 +5000,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         local_hash = info.get("local_hash")
         remote_hash = info.get("remote_hash")
         source_url = info.get("source_url")
+        expected_domain = self._get_functional_domain(path)
 
         if remote_hash is None and info.get("updatable"):
             _LOGGER.error(
@@ -4983,6 +5037,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 path,
                 remote_content,
                 source_url_str,
+                expected_domain,
             )
         except Exception as err:
             _LOGGER.warning("Failed to generate diff for %s: %s", path, err)
@@ -4990,7 +5045,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         remote_content_str = remote_content if isinstance(remote_content, str) else ""
         is_semantic_sync = self._is_semantically_equal(
-            remote_content_str, local_hash_str or "", source_url_str
+            remote_content_str,
+            local_hash_str or "",
+            source_url_str,
+            expected_domain=expected_domain,
         )
         self.set_cached_git_diff(
             path, local_hash_str, remote_hash_str, diff_text or "", is_semantic_sync
@@ -5361,14 +5419,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             return
         real_path = os.path.realpath(path)
         source_url_str = source_url if isinstance(source_url, str) else ""
-        filter_paths = self.get_selector_filter_paths()
         remote_content_with_url = remote_content
+        expected_domain = self._get_functional_domain(real_path)
         try:
             remote_content_with_url = ensure_source_url(
-                remote_content, source_url_str, filter_paths=filter_paths
+                remote_content,
+                source_url_str,
+                expected_domain=expected_domain,
             )
             remote_parsed = yaml_util.parse_yaml(remote_content_with_url)
-            expected_domain = self._get_functional_domain(real_path)
             blueprint_dict: dict[str, object] = (
                 {str(k): v for k, v in remote_parsed.items()}
                 if isinstance(remote_parsed, dict)
@@ -5385,7 +5444,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 last_error = validation_error
             else:
                 remote_hash = hash_content(
-                    remote_content, source_url_str, filter_paths=filter_paths
+                    remote_content,
+                    source_url_str,
+                    expected_domain=expected_domain,
                 )
                 local_hash = info.get("local_hash")
                 updatable = bool(remote_hash and remote_hash != local_hash)
@@ -5437,7 +5498,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             )
             updatable = False
             remote_hash = None
-            last_error = format_error_message("yaml_syntax_error", err)
+            error_code = (
+                "invalid_blueprint" if isinstance(err, InvalidBlueprint) else "yaml_syntax_error"
+            )
+            last_error = format_error_message(error_code, err)
         except Exception as err:
             _LOGGER.exception("Unexpected error processing blueprint for %s", path)
             updatable = False
@@ -6219,7 +6283,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             "name": name,
             "domain": domain,
             "source_url": clean_source_url,
-            "local_hash": hash_content(content, clean_source_url),
+            "local_hash": hash_content(content, clean_source_url, expected_domain=domain),
             "local_file_hash": (
                 file_hash
                 if file_hash is not None
@@ -6465,7 +6529,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                             "content": content,
                             "local_file_hash": file_hash,
                             "local_hash": (
-                                hash_content(content, clean_url) if clean_url else file_hash
+                                hash_content(content, clean_url, expected_domain=func_domain)
+                                if clean_url
+                                else file_hash
                             ),
                         }
                     except (HomeAssistantError, ValueError, OSError) as err:

@@ -6,17 +6,16 @@ import asyncio
 import contextlib
 import copy
 import difflib
-import functools
 import hashlib
 import logging
 import math
 import os
 import re
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Final, NamedTuple, TypedDict
+from typing import TYPE_CHECKING, Final, TypedDict
 
 import homeassistant.components.template.config as template_config
 import orjson
@@ -31,11 +30,13 @@ else:
         import voluptuous as vol
 from homeassistant.components.automation.config import AUTOMATION_BLUEPRINT_SCHEMA
 from homeassistant.components.automation.const import CONF_TRIGGER_VARIABLES
+from homeassistant.components.blueprint import models
 from homeassistant.components.blueprint.const import (
     CONF_BLUEPRINT,
     CONF_INPUT,
     CONF_SOURCE_URL,
 )
+from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.const import (
     ATTR_AREA_ID,
@@ -99,20 +100,6 @@ from .const import (
 )
 from .providers import registry
 from .utils import extract_leaf_strings, redact_url
-
-_SINGULAR_CONFIG_KEYS: Final[dict[str, str]] = {v: k for k, v in PLURAL_CONFIG_KEYS.items()}
-
-_NON_INPUT_ROOT_KEYS: Final[frozenset[str]] = frozenset(
-    {
-        CONF_ACTION,
-        CONF_ACTIONS,
-        CONF_TRIGGER,
-        CONF_TRIGGERS,
-        CONF_CONDITION,
-        CONF_CONDITIONS,
-        CONF_VARIABLES,
-    }
-)
 
 _DEVICE_AUTOMATION_EXCEPTIONS: tuple[type[Exception], ...]
 _ENTITY_NOT_FOUND_EXCEPTIONS: tuple[type[Exception], ...]
@@ -191,23 +178,6 @@ class SelectorType(StrEnum):
 _KNOWN_SELECTOR_TYPES: Final[frozenset[str]] = frozenset(s.value for s in SelectorType)
 
 
-type SelectorRegistryFingerprint = tuple[tuple[str, str, tuple[object, ...]], ...]
-
-DEFAULT_SELECTOR_FILTER_PATHS: Final[frozenset[tuple[str, ...]]] = frozenset(
-    {
-        (SelectorType.ENTITY, SelectorType.FILTER),
-        (SelectorType.DEVICE, SelectorType.FILTER),
-        (SelectorType.DEVICE, SelectorType.ENTITY),
-        (SelectorType.TARGET, SelectorType.ENTITY),
-        (SelectorType.TARGET, SelectorType.DEVICE),
-        (SelectorType.AREA, SelectorType.ENTITY),
-        (SelectorType.AREA, SelectorType.DEVICE),
-        (SelectorType.FLOOR, SelectorType.ENTITY),
-        (SelectorType.FLOOR, SelectorType.DEVICE),
-        (SelectorType.NUMERIC_THRESHOLD, SelectorType.ENTITY),
-    }
-)
-
 JSONDict = Mapping[str, "JSONValue"]
 JSONList = Sequence["JSONValue"]
 JSONValue = None | bool | int | float | str | JSONDict | JSONList
@@ -280,471 +250,6 @@ def _get_ha_mutable_method_names() -> frozenset[str]:
 
 
 _HA_MUTABLE_METHOD_NAMES: Final[frozenset[str]] = _get_ha_mutable_method_names()
-
-
-def _fingerprint_schema_key(sk: object) -> tuple[str, str, tuple[object, ...] | None]:
-    """Deterministically fingerprint a schema key including marker metadata."""
-    if isinstance(sk, (vol.Optional, vol.Required, vol.Marker)):
-        marker_name = type(sk).__name__
-        default_val = getattr(sk, "default", vol.UNDEFINED)
-        default_fp = (
-            compute_selector_schema_fingerprint(default_val)
-            if default_val is not vol.UNDEFINED
-            else None
-        )
-        return (marker_name, str(sk.schema), default_fp)
-    return (type(sk).__name__, str(sk), None)
-
-
-def _fingerprint_dict_entries(
-    items: Mapping[object, object],
-) -> tuple[tuple[tuple[str, str, tuple[object, ...] | None], tuple[object, ...]], ...]:
-    """Deterministically fingerprint mapping entries.
-
-    Args:
-        items: Mapping of schema keys to child schemas.
-
-    Returns:
-        Sorted tuple of key-value fingerprint pairs.
-
-    """
-    entries = [
-        (_fingerprint_schema_key(sk), compute_selector_schema_fingerprint(sv))
-        for sk, sv in items.items()
-    ]
-    return tuple(sorted(entries, key=lambda x: str(x[0])))
-
-
-def _fingerprint_vol_validator(
-    schema_obj: object, type_name: str
-) -> tuple[str, str, tuple[object, ...]]:
-    """Fingerprint voluptuous validator instances like Coerce, In, Range, Length.
-
-    Args:
-        schema_obj: Voluptuous validator instance.
-        type_name: Class name of the validator.
-
-    Returns:
-        Fingerprint tuple identifying validator and its parameters.
-
-    """
-    extra_attrs = tuple(
-        (attr, compute_selector_schema_fingerprint(getattr(schema_obj, attr)))
-        for attr in ("type", "container", "min", "max")
-        if hasattr(schema_obj, attr)
-    )
-    return ("vol_validator", type_name, extra_attrs)
-
-
-def _fingerprint_partial(
-    schema_obj: functools.partial[object],
-) -> tuple[
-    str,
-    tuple[object, ...],
-    tuple[tuple[object, ...], tuple[tuple[str, tuple[object, ...]], ...]],
-]:
-    """Fingerprint functools.partial instance.
-
-    Args:
-        schema_obj: Partial function instance.
-
-    Returns:
-        Fingerprint tuple for function, positional arguments, and keywords.
-
-    """
-    args_fps = tuple(compute_selector_schema_fingerprint(a) for a in schema_obj.args)
-    kwargs_fps = tuple(
-        sorted(
-            (
-                (str(k), compute_selector_schema_fingerprint(v))
-                for k, v in (schema_obj.keywords or {}).items()
-            ),
-            key=lambda x: x[0],
-        )
-    )
-    return (
-        "partial",
-        compute_selector_schema_fingerprint(schema_obj.func),
-        (args_fps, kwargs_fps),
-    )
-
-
-def _fingerprint_opaque_object(schema_obj: object) -> tuple[str, str, tuple[object, ...]]:
-    """Fingerprint arbitrary non-callable objects via instance dictionary.
-
-    Args:
-        schema_obj: Arbitrary object to fingerprint.
-
-    Returns:
-        Fingerprint tuple containing class name and non-private instance attributes.
-
-    """
-    obj_dict = getattr(schema_obj, "__dict__", None)
-    dict_items = obj_dict.items() if isinstance(obj_dict, dict) else []
-    extra_state = tuple(
-        (str(k), compute_selector_schema_fingerprint(v))
-        for k, v in sorted(dict_items, key=lambda x: str(x[0]))
-        if not str(k).startswith("_")
-    )
-    qualname = getattr(type(schema_obj), "__qualname__", getattr(type(schema_obj), "__name__", ""))
-    module = getattr(type(schema_obj), "__module__", "")
-    return ("opaque_obj", f"{module}.{qualname}", extra_state)
-
-
-def compute_selector_schema_fingerprint(schema_obj: object) -> tuple[object, ...]:
-    """Deterministically compute content-based fingerprint for a selector voluptuous schema."""
-    if isinstance(schema_obj, vol.Schema) and isinstance(schema_obj.schema, dict):
-        return ("vol.Schema", len(schema_obj.schema), _fingerprint_dict_entries(schema_obj.schema))
-    if isinstance(schema_obj, dict):
-        return ("dict", len(schema_obj), _fingerprint_dict_entries(schema_obj))
-    if isinstance(schema_obj, (vol.All, vol.Any)):
-        type_name = "vol.All" if isinstance(schema_obj, vol.All) else "vol.Any"
-        sub_fps = tuple(compute_selector_schema_fingerprint(v) for v in schema_obj.validators)
-        return (type_name, len(sub_fps), sub_fps)
-    if isinstance(schema_obj, (set, frozenset)):
-        sub_fps = tuple(
-            sorted((compute_selector_schema_fingerprint(v) for v in schema_obj), key=str)
-        )
-        return (type(schema_obj).__name__, len(sub_fps), sub_fps)
-    if isinstance(schema_obj, (list, tuple)):
-        sub_fps = tuple(compute_selector_schema_fingerprint(v) for v in schema_obj)
-        return (type(schema_obj).__name__, len(sub_fps), sub_fps)
-    if isinstance(schema_obj, functools.partial):
-        return _fingerprint_partial(schema_obj)
-    if isinstance(schema_obj, (vol.Coerce, vol.In, vol.Range, vol.Length)):
-        return _fingerprint_vol_validator(schema_obj, type(schema_obj).__name__)
-    if isinstance(schema_obj, (str, int, float, bool, type(None))):
-        return ("literal", type(schema_obj).__name__, schema_obj)
-    if isinstance(schema_obj, type):
-        qualname = getattr(schema_obj, "__qualname__", getattr(schema_obj, "__name__", ""))
-        module = getattr(schema_obj, "__module__", "")
-        return ("type", f"{module}.{qualname}", ())
-    if callable(schema_obj):
-        return _fingerprint_callable_state(schema_obj)
-    return _fingerprint_opaque_object(schema_obj)
-
-
-def _fingerprint_callable_state(schema_obj: object) -> tuple[str, str, tuple[object, ...]]:
-    """Deterministically fingerprint callable name, closure state, and instance variables."""
-    qualname = (
-        getattr(schema_obj, "__qualname__", getattr(schema_obj, "__name__", ""))
-        or type(schema_obj).__name__
-    )
-    module = getattr(schema_obj, "__module__", "")
-    extra_state: list[tuple[str, tuple[object, ...]]] = []
-    if defaults := getattr(schema_obj, "__defaults__", None):
-        extra_state.append(("defaults", compute_selector_schema_fingerprint(defaults)))
-    if kwdefaults := getattr(schema_obj, "__kwdefaults__", None):
-        extra_state.append(("kwdefaults", compute_selector_schema_fingerprint(kwdefaults)))
-    if closure := getattr(schema_obj, "__closure__", None):
-        cell_contents: list[tuple[object, ...]] = []
-        for cell in closure:
-            try:
-                cell_contents.append(compute_selector_schema_fingerprint(cell.cell_contents))
-            except Exception:
-                cell_contents.append(("unrepr_cell",))
-        extra_state.append(("closure", tuple(cell_contents)))
-    if hasattr(schema_obj, "__dict__") and isinstance(schema_obj.__dict__, dict):
-        extra_state.extend(
-            (str(k), compute_selector_schema_fingerprint(v))
-            for k, v in sorted(schema_obj.__dict__.items(), key=lambda x: str(x[0]))
-            if not str(k).startswith("_")
-        )
-    return ("callable", f"{module}.{qualname}", tuple(extra_state))
-
-
-def _is_dict_validator(val: object) -> bool:
-    """Check whether a schema validator matches a dictionary structure."""
-    if isinstance(val, vol.Schema):
-        return _is_dict_validator(val.schema)
-    if isinstance(val, dict):
-        return True
-    if isinstance(val, (vol.All, vol.Any)):
-        return any(_is_dict_validator(v) for v in val.validators)
-    return False
-
-
-def _has_dict_list_expansion(val: object) -> bool:
-    """Detect whether a schema validator coerces single dictionary to list of dictionaries."""
-    if isinstance(val, vol.All):
-        has_ensure_list = any(
-            v is cv.ensure_list
-            or getattr(v, "__name__", "") == "ensure_list"
-            or (hasattr(v, "__qualname__") and "ensure_list" in v.__qualname__)
-            or type(v).__name__.lower() in ("ensurelist", "ensure_list")
-            or (hasattr(type(v), "__qualname__") and "ensurelist" in type(v).__qualname__.lower())
-            for v in val.validators
-        )
-        has_list_of_dicts = any(
-            isinstance(v, (list, tuple)) and len(v) == 1 and _is_dict_validator(v[0])
-            for v in val.validators
-        )
-        if has_ensure_list and has_list_of_dicts:
-            return True
-        return any(_has_dict_list_expansion(v) for v in val.validators)
-
-    if isinstance(val, vol.Any):
-        return any(_has_dict_list_expansion(v) for v in val.validators)
-
-    if isinstance(val, vol.Schema):
-        return _has_dict_list_expansion(val.schema)
-
-    return False
-
-
-def _extract_schema_dicts(config_schema: object) -> list[dict[object, object]]:
-    """Extract all underlying schema mappings from a voluptuous schema object."""
-    if isinstance(config_schema, vol.Schema):
-        return _extract_schema_dicts(config_schema.schema)
-    if isinstance(config_schema, dict):
-        return [config_schema]
-    if isinstance(config_schema, (vol.All, vol.Any)):
-        dicts: list[dict[object, object]] = []
-        for v in config_schema.validators:
-            dicts.extend(_extract_schema_dicts(v))
-        return dicts
-    return []
-
-
-def _collect_selector_filter_paths(
-    current_prefix: tuple[str, ...],
-    schema_obj: object,
-    discovered: set[tuple[str, ...]],
-) -> None:
-    """Recursively collect filter path prefixes matching list expansion schemas."""
-    schema_dicts = _extract_schema_dicts(schema_obj)
-    if not schema_dicts:
-        return
-
-    for schema_dict in schema_dicts:
-        for key, val in schema_dict.items():
-            key_name = (
-                key.schema if isinstance(key, (vol.Optional, vol.Required, vol.Marker)) else key
-            )
-            if not isinstance(key_name, str):
-                continue
-
-            new_prefix = (*current_prefix, key_name)
-            if _has_dict_list_expansion(val):
-                discovered.add(new_prefix)
-
-            _collect_selector_filter_paths(new_prefix, val, discovered)
-
-
-def compute_selector_registry_fingerprint(
-    selectors_registry: object,
-) -> SelectorRegistryFingerprint | None:
-    """Compute a recursive content fingerprint of selector classes and schemas in the registry."""
-    if not isinstance(selectors_registry, Mapping):
-        return None
-    try:
-        registry_items = list(selectors_registry.items())
-    except Exception:
-        _LOGGER.debug("Could not iterate Home Assistant selector registry items", exc_info=True)
-        return None
-
-    items: list[tuple[str, str, tuple[object, ...]]] = []
-    for k, v in registry_items:
-        try:
-            config_schema = getattr(v, "CONFIG_SCHEMA", None)
-            schema_fp = (
-                compute_selector_schema_fingerprint(config_schema)
-                if config_schema is not None
-                else ()
-            )
-            cls_name = getattr(v, "__qualname__", getattr(v, "__name__", repr(v)))
-        except Exception:
-            cls_name = repr(v)
-            schema_fp = ()
-        items.append((str(k), cls_name, schema_fp))
-    return tuple(sorted(items, key=lambda item: item[0]))
-
-
-def derive_selector_filter_paths(
-    selectors_registry: object | None,
-    default_paths: frozenset[tuple[str, ...]] = DEFAULT_SELECTOR_FILTER_PATHS,
-) -> frozenset[tuple[str, ...]]:
-    """Dynamically inspect registered Home Assistant selectors to discover filter paths.
-
-    Args:
-        selectors_registry: Registry mapping selector types to selector classes.
-        default_paths: Baseline fallback paths used if the registry is unavailable.
-
-    Returns:
-        Frozenset of selector filter path tuples discovered from the schemas.
-
-    """
-    discovered: set[tuple[str, ...]] = set()
-
-    if isinstance(selectors_registry, Mapping) and selectors_registry:
-        try:
-            registry_items = list(selectors_registry.items())
-        except Exception:
-            _LOGGER.warning(
-                "Could not iterate Home Assistant selector registry items; "
-                "falling back to default paths",
-                exc_info=True,
-            )
-            registry_items = []
-
-        for selector_type, selector_cls in registry_items:
-            try:
-                config_schema = getattr(selector_cls, "CONFIG_SCHEMA", None)
-                if config_schema is None:
-                    continue
-
-                _collect_selector_filter_paths((str(selector_type),), config_schema, discovered)
-            except Exception:
-                _LOGGER.warning(
-                    "Failed to inspect selector schema for %s",
-                    selector_type,
-                    exc_info=True,
-                )
-
-        if registry_items and not discovered:
-            _LOGGER.warning(
-                "Selector dynamic discovery produced no paths from %d registered selectors; "
-                "check schema introspection compatibility",
-                len(registry_items),
-            )
-    else:
-        _LOGGER.warning(
-            "Home Assistant selector registry is unavailable or empty; "
-            "falling back to default paths"
-        )
-
-    if default_paths and not default_paths.issubset(discovered):
-        discovered.update(default_paths)
-
-    return frozenset(discovered)
-
-
-class SelectorRegistryQuickSig(NamedTuple):
-    """Fast shallow signature for Home Assistant selector registry."""
-
-    length: int
-    items: tuple[tuple[str, int, int], ...]
-
-
-_cached_selector_filter_paths: frozenset[tuple[str, ...]] | None = None
-_cached_selector_registry_fingerprint: SelectorRegistryFingerprint | None = None
-_cached_selector_registry_quick_sig: SelectorRegistryQuickSig | None = None
-
-
-def invalidate_selector_filter_paths_cache() -> None:
-    """Invalidate the cached selector filter paths and registry fingerprint."""
-    global \
-        _cached_selector_filter_paths, \
-        _cached_selector_registry_fingerprint, \
-        _cached_selector_registry_quick_sig
-    _cached_selector_filter_paths = None
-    _cached_selector_registry_fingerprint = None
-    _cached_selector_registry_quick_sig = None
-
-
-def get_cached_selector_registry_fingerprint() -> SelectorRegistryFingerprint | None:
-    """Get the cached selector registry fingerprint.
-
-    Returns:
-        The cached registry fingerprint tuple or None if uninitialized.
-
-    """
-    return _cached_selector_registry_fingerprint
-
-
-def get_cached_selector_registry_quick_sig() -> SelectorRegistryQuickSig | None:
-    """Get the cached selector registry quick signature.
-
-    Returns:
-        The cached registry quick signature tuple or None if uninitialized.
-
-    """
-    return _cached_selector_registry_quick_sig
-
-
-def set_cached_selector_filter_paths(
-    paths: frozenset[tuple[str, ...]] | None,
-    fingerprint: SelectorRegistryFingerprint | None = None,
-    quick_sig: SelectorRegistryQuickSig | None = None,
-) -> None:
-    """Set the cached selector filter paths and registry fingerprint.
-
-    Args:
-        paths: Filter paths to store in the cache.
-        fingerprint: Registry fingerprint to store in the cache.
-        quick_sig: Registry quick signature to store in the cache.
-
-    """
-    global \
-        _cached_selector_filter_paths, \
-        _cached_selector_registry_fingerprint, \
-        _cached_selector_registry_quick_sig
-    _cached_selector_filter_paths = paths
-    _cached_selector_registry_fingerprint = fingerprint
-    _cached_selector_registry_quick_sig = quick_sig
-
-
-def _get_registry_quick_signature(
-    selectors_registry: object,
-) -> SelectorRegistryQuickSig | None:
-    """Compute a fast shallow signature of the selector registry mapping.
-
-    Args:
-        selectors_registry: Registry mapping selector types to selector classes.
-
-    Returns:
-        SelectorRegistryQuickSig or None if invalid.
-
-    """
-    if not isinstance(selectors_registry, Mapping):
-        return None
-    try:
-        sig_items = tuple(
-            (str(k), id(v), id(getattr(v, "CONFIG_SCHEMA", None)))
-            for k, v in sorted(selectors_registry.items(), key=lambda item: str(item[0]))
-        )
-        return SelectorRegistryQuickSig(length=len(selectors_registry), items=sig_items)
-    except Exception:
-        return None
-
-
-def get_selector_filter_paths(*, force_refresh: bool = False) -> frozenset[tuple[str, ...]]:
-    """Get the cached or dynamically derived set of selector filter paths from HA Core.
-
-    Args:
-        force_refresh: Whether to ignore cached paths and re-derive from the registry.
-
-    Returns:
-        A frozenset of tuple paths identifying selector fields that expand to lists.
-
-    """
-    global \
-        _cached_selector_filter_paths, \
-        _cached_selector_registry_fingerprint, \
-        _cached_selector_registry_quick_sig
-
-    try:
-        from homeassistant.helpers import selector as ha_selector
-
-        selectors_registry = getattr(ha_selector, "SELECTORS", None)
-    except Exception:
-        _LOGGER.warning("Could not import Home Assistant selector registry", exc_info=True)
-        selectors_registry = None
-
-    current_fingerprint = compute_selector_registry_fingerprint(selectors_registry)
-
-    if (
-        force_refresh
-        or _cached_selector_filter_paths is None
-        or current_fingerprint != _cached_selector_registry_fingerprint
-    ):
-        _cached_selector_filter_paths = derive_selector_filter_paths(
-            selectors_registry, DEFAULT_SELECTOR_FILTER_PATHS
-        )
-        _cached_selector_registry_fingerprint = current_fingerprint
-
-    _cached_selector_registry_quick_sig = _get_registry_quick_signature(selectors_registry)
-    return _cached_selector_filter_paths
 
 
 def _get_ha_target_field_keys() -> frozenset[str]:
@@ -3944,153 +3449,8 @@ def get_blueprint_schema(domain: str) -> vol.Schema | vol.All:
     return BLUEPRINT_SCHEMA
 
 
-def coerce_empty_selectors(data: object) -> None:
-    """Coerce empty selector configurations with None values to empty dicts.
-
-    Args:
-        data: Arbitrary structured blueprint data to traverse and mutate.
-
-    """
-    if isinstance(data, dict):
-        if CONF_BLUEPRINT in data:
-            bp_dict = data.get(CONF_BLUEPRINT)
-            if isinstance(bp_dict, dict) and CONF_INPUT in bp_dict:
-                coerce_empty_selectors(bp_dict[CONF_INPUT])
-            return
-        selector_data = data.get(_CONF_SELECTOR)
-        if isinstance(selector_data, dict):
-            for sel_type, sel_val in selector_data.items():
-                if sel_val is None:
-                    selector_data[sel_type] = {}
-        for value in data.values():
-            coerce_empty_selectors(value)
-    elif isinstance(data, list):
-        for item in data:
-            coerce_empty_selectors(item)
-
-
-class BlueprintSchemaAdapter:
-    """Version-tolerant adapter for Home Assistant Core blueprint schema inspection."""
-
-    _DEFAULT_CANONICAL_KEYS: Final[tuple[str, ...]] = (
-        "name",
-        "description",
-        "domain",
-        "author",
-        "homeassistant",
-        "input",
-    )
-
-    @classmethod
-    def get_canonical_keys(cls, schema_obj: object = None) -> tuple[str, ...]:
-        """Dynamically extract canonical blueprint metadata keys in declaration order.
-
-        Inspects the provided Home Assistant blueprint schema (defaulting to
-        BLUEPRINT_SCHEMA) across diverse Core versions and schema wrapper layouts.
-
-        Args:
-            schema_obj: Optional schema object or mapping to inspect. Defaults to
-                BLUEPRINT_SCHEMA.
-
-        Returns:
-            Tuple of canonical schema key names in declaration order.
-
-        """
-        target = BLUEPRINT_SCHEMA if schema_obj is None else schema_obj
-        try:
-            if extracted := cls._extract_keys_from_schema(target):
-                return extracted
-            _LOGGER.debug(
-                "Dynamic blueprint schema key extraction found no valid blueprint subschema; "
-                "falling back to default canonical keys"
-            )
-        except Exception as err:
-            _LOGGER.debug(
-                "Dynamic blueprint schema key extraction failed; "
-                "falling back to default canonical keys: %s",
-                err,
-            )
-        return cls._DEFAULT_CANONICAL_KEYS
-
-    @classmethod
-    def _extract_keys_from_schema(cls, schema_obj: object) -> tuple[str, ...] | None:
-        """Extract recognized keys from a schema object.
-
-        Args:
-            schema_obj: Schema object, voluptuous Schema, or Mapping.
-
-        Returns:
-            Discovered canonical key names or None if resolution fails.
-
-        """
-        bp_inner = cls._find_blueprint_subschema(schema_obj)
-        if bp_inner is None:
-            return None
-
-        discovered: list[str] = []
-        for k in bp_inner:
-            key_name = getattr(k, "schema", k)
-            if isinstance(key_name, str):
-                if key_name == _CONF_SOURCE_URL:
-                    continue
-                if key_name not in discovered:
-                    discovered.append(key_name)
-
-        return tuple(discovered) if discovered else None
-
-    @classmethod
-    def _find_blueprint_subschema(cls, schema_obj: object) -> Mapping[object, object] | None:
-        """Locate the blueprint metadata mapping from a schema object.
-
-        Handles direct mappings, vol.Schema instances, probatio schemas, and
-        vol.Required/vol.Optional markers.
-
-        Args:
-            schema_obj: Schema object to search.
-
-        Returns:
-            Underlying mapping representing the blueprint schema, or None.
-
-        """
-        raw_schema = getattr(schema_obj, "schema", schema_obj)
-        if not isinstance(raw_schema, Mapping):
-            return None
-
-        for k, val in raw_schema.items():
-            key_name = getattr(k, "schema", k)
-            if key_name == CONF_BLUEPRINT or str(key_name) == CONF_BLUEPRINT:
-                inner = getattr(val, "schema", val)
-                if isinstance(inner, Mapping):
-                    return inner
-                validators = getattr(val, "validators", None)
-                if isinstance(validators, (list, tuple)):
-                    for validator in validators:
-                        val_inner = getattr(validator, "schema", validator)
-                        if isinstance(val_inner, Mapping):
-                            return val_inner
-
-        return raw_schema
-
-
-@functools.cache
-def get_blueprint_canonical_keys() -> tuple[str, ...]:
-    """Dynamically discover canonical blueprint metadata keys from Home Assistant Core.
-
-    Discovers recognized keys from Home Assistant Core's BLUEPRINT_SCHEMA
-    (excluding source_url, which is always tail-pinned). Falls back to the static
-    canonical sequence if schemas cannot be inspected.
-
-    Returns:
-        Tuple of canonical schema key names in schema declaration order.
-
-    """
-    return BlueprintSchemaAdapter.get_canonical_keys()
-
-
 def _deterministic_key_sort(k: object) -> tuple[str, str]:
     """Sort key tuple providing deterministic ordering across distinct types.
-
-    Provides a tie-breaker for keys with identical string representations.
 
     Args:
         k: Dictionary key to sort.
@@ -4102,326 +3462,180 @@ def _deterministic_key_sort(k: object) -> tuple[str, str]:
     return (str(k), type(k).__qualname__)
 
 
-def _order_blueprint_metadata(bp_dict: dict[object, object]) -> dict[object, object]:
-    """Order blueprint metadata dictionary deterministically to prevent ordering drift.
-
-    Static canonical schema keys (_DEFAULT_CANONICAL_KEYS) are ordered first, followed by any
-    additional author or custom keys sorted alphabetically. The source_url key is always pinned
-    to the tail. This ensures that metadata ordering and hash calculation remain independent of
-    the installed Home Assistant Core version and schema changes.
+def _sort_mapping_recursive(item: object) -> object:
+    """Recursively sort dictionary keys in mapping and list structures.
 
     Args:
-        bp_dict: Raw blueprint metadata dictionary.
+        item: The dictionary, list, or primitive object to recursively sort.
 
     Returns:
-        Deterministically ordered metadata dictionary.
+        The recursively key-sorted structure.
 
     """
-    canonical_keys = BlueprintSchemaAdapter._DEFAULT_CANONICAL_KEYS
-    ordered: dict[object, object] = {k: bp_dict[k] for k in canonical_keys if k in bp_dict}
-    for key in sorted(
-        [k for k in bp_dict if k not in ordered and k != _CONF_SOURCE_URL],
-        key=_deterministic_key_sort,
-    ):
-        ordered[key] = bp_dict[key]
-    if _CONF_SOURCE_URL in bp_dict:
-        ordered[_CONF_SOURCE_URL] = bp_dict[_CONF_SOURCE_URL]
-    return ordered
+    if isinstance(item, dict):
+        return {
+            k: _sort_mapping_recursive(item[k])
+            for k in sorted(item.keys(), key=_deterministic_key_sort)
+        }
+    if isinstance(item, list):
+        return [_sort_mapping_recursive(sub_item) for sub_item in item]
+    return item
 
 
-def _clean_empty_selectors(data: object) -> None:
-    """Clean empty selector dictionaries to None in-place within blueprint inputs.
+def _normalize_none_selectors(data: object) -> None:
+    """Normalize selector configurations that are None to empty mappings.
 
-    Ensures that empty mapping selectors (e.g. `text: {}`, `boolean: {}`)
-    format cleanly as `text:` or `boolean:` without empty mapping braces,
-    while restricting cleanup to blueprint input definitions to avoid
-    altering non-input payloads (such as action service selectors).
+    Ensures that empty selectors (e.g. text: None) are converted to empty
+    mappings (e.g. text: {}) prior to schema validation and serialization.
 
     Args:
-        data: Blueprint data structure (dict) or input mapping to clean.
+        data: The blueprint data structure or subsection to normalize in place.
 
     """
     if isinstance(data, dict):
         if CONF_BLUEPRINT in data:
             bp_dict = data.get(CONF_BLUEPRINT)
             if isinstance(bp_dict, dict) and CONF_INPUT in bp_dict:
-                _clean_empty_selectors(bp_dict[CONF_INPUT])
+                _normalize_none_selectors(bp_dict[CONF_INPUT])
             return
         selector_data = data.get(_CONF_SELECTOR)
         if isinstance(selector_data, dict):
-            for sel_type, sel_val in selector_data.items():
-                if sel_val == {}:
-                    selector_data[sel_type] = None
+            for sel_type, sel_val in list(selector_data.items()):
+                if sel_val is None:
+                    selector_data[sel_type] = {}
         for value in data.values():
-            _clean_empty_selectors(value)
+            if isinstance(value, (dict, list)):
+                _normalize_none_selectors(value)
     elif isinstance(data, list):
         for item in data:
-            _clean_empty_selectors(item)
+            if isinstance(item, (dict, list)):
+                _normalize_none_selectors(item)
 
 
-def _safe_deepcopy(data: object, memo: dict[int, object] | None = None) -> object:
-    """Create an isolated deep copy of structured data resilient to custom leaf types.
+def _sort_selector_keys(data: object) -> None:
+    """Sort dictionary keys inside selector definitions deterministically.
 
-    Deep-copies dictionaries and lists so mutations (like empty selector coercion)
-    do not contaminate the pristine parsed structure, while preserving custom leaf
-    objects (such as Home Assistant YAML Input objects) that may fail standard deepcopy.
+    Ensures that permutations of selector options (e.g. multiline vs multiple)
+    and nested filter keys produce identical canonical YAML and SHA-256 hashes.
 
     Args:
-        data: Arbitrary structured data (dict, list, or scalar).
-        memo: Optional memoization dictionary for circular reference protection.
-
-    Returns:
-        Deep-copied data structure.
+        data: The blueprint data structure or subsection to sort in place.
 
     """
-    if memo is None:
-        memo = {}
-    obj_id = id(data)
-    if obj_id in memo:
-        return memo[obj_id]
-
     if isinstance(data, dict):
-        result_dict: dict[object, object] = {}
-        memo[obj_id] = result_dict
-        for k, v in data.items():
-            result_dict[_safe_deepcopy(k, memo)] = _safe_deepcopy(v, memo)
-        return result_dict
-
-    if isinstance(data, list):
-        result_list: list[object] = []
-        memo[obj_id] = result_list
-        result_list.extend(_safe_deepcopy(item, memo) for item in data)
-        return result_list
-
-    try:
-        copied = copy.deepcopy(data)
-        memo[obj_id] = copied
-        return copied
-    except Exception:
-        memo[obj_id] = data
-        return data
-
-
-def ensure_source_url_cached(
-    content: str,
-    source_url: str,
-    *,
-    normalize_fn: Callable[[str], str] | None = None,
-    dump_fn: Callable[[dict | list], str] | None = None,
-    filter_paths: frozenset[tuple[str, ...]] | None = None,
-) -> str:
-    """Implementation of source URL normalization.
-
-    Args:
-        content: Raw YAML blueprint content string.
-        source_url: Canonical source URL string.
-        normalize_fn: Optional custom normalization callable.
-        dump_fn: Optional custom YAML dump callable.
-        filter_paths: Optional selector filter paths to coerce singleton mappings.
-
-    Returns:
-        Normalized content string with source_url injected into blueprint metadata.
-
-    """
-    actual_normalize = normalize_fn or normalize_content
-    actual_dump = dump_fn or yaml_util.dump
-    source_url = source_url.strip()
-
-    try:
-        parsed = yaml_util.parse_yaml(content)
-    except HomeAssistantError:
-        parsed = None
-
-    if not isinstance(parsed, dict) or CONF_BLUEPRINT not in parsed:
-        return actual_normalize(content)
-
-    blueprint_info = parsed[CONF_BLUEPRINT]
-    if not isinstance(blueprint_info, dict):
-        return actual_normalize(content)
-
-    domain = blueprint_info.get(CONF_DOMAIN, FunctionalDomain.AUTOMATION)
-    is_automation = str(domain) == FunctionalDomain.AUTOMATION
-
-    target_data: object = None
-    try:
-        # Check for conflicting singular and plural aliases before normalization
-        if is_automation:
-            for sing_key, plur_key in PLURAL_CONFIG_KEYS.items():
-                if sing_key in parsed and plur_key in parsed:
-                    raise vol.Invalid(
-                        f"Cannot specify both '{sing_key}' and '{plur_key}' in automation blueprint"
-                    )
-
-        # 1. Perform validation pass on an isolated deep copy with source_url injected
-        validation_copy = _safe_deepcopy(parsed)
-        if isinstance(validation_copy, dict):
-            val_bp = validation_copy.get(CONF_BLUEPRINT)
-            if isinstance(val_bp, dict):
-                val_bp[_CONF_SOURCE_URL] = source_url
-        coerce_empty_selectors(validation_copy)
-
-        schema = get_blueprint_schema(str(domain))
-        normalized = schema(validation_copy)
-        actual_filter_paths = (
-            filter_paths if filter_paths is not None else get_selector_filter_paths()
-        )
-        target_dict: dict[object, object] = {}
-        for k in normalized:
-            orig_val: object = None
-            if k in parsed:
-                orig_val = parsed[k]
-            elif isinstance(k, str):
-                alias_k = _SINGULAR_CONFIG_KEYS.get(k) or PLURAL_CONFIG_KEYS.get(k)
-                if alias_k is not None and alias_k in parsed:
-                    orig_val = parsed[alias_k]
-            target_dict[k] = stabilize_yaml_structure(
-                orig_val,
-                normalized[k],
-                selector_path=None,
-                allow_singleton_list_coercion=False,
-                filter_paths=actual_filter_paths,
-                in_non_input=isinstance(k, str) and k in _NON_INPUT_ROOT_KEYS,
-            )
-        for k, v in parsed.items():
-            alias_k = (
-                (_SINGULAR_CONFIG_KEYS.get(k) or PLURAL_CONFIG_KEYS.get(k))
-                if isinstance(k, str)
-                else None
-            )
-            if k not in target_dict and (alias_k is None or alias_k not in target_dict):
-                target_dict[k] = v
-        target_data = target_dict
-    except (
-        vol.Invalid,
-        HomeAssistantError,
-        KeyError,
-        TypeError,
-        ValueError,
-        copy.Error,
-    ) as err:
-        _LOGGER.debug(
-            "Semantic normalization skipped for %s (falling back to canonical YAML): %s",
-            redact_url(source_url),
-            err,
-        )
-        # 2. Preserve original key spellings and every value on fallback from pristine parsed data
-        fallback_dict: dict[object, object] = {}
-        for k, v in parsed.items():
-            try:
-                fallback_dict[k] = _safe_deepcopy(v)
-            except Exception:
-                fallback_dict[k] = dict(v) if isinstance(v, dict) else v
-        target_data = fallback_dict
-
-    # 3. Explicit post-processing: clean empty selectors for BOTH paths
-    _clean_empty_selectors(target_data)
-
-    if isinstance(target_data, dict):
-        bp_dict = target_data.get(CONF_BLUEPRINT)
-        if isinstance(bp_dict, dict):
-            canonical_bp = dict(bp_dict)
-            canonical_bp[_CONF_SOURCE_URL] = source_url
-            target_data[CONF_BLUEPRINT] = _order_blueprint_metadata(canonical_bp)
-
-    if isinstance(target_data, (dict, list)):
-        try:
-            return actual_dump(target_data)
-        except Exception as err:
-            _LOGGER.warning(
-                "YAML canonicalization failed for %s: %s",
-                redact_url(source_url),
-                err,
-            )
-    return actual_normalize(content)
+        if CONF_BLUEPRINT in data:
+            bp_dict = data.get(CONF_BLUEPRINT)
+            if isinstance(bp_dict, dict) and CONF_INPUT in bp_dict:
+                _sort_selector_keys(bp_dict[CONF_INPUT])
+            return
+        selector_data = data.get(_CONF_SELECTOR)
+        if isinstance(selector_data, dict):
+            for sel_type, sel_val in list(selector_data.items()):
+                if isinstance(sel_val, (dict, list)):
+                    selector_data[sel_type] = _sort_mapping_recursive(sel_val)
+        for value in data.values():
+            if isinstance(value, (dict, list)):
+                _sort_selector_keys(value)
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, (dict, list)):
+                _sort_selector_keys(item)
 
 
 def ensure_source_url(
     content: object,
-    source_url: object,
-    *,
-    normalize_fn: Callable[[str], str] | None = None,
-    dump_fn: Callable[[dict | list], str] | None = None,
-    filter_paths: frozenset[tuple[str, ...]] | None = None,
-) -> str:
-    """Ensure the target source_url is present in the blueprint metadata.
-
-    Args:
-        content: Raw YAML blueprint content.
-        source_url: Target URL to enforce in the content.
-        normalize_fn: Optional custom normalization callable.
-        dump_fn: Optional custom YAML dump callable.
-        filter_paths: Optional selector filter paths to coerce singleton mappings.
-
-    Returns:
-        YAML content with source_url present in canonical normalized form.
-
-    """
-    actual_normalize = normalize_fn or normalize_content
-    if not isinstance(content, str):
-        _LOGGER.debug("Non-string content passed to _ensure_source_url: %s", type(content))
-        return ""
-    if not isinstance(source_url, str) or not source_url.strip():
-        _LOGGER.debug(
-            "Non-string or empty source_url passed to _ensure_source_url: %s", type(source_url)
-        )
-        return actual_normalize(content)
-
-    return ensure_source_url_cached(
-        content,
-        source_url.strip(),
-        normalize_fn=actual_normalize,
-        dump_fn=dump_fn,
-        filter_paths=filter_paths,
-    )
-
-
-def ensure_source_url_ha_core(
-    content: object,
     source_url: object = None,
     *,
     expected_domain: object = None,
+    sort_selectors: bool = False,
 ) -> str:
-    """Ensure source_url is set and format canonical YAML via Home Assistant Core helpers.
+    """Ensure source_url is present in blueprint metadata and format canonical YAML.
 
     Replicates the storage format produced by Home Assistant Core's native
-    blueprint importer: parses YAML, injects or updates source_url, and
-    serializes using yaml_util.dump.
+    blueprint importer: parses YAML, validates via models.Blueprint with schema,
+    updates metadata in place, and serializes using bp.yaml().
 
     Args:
         content: Raw YAML blueprint content string.
         source_url: Canonical source URL string to ensure in metadata.
-        expected_domain: Optional functional domain string (reserved for compatibility).
+        expected_domain: Optional functional domain string.
+        sort_selectors: Whether to sort selector keys (default: False).
 
     Returns:
         Canonical YAML string aligned with Home Assistant Core on disk.
 
     Raises:
-        HomeAssistantError: If YAML serialization fails.
+        HomeAssistantError: If YAML parsing or serialization fails.
+        InvalidBlueprint: If blueprint structure or schema validation fails.
 
     """
     if not isinstance(content, str):
+        _LOGGER.debug("Non-string content provided to ensure_source_url")
         return ""
-    clean_url = source_url.strip() if isinstance(source_url, str) and source_url.strip() else None
-    try:
-        parsed = yaml_util.parse_yaml(content)
-    except HomeAssistantError:
+
+    if not isinstance(source_url, str) or not source_url.strip():
+        _LOGGER.debug("Non-string source_url provided to ensure_source_url")
         return normalize_content(content)
 
+    clean_url = source_url.strip()
+
+    try:
+        parsed = yaml_util.parse_yaml(content)
+    except HomeAssistantError as err:
+        _LOGGER.warning("Invalid blueprint structure or YAML parse error: %s", err)
+        raise HomeAssistantError(f"Failed to parse blueprint YAML: {err}") from err
+
     if not isinstance(parsed, dict) or CONF_BLUEPRINT not in parsed:
-        return normalize_content(content)
+        _LOGGER.warning("Invalid blueprint structure: missing '%s' mapping", CONF_BLUEPRINT)
+        raise InvalidBlueprint(
+            str(expected_domain) if expected_domain else None,
+            None,
+            parsed if isinstance(parsed, dict) else {},
+            f"Missing '{CONF_BLUEPRINT}' key",
+        )
 
     bp_meta = parsed.get(CONF_BLUEPRINT)
     if not isinstance(bp_meta, dict):
-        return normalize_content(content)
+        _LOGGER.warning(
+            "Invalid blueprint structure: '%s' must be a dictionary",
+            CONF_BLUEPRINT,
+        )
+        raise InvalidBlueprint(
+            str(expected_domain) if expected_domain else None,
+            None,
+            parsed,
+            f"'{CONF_BLUEPRINT}' must be a dictionary",
+        )
 
-    target_data = dict(parsed)
-    target_bp = dict(target_data.get(CONF_BLUEPRINT, {}))
-    if clean_url:
-        target_bp[CONF_SOURCE_URL] = clean_url
-    target_data[CONF_BLUEPRINT] = target_bp
-
+    domain_was_absent = CONF_DOMAIN not in bp_meta
+    domain = bp_meta.get(CONF_DOMAIN) or (
+        str(expected_domain) if expected_domain is not None else FunctionalDomain.AUTOMATION
+    )
+    if domain_was_absent:
+        bp_meta[CONF_DOMAIN] = str(domain)
+    _normalize_none_selectors(parsed)
     try:
-        return yaml_util.dump(target_data)
+        bp = models.Blueprint(
+            parsed,
+            expected_domain=str(domain) if domain else None,
+            schema=BLUEPRINT_SCHEMA,
+        )
+        bp.update_metadata(source_url=clean_url)
+        if sort_selectors:
+            _sort_selector_keys(bp.data)
+        if domain_was_absent:
+            bp.data[CONF_BLUEPRINT].pop(CONF_DOMAIN, None)
+        return bp.yaml()
+    except (InvalidBlueprint, vol.Invalid) as err:
+        _LOGGER.warning("Invalid blueprint structure or schema validation: %s", err)
+        if isinstance(err, InvalidBlueprint):
+            raise
+        raise InvalidBlueprint(
+            str(domain) if domain else None,
+            None,
+            parsed,
+            str(err),
+        ) from err
     except Exception as err:
         _LOGGER.error("Failed to serialize blueprint YAML via Home Assistant Core: %s", err)
         raise HomeAssistantError(f"Failed to serialize blueprint YAML: {err}") from err
@@ -4432,7 +3646,7 @@ def hash_content(
     source_url: object = None,
     already_normalized: bool = False,
     *,
-    filter_paths: frozenset[tuple[str, ...]] | None = None,
+    expected_domain: object = None,
 ) -> str:
     """Calculate a deterministic SHA-256 hash of normalized content.
 
@@ -4440,10 +3654,7 @@ def hash_content(
         content: The raw YAML string to hash.
         source_url: Optional source URL to trigger identity-aware hashing.
         already_normalized: If True, bypass normalization steps and hash raw content.
-        filter_paths: Optional pre-resolved selector filter paths.  When supplied
-            the value is forwarded to ``ensure_source_url_cached`` so the deep
-            registry walk inside ``get_selector_filter_paths`` is skipped for
-            this call.
+        expected_domain: Optional functional domain string.
 
     Returns:
         The SHA-256 hex digest of the normalized content.
@@ -4456,248 +3667,21 @@ def hash_content(
         return hashlib.sha256(normalize_content(content).encode(_UTF8_ENCODING)).hexdigest()
 
     canonical_source_url = canonicalize_source_url(source_url)
-    normalized = ensure_source_url_cached(content, canonical_source_url, filter_paths=filter_paths)
+    try:
+        normalized = ensure_source_url(
+            content,
+            canonical_source_url,
+            expected_domain=expected_domain,
+            sort_selectors=True,
+        )
+    except (HomeAssistantError, InvalidBlueprint) as err:
+        _LOGGER.debug(
+            "Invalid blueprint structure or schema validation for %s: %s",
+            redact_url(canonical_source_url),
+            err,
+        )
+        normalized = normalize_content(content)
     return hashlib.sha256(normalized.encode(_UTF8_ENCODING)).hexdigest()
-
-
-def _stabilize_dict_structure(
-    orig_dict: dict[object, object] | None,
-    norm_dict: dict[object, object],
-    selector_path: tuple[str, ...] | None,
-    filter_paths: frozenset[tuple[str, ...]],
-    in_non_input: bool = False,
-) -> dict[object, object]:
-    """Recursively stabilize dictionary structures preserving author keys and ordering.
-
-    Args:
-        orig_dict: Original dictionary mapping, or None if no original mapping exists.
-        norm_dict: Normalized dictionary mapping.
-        selector_path: Accumulated path within a selector block, or None.
-        filter_paths: Set of selector filter paths.
-        in_non_input: Whether the current traversal is inside a non-input blueprint payload block.
-
-    Returns:
-        Stabilized dictionary with preserved or sorted key ordering.
-
-    """
-    if selector_path is not None:
-        if orig_dict is None:
-            sorted_keys = sorted(norm_dict.keys(), key=_deterministic_key_sort)
-            return {
-                k: stabilize_yaml_structure(
-                    None,
-                    norm_dict[k],
-                    selector_path=(*selector_path, str(k)),
-                    allow_singleton_list_coercion=(*selector_path, str(k)) in filter_paths,
-                    filter_paths=filter_paths,
-                )
-                for k in sorted_keys
-            }
-        if selector_path == ():
-            # Level 1: Directly inside selector: { ... } (mapping selector types)
-            sorted_types = sorted(
-                [k for k in orig_dict if k in norm_dict],
-                key=_deterministic_key_sort,
-            )
-            res_sel: dict[object, object] = {}
-            for k in sorted_types:
-                val = orig_dict.get(k)
-                if val is None or val == {}:
-                    res_sel[k] = None
-                else:
-                    child_path = (str(k),)
-                    res_sel[k] = stabilize_yaml_structure(
-                        val,
-                        norm_dict[k],
-                        selector_path=child_path,
-                        allow_singleton_list_coercion=child_path in filter_paths,
-                        filter_paths=filter_paths,
-                    )
-            return res_sel
-
-        if len(selector_path) == 1:
-            # Level 2: Inside direct selector config (e.g. number: { min: 1, max: 100 })
-            # Retain ONLY author-defined keys (prunes voluptuous synthetic schema defaults)
-            if not orig_dict:
-                return {}
-            author_keys = sorted(
-                [k for k in orig_dict if k in norm_dict],
-                key=_deterministic_key_sort,
-            )
-            res_props: dict[object, object] = {}
-            for k in author_keys:
-                child_path = (*selector_path, str(k))
-                res_props[k] = stabilize_yaml_structure(
-                    orig_dict.get(k),
-                    norm_dict[k],
-                    selector_path=child_path,
-                    allow_singleton_list_coercion=child_path in filter_paths,
-                    filter_paths=filter_paths,
-                )
-            return res_props
-
-        # Level 3+: Deeply nested within selector properties (e.g. filter mappings)
-        sorted_keys = sorted(norm_dict.keys(), key=_deterministic_key_sort)
-        return {
-            k: stabilize_yaml_structure(
-                orig_dict.get(k),
-                norm_dict[k],
-                selector_path=(*selector_path, str(k)),
-                allow_singleton_list_coercion=(*selector_path, str(k)) in filter_paths,
-                filter_paths=filter_paths,
-            )
-            for k in sorted_keys
-        }
-
-    res: dict[object, object] = {}
-    matched_norm_keys: set[object] = set()
-
-    if orig_dict is not None:
-        for k, orig_val in orig_dict.items():
-            target_k: object = None
-            if k in norm_dict:
-                target_k = k
-            elif isinstance(k, str):
-                alias_k = PLURAL_CONFIG_KEYS.get(k) or _SINGULAR_CONFIG_KEYS.get(k)
-                if alias_k is not None and alias_k in norm_dict:
-                    target_k = alias_k
-
-            if target_k is not None and target_k not in res:
-                child_in_non_input = in_non_input or (
-                    isinstance(target_k, str) and target_k in _NON_INPUT_ROOT_KEYS
-                )
-                is_sel = target_k == _CONF_SELECTOR and not child_in_non_input
-                res[target_k] = stabilize_yaml_structure(
-                    orig_val,
-                    norm_dict[target_k],
-                    selector_path=() if is_sel else None,
-                    allow_singleton_list_coercion=False,
-                    filter_paths=filter_paths,
-                    in_non_input=child_in_non_input,
-                )
-                matched_norm_keys.add(target_k)
-
-    for key in sorted(
-        [k for k in norm_dict if k not in matched_norm_keys],
-        key=_deterministic_key_sort,
-    ):
-        child_in_non_input = in_non_input or (isinstance(key, str) and key in _NON_INPUT_ROOT_KEYS)
-        is_sel = key == _CONF_SELECTOR and not child_in_non_input
-        res[key] = stabilize_yaml_structure(
-            None,
-            norm_dict[key],
-            selector_path=() if is_sel else None,
-            allow_singleton_list_coercion=False,
-            filter_paths=filter_paths,
-            in_non_input=child_in_non_input,
-        )
-    return res
-
-
-def _stabilize_list_structure(
-    orig_data: object,
-    normalized_data: list[object],
-    selector_path: tuple[str, ...] | None,
-    allow_singleton_list_coercion: bool,
-    filter_paths: frozenset[tuple[str, ...]],
-    in_non_input: bool = False,
-) -> list[object]:
-    """Recursively stabilize list structures handling singleton list coercion.
-
-    Args:
-        orig_data: Original unnormalized object.
-        normalized_data: List processed by schema.
-        selector_path: Accumulated path within a selector block, or None.
-        allow_singleton_list_coercion: Whether singleton list coercion applies.
-        filter_paths: Set of selector filter paths.
-        in_non_input: Whether the current traversal is inside a non-input blueprint payload block.
-
-    Returns:
-        Stabilized list of items.
-
-    """
-    if isinstance(orig_data, list):
-        orig_list = orig_data
-    elif (
-        allow_singleton_list_coercion
-        and isinstance(orig_data, dict)
-        and len(normalized_data) == 1
-        and isinstance(normalized_data[0], dict)
-    ):
-        orig_list = [orig_data]
-    else:
-        orig_list = []
-
-    return [
-        stabilize_yaml_structure(
-            orig_list[i] if i < len(orig_list) else None,
-            item,
-            selector_path=selector_path,
-            allow_singleton_list_coercion=False,
-            filter_paths=filter_paths,
-            in_non_input=in_non_input,
-        )
-        for i, item in enumerate(normalized_data)
-    ]
-
-
-def stabilize_yaml_structure(
-    orig_data: object,
-    normalized_data: object,
-    selector_path: tuple[str, ...] | None = None,
-    allow_singleton_list_coercion: bool = False,
-    filter_paths: frozenset[tuple[str, ...]] | None = None,
-    in_non_input: bool = False,
-) -> object:
-    """Recursively update normalized structures using original key ordering.
-
-    Args:
-        orig_data: Original unnormalized object.
-        normalized_data: Object processed by voluptuous schema.
-        selector_path: Accumulated path within a selector block.
-        allow_singleton_list_coercion: Whether singleton list coercion applies.
-        filter_paths: Set of selector filter paths.
-        in_non_input: Whether the current traversal is inside a non-input blueprint payload block.
-
-    Returns:
-        Stabilized Python object ready for yaml dumping.
-
-    """
-    effective_filter_paths = (
-        filter_paths if filter_paths is not None else get_selector_filter_paths()
-    )
-
-    if isinstance(normalized_data, dict):
-        norm_dict = dict(normalized_data.items())
-        orig_dict = dict(orig_data.items()) if isinstance(orig_data, dict) else None
-        return _stabilize_dict_structure(
-            orig_dict,
-            norm_dict,
-            selector_path,
-            effective_filter_paths,
-            in_non_input=in_non_input,
-        )
-
-    if isinstance(normalized_data, list):
-        return _stabilize_list_structure(
-            orig_data,
-            normalized_data,
-            selector_path,
-            allow_singleton_list_coercion,
-            effective_filter_paths,
-            in_non_input=in_non_input,
-        )
-
-    # Preserve author's original integer representation when schema coerced int to float
-    if (
-        isinstance(orig_data, int)
-        and not isinstance(orig_data, bool)
-        and isinstance(normalized_data, float)
-        and orig_data == normalized_data
-    ):
-        return orig_data
-
-    return normalized_data
 
 
 def extract_blueprint_text(content: str) -> str:
@@ -4780,23 +3764,37 @@ def get_blueprint_block(
     return {str(k): v for k, v in bp_info.items()} if isinstance(bp_info, dict) else None
 
 
-def read_and_diff(local_path: str, remote_text: str, source_url: str) -> str:
+def read_and_diff(
+    local_path: str,
+    remote_text: str,
+    source_url: str,
+    expected_domain: object = None,
+) -> str:
     """Read and diff local vs remote content with normalization.
 
     Args:
         local_path: Path to the local blueprint file.
         remote_text: Raw remote content fetched from Git.
         source_url: The source URL to ensure is present in the remote.
+        expected_domain: Optional functional domain string.
 
     Returns:
         A unified diff string.
 
     """
+    domain = expected_domain
+    if domain is None:
+        normalized_path = local_path.replace("\\", "/")
+        for d in ("automation", "script", "template"):
+            if f"/blueprints/{d}/" in normalized_path or normalized_path.startswith(f"{d}/"):
+                domain = d
+                break
+
     with open(local_path, encoding=_UTF8_ENCODING) as f:
         local_text = f.read()
 
-    local_text = ensure_source_url(local_text, source_url)
-    remote_text = ensure_source_url(remote_text, source_url)
+    local_text = ensure_source_url(local_text, source_url, expected_domain=domain)
+    remote_text = ensure_source_url(remote_text, source_url, expected_domain=domain)
 
     local_lines = local_text.splitlines(keepends=True)
     remote_lines = remote_text.splitlines(keepends=True)

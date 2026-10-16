@@ -42,7 +42,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .blueprint_validation import (
-    ensure_source_url_ha_core,
+    ensure_source_url,
     read_and_diff,
 )
 from .const import (
@@ -198,7 +198,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
                             content,
                             new_url,
                         )
-                    except (OSError, ValueError) as err:
+                    except (OSError, ValueError, HomeAssistantError) as err:
                         _LOGGER.warning(
                             "Failed to generate diff for blueprint %s during URL change: %s",
                             self.path,
@@ -209,7 +209,10 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
                     local_hash = self.coordinator.data.get(self.path, {}).get("local_hash")
                     self._is_semantic_sync = (
                         self.coordinator._is_semantically_equal(
-                            content, str(local_hash or ""), new_url
+                            content,
+                            str(local_hash or ""),
+                            new_url,
+                            expected_domain=self.domain,
                         )
                         if local_hash
                         else False
@@ -972,7 +975,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
             persisted["source_url"] = url
 
         try:
-            fork_content_with_url = ensure_source_url_ha_core(raw_content, url)
+            fork_content_with_url = ensure_source_url(raw_content, url, expected_domain=self.domain)
             await self.coordinator.async_install_blueprint(
                 self.path,
                 fork_content_with_url,

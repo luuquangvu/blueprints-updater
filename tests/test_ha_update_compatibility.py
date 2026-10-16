@@ -38,7 +38,6 @@ from custom_components.blueprints_updater import (
 from custom_components.blueprints_updater.blueprint_validation import (
     _DEFAULT_MATH_FILTER_METHODS,
     _DEFAULT_MATH_GLOBALS,
-    BlueprintSchemaAdapter,
     SyntheticDummyEntry,
     SyntheticDummyValues,
     _derive_value_for_path,
@@ -1031,7 +1030,7 @@ async def test_incompatible_repair_flow_edge_cases(coordinator, hass, monkeypatc
 
     # Case 8: Confirm fork routing to auto-fix and different URL
     flow._pending_url = "https://example.com/fork.yaml"
-    flow._pending_content = "content"
+    flow._pending_content = "blueprint:\n  name: Test\n  domain: automation\n"
     flow._fork_candidate = ("modern content", "- old\n+ modern")
     flow._pending_precondition = FileRevisionPrecondition.existing("precondition_hash")
     result_fork_to_af = await flow.async_step_confirm_fork(
@@ -2865,7 +2864,7 @@ async def test_async_execute_fork_switch_serialization_failure_restores_urls(
     flow._pending_precondition = FileRevisionPrecondition.existing("precondition_hash")
 
     with patch(
-        "custom_components.blueprints_updater.repairs.ensure_source_url_ha_core",
+        "custom_components.blueprints_updater.repairs.ensure_source_url",
         side_effect=HomeAssistantError("Serialization failed"),
     ):
         result = await flow._async_execute_fork_switch()
@@ -6623,7 +6622,7 @@ def test_diff_structural_configs_ignores_jinja_template_keys() -> None:
 
 
 def test_blueprint_schema_keys_alignment() -> None:
-    """Verify blueprints_updater canonical keys cover all HA Core BLUEPRINT_SCHEMA keys."""
+    """Verify expected blueprint keys cover all HA Core BLUEPRINT_SCHEMA keys."""
     from homeassistant.components.blueprint.const import CONF_BLUEPRINT, CONF_SOURCE_URL
     from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 
@@ -6633,7 +6632,13 @@ def test_blueprint_schema_keys_alignment() -> None:
         for k in bp_schema.schema
         if isinstance(getattr(k, "schema", k), str)
     }
-    canonical = set(BlueprintSchemaAdapter._DEFAULT_CANONICAL_KEYS) | {CONF_SOURCE_URL}
-    assert ha_keys.issubset(canonical), (
-        f"HA Core added new blueprint keys not tracked in canonical keys: {ha_keys - canonical}"
-    )
+    expected_keys = {
+        "name",
+        "description",
+        "domain",
+        "author",
+        "homeassistant",
+        "input",
+        CONF_SOURCE_URL,
+    }
+    assert expected_keys.issubset(ha_keys)

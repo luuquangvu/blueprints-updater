@@ -6,6 +6,9 @@ from unittest.mock import AsyncMock, mock_open, patch
 import pytest
 import yaml
 from homeassistant.components.blueprint import models
+from homeassistant.components.blueprint.errors import InvalidBlueprint
+from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import yaml as yaml_util
 from homeassistant.util.yaml.objects import Input
 
@@ -95,7 +98,8 @@ def test_ensure_source_url():
     )
     parsed_outside = yaml.safe_load(result_outside)
     assert parsed_outside["blueprint"]["source_url"] == source_url
-    assert parsed_outside["actions"][0]["data"]["source_url"] == "https://api.example.com"
+    action_item = parsed_outside.get("action") or parsed_outside.get("actions")
+    assert action_item[0]["data"]["source_url"] == "https://api.example.com"
 
     result_nested = _assert_embedded_source_url(
         "blueprint:\n  name: Test\n  domain: automation\n"
@@ -114,9 +118,8 @@ def test_ensure_source_url():
         source_url,
     )
     content_invalid = "\ufeffblueprint: [unclosed\r\n"
-    result_invalid = ensure_source_url(content_invalid, source_url)
-    assert "\ufeff" not in result_invalid
-    assert "\r" not in result_invalid
+    with pytest.raises(HomeAssistantError):
+        ensure_source_url(content_invalid, source_url)
 
     result_multi = _assert_embedded_source_url(
         "# Some info: blueprint:\n"
@@ -133,8 +136,8 @@ def test_ensure_source_url():
     assert parsed_multi["blueprint"]["input"] == {}
 
     content_none = "not_a_blueprint: true"
-    expected_none = normalize_content(content_none)
-    assert ensure_source_url(content_none, source_url) == expected_none
+    with pytest.raises(InvalidBlueprint):
+        ensure_source_url(content_none, source_url)
 
 
 def _assert_embedded_source_url(
@@ -158,14 +161,13 @@ def _assert_embedded_source_url(
     ],
 )
 def test_ensure_source_url_malformed_blueprint_key(malformed_content):
-    """Test ensuring source_url returns normalized original if blueprint key is malformed.
+    """Test ensuring source_url raises InvalidBlueprint if blueprint key is malformed.
 
     (Case where blueprint key is not a dict).
     """
     source_url = "https://example.com/test.yaml"
-    result = ensure_source_url(malformed_content, source_url)
-    assert "source_url" not in result
-    assert result == normalize_content(malformed_content)
+    with pytest.raises(InvalidBlueprint):
+        ensure_source_url(malformed_content, source_url)
 
 
 def test_ensure_source_url_non_string_content_logs_and_returns_empty(caplog):
@@ -203,28 +205,21 @@ def test_ensure_source_url_non_string_source_url_falls_back_to_normalize_content
 
 
 def test_ensure_source_url_yaml_dump_failure_falls_back_to_normalize_content(monkeypatch, caplog):
-    """If yaml_util.dump raises, we should log and fall back to normalize_content(content)."""
-    original_content = "blueprint:\n  name: Test"
-    sentinel_result = "normalized-after-dump-failure"
-
-    normalize_calls = {}
-
-    def _fake_normalize_content(content: str) -> str:
-        normalize_calls["called_with"] = content
-        return sentinel_result
+    """If yaml_util.dump raises, we log error and raise HomeAssistantError without fallback."""
+    original_content = "blueprint:\n  name: Test\n  domain: automation"
 
     def _failing_dump(*args, **kwargs):
         raise yaml.YAMLError("simulated dump failure")
 
     monkeypatch.setattr(bp_val.yaml_util, "dump", _failing_dump)
-    monkeypatch.setattr(bp_val, "normalize_content", _fake_normalize_content)
 
-    with caplog.at_level("WARNING"):
-        result = ensure_source_url(original_content, "https://example.com/blueprint.yaml")
+    with (
+        caplog.at_level("ERROR"),
+        pytest.raises(HomeAssistantError, match="Failed to serialize blueprint YAML"),
+    ):
+        ensure_source_url(original_content, "https://example.com/blueprint.yaml")
 
-    assert result == sentinel_result
-    assert normalize_calls["called_with"] == original_content
-    assert any(record.levelname == "WARNING" for record in caplog.records)
+    assert any(record.levelname == "ERROR" for record in caplog.records)
 
 
 def test_ensure_source_url_prioritizes_local():
@@ -319,7 +314,7 @@ action:
     # Simulate Home Assistant Core import workflow for this forum blueprint
     ha_data = yaml_util.parse_yaml(forum_content)
     assert isinstance(ha_data, dict)
-    schema = get_blueprint_schema("automation")
+    schema = BLUEPRINT_SCHEMA
     bp = models.Blueprint(ha_data, schema=schema)
     bp.update_metadata(source_url=source_url)
     local_imported = bp.yaml()
@@ -329,6 +324,40 @@ action:
 
     remote_hash = hash_content(forum_content, source_url)
     local_hash = hash_content(local_imported, source_url)
+    assert remote_hash == local_hash
+
+
+def test_ensure_source_url_script_domain_parity():
+    """Test non-automation blueprint normalization parity with Home Assistant Core import."""
+    script_content = """blueprint:
+  name: Script Blueprint Test
+  domain: script
+  input:
+    message:
+      name: Message
+      selector:
+        text:
+sequence:
+  - action: notify.notify
+    data:
+      message: !input message
+"""
+    source_url = "https://community.home-assistant.io/t/test-script/12345"
+
+    remote_normalized = ensure_source_url(script_content, source_url, expected_domain="script")
+
+    ha_data = yaml_util.parse_yaml(script_content)
+    assert isinstance(ha_data, dict)
+    schema = BLUEPRINT_SCHEMA
+    bp = models.Blueprint(ha_data, expected_domain="script", schema=schema)
+    bp.update_metadata(source_url=source_url)
+    local_imported = bp.yaml()
+
+    local_normalized = ensure_source_url(local_imported, source_url, expected_domain="script")
+    assert remote_normalized == local_normalized
+
+    remote_hash = hash_content(script_content, source_url, expected_domain="script")
+    local_hash = hash_content(local_imported, source_url, expected_domain="script")
     assert remote_hash == local_hash
 
 
@@ -448,7 +477,7 @@ def test_ensure_source_url_all_domains_schema_parity(
     # Simulate HA Core domain-specific import
     data = yaml_util.parse_yaml(payload)
     assert isinstance(data, dict)
-    schema = get_blueprint_schema(domain)
+    schema = BLUEPRINT_SCHEMA
     bp = models.Blueprint(data, schema=schema)
     bp.update_metadata(source_url=url)
     local_imported = bp.yaml()
@@ -1002,33 +1031,51 @@ def test_deterministic_yaml_hashing():
         "blueprint:\n  name: T\n  domain: automation\n  input:\n    t:\n"
         "      name: T\n      selector:\n        text: {}"
     )
-    content_v3 = (
-        "blueprint:\n  name: T\n  domain: automation\n  input:\n    t:\n"
-        "      name: T\n      selector:\n        text:\n"
-        "          multiple: false\n          multiline: false"
-    )
     content_v4 = (
         "blueprint:\n  name: T\n  domain: automation\n  input:\n    t:\n"
         "      name: T\n      selector:\n        text:"
     )
 
     hash1 = hash_content(content_v1, source_url)
-    hash3 = hash_content(content_v3, source_url)
-    assert hash1 == hash3
-
-    norm1 = ensure_source_url(content_v1, source_url)
-    norm3 = ensure_source_url(content_v3, source_url)
-    assert norm1 == norm3
-
+    content_v3 = (
+        "blueprint:\n  name: T\n  domain: automation\n  input:\n    t:\n"
+        "      name: T\n      selector:\n        text:\n"
+        "          multiple: false\n          multiline: false"
+    )
+    norm1 = _assert_deterministic_variant_equivalence(content_v1, content_v3, source_url, hash1)
     hash2 = hash_content(content_v2, source_url)
-    hash4 = hash_content(content_v4, source_url)
-    assert hash2 == hash4
-
-    norm2 = ensure_source_url(content_v2, source_url)
-    norm4 = ensure_source_url(content_v4, source_url)
-    assert norm2 == norm4
+    norm2 = _assert_deterministic_variant_equivalence(content_v2, content_v4, source_url, hash2)
     assert "{}" not in norm2
-    assert "multiline" not in norm2
+    assert norm1 == norm2
+    assert hash1 == hash2
+
+
+def _assert_deterministic_variant_equivalence(
+    baseline_yaml: str,
+    variant_yaml: str,
+    source_url: str,
+    expected_hash: str,
+) -> str:
+    """Verify that a variant YAML matches baseline hash and normalized representation.
+
+    Args:
+        baseline_yaml: Baseline blueprint YAML string.
+        variant_yaml: Variant blueprint YAML string with permuted or omitted options.
+        source_url: Canonical source URL string.
+        expected_hash: Expected SHA-256 hash digest from baseline YAML.
+
+    Returns:
+        Normalized YAML string from baseline content with sorted selectors.
+
+    """
+    variant_hash = hash_content(variant_yaml, source_url)
+    assert expected_hash == variant_hash
+
+    baseline_norm = ensure_source_url(baseline_yaml, source_url, sort_selectors=True)
+    variant_norm = ensure_source_url(variant_yaml, source_url, sort_selectors=True)
+    assert baseline_norm == variant_norm
+
+    return baseline_norm
 
 
 def test_yaml_order_preservation():
