@@ -3,20 +3,25 @@
 import asyncio
 import hashlib
 import io
+import logging
 import os
 import tempfile
+import uuid
 from collections.abc import AsyncGenerator
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from datetime import timedelta
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import orjson
 import pytest
 import voluptuous as vol
 from homeassistant import data_entry_flow
+from homeassistant.components.blueprint import importer, models
+from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
 from homeassistant.components.device_automation.exceptions import (
     EntityNotFound,
     InvalidDeviceAutomationConfig,
@@ -46,13 +51,16 @@ from custom_components.blueprints_updater.blueprint_validation import (
     _wrap_action_target_blocks,
     detect_unsupported_yaml_constructs,
     extract_synthetic_dummy_values,
+    hash_content,
     is_dummy_validation_error,
     is_invalid_for_input_default,
     is_synthetic_identifier,
     modernize_legacy_blueprint_yaml,
     normalize_config_path,
+    read_and_diff,
 )
 from custom_components.blueprints_updater.const import (
+    BLUEPRINTS_DATA_DIR,
     CONF_CHECK_COMPATIBILITY,
     DOMAIN,
     STORAGE_KEY_LAST_HA_VERSION,
@@ -81,6 +89,7 @@ from custom_components.blueprints_updater.file_store import (
     FileRevisionMismatchError,
     FileRevisionPrecondition,
 )
+from custom_components.blueprints_updater.providers import _strip_yaml_extension
 from custom_components.blueprints_updater.repairs import (
     IncompatibleBlueprintRepairFlow,
     async_create_fix_flow,
@@ -6351,6 +6360,12 @@ def test_diff_structural_configs_options_relocation_nested_removal_detected() ->
 
 
 @pytest.fixture
+def expected_lingering_timers(request: pytest.FixtureRequest) -> bool:
+    """Allow lingering timers only for real network tests."""
+    return "real_network" in request.keywords
+
+
+@pytest.fixture
 async def real_world_coordinator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncGenerator[BlueprintUpdateCoordinator]:
@@ -6548,6 +6563,291 @@ async def test_real_world_blueprint_compatibility_validation(
     assert isinstance(report, CompatibilityReport)
     assert report.errors == []
     assert report.warnings == []
+
+
+REAL_WORLD_PARITY_BLUEPRINT_URLS = [
+    (
+        "https://github.com/luuquangvu/demo-blueprints/blob/main/blueprints/"
+        "motion_light_blueprint.yaml"
+    ),
+]
+
+
+@pytest.mark.real_network
+@pytest.mark.parametrize("url", REAL_WORLD_PARITY_BLUEPRINT_URLS)
+async def test_real_world_blueprint_install_parity_with_ha_core(
+    real_world_coordinator: BlueprintUpdateCoordinator,
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+) -> None:
+    """Test full real-world blueprint installation flow parity with HA Core across providers.
+
+    1. Install a real-world blueprint using the HA core importer flow to a temporary file.
+    2. Install the same blueprint using this integration's full production entry point
+       (async_import_blueprint).
+    3. Compare the two files to ensure path, schema, serialization, and hashes match.
+    4. Verify that the file with a remote URL does not trigger a ghost update.
+    """
+    hass = real_world_coordinator.hass
+    suffix = uuid.uuid4().hex[:8]
+
+    # Ensure aiohttp uses ThreadedResolver in tests to avoid loop conflicts
+    # and pycares background threads across all HA versions.
+    import aiohttp
+    from homeassistant.helpers import aiohttp_client
+
+    if hasattr(aiohttp_client, "AsyncResolver"):
+        monkeypatch.setattr(aiohttp_client, "AsyncResolver", aiohttp.ThreadedResolver)
+    if hasattr(aiohttp_client, "_async_make_resolver"):
+        monkeypatch.setattr(
+            aiohttp_client,
+            "_async_make_resolver",
+            lambda _hass: aiohttp.ThreadedResolver(),
+        )
+    if hasattr(aiohttp_client, "_async_get_or_create_resolver"):
+        monkeypatch.setattr(
+            aiohttp_client,
+            "_async_get_or_create_resolver",
+            lambda _hass: aiohttp.ThreadedResolver(),
+        )
+
+    # 1. Flow 1: Home Assistant Core importer flow
+    imported_bp = await importer.fetch_blueprint_from_url(hass, url)
+    assert imported_bp is not None
+    ha_raw_yaml = imported_bp.raw_data
+    ha_blueprint = imported_bp.blueprint
+
+    # Check minimum HA version requirement dynamically
+    min_version = extract_blueprint_min_version(ha_blueprint.data)
+    if min_version is not None:
+        current_ha = get_ha_version(hass)
+        is_supported, version_err = check_min_ha_version(current_ha, min_version)
+        if not is_supported and version_err and version_err.startswith("Requires at least"):
+            pytest.skip(
+                f"Blueprint requires Home Assistant >= {min_version}, "
+                f"currently running {current_ha}"
+            )
+
+    domain = ha_blueprint.metadata.get("domain", "automation")
+    meta_name = ha_blueprint.metadata.get("name")
+
+    clean_suggested_filename = _strip_yaml_extension(imported_bp.suggested_filename)
+    suggested_path = Path(clean_suggested_filename)
+    author = suggested_path.parts[0] if len(suggested_path.parts) > 1 else "blueprint"
+    bp_base_name = _strip_yaml_extension(suggested_path.name) or "blueprint"
+
+    assert imported_bp.blueprint.metadata.get("domain") == domain
+    assert imported_bp.blueprint.metadata.get("source_url") == url
+
+    # Exercise Core's normal suggested-path selection and verify installation paths match
+    core_suggested_path = f"{clean_suggested_filename}.yaml"
+    ha_core_install_file = Path(hass.config.path("blueprints", domain, core_suggested_path))
+    integration_install_file = Path(
+        hass.config.path(BLUEPRINTS_DATA_DIR, domain, author, f"{bp_base_name}.yaml")
+    )
+    assert ha_core_install_file == integration_install_file
+
+    ha_core_rel_path = f"{clean_suggested_filename}_{suffix}.yaml"
+    ha_temp_file = Path(hass.config.path("blueprints", domain, ha_core_rel_path))
+
+    integration_filename = f"{bp_base_name}_{suffix}.yaml"
+    integration_file = Path(
+        hass.config.path(BLUEPRINTS_DATA_DIR, domain, author, integration_filename)
+    )
+    assert ha_temp_file == integration_file
+
+    try:
+        domain_blueprints = models.DomainBlueprints(
+            hass,
+            domain,
+            logging.getLogger(__name__),
+            lambda _hass, _path: False,
+            AsyncMock(),
+            blueprint_schema=BLUEPRINT_SCHEMA,
+        )
+        await domain_blueprints.async_add_blueprint(
+            imported_bp.blueprint,
+            ha_core_rel_path,
+            allow_override=True,
+        )
+        assert ha_temp_file.is_file()
+        assert ha_temp_file.stat().st_size > 0
+        ha_core_content = ha_temp_file.read_text(encoding="utf-8")
+        ha_file_hash = hashlib.sha256(ha_temp_file.read_bytes()).hexdigest()
+        ha_temp_file.unlink()
+
+        # 2. Flow 2: blueprints-updater full production entry point (async_import_blueprint)
+        # Ensure integration flow writes to a uniquely suffixed filename to avoid
+        # conflicts or reusing old files.
+        orig_fetch = real_world_coordinator._async_fetch_import_data
+
+        async def _suffixed_fetch(
+            fetch_url: str,
+        ) -> tuple[str, str, str, str, httpx.Response]:
+            """Fetch import data with uniquely suffixed filename."""
+            c, canonical, a, name, resp = await orig_fetch(fetch_url)
+            return c, canonical, a, f"{name}_{suffix}", resp
+
+        monkeypatch.setattr(real_world_coordinator, "_async_fetch_import_data", _suffixed_fetch)
+
+        await real_world_coordinator.async_import_blueprint(url, confirm=True)
+        assert integration_file.is_file()
+        assert integration_file.stat().st_size == len(ha_core_content.encode("utf-8"))
+
+        # 3. Compare the two files to ensure their hashes and structures match exactly
+        integration_content = integration_file.read_text(encoding="utf-8")
+
+        # Verify physical file contents and raw SHA-256 hashes match exactly
+        assert ha_core_content == integration_content
+        integration_file_hash = hashlib.sha256(integration_file.read_bytes()).hexdigest()
+        assert ha_file_hash == integration_file_hash
+
+        # Verify structural parsed YAML matches exactly
+        parsed_ha = yaml_util.parse_yaml(ha_core_content)
+        parsed_integration = yaml_util.parse_yaml(integration_content)
+        assert parsed_ha == parsed_integration
+        assert isinstance(parsed_ha, dict)
+        assert isinstance(parsed_integration, dict)
+        ha_meta = parsed_ha.get("blueprint")
+        integration_meta = parsed_integration.get("blueprint")
+        assert isinstance(ha_meta, dict)
+        assert isinstance(integration_meta, dict)
+        assert ha_meta.get("source_url") == url
+        assert integration_meta.get("source_url") == url
+
+        # Verify semantic content hashes match each other and match upstream remote hash
+        ha_semantic_hash = hash_content(ha_core_content, url, expected_domain=domain)
+        integration_semantic_hash = hash_content(integration_content, url, expected_domain=domain)
+        remote_hash = hash_content(ha_raw_yaml, url, expected_domain=domain)
+        assert ha_semantic_hash == integration_semantic_hash
+        assert ha_semantic_hash == remote_hash
+
+        # 4. Verify that the file with a remote URL does not trigger a ghost update
+        # Verify local parsing derives identical semantic hash to remote content
+        local_data = real_world_coordinator._parse_blueprint_data(
+            str(integration_file), integration_content
+        )
+        assert local_data is not None
+        assert local_data["local_hash"] == remote_hash
+        assert local_data["domain"] == domain
+        assert local_data["source_url"] == url
+
+        # Verify coordinator state after async_import_blueprint has updatable=False
+        assert real_world_coordinator.data[str(integration_file)]["updatable"] is False
+
+        # Verify coordinator processing of remote content results in updatable=False
+        results_to_notify: list[str] = []
+        updated_domains: set[str] = set()
+
+        await real_world_coordinator._process_blueprint_content(
+            str(integration_file),
+            real_world_coordinator.data[str(integration_file)],
+            ha_raw_yaml,
+            url,
+            results_to_notify,
+            updated_domains,
+        )
+
+        assert real_world_coordinator.data[str(integration_file)]["updatable"] is False
+        assert not results_to_notify
+        assert not updated_domains
+
+        # Verify ghost update detection explicitly rejects any false-positive update
+        is_updatable, _, _, _ = real_world_coordinator._apply_ghost_update_detection(
+            str(integration_file),
+            real_world_coordinator.data[str(integration_file)],
+            real_world_coordinator.data[str(integration_file)],
+        )
+        assert is_updatable is False
+
+        # Verify ghost update detection explicitly neutralizes a simulated hash desynchronization
+        desynced_state = {
+            **real_world_coordinator.data[str(integration_file)],
+            "remote_hash": "desynced_phantom_remote_hash_12345",
+            "remote_content": ha_raw_yaml,
+        }
+        is_ghost_updatable, _, _, synced_remote_hash = (
+            real_world_coordinator._apply_ghost_update_detection(
+                str(integration_file),
+                desynced_state,
+                desynced_state,
+            )
+        )
+        assert is_ghost_updatable is False
+        assert synced_remote_hash == local_data["local_hash"]
+
+        # Verify that genuinely changed remote content with a differing hash remains updatable
+        changed_remote_content = (
+            ha_raw_yaml + "\ndescription: An updated description for this blueprint.\n"
+        )
+        changed_remote_hash = hash_content(changed_remote_content, url, expected_domain=domain)
+        assert changed_remote_hash != local_data["local_hash"]
+        changed_state = {
+            **real_world_coordinator.data[str(integration_file)],
+            "remote_hash": changed_remote_hash,
+            "remote_content": changed_remote_content,
+        }
+        is_genuine_updatable, _, _, genuine_remote_hash = (
+            real_world_coordinator._apply_ghost_update_detection(
+                str(integration_file),
+                changed_state,
+                changed_state,
+            )
+        )
+        assert is_genuine_updatable is True
+        assert genuine_remote_hash == changed_remote_hash
+
+        # Verify git diff reports zero changes between disk and remote
+        diff_text = read_and_diff(str(integration_file), ha_raw_yaml, url, domain)
+        assert not diff_text
+        diff_result = await real_world_coordinator.async_get_git_diff(str(integration_file))
+        assert diff_result is None or not diff_result.diff_text
+
+        # Verify git diff reports genuine changes when content differs
+        genuine_diff_text = read_and_diff(
+            str(integration_file), changed_remote_content, url, domain
+        )
+        assert genuine_diff_text
+        assert "+description: An updated description for this blueprint." in genuine_diff_text
+
+        # Verify the HA Core importer created content also produces no ghost update
+        ha_local_data = real_world_coordinator._parse_blueprint_data(
+            str(integration_file), ha_core_content
+        )
+        assert ha_local_data is not None
+        assert ha_local_data["local_hash"] == remote_hash
+
+        display_name = meta_name or bp_base_name
+        real_world_coordinator.data[str(integration_file)] = {
+            "name": display_name,
+            "domain": domain,
+            "source_url": url,
+            "local_hash": ha_local_data["local_hash"],
+            "remote_content": ha_raw_yaml,
+            "relative_path": f"{domain}/{ha_core_rel_path}",
+            "updatable": False,
+        }
+        await real_world_coordinator._process_blueprint_content(
+            str(integration_file),
+            real_world_coordinator.data[str(integration_file)],
+            ha_raw_yaml,
+            url,
+            results_to_notify,
+            updated_domains,
+        )
+        assert real_world_coordinator.data[str(integration_file)]["updatable"] is False
+        assert not results_to_notify
+        assert not updated_domains
+        ha_diff_text = read_and_diff(str(integration_file), ha_raw_yaml, url, domain)
+        assert not ha_diff_text
+        ha_diff_result = await real_world_coordinator.async_get_git_diff(str(integration_file))
+        assert ha_diff_result is None or not ha_diff_result.diff_text
+    finally:
+        if integration_file.exists():
+            integration_file.unlink()
+        if integration_file.parent.exists():
+            with suppress(OSError):
+                integration_file.parent.rmdir()
 
 
 async def test_real_world_blueprint_compatibility_validation_skips_when_ha_version_below_min(

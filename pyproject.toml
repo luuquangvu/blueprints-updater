@@ -3,7 +3,7 @@ name = "blueprints-updater"
 version = "2.17.1"
 description = "Automatically update Home Assistant blueprints via native update entities."
 requires-python = ">=3.14.2"
-dependencies = ["h2", "homeassistant"]
+dependencies = ["h2", "homeassistant>=2026.10.0"]
 
 [dependency-groups]
 dev = [
@@ -70,7 +70,7 @@ addopts = [
   "--cov=custom_components",
   "--cov-fail-under=90",
   "--cov-branch",
-  "--timeout=60",
+  "--timeout=90",
   "--strict-markers",
 ]
 markers = ["real_network: tests that require real network access"]
