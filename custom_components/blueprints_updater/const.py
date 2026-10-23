@@ -287,6 +287,10 @@ ALLOWED_YAML_MIME_TYPES = [
     "text/yaml",
 ]
 
+YML_WITH_DOT: Final[str] = ".yml"
+YAML_WITH_DOT: Final[str] = ".yaml"
+YAML_EXTENSIONS: Final[tuple[str, ...]] = (YML_WITH_DOT, YAML_WITH_DOT)
+
 
 class RepairIssueType(StrEnum):
     """Types of repair issues raised by Blueprints Updater."""

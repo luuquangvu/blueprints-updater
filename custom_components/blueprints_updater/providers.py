@@ -18,6 +18,9 @@ from .const import (
     RE_FORUM_CODE_BLOCK,
     RE_FORUM_TOPIC_ID,
     RE_GIST_RAW,
+    YAML_EXTENSIONS,
+    YAML_WITH_DOT,
+    YML_WITH_DOT,
     SourceDomain,
     SourceProviderType,
     SourceUrlTemplate,
@@ -136,9 +139,9 @@ def _replace_path_segment(url: str, raw_marker: str, from_seg: str, to_seg: str)
 def _strip_yaml_extension(filename: str) -> str:
     """Strip .yaml or .yml extension from a filename, preserving original case."""
     lower = filename.lower()
-    if lower.endswith(".yaml"):
+    if lower.endswith(YAML_WITH_DOT):
         return filename[:-5]
-    return filename[:-4] if lower.endswith(".yml") else filename
+    return filename[:-4] if lower.endswith(YML_WITH_DOT) else filename
 
 
 def _default_url_metadata(url: str) -> dict[str, str]:
@@ -726,7 +729,7 @@ class GenericProvider(SourceProvider):
         path_parts = [p for p in parsed.path.strip("/").split("/") if p]
         last_part = path_parts[-1] if path_parts else ""
 
-        if last_part.lower().endswith((".yaml", ".yml")):
+        if last_part.lower().endswith(YAML_EXTENSIONS):
             name = Path(last_part).stem
         elif content:
             try:
