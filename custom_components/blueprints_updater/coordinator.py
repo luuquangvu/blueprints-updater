@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from difflib import unified_diff
 from http import HTTPStatus
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Self, TypedDict, TypeGuard, TypeVar
 from urllib.parse import urlparse
 from warnings import WarningMessage
@@ -38,7 +37,6 @@ from homeassistant.components.automation.config import (
 from homeassistant.components.automation.config import (
     async_validate_config_item as async_validate_automation_config,
 )
-from homeassistant.components.blueprint import importer
 from homeassistant.components.blueprint.const import (
     CONF_BLUEPRINT,
     CONF_HOMEASSISTANT,
@@ -183,6 +181,7 @@ from .const import (
     IncompatibilitySeverity,
     PinReason,
     RepairIssueType,
+    SourceDomain,
     SourceProviderType,
 )
 from .exceptions import (
@@ -3110,9 +3109,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 translation_placeholders={"error": sanitize_error_detail(str(err))},
             ) from err
 
+        metadata_url = (
+            str(response.url)
+            if provider.provider_type == SourceProviderType.GIST
+            else canonical_url
+        )
         try:
             metadata = provider.get_metadata(
-                canonical_url,
+                metadata_url,
                 content=self._decode_response_text(response, canonical_url),
             )
             author = metadata["author"]
@@ -3125,15 +3129,46 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             ) from err
 
         if provider.provider_type == SourceProviderType.GIST:
-            with contextlib.suppress(Exception):
-                imported_bp = await importer.fetch_blueprint_from_url(self.hass, url)
-                clean_suggested = imported_bp.suggested_filename
-                if clean_suggested.endswith(YAML_EXTENSIONS):
-                    clean_suggested = clean_suggested.rsplit(".", 1)[0]
-                suggested_parts = Path(clean_suggested).parts
-                if len(suggested_parts) > 1:
-                    author = suggested_parts[0]
-                    name = clean_suggested.rsplit("/", 1)[-1]
+            parsed_url = urlparse(url)
+            gist_path_parts = [part for part in parsed_url.path.split("/") if part]
+            is_bare_gist = (parsed_url.hostname or "").lower() == SourceDomain.GIST and len(
+                gist_path_parts
+            ) in (1, 2)
+            if is_bare_gist:
+                gist_metadata_url = f"https://api.github.com/gists/{gist_path_parts[-1]}"
+                try:
+                    gist_response = await self._execute_with_redirect_guard(
+                        session,
+                        gist_metadata_url,
+                        {},
+                    )
+                    gist_data = orjson.loads(
+                        self._decode_response_text(gist_response, gist_metadata_url)
+                    )
+                    if isinstance(gist_data, dict):
+                        owner = gist_data.get("owner")
+                        if isinstance(owner, dict) and isinstance(owner.get("login"), str):
+                            author = owner["login"]
+
+                        files = gist_data.get("files")
+                        if isinstance(files, dict):
+                            filename = next(
+                                (
+                                    file_name.rsplit("/", 1)[-1]
+                                    for file_name in files
+                                    if isinstance(file_name, str)
+                                    and file_name.lower().endswith(YAML_EXTENSIONS)
+                                ),
+                                None,
+                            )
+                            if filename:
+                                name = filename.rsplit(".", 1)[0]
+                except (httpx.HTTPError, HomeAssistantError, TypeError, ValueError) as err:
+                    _LOGGER.debug(
+                        "Failed to retrieve guarded gist metadata from %s: %s",
+                        redact_url(gist_metadata_url),
+                        sanitize_error_detail(str(err)),
+                    )
 
         return content, canonical_url, author, name, response
 
