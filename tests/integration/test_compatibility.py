@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.components.automation import automations_with_blueprint
@@ -10,7 +11,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.blueprints_updater.const import DOMAIN, BlueprintRiskType
+from custom_components.blueprints_updater.const import (
+    DOMAIN,
+    BlueprintBlockingReason,
+    BlueprintRiskType,
+)
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 
 
@@ -386,6 +391,78 @@ async def test_proactive_default_fallback_simulation_catches_unsafe_empty_defaul
     assert len(risks) == 1
     assert risks[0]["type"] == BlueprintRiskType.COMPATIBILITY
     assert risks[0]["args"]["entity"] == "automation.test_instance"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action_key", ["action", "service"])
+@pytest.mark.parametrize("consumer_input", [None, {}, {"custom_service": "light.turn_on"}])
+async def test_update_empty_default_service_only_warns_without_consumers(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    action_key: str,
+    consumer_input: dict[str, object] | None,
+) -> None:
+    """Empty service defaults allow unused blueprint updates but retain consumer checks."""
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options={"auto_update": True})
+    entry.add_to_hass(hass)
+    coordinator = BlueprintUpdateCoordinator(hass, entry, timedelta(hours=24))
+    relative_path = "automation/empty_default_service.yaml"
+    path = hass.config.path("blueprints", relative_path)
+    content = f"""
+blueprint:
+  name: Empty Default Service
+  domain: automation
+  input:
+    custom_service:
+      name: Service
+      default: ""
+trigger: []
+action:
+  - {action_key}: !input custom_service
+"""
+    coordinator.data = {
+        path: {
+            "name": "Empty Default Service",
+            "relative_path": relative_path,
+            "local_hash": "old-hash",
+            "local_file_hash": "old-file-hash",
+            "update_blocking_reason": None,
+        }
+    }
+    consumers = (
+        {}
+        if consumer_input is None
+        else {
+            "automation.test": {"use_blueprint": {"path": relative_path, "input": consumer_input}}
+        }
+    )
+    monkeypatch.setattr(coordinator, "_get_entities_using_blueprint", lambda _: list(consumers))
+    monkeypatch.setattr(coordinator, "_get_entities_configs", lambda _: consumers)
+    monkeypatch.setattr(
+        "custom_components.blueprints_updater.coordinator.read_local_file", lambda _: None
+    )
+    install = AsyncMock()
+    monkeypatch.setattr(coordinator, "async_install_blueprint", install)
+
+    await coordinator._process_blueprint_content(
+        path, coordinator.data[path], content, "https://example.com/bp.yaml", [], set()
+    )
+
+    assert "Unsafe '!input custom_service'" in caplog.text
+    risks = coordinator.data[path]["breaking_risks"]
+    assert isinstance(risks, list)
+    if consumer_input is None:
+        assert coordinator.data[path]["update_blocking_reason"] is None
+        assert risks == []
+        install.assert_awaited_once()
+    else:
+        assert (
+            coordinator.data[path]["update_blocking_reason"]
+            == BlueprintBlockingReason.BREAKING_CHANGE
+        )
+        assert any(risk["type"] == BlueprintRiskType.COMPATIBILITY for risk in risks)
+        install.assert_not_awaited()
 
 
 @pytest.mark.asyncio
