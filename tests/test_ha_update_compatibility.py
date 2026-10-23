@@ -6385,6 +6385,26 @@ async def real_world_coordinator(
     thread-local) so that all HA validators work exactly as they do at
     runtime.
     """
+    # Ensure aiohttp uses ThreadedResolver in tests to avoid loop conflicts
+    # and pycares background threads across all HA versions.
+    import aiohttp
+    from homeassistant.helpers import aiohttp_client
+
+    if hasattr(aiohttp_client, "AsyncResolver"):
+        monkeypatch.setattr(aiohttp_client, "AsyncResolver", aiohttp.ThreadedResolver)
+    if hasattr(aiohttp_client, "_async_make_resolver"):
+        monkeypatch.setattr(
+            aiohttp_client,
+            "_async_make_resolver",
+            lambda _hass: aiohttp.ThreadedResolver(),
+        )
+    if hasattr(aiohttp_client, "_async_get_or_create_resolver"):
+        monkeypatch.setattr(
+            aiohttp_client,
+            "_async_get_or_create_resolver",
+            lambda _hass: aiohttp.ThreadedResolver(),
+        )
+
     async with async_test_home_assistant(load_registries=True) as hass:
         entry = MagicMock()
         entry.options = MappingProxyType({CONF_CHECK_COMPATIBILITY: True})
@@ -6593,26 +6613,6 @@ async def test_real_world_blueprint_install_parity_with_ha_core(
     """
     hass = real_world_coordinator.hass
     suffix = uuid.uuid4().hex[:8]
-
-    # Ensure aiohttp uses ThreadedResolver in tests to avoid loop conflicts
-    # and pycares background threads across all HA versions.
-    import aiohttp
-    from homeassistant.helpers import aiohttp_client
-
-    if hasattr(aiohttp_client, "AsyncResolver"):
-        monkeypatch.setattr(aiohttp_client, "AsyncResolver", aiohttp.ThreadedResolver)
-    if hasattr(aiohttp_client, "_async_make_resolver"):
-        monkeypatch.setattr(
-            aiohttp_client,
-            "_async_make_resolver",
-            lambda _hass: aiohttp.ThreadedResolver(),
-        )
-    if hasattr(aiohttp_client, "_async_get_or_create_resolver"):
-        monkeypatch.setattr(
-            aiohttp_client,
-            "_async_get_or_create_resolver",
-            lambda _hass: aiohttp.ThreadedResolver(),
-        )
 
     # 1. Flow 1: Home Assistant Core importer flow
     imported_bp = await importer.fetch_blueprint_from_url(hass, url)
