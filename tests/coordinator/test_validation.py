@@ -469,8 +469,10 @@ async def test_async_validate_blueprint_consumers_voluptuous_error(hass, coordin
         assert "Invalid selector parameter" in risks[0]["args"]["error"]
 
 
-def test_validate_blueprint_rejects_unsafe_empty_default_target(coordinator: Any) -> None:
-    """Validate that !input referencing an empty default in target entity_id is rejected."""
+def test_validate_blueprint_allows_unsafe_empty_default_target(
+    coordinator: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Validate that an empty default target only warns because Home Assistant accepts it."""
     raw_yaml = """
 blueprint:
   name: Test Unsafe Target
@@ -490,14 +492,16 @@ action:
 """
     data = yaml_util.parse_yaml(raw_yaml)
     assert isinstance(data, dict)
+    caplog.set_level("WARNING")
     res = coordinator._validate_blueprint(data, "https://example.com/bp.yaml", "automation")
-    assert res is not None
-    assert "blueprint_validation_error" in res
-    assert "Unsafe '!input target_lamp'" in res
+    assert res is None
+    assert "Unsafe '!input target_lamp'" in caplog.text
 
 
-def test_validate_blueprint_rejects_unsafe_empty_default_service(coordinator: Any) -> None:
-    """Validate that !input referencing an empty default in service name is rejected."""
+def test_validate_blueprint_allows_unsafe_empty_default_service(
+    coordinator: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Validate that an empty default service only warns because Home Assistant accepts it."""
     raw_yaml = """
 blueprint:
   name: Test Unsafe Service
@@ -512,10 +516,10 @@ action:
 """
     data = yaml_util.parse_yaml(raw_yaml)
     assert isinstance(data, dict)
+    caplog.set_level("WARNING")
     res = coordinator._validate_blueprint(data, "https://example.com/bp.yaml", "automation")
-    assert res is not None
-    assert "blueprint_validation_error" in res
-    assert "Unsafe '!input custom_service'" in res
+    assert res is None
+    assert "Unsafe '!input custom_service'" in caplog.text
 
 
 def test_validate_blueprint_rejects_template_with_math_module(coordinator: Any) -> None:
@@ -1081,8 +1085,10 @@ action:
         assert "Invalid baseline substituted schema" in risks[0]["args"]["error"]
 
 
-def test_validate_blueprint_rejects_unsafe_empty_default_in_trigger(coordinator: Any) -> None:
-    """Validate that !input referencing an empty default inside trigger entity is rejected."""
+def test_validate_blueprint_allows_unsafe_empty_default_in_trigger(
+    coordinator: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Validate that an empty default trigger only warns because Home Assistant accepts it."""
     raw_yaml = """
 blueprint:
   name: Unsafe Trigger Default
@@ -1103,10 +1109,47 @@ action:
 """
     data = yaml_util.parse_yaml(raw_yaml)
     assert isinstance(data, dict)
+    caplog.set_level("WARNING")
     res = coordinator._validate_blueprint(data, "https://example.com/bp.yaml", "automation")
-    assert res is not None
-    assert "blueprint_validation_error" in res
-    assert "trigger entity/device cannot default to an invalid value" in res
+    assert res is None
+    assert "trigger entity/device cannot default to an invalid value" in caplog.text
+
+
+def test_validate_blueprint_allows_empty_list_default_in_trigger(
+    coordinator: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Regression test for issue #248: Home Assistant accepts [] trigger defaults."""
+    raw_yaml = """
+blueprint:
+  name: NSPanel-style Empty List Defaults
+  domain: automation
+  input:
+    panel_device:
+      name: Panel Device
+      default: []
+      selector:
+        device: {}
+    entity01:
+      name: Button 1 Entity
+      default: []
+      selector:
+        entity: {}
+trigger:
+  - trigger: event
+    event_type: esphome.nspanel_easy
+    event_data:
+      device_id: !input panel_device
+  - trigger: state
+    entity_id: !input entity01
+action: []
+"""
+    data = yaml_util.parse_yaml(raw_yaml)
+    assert isinstance(data, dict)
+    caplog.set_level("WARNING")
+    res = coordinator._validate_blueprint(data, "https://example.com/bp.yaml", "automation")
+    assert res is None
+    assert "Unsafe '!input panel_device'" in caplog.text
+    assert "Unsafe '!input entity01'" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -1192,14 +1235,15 @@ action:
     ],
     ids=["top_level_condition", "if_condition", "while_condition", "until_condition"],
 )
-def test_validate_blueprint_rejects_unsafe_empty_default_in_conditions(
-    coordinator: Any, yaml_content: str
+def test_validate_blueprint_allows_unsafe_empty_default_in_conditions(
+    coordinator: Any, yaml_content: str, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Validate that empty-default inputs inside condition blocks are rejected."""
+    """Validate that empty-default inputs inside condition blocks only warn."""
     data = yaml_util.parse_yaml(yaml_content)
+    caplog.set_level("WARNING")
     res = coordinator._validate_blueprint(data, "https://example.com/bp.yaml", "automation")
-    assert res is not None
-    assert "condition entity/device cannot default" in res
+    assert res is None
+    assert "condition entity/device cannot default" in caplog.text
 
 
 def test_validate_blueprint_allows_empty_default_in_variables(coordinator: Any) -> None:

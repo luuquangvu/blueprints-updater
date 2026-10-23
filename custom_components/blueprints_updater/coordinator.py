@@ -2850,11 +2850,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if empty_default_inputs and (
             usage_errors := validate_safe_input_usages(data, empty_default_inputs)
         ):
-            return self._format_validation_failure(
-                "blueprint_validation_error",
-                "Blueprint unsafe input usage in %s: %s",
-                source_url,
-                usage_errors,
+            # Home Assistant loads these blueprints without errors, so this finding must
+            # not block installs or updates. Keep it visible as a warning instead.
+            _LOGGER.warning(
+                "Blueprint unsafe input usage in %s: %s. Continuing because Home Assistant "
+                "accepts this blueprint.",
+                redact_url(source_url),
+                "; ".join(usage_errors),
             )
 
         schema = get_blueprint_schema(expected_domain)
@@ -4636,7 +4638,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         )
         if substituted_baseline is None:
             return
-        synthetic_values = extract_synthetic_dummy_values(blueprint_dict)
+        synthetic_values = extract_synthetic_dummy_values(
+            blueprint_dict, include_empty_defaults=True
+        )
         try:
             await self._async_validate_substituted_domain_config(
                 domain, relative_path, substituted_baseline
@@ -6625,6 +6629,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         Returns:
             Substituted baseline configuration dictionary, or None if the blueprint
             lacks an executable structure or dummy inputs could not be derived.
+            Empty action/service defaults use dummy values to preserve warning-only handling.
 
         """
         has_executable_structure = (
@@ -6651,10 +6656,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         bp_meta = blueprint_dict.get("blueprint")
         input_meta = bp_meta.get(CONF_INPUT) if isinstance(bp_meta, Mapping) else None
         input_configs = extract_input_configs(input_meta)
+        service_inputs = {
+            entry.input_name
+            for entry in extract_synthetic_dummy_values(
+                blueprint_dict, include_empty_defaults=True
+            ).entries
+            if any(path and path[-1] in (CONF_ACTION, CONF_SERVICE) for path in entry.paths)
+        }
         dummy_inputs: dict[str, object] = {}
         for input_name, input_cfg in input_configs.items():
             if CONF_DEFAULT in input_cfg:
-                if not derive_for_empty_defaults:
+                if not derive_for_empty_defaults and input_name not in service_inputs:
                     continue
                 if input_cfg[CONF_DEFAULT] is None or not is_invalid_for_input_default(
                     input_cfg[CONF_DEFAULT], input_cfg
