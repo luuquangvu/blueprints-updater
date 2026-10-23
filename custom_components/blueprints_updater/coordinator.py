@@ -2850,11 +2850,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         if empty_default_inputs and (
             usage_errors := validate_safe_input_usages(data, empty_default_inputs)
         ):
-            return self._format_validation_failure(
-                "blueprint_validation_error",
-                "Blueprint unsafe input usage in %s: %s",
-                source_url,
-                usage_errors,
+            # Home Assistant loads these blueprints without errors, so this finding must
+            # not block installs or updates. Keep it visible as a warning instead.
+            _LOGGER.warning(
+                "Blueprint unsafe input usage in %s: %s. Continuing because Home Assistant "
+                "accepts this blueprint.",
+                redact_url(source_url),
+                "; ".join(usage_errors),
             )
 
         schema = get_blueprint_schema(expected_domain)
