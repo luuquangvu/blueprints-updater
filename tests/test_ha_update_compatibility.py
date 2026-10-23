@@ -6435,6 +6435,7 @@ REAL_WORLD_BLUEPRINT_URLS = [
     "https://github.com/SirGoodenough/HA_Blueprints/blob/master/Automations/ZHA-Xiaomi_Cube_Controller.yaml",
     "https://github.com/Skaronator/home-assistant-blueprints/blob/main/automation/ikea-bilresa-dual-button.yaml",
     "https://github.com/edwardtfn/NSPanel-Easy/blob/main/nspanel_easy_blueprint.yaml",
+    "https://community.home-assistant.io/t/send-camera-snapshot-notification-on-motion/254565",
 ]
 """This list features real-world blueprints used to check the compatibility of the update process.
 
@@ -6570,6 +6571,8 @@ REAL_WORLD_PARITY_BLUEPRINT_URLS = [
         "https://github.com/luuquangvu/demo-blueprints/blob/main/blueprints/"
         "motion_light_blueprint.yaml"
     ),
+    ("https://gist.github.com/Blackshome/6edfec0ff6a25c5da0d07b88dc908238"),
+    ("https://community.home-assistant.io/t/send-camera-snapshot-notification-on-motion/254565"),
 ]
 
 

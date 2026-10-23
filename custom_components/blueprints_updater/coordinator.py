@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from difflib import unified_diff
 from http import HTTPStatus
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Self, TypedDict, TypeGuard, TypeVar
 from urllib.parse import urlparse
 from warnings import WarningMessage
@@ -37,6 +38,7 @@ from homeassistant.components.automation.config import (
 from homeassistant.components.automation.config import (
     async_validate_config_item as async_validate_automation_config,
 )
+from homeassistant.components.blueprint import importer
 from homeassistant.components.blueprint.const import (
     CONF_BLUEPRINT,
     CONF_HOMEASSISTANT,
@@ -173,6 +175,7 @@ from .const import (
     URL_HA_DOCS_TARGETING,
     URL_HA_DOCS_TEMPLATING_MATH,
     URL_HA_DOCS_TEMPLATING_NUMERIC,
+    YAML_EXTENSIONS,
     BlueprintBlockingReason,
     BlueprintRiskType,
     FilterMode,
@@ -3121,6 +3124,17 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 translation_placeholders={"error": f"Malformed metadata: {err}"},
             ) from err
 
+        if provider.provider_type == SourceProviderType.GIST:
+            with contextlib.suppress(Exception):
+                imported_bp = await importer.fetch_blueprint_from_url(self.hass, url)
+                clean_suggested = imported_bp.suggested_filename
+                if clean_suggested.endswith(YAML_EXTENSIONS):
+                    clean_suggested = clean_suggested.rsplit(".", 1)[0]
+                suggested_parts = Path(clean_suggested).parts
+                if len(suggested_parts) > 1:
+                    author = suggested_parts[0]
+                    name = clean_suggested.rsplit("/", 1)[-1]
+
         return content, canonical_url, author, name, response
 
     @staticmethod
@@ -3497,6 +3511,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 remote_content,
                 final_source_url,
                 expected_domain=functional_domain,
+                core_parity=True,
             )
         else:
             content = normalize_content(remote_content)
@@ -6407,7 +6422,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
             for root, _, files in os.walk(domain_path):
                 for file in files:
-                    if not file.endswith((".yaml", ".yml")):
+                    if not file.endswith(YAML_EXTENSIONS):
                         continue
 
                     full_path = os.path.join(root, file)
@@ -6477,7 +6492,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
             for root, _, files in os.walk(domain_path):
                 for file in files:
-                    if not file.endswith((".yaml", ".yml")):
+                    if not file.endswith(YAML_EXTENSIONS):
                         continue
 
                     full_path = os.path.join(root, file)
