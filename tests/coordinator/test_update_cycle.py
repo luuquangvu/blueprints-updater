@@ -356,7 +356,7 @@ async def test_async_update_data_auto_update(mock_translate, coordinator, mock_m
         await coordinator._async_update_data()
         await coordinator._async_background_refresh(coordinator.data)
 
-    expected_content = ensure_source_url(content, url)
+    expected_content = content
     coordinator.async_install_blueprint.assert_awaited_once_with(
         path,
         expected_content,
@@ -370,6 +370,52 @@ async def test_async_update_data_auto_update(mock_translate, coordinator, mock_m
         file_precondition=FileRevisionPrecondition.existing("old"),
         refresh_work=ANY,
     )
+
+
+@pytest.mark.asyncio
+async def test_process_blueprint_content_preserves_raw_content_for_auto_update(coordinator):
+    """Auto-update installs the raw fetch so core-parity serialization survives."""
+    path = "/config/blueprints/automation/test.yaml"
+    url = "https://example.com/blueprint.yaml"
+    raw_content = (
+        "blueprint:\n"
+        "  name: Empty Selector\n"
+        "  domain: automation\n"
+        "  input:\n"
+        "    custom_text:\n"
+        "      name: Custom Text\n"
+        "      selector:\n"
+        "        text:\n"
+        "trigger: []\n"
+        "action: []\n"
+    )
+    coordinator.config_entry.options = {"auto_update": True}
+    info = {
+        "name": "Empty Selector",
+        "relative_path": "automation/test.yaml",
+        "domain": FunctionalDomain.AUTOMATION,
+        "source_url": url,
+        "local_hash": "old",
+        "local_file_hash": "local-file-hash",
+        "updatable": True,
+    }
+    coordinator.data = {path: info}
+    coordinator.async_install_blueprint = AsyncMock()
+    coordinator._detect_risks_for_update = AsyncMock(return_value=[])
+
+    await coordinator._process_blueprint_content(
+        path,
+        info,
+        raw_content,
+        url,
+        [],
+        set(),
+        new_etag="new_etag",
+    )
+
+    coordinator.async_install_blueprint.assert_awaited_once()
+    assert coordinator.async_install_blueprint.await_args is not None
+    assert coordinator.async_install_blueprint.await_args.args[1] == raw_content
 
 
 @pytest.mark.asyncio

@@ -201,7 +201,7 @@ from .network import (
     is_special_use_hostname,
     normalize_hostname,
 )
-from .providers import registry
+from .providers import _normalize_hostname, registry
 from .utils import (
     format_diff_block,
     format_error_message,
@@ -3055,6 +3055,47 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         """Detect potential breaking changes for a blueprint update."""
         return await self._detect_risks_for_update(path, info, remote_content, session=session)
 
+    @staticmethod
+    def _gist_filename_from_url(url: str) -> str | None:
+        """Return a YAML filename encoded in a resolved Gist raw URL."""
+        path_parts = [part for part in urlparse(url).path.split("/") if part]
+        if not path_parts:
+            return None
+        filename = path_parts[-1]
+        return filename if filename.lower().endswith(YAML_EXTENSIONS) else None
+
+    @classmethod
+    def _select_gist_blueprint_filename(
+        cls,
+        files: Mapping[str, object],
+        fetched_content: str,
+        fetched_url: str,
+    ) -> str | None:
+        """Select the Gist file whose content matches the fetched revision.
+
+        When the resolved raw URL identifies the file, that filename is used
+        directly. Otherwise the API file list is matched against the fetched
+        content so an edited or multi-file Gist cannot assign the wrong name
+        to the downloaded blueprint.
+        """
+        filename = cls._gist_filename_from_url(fetched_url)
+        if filename:
+            return filename
+
+        normalized_content = normalize_content(fetched_content)
+        for file_name, file_info in files.items():
+            if not isinstance(file_name, str) or not file_name.lower().endswith(YAML_EXTENSIONS):
+                continue
+            if not isinstance(file_info, Mapping):
+                continue
+            file_content = file_info.get("content")
+            if (
+                isinstance(file_content, str)
+                and normalize_content(file_content) == normalized_content
+            ):
+                return file_name.rsplit("/", 1)[-1]
+        return None
+
     async def _async_fetch_import_data(self, url: str) -> tuple[str, str, str, str, httpx.Response]:
         """Fetch blueprint content, canonical url, and validate basic metadata."""
         if not await self._is_safe_url(url):
@@ -3130,10 +3171,9 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         if provider.provider_type == SourceProviderType.GIST:
             parsed_url = urlparse(url)
+            hostname = _normalize_hostname(parsed_url.hostname)
             gist_path_parts = [part for part in parsed_url.path.split("/") if part]
-            is_bare_gist = (parsed_url.hostname or "").lower() == SourceDomain.GIST and len(
-                gist_path_parts
-            ) in (1, 2)
+            is_bare_gist = hostname == SourceDomain.GIST and len(gist_path_parts) in (1, 2)
             if is_bare_gist:
                 gist_metadata_url = f"https://api.github.com/gists/{gist_path_parts[-1]}"
                 try:
@@ -3152,14 +3192,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
                         files = gist_data.get("files")
                         if isinstance(files, dict):
-                            filename = next(
-                                (
-                                    file_name.rsplit("/", 1)[-1]
-                                    for file_name in files
-                                    if isinstance(file_name, str)
-                                    and file_name.lower().endswith(YAML_EXTENSIONS)
-                                ),
-                                None,
+                            filename = self._select_gist_blueprint_filename(
+                                files,
+                                content,
+                                str(response.url),
                             )
                             if filename:
                                 name = filename.rsplit(".", 1)[0]
@@ -5575,7 +5611,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             auto_update_handled = await self._handle_auto_update_step(
                 path,
                 info,
-                remote_content_with_url,
+                remote_content,
                 risks or [],
                 results_to_notify,
                 updated_domains,
