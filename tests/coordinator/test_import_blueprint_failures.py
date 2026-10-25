@@ -536,6 +536,27 @@ async def test_async_fetch_import_data_uses_guarded_gist_response_metadata(
             "0123456789abcdef/beta.yaml",
             "beta",
         ),
+        (
+            {
+                "alpha.yaml": {"content": IMPORTED_BLUEPRINT},
+                "My Blueprint.yaml": {"truncated": True},
+            },
+            "https://gist.githubusercontent.com/example-user/gist123/raw/"
+            "0123456789abcdef/My%20Blueprint.yaml",
+            "My Blueprint",
+        ),
+        (
+            {"Café + 100%25.yaml": {"truncated": True}},
+            "https://gist.githubusercontent.com/example-user/gist123/raw/"
+            "0123456789abcdef/Caf%C3%A9%20+%20100%2525%2Eyaml",
+            "Café + 100%25",
+        ),
+        (
+            {"beta.yaml": {"content": IMPORTED_BLUEPRINT}},
+            "https://gist.githubusercontent.com/example-user/gist123/raw/"
+            "0123456789abcdef/missing.yaml",
+            "beta",
+        ),
     ],
 )
 @pytest.mark.asyncio

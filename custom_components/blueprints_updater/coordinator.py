@@ -16,7 +16,7 @@ from datetime import timedelta
 from difflib import unified_diff
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Final, Self, TypedDict, TypeGuard, TypeVar
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from warnings import WarningMessage
 
 import httpx
@@ -3056,13 +3056,15 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         return await self._detect_risks_for_update(path, info, remote_content, session=session)
 
     @staticmethod
-    def _gist_filename_from_url(url: str) -> str | None:
-        """Return a YAML filename encoded in a resolved Gist raw URL."""
+    def _gist_filename_from_url(url: str, files: Mapping[str, object]) -> str | None:
+        """Return the Gist file key matching the decoded raw URL filename."""
         path_parts = [part for part in urlparse(url).path.split("/") if part]
         if not path_parts:
             return None
-        filename = path_parts[-1]
-        return filename if filename.lower().endswith(YAML_EXTENSIONS) else None
+        filename = unquote(path_parts[-1])
+        if filename in files and filename.lower().endswith(YAML_EXTENSIONS):
+            return filename
+        return None
 
     @classmethod
     def _select_gist_blueprint_filename(
@@ -3073,12 +3075,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
     ) -> str | None:
         """Select the Gist file whose content matches the fetched revision.
 
-        When the resolved raw URL identifies the file, that filename is used
-        directly. Otherwise the API file list is matched against the fetched
+        When the resolved raw URL identifies a file in the API list, that file
+        key is used. Otherwise the API file list is matched against the fetched
         content so an edited or multi-file Gist cannot assign the wrong name
         to the downloaded blueprint.
         """
-        filename = cls._gist_filename_from_url(fetched_url)
+        filename = cls._gist_filename_from_url(fetched_url, files)
         if filename:
             return filename
 
