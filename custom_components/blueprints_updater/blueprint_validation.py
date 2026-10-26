@@ -3548,6 +3548,7 @@ def ensure_source_url(
     *,
     expected_domain: object = None,
     sort_selectors: bool = False,
+    core_parity: bool = False,
 ) -> str:
     """Ensure source_url is present in blueprint metadata and format canonical YAML.
 
@@ -3560,6 +3561,10 @@ def ensure_source_url(
         source_url: Canonical source URL string to ensure in metadata.
         expected_domain: Optional functional domain string.
         sort_selectors: Whether to sort selector keys (default: False).
+        core_parity: Whether to emit Home Assistant Core's exact import
+            serialization. When False, empty selectors are stabilized so
+            repeated serialization converges to the same output on every
+            supported Home Assistant version.
 
     Returns:
         Canonical YAML string aligned with Home Assistant Core on disk.
@@ -3613,7 +3618,8 @@ def ensure_source_url(
     )
     if domain_was_absent:
         bp_meta[CONF_DOMAIN] = str(domain)
-    _normalize_none_selectors(parsed)
+    if not core_parity:
+        _normalize_none_selectors(parsed)
     try:
         bp = models.Blueprint(
             parsed,

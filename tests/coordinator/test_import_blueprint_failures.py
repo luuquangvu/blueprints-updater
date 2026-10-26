@@ -17,6 +17,7 @@ from custom_components.blueprints_updater.file_store import (
     BlueprintFileStore,
     FileRevisionPrecondition,
 )
+from custom_components.blueprints_updater.providers import GistProvider
 
 PROVIDER_LOOKUP = "custom_components.blueprints_updater.coordinator.registry.get_provider"
 IMPORT_URL = "https://example.com/bp.yaml"
@@ -410,3 +411,240 @@ async def test_async_import_blueprint_surfaces_blueprint_validation_error(coordi
 
     assert err.value.translation_key == "blueprint_validation_error"
     assert err.value.translation_placeholders == {"error": "bad schema"}
+
+
+@pytest.mark.parametrize(
+    ("url", "response_url", "expected_author", "expected_name", "expected_fetch_count"),
+    [
+        (
+            "https://gist.github.com/example-user/gist123",
+            "https://gist.githubusercontent.com/example-user/gist123/raw",
+            "example-user",
+            "blueprint",
+            2,
+        ),
+        (
+            "https://www.gist.github.com/example-user/gist123",
+            "https://gist.githubusercontent.com/example-user/gist123/raw",
+            "example-user",
+            "blueprint",
+            2,
+        ),
+        (
+            "https://gist.githubusercontent.com/example-user/gist123/raw/blueprint.yaml",
+            "https://gist.githubusercontent.com/example-user/gist123/raw/blueprint.yaml",
+            "example-user",
+            "blueprint",
+            1,
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_async_fetch_import_data_uses_guarded_gist_response_metadata(
+    coordinator,
+    url: str,
+    response_url: str,
+    expected_author: str,
+    expected_name: str,
+    expected_fetch_count: int,
+) -> None:
+    """Use guarded gist API metadata only for bare gist pages."""
+    provider = GistProvider()
+    response = _response(response_url)
+    gist_metadata_response = httpx.Response(
+        HTTPStatus.OK,
+        json={
+            "owner": {"login": expected_author},
+            "files": {
+                f"{expected_name}.yaml": {
+                    "filename": f"{expected_name}.yaml",
+                    "content": IMPORTED_BLUEPRINT,
+                    "size": len(IMPORTED_BLUEPRINT.encode("utf-8")),
+                }
+            },
+        },
+        headers={"Content-Type": "application/json"},
+        request=httpx.Request("GET", "https://api.github.com/gists/gist123"),
+    )
+
+    with (
+        _patched_provider(provider),
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_guarded_async_client",
+            return_value=MagicMock(),
+        ),
+        patch.object(
+            coordinator,
+            "_execute_with_redirect_guard",
+            new_callable=AsyncMock,
+            side_effect=[response, gist_metadata_response],
+        ) as guarded_fetch,
+        patch.object(
+            coordinator,
+            "_parse_provider_response",
+            new_callable=AsyncMock,
+            return_value=IMPORTED_BLUEPRINT,
+        ),
+    ):
+        (
+            content,
+            canonical_url,
+            author,
+            name,
+            fetched_response,
+        ) = await coordinator.async_fetch_import_data(url)
+
+    assert content == IMPORTED_BLUEPRINT
+    assert author == expected_author
+    assert name == expected_name
+    assert fetched_response is response
+    assert canonical_url == provider.normalize_url(url)
+    assert guarded_fetch.await_count == expected_fetch_count
+    if expected_fetch_count == 2:
+        assert guarded_fetch.await_args_list[1].args[1] == "https://api.github.com/gists/gist123"
+
+
+@pytest.mark.parametrize(
+    ("api_files", "response_url", "expected_name"),
+    [
+        (
+            {
+                "alpha.yaml": {
+                    "filename": "alpha.yaml",
+                    "content": "blueprint:\n  name: Alpha\n  domain: automation\n",
+                },
+                "beta.yaml": {
+                    "filename": "beta.yaml",
+                    "content": IMPORTED_BLUEPRINT,
+                },
+            },
+            "https://gist.githubusercontent.com/example-user/gist123/raw",
+            "beta",
+        ),
+        (
+            {
+                "alpha.yaml": {
+                    "filename": "alpha.yaml",
+                    "content": "blueprint:\n  name: Alpha\n  domain: automation\n",
+                },
+                "beta.yaml": {
+                    "filename": "beta.yaml",
+                    "content": IMPORTED_BLUEPRINT,
+                },
+            },
+            "https://gist.githubusercontent.com/example-user/gist123/raw/"
+            "0123456789abcdef/beta.yaml",
+            "beta",
+        ),
+        (
+            {
+                "alpha.yaml": {"content": IMPORTED_BLUEPRINT},
+                "My Blueprint.yaml": {"truncated": True},
+            },
+            "https://gist.githubusercontent.com/example-user/gist123/raw/"
+            "0123456789abcdef/My%20Blueprint.yaml",
+            "My Blueprint",
+        ),
+        (
+            {"Café + 100%25.yaml": {"truncated": True}},
+            "https://gist.githubusercontent.com/example-user/gist123/raw/"
+            "0123456789abcdef/Caf%C3%A9%20+%20100%2525%2Eyaml",
+            "Café + 100%25",
+        ),
+        (
+            {"beta.yaml": {"content": IMPORTED_BLUEPRINT}},
+            "https://gist.githubusercontent.com/example-user/gist123/raw/"
+            "0123456789abcdef/missing.yaml",
+            "beta",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_async_fetch_import_data_matches_gist_filename_to_content(
+    coordinator,
+    api_files: dict[str, object],
+    response_url: str,
+    expected_name: str,
+) -> None:
+    """Select the Gist filename that matches the fetched file, not the first YAML entry."""
+    provider = GistProvider()
+    response = _response(response_url)
+    gist_metadata_response = httpx.Response(
+        HTTPStatus.OK,
+        json={"owner": {"login": "example-user"}, "files": api_files},
+        headers={"Content-Type": "application/json"},
+        request=httpx.Request("GET", "https://api.github.com/gists/gist123"),
+    )
+
+    with (
+        _patched_provider(provider),
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_guarded_async_client",
+            return_value=MagicMock(),
+        ),
+        patch.object(
+            coordinator,
+            "_execute_with_redirect_guard",
+            new_callable=AsyncMock,
+            side_effect=[response, gist_metadata_response],
+        ),
+        patch.object(
+            coordinator,
+            "_parse_provider_response",
+            new_callable=AsyncMock,
+            return_value=IMPORTED_BLUEPRINT,
+        ),
+    ):
+        _, _, _, name, _ = await coordinator.async_fetch_import_data(
+            "https://gist.github.com/example-user/gist123"
+        )
+
+    assert name == expected_name
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_import_data_ignores_metadata_from_different_gist_revision(
+    coordinator,
+) -> None:
+    """Do not apply a renamed filename when the Gist changed after content was fetched."""
+    provider = GistProvider()
+    response = _response("https://gist.githubusercontent.com/example-user/gist123/raw")
+    gist_metadata_response = httpx.Response(
+        HTTPStatus.OK,
+        json={
+            "owner": {"login": "example-user"},
+            "files": {
+                "renamed.yaml": {
+                    "filename": "renamed.yaml",
+                    "content": "blueprint:\n  name: Renamed\n  domain: automation\n",
+                }
+            },
+        },
+        headers={"Content-Type": "application/json"},
+        request=httpx.Request("GET", "https://api.github.com/gists/gist123"),
+    )
+
+    with (
+        _patched_provider(provider),
+        patch(
+            "custom_components.blueprints_updater.coordinator.get_guarded_async_client",
+            return_value=MagicMock(),
+        ),
+        patch.object(
+            coordinator,
+            "_execute_with_redirect_guard",
+            new_callable=AsyncMock,
+            side_effect=[response, gist_metadata_response],
+        ),
+        patch.object(
+            coordinator,
+            "_parse_provider_response",
+            new_callable=AsyncMock,
+            return_value=IMPORTED_BLUEPRINT,
+        ),
+    ):
+        _, _, _, name, _ = await coordinator.async_fetch_import_data(
+            "https://gist.github.com/example-user/gist123"
+        )
+
+    assert name == "gist123"

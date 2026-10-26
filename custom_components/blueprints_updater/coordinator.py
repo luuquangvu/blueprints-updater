@@ -16,7 +16,7 @@ from datetime import timedelta
 from difflib import unified_diff
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Final, Self, TypedDict, TypeGuard, TypeVar
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from warnings import WarningMessage
 
 import httpx
@@ -173,6 +173,7 @@ from .const import (
     URL_HA_DOCS_TARGETING,
     URL_HA_DOCS_TEMPLATING_MATH,
     URL_HA_DOCS_TEMPLATING_NUMERIC,
+    YAML_EXTENSIONS,
     BlueprintBlockingReason,
     BlueprintRiskType,
     FilterMode,
@@ -180,6 +181,7 @@ from .const import (
     IncompatibilitySeverity,
     PinReason,
     RepairIssueType,
+    SourceDomain,
     SourceProviderType,
 )
 from .exceptions import (
@@ -199,7 +201,7 @@ from .network import (
     is_special_use_hostname,
     normalize_hostname,
 )
-from .providers import registry
+from .providers import _normalize_hostname, registry
 from .utils import (
     format_diff_block,
     format_error_message,
@@ -3053,6 +3055,49 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         """Detect potential breaking changes for a blueprint update."""
         return await self._detect_risks_for_update(path, info, remote_content, session=session)
 
+    @staticmethod
+    def _gist_filename_from_url(url: str, files: Mapping[str, object]) -> str | None:
+        """Return the Gist file key matching the decoded raw URL filename."""
+        path_parts = [part for part in urlparse(url).path.split("/") if part]
+        if not path_parts:
+            return None
+        filename = unquote(path_parts[-1])
+        if filename in files and filename.lower().endswith(YAML_EXTENSIONS):
+            return filename
+        return None
+
+    @classmethod
+    def _select_gist_blueprint_filename(
+        cls,
+        files: Mapping[str, object],
+        fetched_content: str,
+        fetched_url: str,
+    ) -> str | None:
+        """Select the Gist file whose content matches the fetched revision.
+
+        When the resolved raw URL identifies a file in the API list, that file
+        key is used. Otherwise the API file list is matched against the fetched
+        content so an edited or multi-file Gist cannot assign the wrong name
+        to the downloaded blueprint.
+        """
+        filename = cls._gist_filename_from_url(fetched_url, files)
+        if filename:
+            return filename
+
+        normalized_content = normalize_content(fetched_content)
+        for file_name, file_info in files.items():
+            if not isinstance(file_name, str) or not file_name.lower().endswith(YAML_EXTENSIONS):
+                continue
+            if not isinstance(file_info, Mapping):
+                continue
+            file_content = file_info.get("content")
+            if (
+                isinstance(file_content, str)
+                and normalize_content(file_content) == normalized_content
+            ):
+                return file_name.rsplit("/", 1)[-1]
+        return None
+
     async def _async_fetch_import_data(self, url: str) -> tuple[str, str, str, str, httpx.Response]:
         """Fetch blueprint content, canonical url, and validate basic metadata."""
         if not await self._is_safe_url(url):
@@ -3107,9 +3152,14 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 translation_placeholders={"error": sanitize_error_detail(str(err))},
             ) from err
 
+        metadata_url = (
+            str(response.url)
+            if provider.provider_type == SourceProviderType.GIST
+            else canonical_url
+        )
         try:
             metadata = provider.get_metadata(
-                canonical_url,
+                metadata_url,
                 content=self._decode_response_text(response, canonical_url),
             )
             author = metadata["author"]
@@ -3120,6 +3170,43 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 translation_key="fetch_blueprint_error",
                 translation_placeholders={"error": f"Malformed metadata: {err}"},
             ) from err
+
+        if provider.provider_type == SourceProviderType.GIST:
+            parsed_url = urlparse(url)
+            hostname = _normalize_hostname(parsed_url.hostname)
+            gist_path_parts = [part for part in parsed_url.path.split("/") if part]
+            is_bare_gist = hostname == SourceDomain.GIST and len(gist_path_parts) in (1, 2)
+            if is_bare_gist:
+                gist_metadata_url = f"https://api.github.com/gists/{gist_path_parts[-1]}"
+                try:
+                    gist_response = await self._execute_with_redirect_guard(
+                        session,
+                        gist_metadata_url,
+                        {},
+                    )
+                    gist_data = orjson.loads(
+                        self._decode_response_text(gist_response, gist_metadata_url)
+                    )
+                    if isinstance(gist_data, dict):
+                        owner = gist_data.get("owner")
+                        if isinstance(owner, dict) and isinstance(owner.get("login"), str):
+                            author = owner["login"]
+
+                        files = gist_data.get("files")
+                        if isinstance(files, dict):
+                            filename = self._select_gist_blueprint_filename(
+                                files,
+                                content,
+                                str(response.url),
+                            )
+                            if filename:
+                                name = filename.rsplit(".", 1)[0]
+                except (httpx.HTTPError, HomeAssistantError, TypeError, ValueError) as err:
+                    _LOGGER.debug(
+                        "Failed to retrieve guarded gist metadata from %s: %s",
+                        redact_url(gist_metadata_url),
+                        sanitize_error_detail(str(err)),
+                    )
 
         return content, canonical_url, author, name, response
 
@@ -3497,6 +3584,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 remote_content,
                 final_source_url,
                 expected_domain=functional_domain,
+                core_parity=True,
             )
         else:
             content = normalize_content(remote_content)
@@ -5525,7 +5613,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             auto_update_handled = await self._handle_auto_update_step(
                 path,
                 info,
-                remote_content_with_url,
+                remote_content,
                 risks or [],
                 results_to_notify,
                 updated_domains,
@@ -6407,7 +6495,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
             for root, _, files in os.walk(domain_path):
                 for file in files:
-                    if not file.endswith((".yaml", ".yml")):
+                    if not file.endswith(YAML_EXTENSIONS):
                         continue
 
                     full_path = os.path.join(root, file)
@@ -6477,7 +6565,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
             for root, _, files in os.walk(domain_path):
                 for file in files:
-                    if not file.endswith((".yaml", ".yml")):
+                    if not file.endswith(YAML_EXTENSIONS):
                         continue
 
                     full_path = os.path.join(root, file)
