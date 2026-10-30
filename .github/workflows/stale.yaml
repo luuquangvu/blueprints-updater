@@ -16,7 +16,7 @@ jobs:
       issues: write
     steps:
       - name: 30 days stale issues
-        uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
+        uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93
         with:
           days-before-stale: 23
           days-before-close: 7

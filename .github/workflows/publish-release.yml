@@ -22,14 +22,14 @@ jobs:
 
     steps:
       - name: Checkout merged release commit
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e
 
       - name: Install dependencies
         run: uv sync --locked
@@ -74,7 +74,7 @@ jobs:
 
       - name: Create GitHub Release
         if: ${{ steps.gate.outputs.should_publish == 'true' }}
-        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd
         with:
           tag: ${{ steps.gate.outputs.tag }}
           commit: ${{ steps.tag.outputs.commit_sha }}
