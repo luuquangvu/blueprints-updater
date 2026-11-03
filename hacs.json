@@ -1,6 +1,5 @@
 {
   "name": "Blueprints Updater",
   "homeassistant": "2024.12.0",
-  "hacs": "2.0.5",
-  "render_readme": true
+  "hacs": "2.0.5"
 }

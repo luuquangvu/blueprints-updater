@@ -70,10 +70,12 @@ addopts = [
   "--cov=custom_components",
   "--cov-fail-under=90",
   "--cov-branch",
-  "--timeout=90",
+  "--timeout=120",
   "--strict-markers",
 ]
-markers = ["real_network: tests that require real network access"]
+markers = [
+  "real_network: tests that may access real network sources or replay committed snapshots",
+]
 
 [tool.pyright]
 typeCheckingMode = "standard"
