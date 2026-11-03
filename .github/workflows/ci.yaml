@@ -58,6 +58,10 @@ jobs:
         run: uv run --locked interrogate
 
       - name: Run Pytest
+        env:
+          # Scheduled runs act as a live-source canary. Pull requests and pushes
+          # keep replaying committed snapshots for deterministic results.
+          BLUEPRINTS_UPDATER_LIVE_REAL_WORLD: ${{ github.event_name == 'schedule' && '1' || '' }}
         run: uv run --locked pytest
 
   setup-matrix:
@@ -318,4 +322,8 @@ jobs:
         run: uv run --locked pyright --pythonpath .venv/bin/python
 
       - name: Run Pytest
+        env:
+          # Only the scheduled latest-version row fetches upstream sources live;
+          # ordinary runs and older compatibility rows replay committed snapshots.
+          BLUEPRINTS_UPDATER_LIVE_REAL_WORLD: ${{ github.event_name == 'schedule' && matrix.is_latest && '1' || '' }}
         run: uv --no-config run --no-project --python .venv/bin/python pytest --no-cov

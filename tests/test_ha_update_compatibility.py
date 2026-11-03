@@ -99,6 +99,13 @@ from custom_components.blueprints_updater.utils import (
     stringify_keys,
 )
 
+from .real_world_blueprints import (
+    LIVE_ENV,
+    RECORD_ENV,
+    get_blueprint_content,
+    get_snapshot,
+)
+
 
 @pytest.fixture
 def hass(_mock_hass):
@@ -6546,16 +6553,10 @@ async def test_real_world_blueprint_compatibility_validation(
     real_world_coordinator: BlueprintUpdateCoordinator, url: str
 ) -> None:
     """Validate compatibility of complex real-world blueprints against Home Assistant Core."""
-    blueprint_filename = f"{hashlib.sha256(url.encode('utf-8')).hexdigest()[:32]}.yaml"
-    cache_path = Path(tempfile.gettempdir()) / "bp_cache" / blueprint_filename
-    if cache_path.exists():
-        content = cache_path.read_text(encoding="utf-8")
-    else:
-        content, _, _, _, _ = await real_world_coordinator.async_fetch_import_data(url)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(content, encoding="utf-8")
+    content = await get_blueprint_content(real_world_coordinator, url)
 
     assert len(content) > 0
+    blueprint_filename = f"{hashlib.sha256(url.encode('utf-8')).hexdigest()[:32]}.yaml"
 
     try:
         parsed_blueprint = yaml_util.parse_yaml(content)
@@ -6614,11 +6615,21 @@ async def test_real_world_blueprint_install_parity_with_ha_core(
     hass = real_world_coordinator.hass
     suffix = uuid.uuid4().hex[:8]
 
-    # 1. Flow 1: Home Assistant Core importer flow
-    imported_bp = await importer.fetch_blueprint_from_url(hass, url)
-    assert imported_bp is not None
-    ha_raw_yaml = imported_bp.raw_data
-    ha_blueprint = imported_bp.blueprint
+    # 1. Flow 1: Home Assistant Core importer flow.
+    # Replay a recorded snapshot by default so the two installers always receive
+    # the same bytes, even when the upstream author edits the source mid-test.
+    snapshot = await get_snapshot(real_world_coordinator, url)
+    assert snapshot.core_suggested_filename
+    ha_raw_yaml = snapshot.core_raw_data or snapshot.content
+    ha_data = yaml_util.parse_yaml(ha_raw_yaml)
+    assert isinstance(ha_data, dict)
+    ha_blueprint = models.Blueprint(ha_data, schema=BLUEPRINT_SCHEMA)
+    ha_blueprint.update_metadata(source_url=url)
+    imported_bp = importer.ImportedBlueprint(
+        snapshot.core_suggested_filename,
+        ha_raw_yaml,
+        ha_blueprint,
+    )
 
     # Check minimum HA version requirement dynamically
     min_version = extract_blueprint_min_version(ha_blueprint.data)
@@ -6639,6 +6650,9 @@ async def test_real_world_blueprint_install_parity_with_ha_core(
     author = suggested_path.parts[0] if len(suggested_path.parts) > 1 else "blueprint"
     bp_base_name = _strip_yaml_extension(suggested_path.name) or "blueprint"
 
+    assert snapshot.canonical_url
+    assert snapshot.author == author
+    assert snapshot.name == bp_base_name
     assert imported_bp.blueprint.metadata.get("domain") == domain
     assert imported_bp.blueprint.metadata.get("source_url") == url
 
@@ -6680,18 +6694,33 @@ async def test_real_world_blueprint_install_parity_with_ha_core(
         ha_temp_file.unlink()
 
         # 2. Flow 2: blueprints-updater full production entry point (async_import_blueprint)
-        # Ensure integration flow writes to a uniquely suffixed filename to avoid
-        # conflicts or reusing old files.
-        orig_fetch = real_world_coordinator._async_fetch_import_data
-
-        async def _suffixed_fetch(
+        # Reuse the exact snapshot bytes from the Core flow and add a unique
+        # filename suffix so the two flows cannot overwrite each other.
+        async def _snapshot_fetch(
             fetch_url: str,
         ) -> tuple[str, str, str, str, httpx.Response]:
-            """Fetch import data with uniquely suffixed filename."""
-            c, canonical, a, name, resp = await orig_fetch(fetch_url)
-            return c, canonical, a, f"{name}_{suffix}", resp
+            """Return the recorded snapshot with a uniquely suffixed filename."""
+            if fetch_url != url:
+                raise AssertionError(f"Unexpected fetch URL: {fetch_url!r}")
+            response = httpx.Response(
+                200,
+                headers={"Content-Type": "application/yaml"},
+                content=snapshot.content.encode("utf-8"),
+                request=httpx.Request("GET", snapshot.canonical_url),
+            )
+            return (
+                snapshot.content,
+                snapshot.canonical_url,
+                snapshot.author,
+                f"{snapshot.name}_{suffix}",
+                response,
+            )
 
-        monkeypatch.setattr(real_world_coordinator, "_async_fetch_import_data", _suffixed_fetch)
+        monkeypatch.setattr(
+            real_world_coordinator,
+            "_async_fetch_import_data",
+            _snapshot_fetch,
+        )
 
         await real_world_coordinator.async_import_blueprint(url, confirm=True)
         assert integration_file.is_file()
@@ -6868,15 +6897,13 @@ trigger: []
 action: []
 """
     test_url = "https://example.com/test_future_blueprint.yaml"
+    monkeypatch.setenv(LIVE_ENV, "1")
+    monkeypatch.delenv(RECORD_ENV, raising=False)
     monkeypatch.setattr(
         real_world_coordinator,
         "async_fetch_import_data",
         AsyncMock(return_value=(future_blueprint, "2099.1.0", None, None, None)),
     )
-    blueprint_filename = f"{hashlib.sha256(test_url.encode('utf-8')).hexdigest()[:32]}.yaml"
-    cache_path = Path(tempfile.gettempdir()) / "bp_cache" / blueprint_filename
-    if cache_path.exists():
-        cache_path.unlink()
 
     with pytest.raises(pytest.skip.Exception):
         await test_real_world_blueprint_compatibility_validation(real_world_coordinator, test_url)

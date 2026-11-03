@@ -34,6 +34,15 @@ Run a focused test while developing, for example:
 uv run --locked pytest tests/coordinator/test_compatibility_guard.py
 ```
 
+Real-world blueprint tests replay committed snapshots so third-party outages and upstream edits cannot change test results. Refresh the snapshots only when intentionally updating those samples:
+
+```bash
+BLUEPRINTS_UPDATER_LIVE_REAL_WORLD=1 \
+BLUEPRINTS_UPDATER_RECORD_REAL_WORLD=1 \
+uv run --locked pytest tests/test_ha_update_compatibility.py \
+  -k "real_world_blueprint" -n 0 --no-cov
+```
+
 Run the full local gate before submitting:
 
 ```bash

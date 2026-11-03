@@ -60,19 +60,19 @@
 
 ### Option 1: Using HACS (Recommended)
 
+> [!IMPORTANT]
+> Since the Home Assistant 2026.11.0 release, HACS has been renamed Marketplace. You can access it under **Settings** > **Marketplace**.
+
 [![Add Blueprints Updater to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=luuquangvu&repository=blueprints-updater&category=integration)
 
-1. Open **HACS** in Home Assistant.
-2. Search for **Blueprints Updater**.
-3. If not found, click the three dots in the top right corner and select **Custom repositories**.
-4. Add `https://github.com/luuquangvu/blueprints-updater` with category **Integration**.
-5. Search for **Blueprints Updater** and click **Download**.
-6. Restart Home Assistant.
+1. Open **HACS** in Home Assistant (or **Marketplace** for Home Assistant version 2026.11.0 and later).
+2. Search for **Blueprints Updater** and click **Download**.
+3. Restart Home Assistant (not required for version 2026.11.0 or later).
 
 ### Option 2: Manual Installation
 
-1. Download the latest release and extract the files.
-2. Copy the `custom_components/blueprints_updater` folder into your Home Assistant `config/custom_components/` directory.
+1. Download the latest release from the [Releases page](https://github.com/luuquangvu/blueprints-updater/releases).
+2. Extract the archive and copy the `custom_components/blueprints_updater` directory into your Home Assistant `<config_dir>/custom_components/` folder.
 3. Restart Home Assistant.
 
 ---
