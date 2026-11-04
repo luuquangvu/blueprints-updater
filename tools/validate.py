@@ -39,7 +39,9 @@ _VALIDATION_STEP_TIMEOUT_SECONDS = 300
 
 _PACKAGE_NORM_PATTERN = re.compile(r"[._-]+")
 _HA_PACKAGE = "homeassistant"
-_TEST_HARNESS_PACKAGE = "pytest-homeassistant-custom-component"
+_LEGACY_TEST_HARNESS_PACKAGE = "pytest-homeassistant-custom-component"
+_NEW_TEST_HARNESS_PACKAGE = "pytest-homeassistant"
+_TEST_HARNESS_PACKAGES = (_LEGACY_TEST_HARNESS_PACKAGE, _NEW_TEST_HARNESS_PACKAGE)
 _ALLOWED_PATH_COMPONENT_CHARS = f"{ascii_letters}{digits}._-+@ "
 
 
@@ -788,16 +790,39 @@ def versions_differ(installed: str, required: str) -> bool:
         return installed != required
 
 
+def _installed_test_harnesses() -> list[tuple[str, str]]:
+    """Return installed supported test harness distributions and versions."""
+    installed: list[tuple[str, str]] = []
+    for package in _TEST_HARNESS_PACKAGES:
+        try:
+            installed.append((package, md.version(package)))
+        except md.PackageNotFoundError:
+            continue
+    return installed
+
+
 def _check_local_ha_harness_alignment() -> None:
     """Fail validation when the local harness does not target installed Home Assistant."""
     command_label = "check local homeassistant/test harness alignment"
     print(f"STEP_START: {command_label}", flush=True)
     try:
         installed_ha = md.version(_HA_PACKAGE)
-        installed_harness = md.version(_TEST_HARNESS_PACKAGE)
+        installed_harnesses = _installed_test_harnesses()
+        if not installed_harnesses:
+            raise ValueError(
+                "no supported Home Assistant test harness package is installed; install "
+                f"one of {', '.join(_TEST_HARNESS_PACKAGES)}"
+            )
+        if len(installed_harnesses) > 1:
+            installed_names = ", ".join(package for package, _ in installed_harnesses)
+            raise ValueError(
+                "multiple Home Assistant test harness packages are installed "
+                f"({installed_names}); install only one"
+            )
+        harness_package, installed_harness = installed_harnesses[0]
         harness_required_ha = exact_homeassistant_requirement(
-            md.requires(_TEST_HARNESS_PACKAGE),
-            f"installed {_TEST_HARNESS_PACKAGE} {installed_harness}",
+            md.requires(harness_package),
+            f"installed {harness_package} {installed_harness}",
         )
     except (md.PackageNotFoundError, ValueError) as err:
         print(f"HARNESS_MISMATCH: {err}", flush=True)
@@ -805,7 +830,7 @@ def _check_local_ha_harness_alignment() -> None:
 
     if versions_differ(installed_ha, harness_required_ha):
         print(
-            f"HARNESS_MISMATCH: installed {_TEST_HARNESS_PACKAGE} "
+            f"HARNESS_MISMATCH: installed {harness_package} "
             f"{installed_harness} requires Home Assistant {harness_required_ha}, "
             f"but the local environment has {installed_ha}",
             flush=True,
@@ -814,7 +839,7 @@ def _check_local_ha_harness_alignment() -> None:
 
     print(
         f"STEP_INFO: local Home Assistant {installed_ha} matches "
-        f"{_TEST_HARNESS_PACKAGE} {installed_harness}",
+        f"{harness_package} {installed_harness}",
         flush=True,
     )
     print(f"STEP_OK: {command_label}", flush=True)

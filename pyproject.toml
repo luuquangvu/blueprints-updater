@@ -3,7 +3,7 @@ name = "blueprints-updater"
 version = "2.17.2"
 description = "Automatically update Home Assistant blueprints via native update entities."
 requires-python = ">=3.14.2"
-dependencies = ["h2", "homeassistant>=2026.10.0"]
+dependencies = ["h2", "homeassistant>=2026.11.0"]
 
 [dependency-groups]
 dev = [
@@ -15,7 +15,7 @@ dev = [
   "pytest",
   "pytest-asyncio",
   "pytest-cov",
-  "pytest-homeassistant-custom-component",
+  "pytest-homeassistant>=2026.11.0",
   "pytest-timeout",
   "pytest-xdist",
   "ruff",
@@ -64,6 +64,8 @@ asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = [
+  "-p",
+  "no:respx",
   "-n",
   "auto",
   "--quiet",

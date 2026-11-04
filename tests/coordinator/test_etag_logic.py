@@ -4,7 +4,6 @@ from datetime import timedelta
 from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 from homeassistant.core import HomeAssistant
 
@@ -13,6 +12,7 @@ from custom_components.blueprints_updater.const import (
     FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.ha_compat import httpx
 
 from .utils import mock_bounded_response
 

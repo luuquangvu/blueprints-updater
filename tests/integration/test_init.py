@@ -5,12 +5,10 @@ from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-import httpx
 import pytest
 from homeassistant.components.update import SERVICE_INSTALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
@@ -18,6 +16,8 @@ from custom_components.blueprints_updater.const import (
     IntegrationService,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.ha_compat import httpx
+from tests.ha_test_harness import MockConfigEntry
 
 
 @pytest.mark.asyncio

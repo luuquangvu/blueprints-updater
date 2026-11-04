@@ -4,15 +4,6 @@ import asyncio
 import inspect
 import logging
 from datetime import timedelta
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import probatio as vol
-else:
-    try:
-        import probatio as vol
-    except ImportError:
-        import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
@@ -37,6 +28,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN, IntegrationService
 from .coordinator import BlueprintUpdateCoordinator
+from .ha_compat import vol
 from .utils import get_update_interval, normalize_domain
 
 try:

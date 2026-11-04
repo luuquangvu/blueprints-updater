@@ -27,12 +27,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import aiohttp
-import httpx
 from homeassistant.components.blueprint import importer
 from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.blueprints_updater.const import REQUEST_TIMEOUT
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.ha_compat import httpx
 
 SNAPSHOT_PATH = Path(__file__).parent / "fixtures" / "real_world_blueprints.json.gz"
 LIVE_ENV = "BLUEPRINTS_UPDATER_LIVE_REAL_WORLD"

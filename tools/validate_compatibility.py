@@ -31,6 +31,9 @@ from packaging.version import InvalidVersion, Version
 
 try:
     from .validate import (
+        _LEGACY_TEST_HARNESS_PACKAGE,
+        _NEW_TEST_HARNESS_PACKAGE,
+        _TEST_HARNESS_PACKAGES,
         exact_homeassistant_requirement,
         normalize_package_name,
         resolve_global_uv_path,
@@ -38,6 +41,9 @@ try:
     )
 except ImportError:
     from validate import (
+        _LEGACY_TEST_HARNESS_PACKAGE,
+        _NEW_TEST_HARNESS_PACKAGE,
+        _TEST_HARNESS_PACKAGES,
         exact_homeassistant_requirement,
         normalize_package_name,
         resolve_global_uv_path,
@@ -47,6 +53,10 @@ except ImportError:
 
 class PackageConstraintNotFoundError(ValueError):
     """Raised when a package is genuinely not found in Home Assistant package constraints."""
+
+
+class NoPublishedReleasesError(ValueError):
+    """Raised when PyPI metadata has no usable published releases for a package."""
 
 
 class PythonVersionIncompatibilityError(ValueError):
@@ -60,20 +70,24 @@ _VENVS_ROOT = os.path.join(_REPO_ROOT, ".venvs")
 _VENV_DEPENDENCY_MARKER = ".blueprints_updater_test_dependencies.json"
 
 _AIODNS_PACKAGE = "aiodns"
-_HTTPX_PACKAGE = "httpx[http2]"
-_TEST_HARNESS_PACKAGE = "pytest-homeassistant-custom-component"
-_HA_CONSTRAINED_TEST_DEPS = (_AIODNS_PACKAGE,)
+# Home Assistant pins httpx even where httpx2 is the runtime engine because
+# libraries such as respx still depend on it. Keep that pin, and install the
+# HTTP/2 dependency separately instead of relying on the legacy [http2] extra.
+_HTTPX_PACKAGE = "httpx"
+_HTTP2_PACKAGE = "h2"
+_HA_CONSTRAINED_TEST_DEPS = (_AIODNS_PACKAGE, _HTTPX_PACKAGE)
 _REQUIRED_TEST_DEPS = (
     *_HA_CONSTRAINED_TEST_DEPS,
-    _HTTPX_PACKAGE,
+    _HTTP2_PACKAGE,
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
-    _TEST_HARNESS_PACKAGE,
     "pytest-timeout",
     "pytest-xdist",
     "tomlkit",
 )
+_NEW_TEST_HARNESS_MIN_HA_VERSION = "2026.11.0b4"
+_TEST_HARNESS_EXTRAS: dict[str, tuple[str, ...]] = {}
 
 _COMPATIBILITY_PYTEST_ARGS = ["--no-cov"]
 _COMPATIBILITY_METADATA_PROBE_TIMEOUT_SECONDS = 60
@@ -100,10 +114,22 @@ _MATRIX_FILE = os.path.join(_REPO_ROOT, "tools", "compatibility_matrix.json")
 _HACS_FILE = os.path.join(_REPO_ROOT, "hacs.json")
 
 _PYPI_HA_JSON_URL = "https://pypi.org/pypi/homeassistant/json"
-_PYPI_TEST_HARNESS_JSON_URL = "https://pypi.org/pypi/pytest-homeassistant-custom-component/json"
+_PYPI_TEST_HARNESS_JSON_URL = f"https://pypi.org/pypi/{_LEGACY_TEST_HARNESS_PACKAGE}/json"
 _PYPI_TEST_HARNESS_VERSION_JSON_URL_TEMPLATE = (
-    "https://pypi.org/pypi/pytest-homeassistant-custom-component/{version}/json"
+    f"https://pypi.org/pypi/{_LEGACY_TEST_HARNESS_PACKAGE}/{{version}}/json"
 )
+_PYPI_NEW_TEST_HARNESS_JSON_URL = f"https://pypi.org/pypi/{_NEW_TEST_HARNESS_PACKAGE}/json"
+_PYPI_NEW_TEST_HARNESS_VERSION_JSON_URL_TEMPLATE = (
+    f"https://pypi.org/pypi/{_NEW_TEST_HARNESS_PACKAGE}/{{version}}/json"
+)
+_TEST_HARNESS_JSON_URLS = {
+    _LEGACY_TEST_HARNESS_PACKAGE: _PYPI_TEST_HARNESS_JSON_URL,
+    _NEW_TEST_HARNESS_PACKAGE: _PYPI_NEW_TEST_HARNESS_JSON_URL,
+}
+_TEST_HARNESS_VERSION_JSON_URL_TEMPLATES = {
+    _LEGACY_TEST_HARNESS_PACKAGE: _PYPI_TEST_HARNESS_VERSION_JSON_URL_TEMPLATE,
+    _NEW_TEST_HARNESS_PACKAGE: _PYPI_NEW_TEST_HARNESS_VERSION_JSON_URL_TEMPLATE,
+}
 
 _HA_CONSTRAINTS_GITHUB_URL_TEMPLATE = "https://raw.githubusercontent.com/home-assistant/core/{ha_version}/homeassistant/package_constraints.txt"
 
@@ -122,6 +148,7 @@ class LatestMatchedPair(TypedDict):
     """Newest harness-backed Home Assistant release plus the absolute HA edge."""
 
     ha_ver: str
+    harness_package: str
     harness_ver: str
     absolute_latest_ha_ver: str
 
@@ -131,7 +158,7 @@ class RequiredTestDependencyMetadata(TypedDict):
 
     required_packages: Sequence[str]
     homeassistant_constraint_packages: Sequence[str]
-    test_harness_package: str
+    test_harness_packages: Sequence[str]
 
 
 def _required_test_dependency_metadata() -> RequiredTestDependencyMetadata:
@@ -139,7 +166,7 @@ def _required_test_dependency_metadata() -> RequiredTestDependencyMetadata:
     return {
         "required_packages": _REQUIRED_TEST_DEPS,
         "homeassistant_constraint_packages": _HA_CONSTRAINED_TEST_DEPS,
-        "test_harness_package": _TEST_HARNESS_PACKAGE,
+        "test_harness_packages": _TEST_HARNESS_PACKAGES,
     }
 
 
@@ -342,18 +369,50 @@ def _get_optional_package_version(ha_ver: str, package_name: str) -> str | None:
         return None
 
 
+def _test_harness_package_for_ha(ha_ver: str) -> str:
+    """Return the test harness distribution matching a Home Assistant version."""
+    version = Version(_validate_version_label("ha_ver", ha_ver))
+    if version >= Version(_NEW_TEST_HARNESS_MIN_HA_VERSION):
+        return _NEW_TEST_HARNESS_PACKAGE
+    return _LEGACY_TEST_HARNESS_PACKAGE
+
+
+def _test_harness_dependency_for_ha(ha_ver: str) -> str:
+    """Return the test harness install name, including required extras."""
+    package = _test_harness_package_for_ha(ha_ver)
+    extras = _TEST_HARNESS_EXTRAS.get(package)
+    return f"{package}[{','.join(extras)}]" if extras else package
+
+
+def _validate_test_harness_package(package_name: object) -> str:
+    """Return a supported Home Assistant test harness package name."""
+    package = _validate_package_name("harness_package", package_name)
+    if package not in _TEST_HARNESS_PACKAGES:
+        raise ValueError(
+            f"Unsupported test harness package {package!r}; expected one of "
+            f"{', '.join(_TEST_HARNESS_PACKAGES)}."
+        )
+    return package
+
+
 def _resolve_test_dependency_versions(
     ha_ver: str,
     harness_ver: str,
 ) -> dict[str, str]:
     """Return Home Assistant test dependency versions."""
-    return {
-        _AIODNS_PACKAGE: _get_required_package_version(ha_ver, _AIODNS_PACKAGE),
-        _TEST_HARNESS_PACKAGE: _validate_version_label(
-            "harness_ver",
-            harness_ver,
-        ),
+    package = _test_harness_dependency_for_ha(ha_ver)
+    resolved = {
+        constrained_package: _get_required_package_version(
+            ha_ver,
+            normalize_package_name(constrained_package),
+        )
+        for constrained_package in _HA_CONSTRAINED_TEST_DEPS
     }
+    resolved[package] = _validate_version_label(
+        "harness_ver",
+        harness_ver,
+    )
+    return resolved
 
 
 def _test_dep_packages(test_dependency_versions: dict[str, str]) -> tuple[str, ...]:
@@ -696,7 +755,7 @@ def _published_versions_descending(payload: object, package_name: str) -> list[s
         except InvalidVersion:
             continue
     if not published_versions:
-        raise ValueError(f"PyPI returned no published {package_name} releases")
+        raise NoPublishedReleasesError(f"PyPI returned no published {package_name} releases")
     # Sort strictly by parsed PEP 440 Version object in descending order (e.g. 0.13.100 > 0.13.99)
     published_versions.sort(key=lambda item: item[0], reverse=True)
     valid_versions: list[str] = []
@@ -708,7 +767,7 @@ def _published_versions_descending(payload: object, package_name: str) -> list[s
         except ValueError:
             continue
     if not valid_versions:
-        raise ValueError(f"PyPI returned no published {package_name} releases")
+        raise NoPublishedReleasesError(f"PyPI returned no published {package_name} releases")
     return valid_versions
 
 
@@ -717,82 +776,228 @@ def _newest_published_version(payload: object, package_name: str) -> str:
     return _published_versions_descending(payload, package_name)[0]
 
 
-def _get_latest_matched_pair() -> LatestMatchedPair:
-    """Resolve the newest harness-backed HA release and the absolute HA edge."""
+def _load_latest_ha_releases() -> tuple[dict[str, object], str]:
+    """Return published Home Assistant releases and the absolute latest version."""
     try:
         ha_payload = orjson.loads(_fetch_remote_text(_PYPI_HA_JSON_URL))
-        harness_payload = orjson.loads(_fetch_remote_text(_PYPI_TEST_HARNESS_JSON_URL))
         if not isinstance(ha_payload, dict):
             raise ValueError("Home Assistant PyPI metadata is not a JSON object")
-        if not isinstance(harness_payload, dict):
-            raise ValueError("Test harness PyPI metadata is not a JSON object")
         if not isinstance((releases := ha_payload.get("releases")), dict):
             raise ValueError("Home Assistant PyPI metadata has no releases object")
-
         absolute_latest = _newest_published_version(ha_payload, "homeassistant")
-        harness_versions = _published_versions_descending(
-            harness_payload,
-            _TEST_HARNESS_PACKAGE,
+    except (OSError, KeyError, TypeError, ValueError) as err:
+        raise ValueError(f"Failed to resolve latest Home Assistant release: {err}") from err
+    return releases, absolute_latest
+
+
+def _harness_versions_for_package(payload: object, package_name: str) -> list[str]:
+    """Return candidate versions for one test harness package."""
+    try:
+        harness_versions = _published_versions_descending(payload, package_name)
+    except NoPublishedReleasesError:
+        return []
+    if package_name == _NEW_TEST_HARNESS_PACKAGE:
+        minimum = Version(_NEW_TEST_HARNESS_MIN_HA_VERSION)
+        harness_versions = [version for version in harness_versions if Version(version) >= minimum]
+    return harness_versions
+
+
+def _newest_ha_for_package(
+    ha_releases: dict[str, object],
+    package_name: str,
+) -> str | None:
+    """Return the newest published Home Assistant release handled by a harness package."""
+    try:
+        published_versions = _published_versions_descending(
+            {"releases": ha_releases},
+            "homeassistant",
         )
+    except NoPublishedReleasesError:
+        return None
+    return next(
+        (
+            version
+            for version in published_versions
+            if _test_harness_package_for_ha(version) == package_name
+        ),
+        None,
+    )
 
-        matched_pair: tuple[str, str] | None = None
+
+def _harness_info_for_candidate(
+    harness_payload: dict[str, object],
+    version_url_template: str,
+    harness_version: str,
+) -> dict[str, object]:
+    """Return root or version-specific PyPI info for one harness candidate."""
+    harness_info = harness_payload.get("info")
+    if not isinstance(harness_info, dict):
+        raise ValueError("Test harness PyPI metadata has no info object")
+    if "version" not in harness_info or harness_info.get("version") == harness_version:
+        return harness_info
+    version_url = version_url_template.format(version=harness_version)
+    version_payload = orjson.loads(_fetch_remote_text(version_url))
+    if not isinstance(version_payload, dict):
+        raise ValueError(f"Test harness {harness_version} PyPI metadata is not a JSON object")
+    version_info = version_payload.get("info")
+    if not isinstance(version_info, dict):
+        raise ValueError(f"Test harness {harness_version} PyPI metadata has no info object")
+    return version_info
+
+
+def _load_harness_info(
+    harness_payload: dict[str, object],
+    version_url_template: str,
+    harness_version: str,
+    *,
+    has_match: bool,
+) -> dict[str, object] | None:
+    """Load candidate metadata, tolerating lookup failures only after a match."""
+    try:
+        return _harness_info_for_candidate(
+            harness_payload,
+            version_url_template,
+            harness_version,
+        )
+    except (OSError, KeyError, TypeError, ValueError) as err:
+        if has_match:
+            # Older candidates cannot invalidate an already resolved pair.
+            return None
+        if isinstance(err, ValueError):
+            raise
+        raise ValueError(
+            f"Test harness {harness_version} PyPI metadata unavailable: {err}"
+        ) from err
+
+
+def _exact_ha_version_for_harness(
+    harness_info: dict[str, object],
+    package_name: str,
+    harness_version: str,
+) -> str:
+    """Return the exact Home Assistant version pinned by one harness candidate."""
+    return _validate_version_label(
+        "harness_homeassistant_version",
+        exact_homeassistant_requirement(
+            harness_info.get("requires_dist"),
+            f"{package_name} {harness_version}",
+        ),
+    )
+
+
+def _ha_release_is_published(ha_releases: dict[str, object], ha_version: str) -> bool:
+    """Return whether Home Assistant metadata has a matching published artifact."""
+    return any(
+        isinstance(rel_ver, str)
+        and isinstance(rel_artifacts, list)
+        and rel_artifacts
+        and not versions_differ(rel_ver, ha_version)
+        for rel_ver, rel_artifacts in ha_releases.items()
+    )
+
+
+def _matched_pair_for_package(
+    package_name: str,
+    ha_releases: dict[str, object],
+) -> tuple[str, str] | None:
+    """Return the newest published (HA, harness) pair for one harness package."""
+    harness_json_url = _TEST_HARNESS_JSON_URLS[package_name]
+    version_url_template = _TEST_HARNESS_VERSION_JSON_URL_TEMPLATES[package_name]
+    try:
+        harness_payload = orjson.loads(_fetch_remote_text(harness_json_url))
+        if not isinstance(harness_payload, dict):
+            raise ValueError("Test harness PyPI metadata is not a JSON object")
+        harness_versions = _harness_versions_for_package(harness_payload, package_name)
+        newest_ha_for_package = _newest_ha_for_package(ha_releases, package_name)
+        matched_pairs: list[tuple[str, str]] = []
+        metadata_error: ValueError | None = None
+
         for harness_version in harness_versions[:_MAX_HARNESS_CANDIDATES]:
-            harness_info = harness_payload.get("info")
-            if not isinstance(harness_info, dict):
-                raise ValueError("Test harness PyPI metadata has no info object")
-            if "version" in harness_info and harness_info.get("version") != harness_version:
-                version_url = _PYPI_TEST_HARNESS_VERSION_JSON_URL_TEMPLATE.format(
-                    version=harness_version,
-                )
-                version_payload = orjson.loads(_fetch_remote_text(version_url))
-                if not isinstance(version_payload, dict):
-                    raise ValueError(
-                        f"Test harness {harness_version} PyPI metadata is not a JSON object"
-                    )
-                version_info = version_payload.get("info")
-                if not isinstance(version_info, dict):
-                    raise ValueError(
-                        f"Test harness {harness_version} PyPI metadata has no info object"
-                    )
-                harness_info = version_info
-
-            try:
-                candidate_ha = _validate_version_label(
-                    "harness_homeassistant_version",
-                    exact_homeassistant_requirement(
-                        harness_info.get("requires_dist"),
-                        f"{_TEST_HARNESS_PACKAGE} {harness_version}",
-                    ),
-                )
-            except ValueError:
+            harness_info = _load_harness_info(
+                harness_payload,
+                version_url_template,
+                harness_version,
+                has_match=bool(matched_pairs),
+            )
+            if harness_info is None:
                 continue
 
-            if any(
-                isinstance(rel_ver, str)
-                and isinstance(rel_artifacts, list)
-                and rel_artifacts
-                and not versions_differ(rel_ver, candidate_ha)
-                for rel_ver, rel_artifacts in releases.items()
+            try:
+                candidate_ha = _exact_ha_version_for_harness(
+                    harness_info,
+                    package_name,
+                    harness_version,
+                )
+            except ValueError as err:
+                if metadata_error is None:
+                    metadata_error = err
+                continue
+
+            if _test_harness_package_for_ha(candidate_ha) != package_name:
+                continue
+
+            if not _ha_release_is_published(ha_releases, candidate_ha):
+                continue
+
+            matched_pairs.append((candidate_ha, harness_version))
+            if newest_ha_for_package is not None and not versions_differ(
+                candidate_ha,
+                newest_ha_for_package,
             ):
-                matched_pair = (candidate_ha, harness_version)
+                # Older harness releases cannot beat this pair: the HA version
+                # is the newest one this package can target, and candidates are
+                # already ordered by descending harness version.
                 break
 
-        if not matched_pair:
-            checked = min(len(harness_versions), _MAX_HARNESS_CANDIDATES)
-            raise ValueError(f"No matching test harness found among {checked} checked releases")
+        if matched_pairs:
+            return max(
+                matched_pairs,
+                key=lambda pair: (Version(pair[0]), Version(pair[1])),
+            )
+        if metadata_error is not None:
+            raise metadata_error
+    except (OSError, KeyError, TypeError, ValueError) as err:
+        raise ValueError(f"Failed to resolve latest matched {package_name} pair: {err}") from err
+    return None
 
-        matched_ha, matched_harness = matched_pair
-    except (
-        OSError,
-        KeyError,
-        TypeError,
-        ValueError,
-    ) as err:
+
+def _get_latest_matched_pair() -> LatestMatchedPair:
+    """Resolve the newest harness-backed HA release and the absolute HA edge."""
+    ha_releases, absolute_latest = _load_latest_ha_releases()
+    candidates: list[tuple[str, str, str]] = []
+    errors: dict[str, str] = {}
+    for package in _TEST_HARNESS_PACKAGES:
+        try:
+            matched_pair = _matched_pair_for_package(package, ha_releases)
+        except (OSError, KeyError, TypeError, ValueError) as err:
+            errors[package] = str(err)
+            print(f"STEP_WARNING: {err}", file=sys.stderr, flush=True)
+            continue
+        if matched_pair:
+            candidates.append((*matched_pair, package))
+
+    if not candidates:
+        details = "; ".join(errors.values()) if errors else "no published matching releases"
         raise ValueError(
-            f"Failed to resolve latest matched harness-backed Home Assistant pair: {err}"
-        ) from err
+            f"Failed to resolve latest matched harness-backed Home Assistant pair: {details}"
+        )
+
+    matched_ha, matched_harness, matched_package = max(
+        candidates,
+        key=lambda candidate: (Version(candidate[0]), Version(candidate[1])),
+    )
+    expected_package = _test_harness_package_for_ha(absolute_latest)
+    if expected_package in errors:
+        raise ValueError(
+            "Failed to resolve latest matched harness-backed Home Assistant pair "
+            f"without downgrading {absolute_latest}: {errors[expected_package]}"
+        )
+    # A missing candidate for the expected harness is publication lag, not a
+    # lookup failure. Fall back to the newest matched release; the CI canary
+    # reports the gap while compatibility continues to gate on the matched pair.
     return LatestMatchedPair(
         ha_ver=matched_ha,
+        harness_package=matched_package,
         harness_ver=matched_harness,
         absolute_latest_ha_ver=absolute_latest,
     )
@@ -1232,16 +1437,21 @@ def _validate_python_bin(python_bin: object) -> Path:
     return path_obj
 
 
-def _get_installed_harness_pair(python_bin: Path) -> tuple[str, str]:
-    """Return installed harness version and its exact Home Assistant requirement."""
+def _get_installed_harness_pair(python_bin: Path) -> tuple[str, str, str]:
+    """Return installed harness package, version, and exact Home Assistant requirement."""
     safe_python_bin = _validate_python_bin(python_bin)
+    packages = list(_TEST_HARNESS_PACKAGES)
     code = (
-        "import importlib.metadata as md, json\n"
-        f"package = {_TEST_HARNESS_PACKAGE!r}\n"
-        "print(json.dumps({\n"
-        '    "version": md.version(package),\n'
-        '    "requirements": md.requires(package) or [],\n'
-        "}, sort_keys=True))\n"
+        "import contextlib, importlib.metadata as md, json\n"
+        f"packages = {packages!r}\n"
+        "installed = {}\n"
+        "for package in packages:\n"
+        "    with contextlib.suppress(md.PackageNotFoundError):\n"
+        "        installed[package] = {\n"
+        '            "version": md.version(package),\n'
+        '            "requirements": md.requires(package) or [],\n'
+        "        }\n"
+        'print(json.dumps({"installed": installed}, sort_keys=True))\n'
     )
     try:
         result = subprocess.run(
@@ -1264,18 +1474,36 @@ def _get_installed_harness_pair(python_bin: Path) -> tuple[str, str]:
         )
         payload = orjson.loads(result.stdout)
         if not isinstance(payload, dict) or not isinstance(
-            (harness_version := payload.get("version")),
+            installed := payload.get("installed"),
+            dict,
+        ):
+            raise ValueError("installed harness metadata has no installed object")
+        if not installed:
+            raise ValueError(
+                "no supported test harness package is installed; expected one of "
+                f"{', '.join(_TEST_HARNESS_PACKAGES)}"
+            )
+        if len(installed) > 1:
+            raise ValueError(
+                "multiple test harness packages are installed: "
+                f"{', '.join(sorted(str(package) for package in installed))}"
+            )
+        package_name, harness_info = next(iter(installed.items()))
+        package = _validate_test_harness_package(package_name)
+        if not isinstance(harness_info, dict) or not isinstance(
+            (harness_version := harness_info.get("version")),
             str,
         ):
             raise ValueError("installed harness metadata has no version")
         required_ha = _validate_version_label(
             "harness_homeassistant_version",
             exact_homeassistant_requirement(
-                payload.get("requirements"),
-                f"installed {_TEST_HARNESS_PACKAGE} {harness_version}",
+                harness_info.get("requirements"),
+                f"installed {package} {harness_version}",
             ),
         )
         return (
+            package,
             _validate_version_label("installed_harness_version", harness_version),
             required_ha,
         )
@@ -1298,12 +1526,17 @@ def _verify_harness_pair(
     expected_harness_version: str,
 ) -> bool:
     """Verify that the installed harness exactly targets the installed HA release."""
+    expected_package = _test_harness_package_for_ha(expected_ha_version)
     try:
-        installed_harness, harness_required_ha = _get_installed_harness_pair(python_bin)
+        installed_package, installed_harness, harness_required_ha = _get_installed_harness_pair(
+            python_bin
+        )
     except ValueError as err:
         print(f"HARNESS_MISMATCH: {err}", flush=True)
         return False
     mismatches: list[str] = []
+    if installed_package != expected_package:
+        mismatches.append(f"expected harness package {expected_package}, found {installed_package}")
     if versions_differ(installed_harness, expected_harness_version):
         mismatches.append(f"expected harness {expected_harness_version}, found {installed_harness}")
     if versions_differ(harness_required_ha, expected_ha_version):
@@ -1315,7 +1548,8 @@ def _verify_harness_pair(
         print(f"HARNESS_MISMATCH: {'; '.join(mismatches)}", flush=True)
         return False
     print(
-        f"STEP_OK: harness {installed_harness} matches Home Assistant {expected_ha_version}",
+        f"STEP_OK: {installed_package} {installed_harness} matches Home Assistant "
+        f"{expected_ha_version}",
         flush=True,
     )
     return True
@@ -1418,8 +1652,8 @@ def _prepare_version_and_deps(
         if absolute_latest != ha_ver_to_install:
             print(
                 f"CANARY_LAG: newest Home Assistant {absolute_latest} has no matching "
-                f"test harness; gating on {ha_ver_to_install} with harness "
-                f"{harness_ver_to_install}",
+                f"test harness; gating on {ha_ver_to_install} with "
+                f"{_test_harness_package_for_ha(ha_ver_to_install)} {harness_ver_to_install}",
                 flush=True,
             )
     test_dependency_versions = _resolve_test_dependency_versions(
@@ -1694,7 +1928,8 @@ def _run_tests_for_version(
 
         ha_ver_display = ha_ver_to_install
         print(
-            f"TESTING Home Assistant {ha_ver_to_install} with harness "
+            f"TESTING Home Assistant {ha_ver_to_install} with "
+            f"{_test_harness_package_for_ha(ha_ver_to_install)} "
             f"{harness_ver_to_install} (Python {py_ver})",
             flush=True,
         )
@@ -1776,6 +2011,17 @@ def main() -> None:
         help="Print compatibility test dependency package metadata as JSON and exit",
     )
     parser.add_argument(
+        "--resolve-harness-package",
+        help="Print the test harness package required by a Home Assistant version and exit",
+    )
+    parser.add_argument(
+        "--resolve-harness-dependency",
+        help=(
+            "Print the test harness install name, including required extras, "
+            "required by a Home Assistant version and exit"
+        ),
+    )
+    parser.add_argument(
         "--transitive-compatibility-specs-json",
         action="store_true",
         help="Print transitive compatibility specs for a resolved aiodns version",
@@ -1804,6 +2050,22 @@ def main() -> None:
 
     if args.required_test_dependency_metadata_json:
         print(orjson.dumps(_required_test_dependency_metadata()).decode(), flush=True)
+        return
+
+    if args.resolve_harness_package is not None:
+        try:
+            print(_test_harness_package_for_ha(args.resolve_harness_package), flush=True)
+        except ValueError as err:
+            print(f"VALIDATION_ERROR: {err}", flush=True)
+            sys.exit(1)
+        return
+
+    if args.resolve_harness_dependency is not None:
+        try:
+            print(_test_harness_dependency_for_ha(args.resolve_harness_dependency), flush=True)
+        except ValueError as err:
+            print(f"VALIDATION_ERROR: {err}", flush=True)
+            sys.exit(1)
         return
 
     if args.validate_matrix:

@@ -9,7 +9,6 @@ from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.script import scripts_with_blueprint
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
@@ -17,6 +16,7 @@ from custom_components.blueprints_updater.const import (
     BlueprintRiskType,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from tests.ha_test_harness import MockConfigEntry
 
 
 async def test_hass_uses_isolated_config_directory(

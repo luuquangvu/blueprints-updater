@@ -5,7 +5,6 @@ import logging
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
-import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
@@ -16,6 +15,7 @@ from custom_components.blueprints_updater.const import (
     FilterMode,
     FunctionalDomain,
 )
+from custom_components.blueprints_updater.ha_compat import httpx
 from custom_components.blueprints_updater.utils import (
     get_blueprint_usage_entities,
     get_config_bool,

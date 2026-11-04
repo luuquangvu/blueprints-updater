@@ -25,6 +25,16 @@
     "python_version": "3.14"
   },
   {
+    "ha_version": "2026.10.4",
+    "harness_version": "0.13.375",
+    "python_version": "3.14"
+  },
+  {
+    "ha_version": "2026.11.0",
+    "harness_version": "2026.11.0",
+    "python_version": "3.14"
+  },
+  {
     "ha_version": "latest",
     "harness_version": "latest",
     "python_version": "3.14"

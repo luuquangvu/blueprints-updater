@@ -1,19 +1,10 @@
 """Tests for Blueprints Updater config flow."""
 
 import os
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-if TYPE_CHECKING:
-    import probatio as vol
-else:
-    try:
-        import probatio as vol
-    except ImportError:
-        import voluptuous as vol
-
 from homeassistant.config_entries import (
     ConfigFlowResult,
 )
@@ -29,6 +20,7 @@ from custom_components.blueprints_updater.const import (
     CONF_UPDATE_INTERVAL,
     FunctionalDomain,
 )
+from custom_components.blueprints_updater.ha_compat import vol
 
 
 def get_schema_defaults(schema: vol.Schema) -> dict[str, Any]:

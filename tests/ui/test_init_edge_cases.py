@@ -5,7 +5,6 @@ from http import HTTPStatus
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EVENT_CORE_CONFIG_UPDATE
@@ -26,6 +25,7 @@ from custom_components.blueprints_updater.const import (
     IntegrationService,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.ha_compat import httpx
 
 
 async def _async_none(*args, **kwargs) -> None:

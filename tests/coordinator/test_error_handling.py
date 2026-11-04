@@ -3,13 +3,13 @@
 import os
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.blueprints_updater.const import (
     FunctionalDomain,
 )
+from custom_components.blueprints_updater.ha_compat import httpx
 
 
 @pytest.mark.asyncio
