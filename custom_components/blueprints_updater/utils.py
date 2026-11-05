@@ -15,7 +15,6 @@ from functools import wraps
 from typing import ParamSpec, TypeVar
 from urllib.parse import quote
 
-import httpx
 import orjson
 from homeassistant.components.automation import automations_with_blueprint
 from homeassistant.components.script import scripts_with_blueprint
@@ -44,6 +43,7 @@ from .const import (
     FunctionalDomain,
 )
 from .exceptions import BlueprintFetchPolicyError
+from .ha_compat import httpx
 from .providers import registry
 
 _LOGGER = logging.getLogger(__name__)

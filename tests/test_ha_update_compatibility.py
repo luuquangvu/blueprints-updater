@@ -15,10 +15,8 @@ from types import MappingProxyType
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import orjson
 import pytest
-import voluptuous as vol
 from homeassistant import data_entry_flow
 from homeassistant.components.blueprint import importer, models
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
@@ -34,7 +32,6 @@ from homeassistant.helpers import frame
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import yaml as yaml_util
 from homeassistant.util.yaml.objects import Input
-from pytest_homeassistant_custom_component.common import async_test_home_assistant
 
 from custom_components.blueprints_updater import (
     async_setup_entry,
@@ -89,6 +86,7 @@ from custom_components.blueprints_updater.file_store import (
     FileRevisionMismatchError,
     FileRevisionPrecondition,
 )
+from custom_components.blueprints_updater.ha_compat import httpx, vol
 from custom_components.blueprints_updater.providers import _strip_yaml_extension
 from custom_components.blueprints_updater.repairs import (
     IncompatibleBlueprintRepairFlow,
@@ -99,6 +97,7 @@ from custom_components.blueprints_updater.utils import (
     stringify_keys,
 )
 
+from .ha_test_harness import async_test_home_assistant
 from .real_world_blueprints import (
     LIVE_ENV,
     RECORD_ENV,

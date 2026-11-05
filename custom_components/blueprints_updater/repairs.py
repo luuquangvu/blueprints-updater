@@ -6,17 +6,9 @@ import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
-import httpx
-
 if TYPE_CHECKING:
-    import probatio as vol
     from homeassistant.components.repairs import RepairsFlow, RepairsFlowResult
 else:
-    try:
-        import probatio as vol
-    except ImportError:
-        import voluptuous as vol
-
     from homeassistant.components.repairs import RepairsFlow
 
     try:
@@ -63,6 +55,7 @@ from .const import (
 from .coordinator import BlueprintUpdateCoordinator, StructuredRisk
 from .exceptions import FileRevisionMismatchError
 from .file_store import BlueprintFileStore, FileRevisionPrecondition
+from .ha_compat import httpx, vol
 from .utils import (
     get_blueprint_usage_entities,
     get_ha_version,
@@ -232,6 +225,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
                     return await self.async_step_confirm_risks()
                 except (
                     httpx.HTTPError,
+                    httpx.InvalidURL,
                     HomeAssistantError,
                     ValueError,
                     OSError,
@@ -757,7 +751,13 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
                         _name,
                         _resp,
                     ) = await self.coordinator.async_fetch_import_data(url)
-                except (httpx.HTTPError, HomeAssistantError, ValueError, OSError) as err:
+                except (
+                    httpx.HTTPError,
+                    httpx.InvalidURL,
+                    HomeAssistantError,
+                    ValueError,
+                    OSError,
+                ) as err:
                     _LOGGER.warning("Failed to fetch fork from %s: %s", redact_url(url), err)
                     errors["url"] = "invalid_url"
 

@@ -1,1 +1,1 @@
-"""Tests for the ui module."""
+"""Tests package for the Blueprints Updater integration."""

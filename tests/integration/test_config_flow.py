@@ -5,11 +5,11 @@ from unittest.mock import patch
 import pytest
 from homeassistant import data_entry_flow
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
 )
+from tests.ha_test_harness import MockConfigEntry
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,6 @@ from types import MappingProxyType
 from typing import Any
 from unittest.mock import ANY, AsyncMock, MagicMock, mock_open, patch
 
-import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
@@ -36,6 +35,7 @@ from custom_components.blueprints_updater.coordinator import (
 )
 from custom_components.blueprints_updater.exceptions import BlueprintRefreshObsoleteError
 from custom_components.blueprints_updater.file_store import FileRevisionPrecondition
+from custom_components.blueprints_updater.ha_compat import httpx
 
 
 @pytest.mark.asyncio
@@ -1788,6 +1788,7 @@ async def test_async_handle_auto_update_blocked(coordinator, mock_makedirs):
             "invalid_blueprint",
         ),
         ("fetch_error", None, httpx.ConnectError("Connection Failed"), "fetch_error"),
+        ("invalid_url", None, httpx.InvalidURL("Invalid URL"), "fetch_error"),
     ],
 )
 async def test_async_update_blueprint_in_place_errors_isolated(

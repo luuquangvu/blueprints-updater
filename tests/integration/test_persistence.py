@@ -5,16 +5,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
-    async_mock_service,
-    flush_store,
-)
 
 from custom_components.blueprints_updater.const import (
     DOMAIN,
     FunctionalDomain,
 )
+from tests.ha_test_harness import MockConfigEntry, async_mock_service, flush_store
 
 
 @pytest.mark.asyncio

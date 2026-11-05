@@ -15,22 +15,12 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from difflib import unified_diff
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Final, Self, TypedDict, TypeGuard, TypeVar
+from typing import Any, Final, Self, TypedDict, TypeGuard, TypeVar
 from urllib.parse import unquote, urlparse
 from warnings import WarningMessage
 
-import httpx
 import orjson
 from awesomeversion import AwesomeVersion, AwesomeVersionException
-
-if TYPE_CHECKING:
-    import probatio as vol
-else:
-    try:
-        import probatio as vol
-    except ImportError:
-        import voluptuous as vol
-
 from homeassistant.components.automation.config import (
     ValidationStatus as AutomationValidationStatus,
 )
@@ -195,6 +185,7 @@ from .file_store import (
     FileRevisionPrecondition,
     FileTransactionResult,
 )
+from .ha_compat import httpx, vol
 from .network import (
     async_resolve_public_addresses,
     get_guarded_async_client,
@@ -3143,7 +3134,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     translation_domain=DOMAIN,
                     translation_key="empty_blueprint_content",
                 )
-        except (httpx.HTTPError, HomeAssistantError) as err:
+        except (httpx.HTTPError, httpx.InvalidURL, HomeAssistantError) as err:
             if isinstance(err, ServiceValidationError):
                 raise
             raise ServiceValidationError(
@@ -3201,7 +3192,13 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                             )
                             if filename:
                                 name = filename.rsplit(".", 1)[0]
-                except (httpx.HTTPError, HomeAssistantError, TypeError, ValueError) as err:
+                except (
+                    httpx.HTTPError,
+                    httpx.InvalidURL,
+                    HomeAssistantError,
+                    TypeError,
+                    ValueError,
+                ) as err:
                     _LOGGER.debug(
                         "Failed to retrieve guarded gist metadata from %s: %s",
                         redact_url(gist_metadata_url),
@@ -3866,9 +3863,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         """
         try:
+            httpx.URL(url)
             parsed = urlparse(url)
             raw_hostname = parsed.hostname
-        except ValueError:
+        except (ValueError, httpx.InvalidURL):
             return False
         if parsed.scheme.lower() != "https":
             return False
@@ -5368,7 +5366,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                     new_last_modified,
                     refresh_work,
                 )
-        except (TimeoutError, httpx.HTTPError, HomeAssistantError) as err:
+        except (TimeoutError, httpx.HTTPError, httpx.InvalidURL, HomeAssistantError) as err:
             _LOGGER.warning(
                 "Failed to fetch blueprint from %s: %s",
                 redact_url(source_url),
@@ -6156,7 +6154,12 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
                 response.raise_for_status()
                 return response
 
-            next_url = str(response.url.join(next_url))
+            try:
+                next_url = str(response.url.join(next_url))
+            except httpx.InvalidURL as err:
+                raise BlueprintFetchPolicyError(
+                    f"Security violation: Invalid redirect location for {redact_url(url)}"
+                ) from err
             if not await self._is_safe_url(next_url):
                 _LOGGER.warning("Blocking redirect to unsafe URL: %s", redact_url(next_url))
                 raise BlueprintFetchPolicyError(

@@ -26,6 +26,21 @@ _real_getaddrinfo = socket.getaddrinfo
 patch_service_call_compat()
 
 
+@pytest.fixture
+def respx_mock():
+    """Provide a respx router for the HTTP client Home Assistant is using.
+
+    Home Assistant aliases ``httpx`` to ``httpx2`` (and ``httpcore`` to
+    ``httpcore2``) before test dependencies import respx. Patching the client
+    transport therefore intercepts the active HTTP/2-capable client and accepts
+    the response type imported by the import-service tests.
+    """
+    import respx
+
+    with respx.mock(using="httpx") as mock_router:
+        yield mock_router
+
+
 @pytest.fixture(autouse=True)
 def mock_asyncio_sleep():
     """Mock asyncio.sleep for all tests to run instantly."""

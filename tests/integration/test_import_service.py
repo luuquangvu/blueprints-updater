@@ -3,7 +3,6 @@
 from http import HTTPStatus
 from pathlib import Path
 
-import httpx
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
@@ -14,6 +13,7 @@ from custom_components.blueprints_updater.const import (
     IntegrationService,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.ha_compat import httpx
 
 
 def _assert_imported_blueprint(

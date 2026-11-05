@@ -1,8 +1,7 @@
 """Shared helpers for coordinator tests."""
 
-import httpx
-
 from custom_components.blueprints_updater.const import REQUEST_TIMEOUT
+from custom_components.blueprints_updater.ha_compat import httpx
 
 
 async def mock_bounded_response(

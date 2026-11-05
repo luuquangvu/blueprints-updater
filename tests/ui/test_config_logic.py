@@ -1,18 +1,10 @@
 """Tests for BlueprintUpdateCoordinator configuration helpers."""
 
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-if TYPE_CHECKING:
-    import probatio as vol
-else:
-    try:
-        import probatio as vol
-    except ImportError:
-        import voluptuous as vol
 
 from custom_components.blueprints_updater.config_flow import _get_config_schema
 from custom_components.blueprints_updater.const import (
@@ -20,6 +12,7 @@ from custom_components.blueprints_updater.const import (
     DEFAULT_AUTO_UPDATE,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.ha_compat import vol
 
 
 @pytest.mark.parametrize(

@@ -9,7 +9,6 @@ from types import MappingProxyType
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
@@ -20,6 +19,7 @@ from custom_components.blueprints_updater.const import (
     FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.ha_compat import httpx
 
 from .utils import mock_bounded_response
 

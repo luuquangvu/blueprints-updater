@@ -9,10 +9,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blueprints_updater import coordinator as coordinator_module
 from custom_components.blueprints_updater.const import DOMAIN
+from tests.ha_test_harness import HARNESS_MODULE, MockConfigEntry
 
 
 @pytest.fixture
@@ -25,10 +25,7 @@ def hass_fixture_setup(
     def _get_test_config_dir(*parts: str) -> str:
         return str(tmp_path.joinpath(*parts))
 
-    monkeypatch.setattr(
-        "pytest_homeassistant_custom_component.common.get_test_config_dir",
-        _get_test_config_dir,
-    )
+    monkeypatch.setattr(HARNESS_MODULE, "get_test_config_dir", _get_test_config_dir)
     return []
 
 

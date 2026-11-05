@@ -3,7 +3,6 @@
 from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
-import httpx
 import pytest
 from homeassistant.exceptions import ServiceValidationError
 
@@ -17,6 +16,7 @@ from custom_components.blueprints_updater.file_store import (
     BlueprintFileStore,
     FileRevisionPrecondition,
 )
+from custom_components.blueprints_updater.ha_compat import httpx
 from custom_components.blueprints_updater.providers import GistProvider
 
 PROVIDER_LOOKUP = "custom_components.blueprints_updater.coordinator.registry.get_provider"
@@ -115,6 +115,25 @@ async def test_async_import_blueprint_wraps_fetch_errors(coordinator):
 
     assert err.value.translation_key == "fetch_blueprint_error"
     assert err.value.translation_placeholders == {"error": "network down"}
+
+
+@pytest.mark.asyncio
+async def test_async_import_blueprint_wraps_invalid_url_errors(coordinator):
+    """Verify invalid URLs raised during fetching become service fetch errors."""
+    provider = _provider()
+
+    with (
+        _patched_provider(provider),
+        patch.object(
+            coordinator,
+            "_execute_with_redirect_guard",
+            AsyncMock(side_effect=httpx.InvalidURL("invalid url")),
+        ),
+        pytest.raises(ServiceValidationError) as err,
+    ):
+        await coordinator.async_import_blueprint(IMPORT_URL, confirm=True)
+
+    assert err.value.translation_key == "fetch_blueprint_error"
 
 
 @pytest.mark.asyncio

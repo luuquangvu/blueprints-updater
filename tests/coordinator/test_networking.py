@@ -5,8 +5,6 @@ import socket
 from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpcore
-import httpx
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
@@ -19,6 +17,7 @@ from custom_components.blueprints_updater.const import (
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
 from custom_components.blueprints_updater.exceptions import BlueprintFetchPolicyError
+from custom_components.blueprints_updater.ha_compat import httpcore, httpx
 from custom_components.blueprints_updater.network import (
     SSL_ALPN_HTTP11,
     GuardedAsyncHTTPTransport,
@@ -722,6 +721,28 @@ async def test_execute_with_redirect_guard_security(coordinator):
             mock_session, "https://example.com/start", {}
         )
     coordinator._async_get_bounded_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_with_redirect_guard_rejects_invalid_redirect_location(coordinator):
+    """Reject malformed redirect targets as policy failures instead of leaking InvalidURL."""
+    mock_session = MagicMock(spec=httpx.AsyncClient)
+
+    mock_response = MagicMock(spec=httpx.Response)
+    mock_response.status_code = HTTPStatus.FOUND
+    mock_response.is_redirect = True
+    mock_response.headers = {"Location": "https://example.com:bad/next"}
+    mock_response.url = httpx.URL("https://example.com/start")
+
+    coordinator._async_get_bounded_response = AsyncMock(return_value=mock_response)
+
+    with (
+        patch.object(coordinator, "_is_safe_url", return_value=True),
+        pytest.raises(BlueprintFetchPolicyError, match="Invalid redirect location"),
+    ):
+        await coordinator._execute_with_redirect_guard(
+            mock_session, "https://example.com/start", {}
+        )
 
 
 @pytest.mark.asyncio

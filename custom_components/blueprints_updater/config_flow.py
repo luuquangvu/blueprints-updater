@@ -3,15 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import probatio as vol
-else:
-    try:
-        import probatio as vol
-    except ImportError:
-        import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult, OptionsFlow
@@ -45,6 +36,7 @@ from .const import (
     FilterMode,
 )
 from .coordinator import BlueprintUpdateCoordinator
+from .ha_compat import vol
 from .utils import (
     get_blueprint_relative_path,
     get_config_bool,

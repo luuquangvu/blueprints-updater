@@ -20,14 +20,6 @@ from typing import TYPE_CHECKING, Final, TypedDict
 import homeassistant.components.template.config as template_config
 import orjson
 import yaml
-
-if TYPE_CHECKING:
-    import probatio as vol
-else:
-    try:
-        import probatio as vol
-    except ImportError:
-        import voluptuous as vol
 from homeassistant.components.automation.config import AUTOMATION_BLUEPRINT_SCHEMA
 from homeassistant.components.automation.const import CONF_TRIGGER_VARIABLES
 from homeassistant.components.blueprint import models
@@ -98,6 +90,7 @@ from .const import (
     BlueprintRiskType,
     FunctionalDomain,
 )
+from .ha_compat import vol
 from .providers import registry
 from .utils import extract_leaf_strings, redact_url
 
@@ -173,6 +166,7 @@ class SelectorType(StrEnum):
     THEME = "theme"
     TIME = "time"
     TRIGGER = "trigger"
+    UNIT_OF_MEASUREMENT = "unit_of_measurement"
 
 
 _KNOWN_SELECTOR_TYPES: Final[frozenset[str]] = frozenset(s.value for s in SelectorType)

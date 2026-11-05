@@ -1,1 +1,1 @@
-"""Test utilities for Blueprints Updater."""
+"""Tests package for the Blueprints Updater integration."""

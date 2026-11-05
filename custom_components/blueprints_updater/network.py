@@ -10,13 +10,12 @@ import ssl
 import time
 from collections.abc import AsyncIterable, AsyncIterator, Generator, Iterable
 
-import httpcore
-import httpx
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.httpx_client import create_async_httpx_client
 from homeassistant.util import ssl as ha_ssl
 
 from .const import DOMAIN, REQUEST_TIMEOUT, SPECIAL_USE_TLDS
+from .ha_compat import httpcore, httpx
 from .utils import is_ip_safe
 
 SSL_ALPN_HTTP11: tuple[str, ...] = getattr(
@@ -310,5 +309,7 @@ def get_guarded_async_client(
             http2=use_http2,
             transport=transport,
         )
+    if not isinstance(client, httpx.AsyncClient):
+        raise TypeError("Home Assistant returned an incompatible HTTPX async client")
     clients[use_http2] = client
     return client

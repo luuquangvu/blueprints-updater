@@ -9,19 +9,10 @@ import asyncio
 import os
 import socket
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-if TYPE_CHECKING:
-    import probatio as vol
-else:
-    try:
-        import probatio as vol
-    except ImportError:
-        import voluptuous as vol
-
 from homeassistant.components.blueprint.errors import InvalidBlueprint
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import yaml as yaml_util
@@ -36,6 +27,7 @@ from custom_components.blueprints_updater.const import (
     FunctionalDomain,
 )
 from custom_components.blueprints_updater.coordinator import BlueprintUpdateCoordinator
+from custom_components.blueprints_updater.ha_compat import vol
 from custom_components.blueprints_updater.utils import (
     get_validated_filter_mode,
     get_validated_selected_blueprints,
@@ -315,6 +307,18 @@ async def test_is_safe_url(coordinator):
         assert not await coord._is_safe_url("http://test.example/api")
         assert not await coord._is_safe_url("http://192.168.1.1/admin")
         assert not await coord._is_safe_url("http://127.0.0.1/admin")
+
+
+@pytest.mark.asyncio
+async def test_is_safe_url_rejects_urls_httpx_cannot_construct(coordinator):
+    """Reject URLs that urllib.parse accepts but HTTPX cannot construct."""
+    coordinator._is_safe_url = BlueprintUpdateCoordinator._is_safe_url.__get__(coordinator)
+
+    with patch("socket.getaddrinfo") as mock_getaddr:
+        assert not await coordinator._is_safe_url("https://example.com:bad/bp.yaml")
+        assert not await coordinator._is_safe_url("https://example.com/\x00")
+
+    mock_getaddr.assert_not_called()
 
 
 @pytest.mark.asyncio
