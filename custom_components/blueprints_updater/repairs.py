@@ -67,6 +67,20 @@ from .utils import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _set_flow_issue_id(flow: RepairsFlow, issue_id: str) -> None:
+    """Store a repair flow's issue ID without using the deprecated direct setter.
+
+    Home Assistant 2026.12 deprecated assigning ``RepairsFlow.issue_id`` directly
+    and expects the value to live in the flow context. Older Home Assistant
+    releases expose ``issue_id`` as a plain attribute instead, so both forms
+    must be supported.
+    """
+    if isinstance(getattr(type(flow), "issue_id", None), property):
+        flow.context = {**flow.context, "issue_id": issue_id}
+        return
+    flow.issue_id = issue_id
+
+
 class WithdrawnBlueprintRepairFlow(RepairsFlow):
     """Handler for withdrawn blueprint repair flow."""
 
@@ -78,7 +92,7 @@ class WithdrawnBlueprintRepairFlow(RepairsFlow):
     ) -> None:
         """Initialize the repair flow."""
         self.coordinator = coordinator
-        self.issue_id = issue_id
+        _set_flow_issue_id(self, issue_id)
         self.issue_data: dict[str, object] = dict(data) if isinstance(data, (dict, Mapping)) else {}
         self.relative_path: str = str(self.issue_data.get("relative_path") or "").strip()
         self.path: str = str(self.issue_data.get("path") or "").strip()
@@ -425,7 +439,7 @@ class IncompatibleBlueprintRepairFlow(RepairsFlow):
         """
         self.coordinator = coordinator
         self.hass = coordinator.hass
-        self.issue_id = issue_id
+        _set_flow_issue_id(self, issue_id)
         self.issue_data: dict[str, object] = dict(data) if isinstance(data, (dict, Mapping)) else {}
         self.relative_path: str = str(self.issue_data.get("relative_path") or "").strip()
         self.path: str = str(self.issue_data.get("path") or "").strip()

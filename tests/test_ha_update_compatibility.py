@@ -6448,7 +6448,6 @@ REAL_WORLD_BLUEPRINT_URLS = [
     "https://gist.github.com/Blackshome/42586b567d243d432887cadf54e18906",
     "https://gist.github.com/Blackshome/8e09a8213b834f1be4ab49ba880abed8",
     "https://gist.github.com/Blackshome/e6c8f1bf846bab2fa4431934a0a85770",
-    "https://gist.github.com/Blackshome/40bfd92fb1fe6a9a9189325704a3c81b",
     "https://gist.github.com/Blackshome/180ca4a24af81cd5d843acfc039039bc",
     "https://gist.github.com/Blackshome/0a34870755762bcb9fab159d5b94fd25",
     "https://gist.github.com/Blackshome/06f6f28e76299267b813dac48608f549",

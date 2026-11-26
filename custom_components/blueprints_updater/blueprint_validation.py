@@ -2288,6 +2288,7 @@ def _is_failing_path_dummy_error(
     err: Exception,
     synthetic_values: SyntheticDummyValues | set[str] | None = None,
     substituted_config: Mapping[str, object] | None = None,
+    error_path: Sequence[object] | None = None,
 ) -> bool:
     """Determine if a failing configuration path maps to a synthetic dummy or null-default input.
 
@@ -2295,14 +2296,18 @@ def _is_failing_path_dummy_error(
         err: Exception raised during baseline validation.
         synthetic_values: Optional set or SyntheticDummyValues generated for the blueprint.
         substituted_config: Optional fully substituted blueprint configuration dictionary.
+        error_path: Optional structured path of the failing configuration entry.
 
     Returns:
         True if the failing path resolves to a dummy device/entity or null-default input.
 
     """
-    if substituted_config is not None and (
-        failing_path := _extract_config_path_from_error(err, config=substituted_config)
-    ):
+    failing_path = (
+        error_path
+        if error_path is not None
+        else _extract_config_path_from_error(err, config=substituted_config)
+    )
+    if substituted_config is not None and failing_path:
         resolved = _resolve_config_path(substituted_config, failing_path)
         if isinstance(synthetic_values, SyntheticDummyValues):
             return synthetic_values.maps_failing_path_to_input(
@@ -2384,6 +2389,7 @@ def _is_device_automation_domain_tied_to_dummy(
     err: Exception,
     synthetic_values: SyntheticDummyValues | set[str] | None = None,
     substituted_config: Mapping[str, object] | None = None,
+    error_path: Sequence[object] | None = None,
 ) -> bool:
     """Determine if a device automation integration error is tied to synthetic dummy inputs.
 
@@ -2396,6 +2402,7 @@ def _is_device_automation_domain_tied_to_dummy(
         err: Validation exception raised during baseline validation.
         synthetic_values: Optional set or SyntheticDummyValues collection.
         substituted_config: Optional fully substituted blueprint configuration dictionary.
+        error_path: Optional structured path of the failing configuration entry.
 
     Returns:
         True if the device automation failure is tied to a synthetic dummy input.
@@ -2406,6 +2413,19 @@ def _is_device_automation_domain_tied_to_dummy(
         if synthetic_values is not None
         else STANDARD_DUMMY_IDS
     )
+
+    if error_path is not None and substituted_config is not None:
+        resolved_error = _resolve_config_path(substituted_config, error_path)
+        if (
+            isinstance(resolved_error, Mapping)
+            and isinstance(resolved_domain := resolved_error.get("domain"), str)
+            and resolved_domain
+            and any(
+                value in active_synthetic or is_synthetic_identifier(value)
+                for value in extract_leaf_strings(resolved_error)
+            )
+        ):
+            return True
 
     candidate_domains = _extract_failed_device_automation_domains(err)
     if any(d in active_synthetic or is_synthetic_identifier(d) for d in candidate_domains):
@@ -2456,10 +2476,57 @@ def _is_device_automation_domain_tied_to_dummy(
     return False
 
 
+def _unwrap_validation_error_record(error: object) -> Exception:
+    """Return the exception wrapped by a Home Assistant validation error record.
+
+    Home Assistant 2026.12 collects validation errors as ``ValidationErrorInfo``
+    records. Older releases raise the underlying exceptions directly. Unwrapping
+    the record keeps dummy-input classification working on every supported
+    release.
+
+    Args:
+        error: Validation error or Home Assistant validation error record.
+
+    Returns:
+        The underlying exception, or an equivalent exception for the record.
+
+    """
+    if isinstance(error, Exception):
+        record_exception = getattr(error, "exception", None)
+        return record_exception if isinstance(record_exception, Exception) else error
+    record_exception = getattr(error, "exception", None)
+    if isinstance(record_exception, Exception):
+        return record_exception
+    return RuntimeError(f"Unsupported validation error record: {error!r}")
+
+
+def _structured_error_path(record: object) -> tuple[object, ...] | None:
+    """Return the structured configuration path carried by a validation record.
+
+    Args:
+        record: Validation error record or exception.
+
+    Returns:
+        Tuple of path segments when the record carries a location, otherwise
+        None. Raw exceptions with an empty path return None so the caller can
+        fall back to chained-cause path extraction; structured records keep
+        their explicit root path.
+
+    """
+    path = getattr(record, "path", None)
+    if not isinstance(path, (list, tuple)):
+        return None
+    if not path and isinstance(record, Exception):
+        return None
+    return tuple(path)
+
+
 def is_dummy_validation_error(
     err: Exception,
     synthetic_values: SyntheticDummyValues | set[str] | None = None,
     substituted_config: Mapping[str, object] | None = None,
+    *,
+    error_path: Sequence[object] | None = None,
 ) -> bool:
     """Determine if a validation failure was caused by synthetic dummy inputs or null defaults.
 
@@ -2471,6 +2538,7 @@ def is_dummy_validation_error(
         err: Exception raised during baseline validation.
         synthetic_values: Optional set or SyntheticDummyValues generated for the blueprint.
         substituted_config: Optional fully substituted blueprint configuration dictionary.
+        error_path: Optional structured path of the failing configuration entry.
 
     Returns:
         True if the failure is attributable to dummy device/entity inputs
@@ -2497,7 +2565,12 @@ def is_dummy_validation_error(
             if not errors:
                 return False
             return all(
-                is_dummy_validation_error(sub_err, synthetic_values, substituted_config)
+                is_dummy_validation_error(
+                    _unwrap_validation_error_record(sub_err),
+                    synthetic_values,
+                    substituted_config,
+                    error_path=_structured_error_path(sub_err),
+                )
                 for sub_err in errors
             )
 
@@ -2530,10 +2603,10 @@ def is_dummy_validation_error(
                 for val in synthetic_tokens
             ):
                 return True
-            if _is_failing_path_dummy_error(err, synthetic_values, substituted_config):
+            if _is_failing_path_dummy_error(err, synthetic_values, substituted_config, error_path):
                 return True
             return _is_device_automation_domain_tied_to_dummy(
-                err, synthetic_values, substituted_config
+                err, synthetic_values, substituted_config, error_path
             )
 
         device_ids = (
@@ -2543,7 +2616,7 @@ def is_dummy_validation_error(
         )
         if any(_exception_identifies_synthetic_id(err, dev_id) for dev_id in device_ids):
             return True
-        return _is_failing_path_dummy_error(err, synthetic_values, substituted_config)
+        return _is_failing_path_dummy_error(err, synthetic_values, substituted_config, error_path)
 
     # 4. Entity not found exception type:
     if _ENTITY_NOT_FOUND_EXCEPTIONS and isinstance(err, _ENTITY_NOT_FOUND_EXCEPTIONS):
@@ -2559,7 +2632,7 @@ def is_dummy_validation_error(
         )
         if any(_exception_identifies_synthetic_id(err, val) for val in synthetic_tokens):
             return True
-        return _is_failing_path_dummy_error(err, synthetic_values, substituted_config)
+        return _is_failing_path_dummy_error(err, synthetic_values, substituted_config, error_path)
 
     # 5. Exact synthetic value occurrence identifying the failed identifier:
     # Match ONLY synthetic dummy identifiers (e.g. 'dummy_device_id', 'test.dummy', 'dummy'),
@@ -2575,16 +2648,20 @@ def is_dummy_validation_error(
                 return True
 
     # 6. Path-based suppression for ordinary-value errors mapping to a substituted input:
-    if isinstance(synthetic_values, SyntheticDummyValues) and (
-        failing_path := _extract_config_path_from_error(err)
-    ):
-        resolved = (
-            _resolve_config_path(substituted_config, failing_path)
-            if substituted_config is not None
-            else None
+    if isinstance(synthetic_values, SyntheticDummyValues):
+        failing_path = (
+            error_path if error_path is not None else _extract_config_path_from_error(err)
         )
-        if synthetic_values.maps_failing_path_to_input(failing_path, resolved, substituted_config):
-            return True
+        if failing_path:
+            resolved = (
+                _resolve_config_path(substituted_config, failing_path)
+                if substituted_config is not None
+                else None
+            )
+            if synthetic_values.maps_failing_path_to_input(
+                failing_path, resolved, substituted_config
+            ):
+                return True
 
     # 7. Fallback when synthetic_values is None (e.g. standalone checks/tests):
     if synthetic_values is None:
@@ -3625,6 +3702,36 @@ def ensure_source_url(
             _sort_selector_keys(bp.data)
         if domain_was_absent:
             bp.data[CONF_BLUEPRINT].pop(CONF_DOMAIN, None)
+            original_data = getattr(bp, "_original_data", None)
+            if isinstance(original_data, dict) and isinstance(
+                original_meta := original_data.get(CONF_BLUEPRINT), dict
+            ):
+                original_meta.pop(CONF_DOMAIN, None)
+        if not core_parity:
+            canonical_meta = bp.data.get(CONF_BLUEPRINT)
+            canonical_input = (
+                canonical_meta.get(CONF_INPUT) if isinstance(canonical_meta, dict) else None
+            )
+            if (
+                isinstance(canonical_input, Mapping)
+                and not canonical_input
+                and isinstance(canonical_meta, dict)
+                and CONF_SOURCE_URL in canonical_meta
+            ):
+                # Home Assistant serializes an empty ``input`` mapping differently
+                # depending on whether the source already contained ``source_url``:
+                # the schema default is appended before or after the URL. Pin the
+                # empty input ahead of ``source_url`` so canonical output and
+                # semantic hashes stay identical for raw and Core-imported content.
+                canonical_meta[CONF_SOURCE_URL] = canonical_meta.pop(CONF_SOURCE_URL)
+            original_data = getattr(bp, "_original_data", None)
+            if isinstance(original_data, dict):
+                # Home Assistant 2026.12 serializes the original parsed data to
+                # preserve formatting, while older releases serialize validated data.
+                # Replace the retained original with the canonical mapping so every
+                # supported release produces identical normalized output.
+                original_data.clear()
+                original_data.update(bp.data)
         return bp.yaml()
     except (InvalidBlueprint, vol.Invalid) as err:
         _LOGGER.warning("Invalid blueprint structure or schema validation: %s", err)
