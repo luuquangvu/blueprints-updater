@@ -73,6 +73,7 @@ from homeassistant.helpers.storage import Store as HAStore
 from homeassistant.helpers.template import Template, TemplateEnvironment, is_template_string
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.loader import DATA_INTEGRATIONS
 from homeassistant.util import slugify
 from homeassistant.util import yaml as yaml_util
 
@@ -4382,9 +4383,10 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         """Extract and validate blueprint configuration from a HA entity.
 
         Attempts to recover blueprint inputs from available entity attributes.
-        Prefers public attributes when they still contain the blueprint instance
-        configuration, then falls back to the internal ``_blueprint_inputs``
-        attribute used by Home Assistant Core integrations.
+        Prefers the public ``raw_blueprint_inputs`` attribute used by Home
+        Assistant 2026.12 and later, then falls back to the legacy private
+        ``_blueprint_inputs`` and ``_raw_blueprint_inputs`` attributes used by
+        older releases.
 
         Args:
             entity: The Home Assistant entity object.
@@ -4393,9 +4395,11 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
 
         """
         candidates = (
+            getattr(entity, "raw_blueprint_inputs", None),
+            getattr(entity, "_blueprint_inputs", None),
+            getattr(entity, "_raw_blueprint_inputs", None),
             getattr(entity, "raw_config", None),
             getattr(entity, "config", None),
-            getattr(entity, "_blueprint_inputs", None),
         )
         for candidate in candidates:
             if isinstance(candidate, dict) and "use_blueprint" in candidate:
@@ -4746,7 +4750,7 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
         domain: FunctionalDomain,
         config_key: str,
         substituted_config: dict[str, object],
-    ) -> object:
+    ) -> object | None:
         """Run Home Assistant Core domain validator and return validated config.
 
         Args:
@@ -4755,13 +4759,36 @@ class BlueprintUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, objec
             substituted_config: Config dictionary after input substitution.
 
         Returns:
-            Validated configuration object returned by Core validator.
+            Validated configuration object returned by Core validator, or None
+            when the Home Assistant integration loader is unavailable.
 
         Raises:
             HomeAssistantError: If configuration fails domain validation.
             vol.Invalid: If configuration fails schema validation.
 
         """
+        try:
+            return await self._async_run_domain_validator_inner(
+                domain, config_key, substituted_config
+            )
+        except KeyError as err:
+            if err.args and str(err.args[0]) == str(DATA_INTEGRATIONS):
+                _LOGGER.debug(
+                    "Skipping %s domain validation for %s: Home Assistant "
+                    "integration loader is not initialized",
+                    domain,
+                    config_key,
+                )
+                return None
+            raise
+
+    async def _async_run_domain_validator_inner(
+        self,
+        domain: FunctionalDomain,
+        config_key: str,
+        substituted_config: dict[str, object],
+    ) -> object:
+        """Run Home Assistant Core domain validator without environment guards."""
         if domain == FunctionalDomain.AUTOMATION:
             validated = await async_validate_automation_config(
                 self.hass,

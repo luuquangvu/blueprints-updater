@@ -80,6 +80,6 @@ jobs:
           commit: ${{ steps.tag.outputs.commit_sha }}
           body: |
             > [!NOTE]
-            > If you find **${{ steps.gate.outputs.integration_name }}** useful, please consider giving it a ⭐ on [GitHub](https://github.com/${{ github.repository }}) to support my work and help others discover it. Thank you! ❤️
+            > If you find the **${{ steps.gate.outputs.integration_name }}** integration useful, please consider giving it a ⭐ on [GitHub](https://github.com/${{ github.repository }}) to support my work and help others discover it. Thank you! ❤️
           generateReleaseNotes: true
           prerelease: ${{ steps.gate.outputs.prerelease == 'true' }}
